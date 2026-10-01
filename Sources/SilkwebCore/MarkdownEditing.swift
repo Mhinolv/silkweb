@@ -54,13 +54,28 @@ public enum MarkdownEditing {
             }
             let value = source.substring(with: range)
             let size = (marker as NSString).length
-            if value.hasPrefix(marker), value.hasSuffix(marker), range.length >= size * 2 {
+            func canUnwrap(around content: NSRange) -> Bool {
+                guard command == .italic else { return true }
+                // Even asterisk runs are bold; odd runs also carry italic emphasis.
+                var start = content.location
+                while start > 0, source.character(at: start - 1) == 42 { start -= 1 }
+                var openingEnd = content.location
+                while openingEnd < NSMaxRange(content), source.character(at: openingEnd) == 42 { openingEnd += 1 }
+                var end = NSMaxRange(content)
+                while end < source.length, source.character(at: end) == 42 { end += 1 }
+                var closingStart = NSMaxRange(content)
+                while closingStart > content.location, source.character(at: closingStart - 1) == 42 { closingStart -= 1 }
+                return (openingEnd - start) % 2 == 1 && (end - closingStart) % 2 == 1
+            }
+            if value.hasPrefix(marker), value.hasSuffix(marker), range.length >= size * 2,
+               canUnwrap(around: NSRange(location: range.location + size, length: range.length - size * 2)) {
                 let inner = (value as NSString).substring(with: NSRange(location: size, length: range.length - size * 2))
                 return MarkdownEdit(range: range, replacement: inner, selection: NSRange(location: range.location, length: (inner as NSString).length))
             }
             if range.location >= size, NSMaxRange(range) + size <= source.length,
                source.substring(with: NSRange(location: range.location - size, length: size)) == marker,
-               source.substring(with: NSRange(location: NSMaxRange(range), length: size)) == marker {
+               source.substring(with: NSRange(location: NSMaxRange(range), length: size)) == marker,
+               canUnwrap(around: range) {
                 return MarkdownEdit(range: NSRange(location: range.location - size, length: range.length + size * 2), replacement: value, selection: NSRange(location: range.location - size, length: range.length))
             }
             return MarkdownEdit(range: range, replacement: marker + value + marker, selection: NSRange(location: range.location + size, length: range.length))

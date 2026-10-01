@@ -22,6 +22,39 @@ final class MarkdownEditingTests: XCTestCase {
         XCTAssertEqual(MarkdownEditing.edit(.bold, text: "hello world", selection: NSRange(location: 2, length: 0)).replacement, "**hello**")
     }
 
+    func testItalicPreservesBoldAndTogglesCombinedEmphasis() {
+        for word in ["x", "bold", "日本語", "e\u{301}", "👩🏽‍💻", String(repeating: "x", count: 10000)] {
+            for padding in ["", "a "] {
+                for count in 1...4 {
+                    let markers = String(repeating: "*", count: count)
+                    let text = padding + markers + word + markers + padding
+                    let content = NSRange(location: padding.utf16.count + count, length: word.utf16.count)
+                    let wrapped = NSRange(location: padding.utf16.count, length: word.utf16.count + count * 2)
+                    let expectedMarkers = String(repeating: "*", count: count % 2 == 0 ? count + 1 : count - 1)
+                    let expected = padding + expectedMarkers + word + expectedMarkers + padding
+                    var selections = [content, wrapped]
+                    if word != "👩🏽‍💻" {
+                        selections.append(NSRange(location: content.location, length: 0))
+                    }
+                    for selection in selections {
+                        let edit = MarkdownEditing.edit(.italic, text: text, selection: selection)
+                        XCTAssertEqual(edit.applying(to: text), expected)
+                        XCTAssertEqual((expected as NSString).substring(with: edit.selection),
+                                       selection == wrapped ? String(repeating: "*", count: count - (count % 2)) + word + String(repeating: "*", count: count - (count % 2)) : word)
+                        let toggled = MarkdownEditing.edit(.italic, text: expected, selection: edit.selection)
+                        XCTAssertEqual(toggled.applying(to: expected), text)
+                    }
+                }
+            }
+        }
+        // Unequal delimiter runs must not be mistaken for a matching italic pair.
+        for text in ["**bold*", "*bold**"] {
+            let content = (text as NSString).range(of: "bold")
+            let edit = MarkdownEditing.edit(.italic, text: text, selection: content)
+            XCTAssertEqual(edit.applying(to: text), text.replacingOccurrences(of: "bold", with: "*bold*"))
+        }
+    }
+
     func testLineModesAndBoundaries() {
         let text = "one\ntwo\nthree"
         let range = NSRange(location: 0, length: 8) // excludes third line
