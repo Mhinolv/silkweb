@@ -83,11 +83,16 @@ public struct DocumentSummary: Sendable {
                 let date = try url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
                 let handle = try FileHandle(forReadingFrom: url)
                 defer { try? handle.close() }
-                let data = try handle.read(upToCount: 512) ?? Data()
-                let line = String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+                var data = try handle.read(upToCount: 4096) ?? Data()
+                // A bounded read can end inside a UTF-8 scalar. Drop only that incomplete tail.
+                for _ in 0..<3 where String(data: data, encoding: .utf8) == nil && !data.isEmpty {
+                    data.removeLast()
+                }
+                let title = URL(fileURLWithPath: document.name).deletingPathExtension().lastPathComponent
+                let line = DocumentRowPresentation.snippet(String(decoding: data, as: UTF8.self), title: title)
                 return DocumentSummary(modified: date, firstLine: line)
             } catch {
-                return DocumentSummary(modified: nil, firstLine: "")
+                return DocumentSummary(modified: nil, firstLine: "No additional text")
             }
         }.value
     }

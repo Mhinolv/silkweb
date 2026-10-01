@@ -5,6 +5,7 @@ import SilkwebCore
 struct DocumentList: View {
     @Bindable var workspace: LibraryWorkspace
     @State private var selectionRevision = 0
+    @State private var dateReference = Date()
     var body: some View {
         Group {
             if workspace.snapshot?.folders.first(where: { $0.relativePath == workspace.session.selectedFolder })?.isUnreadable == true {
@@ -24,7 +25,7 @@ struct DocumentList: View {
             } else {
                 ScrollViewReader { proxy in
                     List(workspace.documents, selection: Binding(get: { workspace.session.selectedDocuments }, set: { workspace.focusColumn = 1; workspace.selectDocuments($0) })) { document in
-                        DocumentRow(document: document, root: workspace.snapshot!.rootURL, workspace: workspace)
+                        DocumentRow(document: document, root: workspace.snapshot!.rootURL, workspace: workspace, dateReference: dateReference)
                             .tag(document.relativePath).id(document.relativePath)
                             .contextMenu {
                                 Button("Open in New Tab") { }.disabled(true)
@@ -52,6 +53,10 @@ struct DocumentList: View {
         }
         .navigationTitle(workspace.folderName)
         .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 480)
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in dateReference = Date() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in dateReference = Date() }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in dateReference = Date() }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemClockDidChange)) { _ in dateReference = Date() }
     }
 }
 
@@ -59,6 +64,8 @@ private struct DocumentRow: View {
     let document: LibraryDocument
     let root: URL
     let workspace: LibraryWorkspace
+    let dateReference: Date
+    @Environment(\.locale) private var locale
     @State private var lastClick: Date?
     @State private var summary: DocumentSummary?
     private var title: String { URL(fileURLWithPath: document.name).deletingPathExtension().lastPathComponent }
@@ -78,7 +85,9 @@ private struct DocumentRow: View {
                     })
             }
             HStack(spacing: 4) {
-                if let modified = summary?.modified { Text(modified, style: .relative) }
+                if let modified = summary?.modified {
+                    Text(DocumentRowPresentation.dateLabel(modified, now: dateReference, locale: locale))
+                }
                 Text(summary?.firstLine ?? "")
             }.font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
         }
