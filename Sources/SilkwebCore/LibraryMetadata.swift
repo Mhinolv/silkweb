@@ -58,6 +58,9 @@ enum LibraryMetadataStore {
         } catch {
             let backup = file.deletingLastPathComponent()
                 .appendingPathComponent("index.corrupt-\(UUID().uuidString).json")
+            guard FileManager.default.isWritableFile(atPath: file.deletingLastPathComponent().path) else {
+                return (LibraryMetadata(), nil)
+            }
             try FileManager.default.moveItem(at: file, to: backup)
             return (LibraryMetadata(), backup)
         }

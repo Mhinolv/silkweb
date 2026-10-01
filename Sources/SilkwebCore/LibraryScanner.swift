@@ -2,9 +2,9 @@ import Foundation
 
 public enum LibraryScanner {
     /// All enumeration, metadata IO and encoding run away from the caller's actor.
-    public static func scan(root: URL) async throws -> LibrarySnapshot {
+    public static func scan(root: URL, progress: (@Sendable (Int) -> Void)? = nil) async throws -> LibrarySnapshot {
         let worker = Task.detached(priority: .userInitiated) {
-            try scanOnWorker(root: root)
+            try scanOnWorker(root: root, progress: progress)
         }
         return try await withTaskCancellationHandler {
             try await worker.value
@@ -30,7 +30,7 @@ public enum LibraryScanner {
         }.value
     }
 
-    private static func scanOnWorker(root: URL) throws -> LibrarySnapshot {
+    private static func scanOnWorker(root: URL, progress: (@Sendable (Int) -> Void)?) throws -> LibrarySnapshot {
         precondition(!Thread.isMainThread, "Library enumeration must run off the main thread")
         let root = root.standardizedFileURL
         try LibraryMetadataStore.rejectLink(root)
@@ -52,12 +52,17 @@ public enum LibraryScanner {
         var folders = [LibraryFolder(id: rootID, parentID: nil, relativePath: "", name: root.lastPathComponent)]
         var documents: [LibraryDocument] = []
         var pending = [(url: root, path: "", id: rootID)]
+        var nextProgress = Date().addingTimeInterval(1)
         let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .isHiddenKey]
         while let parent = pending.popLast() {
             try Task.checkCancellation()
             let children = try FileManager.default.contentsOfDirectory(
                 at: parent.url, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles]
             ).sorted { $0.lastPathComponent < $1.lastPathComponent }
+            if Date() >= nextProgress {
+                progress?(documents.count)
+                nextProgress = Date().addingTimeInterval(0.5)
+            }
             for child in children {
                 try Task.checkCancellation()
                 let values = try child.resourceValues(forKeys: keys)
@@ -76,8 +81,20 @@ public enum LibraryScanner {
             }
         }
         try Task.checkCancellation()
-        try LibraryMetadataStore.save(metadata, root: root)
+        let locations = try LibraryMetadataStore.locations(root: root)
+        let metadataTarget = FileManager.default.fileExists(atPath: locations.file.path) ? locations.file :
+            (FileManager.default.fileExists(atPath: locations.directory.path) ? locations.directory : root)
+        var isReadOnly = !FileManager.default.isWritableFile(atPath: root.path)
+            || !FileManager.default.isWritableFile(atPath: metadataTarget.path)
+        if metadata != previous && !isReadOnly {
+            do {
+                try LibraryMetadataStore.save(metadata, root: root)
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain
+                && [NSFileWriteNoPermissionError, NSFileWriteVolumeReadOnlyError].contains(error.code) {
+                isReadOnly = true
+            }
+        }
         return LibrarySnapshot(rootURL: root, folders: folders, documents: documents,
-                               metadata: metadata, recoveredMetadataURL: recoveredURL)
+                               metadata: metadata, recoveredMetadataURL: recoveredURL, isReadOnly: isReadOnly)
     }
 }

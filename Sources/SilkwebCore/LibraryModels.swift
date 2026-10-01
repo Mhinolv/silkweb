@@ -22,6 +22,7 @@ public struct LibrarySnapshot: Sendable {
     public let documents: [LibraryDocument]
     public let metadata: LibraryMetadata
     public let recoveredMetadataURL: URL?
+    public let isReadOnly: Bool
 }
 
 public enum LibraryError: Error, Equatable {

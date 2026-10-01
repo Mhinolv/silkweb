@@ -124,6 +124,64 @@ final class LibraryScannerTests: XCTestCase {
         XCTAssertNotEqual(snapshot.folders[0].id, snapshot.documents[0].id)
     }
 
+    func testMissingAndNonDirectoryRootsThrow() async throws {
+        do {
+            _ = try await LibraryScanner.scan(root: root.appendingPathComponent("missing"))
+            XCTFail("Missing roots must throw")
+        } catch {
+            XCTAssertEqual((error as NSError).domain, NSCocoaErrorDomain)
+        }
+        try write("File.md")
+        do {
+            _ = try await LibraryScanner.scan(root: root.appendingPathComponent("File.md"))
+            XCTFail("A document cannot be a library root")
+        } catch {
+            XCTAssertEqual(error as? LibraryError, .invalidRoot)
+        }
+    }
+
+    func testUnchangedScanDoesNotRewriteIndex() async throws {
+        try write("Note.md")
+        _ = try await LibraryScanner.scan(root: root)
+        let index = root.appendingPathComponent(".silkweb/index.json")
+        let oldDate = Date(timeIntervalSince1970: 1_000)
+        try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: index.path)
+        _ = try await LibraryScanner.scan(root: root)
+        let attributes = try FileManager.default.attributesOfItem(atPath: index.path)
+        XCTAssertEqual(attributes[.modificationDate] as? Date, oldDate)
+    }
+
+    func testReadOnlyRootWithoutIndexStillOpens() async throws {
+        try write("Nested/Note.md")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path) }
+        XCTAssertFalse(FileManager.default.isWritableFile(atPath: root.path))
+        let snapshot = try await LibraryScanner.scan(root: root)
+        XCTAssertTrue(snapshot.isReadOnly)
+        XCTAssertEqual(snapshot.documents.count, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(".silkweb").path))
+        let text = try await LibraryScanner.readDocument(snapshot.documents[0], root: root)
+        XCTAssertEqual(text, "# Café 日本語\n")
+    }
+
+    func testReadOnlyIndexAndCorruptIndexStillOpen() async throws {
+        try write("Note.md")
+        _ = try await LibraryScanner.scan(root: root)
+        let directory = root.appendingPathComponent(".silkweb")
+        let index = directory.appendingPathComponent("index.json")
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: index.path)
+        let indexed = try await LibraryScanner.scan(root: root)
+        XCTAssertTrue(indexed.isReadOnly)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: index.path)
+        try Data("broken".utf8).write(to: index)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
+        let recovered = try await LibraryScanner.scan(root: root)
+        XCTAssertTrue(recovered.isReadOnly)
+        XCTAssertEqual(recovered.documents.count, 1)
+        XCTAssertEqual(try String(contentsOf: index, encoding: .utf8), "broken")
+    }
+
     @MainActor
     func testLargeLibraryOffMainThreadWithinBudget() async throws {
         for folder in 0..<1_000 {
