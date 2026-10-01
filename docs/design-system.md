@@ -19,7 +19,7 @@ Silkweb should feel like a first-party Mac app: native controls, system colors, 
 Copy style: sentence case for messages and title case for menu items and buttons. Use curly quotes around names (“Drafts”). Show paths relative to the library with “ › ” separators (`Writing › Drafts`). Documents display without the `.md` extension.
 
 ## 3. Window and layout
-- One main window built on `NavigationSplitView` with three columns: **Sidebar** (folders and tags) | **Document list** | **Detail** (tab bar, editor and/or preview, status bar). An optional right **Inspector** (`.inspector`) has two segments: **Outline** and **Info**.
+- One main window built on nested `NSSplitViewController` splits with SwiftUI pane contents and three columns: **Sidebar** (folders and tags) | **Document list** | **Detail** (tab bar, editor and/or preview, status bar). An optional right **Inspector** (`.inspector`) has two segments: **Outline** and **Info**.
 - Window: minimum 900×560, default 1200×760. Frame is autosaved.
 - Column widths: sidebar min 180 / ideal 220 / max 320. List min 240 / ideal 300 / max 480. Detail min 420. Inspector min 200 / ideal 240 / max 320.
 - Window title is the active document name. `navigationSubtitle` is the folder path. Content column title is the folder name. Content column subtitle is the count (“12 documents”).

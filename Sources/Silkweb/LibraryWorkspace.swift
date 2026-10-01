@@ -26,6 +26,7 @@ final class LibraryWorkspace {
     var errorTitle = "Can’t Open Library"
     var errorSymbol = "exclamationmark.triangle"
     var root: URL?
+    var sidebarToggleRequest = 0
     var focusRequest = 0
     var focusColumn = 0
     private var scope: URL?
@@ -218,8 +219,6 @@ final class LibraryWorkspace {
 
 struct LibraryWorkspaceView: View {
     @Bindable var workspace: LibraryWorkspace
-    @State private var visibility: NavigationSplitViewVisibility = .all
-    @FocusState private var focusedColumn: Int?
 
     var body: some View {
         Group {
@@ -244,42 +243,20 @@ struct LibraryWorkspaceView: View {
         } message: { Text(workspace.mutationError ?? "") }
         .task { workspace.restore(); await workspace.resumeEditor() }
         .onChange(of: workspace.session) { workspace.persistSession() }
-        .onChange(of: focusedColumn) { if focusedColumn == 1 { workspace.focusColumn = 1 } }
-        .onChange(of: workspace.focusRequest) {
-            visibility = .all
-            focusedColumn = workspace.focusColumn == 1 ? 1 : nil
-        }
     }
 
     private var libraryColumns: some View {
-        NavigationSplitView(columnVisibility: $visibility) {
-            if let snapshot = workspace.snapshot {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("LIBRARY").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 12)
-                    FolderSidebar(snapshot: snapshot, workspace: workspace)
-                    Menu {
-                        Button("New Folder") { workspace.create(folder: true) }
-                        Button("New Document") { workspace.create(folder: false) }
-                    } label: { Image(systemName: "plus") }
-                    .menuStyle(.borderlessButton).fixedSize().padding(8)
-                    .accessibilityLabel("Add").help("Add")
-                    .disabled(!workspace.canMutate)
-                }
-                .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
-            } else {
-                DelayedLibraryProgress(count: workspace.loadingCount)
+        LibrarySplitView(workspace: workspace)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button("Toggle Sidebar", systemImage: "sidebar.left") { workspace.sidebarToggleRequest += 1 }
+                    .help("Toggle Sidebar")
             }
-        } content: {
-            DocumentList(workspace: workspace)
-                .focused($focusedColumn, equals: 1)
-                .onKeyPress(keys: [.tab], phases: .down) { press in
-                    workspace.focus(press.modifiers.contains(.shift) ? 0 : 2)
-                    return .handled
-                }
-        } detail: {
-            DocumentDetail(workspace: workspace)
+            ToolbarItem(placement: .navigation) {
+                Button("New Document", systemImage: "square.and.pencil") { workspace.create(folder: false) }
+                    .help("New Document").disabled(!workspace.canMutate)
+            }
         }
-        .navigationSplitViewStyle(.balanced)
         .navigationTitle(workspace.editor.url == nil ? workspace.folderName : workspace.editor.name)
         .navigationSubtitle(workspace.subtitle)
     }
@@ -309,7 +286,7 @@ struct LibraryWorkspaceView: View {
     }
 }
 
-private struct DelayedLibraryProgress: View {
+struct DelayedLibraryProgress: View {
     let count: Int?
     @State private var visible = false
     var body: some View {

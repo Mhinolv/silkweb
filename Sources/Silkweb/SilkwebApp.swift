@@ -46,7 +46,11 @@ struct SilkwebApp: App {
                     .keyboardShortcut("v", modifiers: [.command, .option, .shift])
             }
             TextEditingCommands()
-            SidebarCommands()
+            CommandGroup(replacing: .sidebar) {
+                Button("Toggle Sidebar") { workspace.sidebarToggleRequest += 1 }
+                    .keyboardShortcut("s", modifiers: [.control, .command])
+                    .disabled(workspace.snapshot == nil && !workspace.loading)
+            }
             ToolbarCommands()
             CommandMenu("Go") {
                 Button("Folders") { workspace.focus(0) }.keyboardShortcut("1", modifiers: [.command, .option])

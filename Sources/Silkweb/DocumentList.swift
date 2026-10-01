@@ -45,14 +45,6 @@ struct DocumentList: View {
                 }
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button("New Document", systemImage: "square.and.pencil") { workspace.create(folder: false) }
-                    .help("New Document").disabled(!workspace.canMutate)
-            }
-        }
-        .navigationTitle(workspace.folderName)
-        .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 480)
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in dateReference = Date() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in dateReference = Date() }
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in dateReference = Date() }
@@ -118,6 +110,5 @@ struct DocumentDetail: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationSplitViewColumnWidth(min: 420, ideal: 680)
     }
 }
