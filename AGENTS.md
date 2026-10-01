@@ -53,6 +53,12 @@ Put anything testable in `SilkwebCore` and cover it with XCTest. The app target 
 - Must stay responsive with 10,000 documents / 1,000 folders. Index and search off the main thread.
 - No expensive work per keystroke on the main thread (debounce preview rendering, saving, indexing).
 
+## GUI Regression Rule
+QA cannot launch the app, so a crash in AppKit/SwiftUI view code is invisible to the pipeline. Any ticket that
+adds or changes an AppKit view subclass, layout override (`setFrameSize`, `layout`, `viewDidMoveToWindow`,
+`updateNSView`) or other view-lifecycle code must add an offscreen test in `Tests/SilkwebAppTests/`
+(`@testable import Silkweb`) that builds the real view and exercises the lifecycle (load content, resize sweep).
+
 ## Team Roadmap Workflow (multi-agent)
 
 A multi-agent team works the roadmap epic. Roles:
