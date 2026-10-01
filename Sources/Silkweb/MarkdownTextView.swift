@@ -17,6 +17,24 @@ struct MarkdownTextView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(session: session) }
 
     func makeNSView(context: Context) -> NSScrollView {
+        let scroll = Self.makeEditorScrollView(style: style)
+        let text = scroll.documentView as! PlainMarkdownTextView
+        text.delegate = context.coordinator
+        text.moveFocus = { workspace.focus($0 ? 1 : 0) }
+        context.coordinator.textView = text
+        scroll.contentView.postsBoundsChangedNotifications = true
+        context.coordinator.scrollObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main
+        ) { [weak session] notification in
+            MainActor.assumeIsolated {
+                session?.scroll = (notification.object as? NSClipView)?.bounds.origin ?? .zero
+            }
+        }
+        return scroll
+    }
+
+    /// Shared construction keeps offscreen regression tests on the production editor hierarchy.
+    static func makeEditorScrollView(style: EditorStyle) -> NSScrollView {
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -48,19 +66,10 @@ struct MarkdownTextView: NSViewRepresentable {
         text.isHorizontallyResizable = false
         text.autoresizingMask = [.width]
         text.textContainer?.widthTracksTextView = false
+        text.textContainer?.heightTracksTextView = false
         text.textContainer?.lineFragmentPadding = 0
-        text.delegate = context.coordinator
-        text.moveFocus = { workspace.focus($0 ? 1 : 0) }
         scroll.documentView = text
-        context.coordinator.textView = text
-        scroll.contentView.postsBoundsChangedNotifications = true
-        context.coordinator.scrollObserver = NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main
-        ) { [weak session] notification in
-            MainActor.assumeIsolated {
-                session?.scroll = (notification.object as? NSClipView)?.bounds.origin ?? .zero
-            }
-        }
+        text.layoutEditor()
         return scroll
     }
 
@@ -118,10 +127,11 @@ struct MarkdownTextView: NSViewRepresentable {
 }
 
 /// The stock text view supplies Unicode, IME, undo and accessibility navigation.
-private final class PlainMarkdownTextView: NSTextView {
+final class PlainMarkdownTextView: NSTextView {
     var style = EditorStyle()
     weak var session: DocumentSession?
     var moveFocus: ((Bool) -> Void)?
+    private var isLayingOutEditor = false
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
@@ -129,12 +139,25 @@ private final class PlainMarkdownTextView: NSTextView {
     }
 
     func layoutEditor() {
-        let viewport = enclosingScrollView?.contentSize ?? bounds.size
+        // NSTextView geometry setters can synchronously resize the view and call us again.
+        guard !isLayingOutEditor, let scroll = enclosingScrollView else { return }
+        isLayingOutEditor = true
+        defer { isLayingOutEditor = false }
+
+        // Use the scroll view's viewport, never the text view's content-driven frame.
+        let viewport = scroll.contentSize
         let width = max(1, min(style.maximumWidth, viewport.width - 2 * style.horizontalInset))
-        textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
-        textContainerInset = NSSize(width: max(style.horizontalInset, (viewport.width - width) / 2), height: style.topInset)
-        enclosingScrollView?.contentInsets.bottom = viewport.height / 2
-        minSize = NSSize(width: 0, height: viewport.height)
+        let containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        if let container = textContainer, container.containerSize != containerSize {
+            container.containerSize = containerSize
+        }
+        let inset = NSSize(width: max(style.horizontalInset, (viewport.width - width) / 2), height: style.topInset)
+        if textContainerInset != inset { textContainerInset = inset }
+        var contentInsets = scroll.contentInsets
+        contentInsets.bottom = viewport.height / 2
+        if scroll.contentInsets.bottom != contentInsets.bottom { scroll.contentInsets = contentInsets }
+        let minimum = NSSize(width: 0, height: viewport.height)
+        if minSize != minimum { minSize = minimum }
     }
 
     override func viewDidMoveToWindow() {

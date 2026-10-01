@@ -10,6 +10,7 @@ let package = Package(
         // SwiftUI + AppKit app.
         .executableTarget(name: "Silkweb", dependencies: ["SilkwebCore"]),
         .testTarget(name: "SilkwebCoreTests", dependencies: ["SilkwebCore"]),
+        .testTarget(name: "SilkwebAppTests", dependencies: ["Silkweb"]),
     ],
     swiftLanguageModes: [.v5]
 )
