@@ -179,6 +179,59 @@ final class SaveCoordinatorTests: XCTestCase {
         XCTAssertEqual(drafts.first?.text, "my draft")
     }
 
+    func testRestoredRevisionClearsConflictAndResumesAutosaveSweep() async throws {
+        var cases: [(SaveCoordinator, URL, String)] = []
+        for original in ["", "日本語 🕸\n", String(repeating: "x", count: 1_000_000)] {
+            for deleted in [false, true] {
+                // Include edits made during the conflict and edits reverted to disk text.
+                for bufferMode in 0..<3 {
+                    let url = try document("\(UUID()).md", text: original)
+                    let coordinator = SaveCoordinator(recoveryDirectory: recovery)
+                    _ = try await coordinator.open(url)
+                    if bufferMode != 0 || !deleted {
+                        try await coordinator.edit(original + "my draft", at: url)
+                    }
+                    await coordinator.scheduleSave(url, delay: .seconds(60))
+                    if deleted {
+                        try FileManager.default.removeItem(at: url)
+                    } else {
+                        try Data((original + "external").utf8).write(to: url, options: .atomic)
+                    }
+                    _ = try await coordinator.reconcile(url)
+                    let conflict = await coordinator.state(for: url)
+                    XCTAssertEqual(conflict, .conflict(diskRevision: deleted ? nil : try DocumentStore().load(url).revision))
+                    let text = bufferMode == 1 ? original + "latest draft" : original
+                    try await coordinator.edit(text, at: url)
+                    let stream = await coordinator.states(for: url)
+                    var states = stream.makeAsyncIterator()
+                    _ = await states.next()
+
+                    try Data(original.utf8).write(to: url, options: .atomic)
+                    let reloaded = try await coordinator.reconcile(url)
+                    XCTAssertNil(reloaded)
+                    let expected: DocumentSaveState = bufferMode == 1 ? .dirty : .clean
+                    let restored = await coordinator.state(for: url)
+                    XCTAssertEqual(restored, expected)
+                    let published = await states.next()
+                    XCTAssertEqual(published, expected)
+                    let retained = await coordinator.draft(for: url)
+                    XCTAssertEqual(retained, text)
+                    cases.append((coordinator, url, text))
+                }
+            }
+        }
+        // Let the reconciliation's own scheduled save run; do not schedule or flush it here.
+        try await Task.sleep(for: .milliseconds(1500))
+        for (coordinator, url, text) in cases {
+            let saved = await coordinator.state(for: url)
+            XCTAssertEqual(saved, .clean)
+            XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), text)
+        }
+        let documents = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "md" }
+        XCTAssertEqual(documents.count, cases.count)
+    }
+
     func testChangeDuringStagingIsCheckedBeforeReplacement() throws {
         struct ChangingFileSystem: DocumentFileSystem {
             let destination: URL

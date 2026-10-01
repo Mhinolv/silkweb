@@ -248,6 +248,12 @@ public actor SaveCoordinator {
         do {
             let disk = try store.load(target)
             if entry.revision == disk.revision {
+                if case .conflict = entry.state {
+                    // A restored file or reverted external edit resolves the conflict.
+                    entry.state = entry.text == disk.text ? .clean : .dirty
+                    entries[target] = entry
+                    publish(target)
+                }
                 entries[target] = entry
                 if entry.state.isDirty { scheduleSave(target) }
                 return nil
