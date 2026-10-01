@@ -15,7 +15,7 @@ final class DocumentListTests: XCTestCase {
         let workspace = LibraryWorkspace()
         workspace.root = root
         let snapshot = try await LibraryScanner.scan(root: root)
-        workspace.install(snapshot, sorted: snapshot.documents)
+        workspace.install(snapshot)
         let host = NSHostingView(rootView: DocumentList(workspace: workspace))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 560),
                               styleMask: [.borderless], backing: .buffered, defer: false)
@@ -66,7 +66,7 @@ final class DocumentListTests: XCTestCase {
         let workspace = LibraryWorkspace()
         workspace.root = root
         let snapshot = try await LibraryScanner.scan(root: root)
-        workspace.install(snapshot, sorted: snapshot.documents)
+        workspace.install(snapshot)
         let host = NSHostingView(rootView: DocumentList(workspace: workspace))
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 4096, height: 2160))
         container.addSubview(host)

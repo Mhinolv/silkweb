@@ -15,6 +15,8 @@ public struct LibraryDocument: Identifiable, Equatable, Sendable {
     public let folderID: UUID
     public let relativePath: String
     public let name: String
+    public var created: Date? = nil
+    public var modified: Date? = nil
 }
 
 public struct LibrarySnapshot: Sendable {
@@ -22,6 +24,7 @@ public struct LibrarySnapshot: Sendable {
     /// Includes the root and empty folders. Parents precede their children.
     public let folders: [LibraryFolder]
     public let documents: [LibraryDocument]
+    public let presentation: LibraryPresentation
     public let metadata: LibraryMetadata
     public let recoveredMetadataURL: URL?
     public let isReadOnly: Bool

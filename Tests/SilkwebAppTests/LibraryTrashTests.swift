@@ -20,7 +20,7 @@ final class LibraryTrashTests: XCTestCase {
         let workspace = LibraryWorkspace()
         workspace.root = root
         let snapshot = try await LibraryScanner.scan(root: root)
-        workspace.install(snapshot, sorted: snapshot.documents.sorted { $0.name < $1.name })
+        workspace.install(snapshot)
         await workspace.editor.configure(root: root)
         let service = try TrashService(root: root) { url in
             let destination = trash.appendingPathComponent(url.lastPathComponent)
@@ -34,6 +34,7 @@ final class LibraryTrashTests: XCTestCase {
         let (root, trash, workspace, service) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: trash) }
         workspace.session.selectedFolder = "A"
+        workspace.setSortKey(.name)
         workspace.session.selectedDocuments = ["A/Middle.md"]
         workspace.focusColumn = 1
         _ = await workspace.editor.open(root.appendingPathComponent("A/Middle.md"), readOnly: false)

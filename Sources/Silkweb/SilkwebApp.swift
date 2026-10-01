@@ -55,6 +55,11 @@ struct SilkwebApp: App {
                     .keyboardShortcut("s", modifiers: [.control, .command])
                     .disabled(workspace.snapshot == nil && !workspace.loading)
             }
+            CommandGroup(after: .sidebar) {
+                Menu("Sort By") { DocumentSortItems(workspace: workspace) }
+                    .disabled(workspace.snapshot == nil)
+                IncludeSubfoldersItem(workspace: workspace, hideForAllDocuments: false)
+            }
             ToolbarCommands()
             CommandMenu("Go") {
                 Button("Folders") { workspace.focus(0) }.keyboardShortcut("1", modifiers: [.command, .option])

@@ -33,9 +33,10 @@ public struct DiskDocumentFileSystem: DocumentFileSystem {
     }
     public func replace(_ destination: URL, with staging: URL) throws {
         let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
-        if let permissions = attributes[.posixPermissions] {
-            try FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: staging.path)
-        }
+        var preserved: [FileAttributeKey: Any] = [:]
+        if let permissions = attributes[.posixPermissions] { preserved[.posixPermissions] = permissions }
+        if let created = attributes[.creationDate] { preserved[.creationDate] = created }
+        try FileManager.default.setAttributes(preserved, ofItemAtPath: staging.path)
         guard rename(staging.path, destination.path) == 0 else {
             throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
         }

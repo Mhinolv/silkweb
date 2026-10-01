@@ -18,11 +18,11 @@ final class LibraryWorkspace {
     var mutationError: String?
     var mutationErrorTitle = ""
 
-    func install(_ snapshot: LibrarySnapshot, sorted: [LibraryDocument]) {
+    func install(_ snapshot: LibrarySnapshot) {
         self.snapshot = snapshot
         itemPathsByID = Dictionary(uniqueKeysWithValues: snapshot.metadata.IDsByPath.map { ($0.value, $0.key) })
-        allDocuments = sorted
-        groupedDocuments = Dictionary(grouping: sorted, by: \.folderID)
+        documentCache = nil
+        presentationRevision += 1
     }
     private var navigationTask: Task<Void, Never>?
     var snapshot: LibrarySnapshot?
@@ -41,14 +41,50 @@ final class LibraryWorkspace {
     private var saveTask: Task<Void, Never>?
     private var canSaveSession = true
     @ObservationIgnored var itemPathsByID: [UUID: String] = [:]
-    private var groupedDocuments: [UUID: [LibraryDocument]] = [:]
-    private var allDocuments: [LibraryDocument] = []
+    @ObservationIgnored private var presentationRevision = 0
+    @ObservationIgnored private var documentCache: (folder: String?, preference: LibraryListPreference, documents: [LibraryDocument])?
 
+    var selectedFolder: LibraryFolder? {
+        snapshot?.folders.first { $0.relativePath == session.selectedFolder }
+    }
+    private var preferenceID: String { selectedFolder.map { "folder:" + $0.id.uuidString } ?? "all" }
+    var listPreference: LibraryListPreference { session.listPreferences[preferenceID] ?? LibraryListPreference() }
+    var includesSubfolders: Bool { session.selectedFolder != nil && listPreference.includeSubfolders }
+    func setSortKey(_ key: DocumentSortKey) {
+        var preference = listPreference
+        preference.select(key)
+        session.listPreferences[preferenceID] = preference
+    }
+    func setSortDescending(_ descending: Bool) {
+        var preference = listPreference
+        preference.descending = descending
+        session.listPreferences[preferenceID] = preference
+    }
+    func setIncludeSubfolders(_ include: Bool) {
+        guard session.selectedFolder != nil else { return }
+        var preference = listPreference
+        preference.includeSubfolders = include
+        session.listPreferences[preferenceID] = preference
+        // Preserve the open editor when narrowing hides its row; never discard dirty text.
+    }
     var documents: [LibraryDocument] {
         guard let snapshot else { return [] }
-        if session.selectedFolder == nil { return allDocuments }
-        guard let folder = snapshot.folders.first(where: { $0.relativePath == session.selectedFolder }) else { return [] }
-        return groupedDocuments[folder.id] ?? []
+        let preference = listPreference
+        if let cached = documentCache, cached.folder == session.selectedFolder, cached.preference == preference {
+            return cached.documents
+        }
+        guard session.selectedFolder == nil || selectedFolder != nil else { return [] }
+        let documents = snapshot.presentation.documents(in: selectedFolder, preference: preference)
+        documentCache = (session.selectedFolder, preference, documents)
+        return documents
+    }
+    func refreshSavedDocumentDates() async {
+        guard !loading, !mutating, let snapshot, let url = editor.url,
+              let document = snapshot.documents.first(where: { snapshot.rootURL.appendingPathComponent($0.relativePath) == url }) else { return }
+        let revision = presentationRevision
+        guard let refreshed = try? await LibraryScanner.refreshingDates(in: snapshot, documentID: document.id),
+              !loading, !mutating, presentationRevision == revision else { return }
+        install(refreshed)
     }
     var selectedDocument: LibraryDocument? {
         guard session.selectedDocuments.count == 1 else { return nil }
@@ -58,7 +94,7 @@ final class LibraryWorkspace {
         snapshot?.folders.first { $0.relativePath == session.selectedFolder }?.name ?? "All Documents"
     }
     var subtitle: String {
-        (session.selectedFolder ?? "").split(separator: "/").joined(separator: " › ")
+        "\(documents.count.formatted()) documents" + (includesSubfolders ? " (with subfolders)" : "")
     }
 
     func restore() {
@@ -136,11 +172,8 @@ final class LibraryWorkspace {
                 do { restored = try await LibrarySession.load(root: url) }
                 catch LibraryError.unsupportedMetadataVersion { canSaveSession = false }
                 catch { /* A rebuildable navigation session can fall back to its defaults. */ }
-                let sorted = await Task.detached {
-                    scanned.documents.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-                }.value
                 guard !Task.isCancelled else { return }
-                install(scanned, sorted: sorted)
+                install(scanned)
                 session = restored
                 if let path = session.selectedFolder, !scanned.folders.contains(where: { $0.relativePath == path }) {
                     session.selectedFolder = ""
@@ -263,6 +296,9 @@ struct LibraryWorkspaceView: View {
         .sheet(item: $workspace.moveRequest) { request in MovePicker(workspace: workspace, request: request) }
         .task { workspace.restore(); await workspace.resumeEditor() }
         .onChange(of: workspace.session) { workspace.persistSession() }
+        .onChange(of: workspace.editor.state) { old, new in
+            if old.isDirty, new == .clean { Task { await workspace.refreshSavedDocumentDates() } }
+        }
     }
 
     private var libraryColumns: some View {
@@ -275,6 +311,16 @@ struct LibraryWorkspaceView: View {
             ToolbarItem(placement: .navigation) {
                 Button("New Document", systemImage: "square.and.pencil") { workspace.create(folder: false) }
                     .help("New Document").disabled(!workspace.canMutate)
+            }
+            ToolbarItem(placement: .navigation) {
+                Menu {
+                    DocumentSortItems(workspace: workspace)
+                    Divider()
+                    IncludeSubfoldersItem(workspace: workspace)
+                } label: { Label("Sort By", systemImage: "arrow.up.arrow.down") }
+                .help("Sort By")
+                .accessibilityLabel("Sort By, \(workspace.listPreference.key.title), \(workspace.listPreference.directionTitle)")
+                .disabled(workspace.snapshot == nil)
             }
         }
         .navigationTitle(workspace.editor.url == nil ? workspace.folderName : workspace.editor.name)

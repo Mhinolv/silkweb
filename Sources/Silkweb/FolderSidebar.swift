@@ -65,8 +65,8 @@ struct FolderSidebar: NSViewRepresentable {
         let workspace = coordinator.workspace
         if coordinator.rootURL != snapshot.rootURL || coordinator.revision != workspace.revision {
             coordinator.revision = workspace.revision
-            coordinator.configure(snapshot)
-            coordinator.restore()
+            if coordinator.configure(snapshot) { coordinator.restore() }
+            else { coordinator.updateVisibleCounts() }
         }
         if coordinator.rename != workspace.rename {
             coordinator.rename = workspace.rename
@@ -85,6 +85,9 @@ struct FolderSidebar: NSViewRepresentable {
         var roots: [Item] = []
         var itemsByPath: [String: Item] = [:]
         var rootURL: URL?
+        private var folders: [LibraryFolder] = []
+        private var counts: [UUID: FolderDocumentCount] = [:]
+        private var totalCount = 0
         weak var outline: NSOutlineView?
         var restoring = false
         var lastFocusRequest = 0
@@ -102,8 +105,13 @@ struct FolderSidebar: NSViewRepresentable {
             configure(snapshot)
         }
 
-        func configure(_ snapshot: LibrarySnapshot) {
+        @discardableResult
+        func configure(_ snapshot: LibrarySnapshot) -> Bool {
+            counts = snapshot.presentation.counts
+            totalCount = snapshot.documents.count
+            guard rootURL != snapshot.rootURL || folders != snapshot.folders else { return false }
             rootURL = snapshot.rootURL
+            folders = snapshot.folders
             itemsByPath = [:]
             let all = Item(folder: nil, title: "All Documents")
             roots = [all]
@@ -115,12 +123,26 @@ struct FolderSidebar: NSViewRepresentable {
             }
             for folder in snapshot.folders {
                 guard let item = byID[folder.id] else { continue }
-                if let parent = folder.parentID { byID[parent]?.children.append(item) }
-                else { roots.append(item) }
+                item.children = (snapshot.presentation.children[folder.id] ?? []).compactMap { byID[$0.id] }
+                if folder.parentID == nil { roots.append(item) }
             }
-            for item in byID.values {
-                item.children.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+            return true
+        }
+
+        func updateVisibleCounts() {
+            guard let outline else { return }
+            for row in 0..<outline.numberOfRows {
+                if let item = outline.item(atRow: row) as? Item,
+                   let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarFolderCell {
+                    applyCount(to: cell, item: item)
+                }
             }
+        }
+        private func applyCount(to cell: SidebarFolderCell, item: Item) {
+            let count = item.folder.flatMap { counts[$0.id] } ?? FolderDocumentCount(direct: totalCount, recursive: totalCount)
+            cell.countBadge.stringValue = count.badge
+            cell.setAccessibilityValue(count.accessibilityValue)
+            cell.toolTip = item.folder?.isUnreadable == true ? "You don't have permission to view this folder." : count.tooltip
         }
 
         func restore() {
@@ -164,6 +186,11 @@ struct FolderSidebar: NSViewRepresentable {
                 let text = NSTextField(labelWithString: "")
                 text.lineBreakMode = .byTruncatingTail
                 let image = NSImageView()
+                let count = cell.countBadge
+                count.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+                count.textColor = .secondaryLabelColor
+                count.setContentCompressionResistancePriority(.required, for: .horizontal)
+                count.translatesAutoresizingMaskIntoConstraints = false
                 let badge = cell.lockBadge
                 badge.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: nil)
                 badge.contentTintColor = .secondaryLabelColor
@@ -173,6 +200,7 @@ struct FolderSidebar: NSViewRepresentable {
                 cell.addSubview(image)
                 cell.addSubview(text)
                 cell.addSubview(badge)
+                cell.addSubview(count)
                 cell.textField = text
                 cell.imageView = image
                 NSLayoutConstraint.activate([
@@ -182,7 +210,9 @@ struct FolderSidebar: NSViewRepresentable {
                     text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
                     text.trailingAnchor.constraint(equalTo: badge.leadingAnchor, constant: -4),
                     text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                    badge.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+                    badge.trailingAnchor.constraint(equalTo: count.leadingAnchor, constant: -4),
+                    count.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+                    count.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                     badge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                     badge.widthAnchor.constraint(equalToConstant: 12), badge.heightAnchor.constraint(equalToConstant: 12)
                 ])
@@ -214,7 +244,7 @@ struct FolderSidebar: NSViewRepresentable {
             let label = item.folder.map { "\(item.title), \($0.parentID == nil ? "library" : "folder")" } ?? item.title
             cell.setAccessibilityElement(true)
             cell.setAccessibilityLabel(item.folder?.isUnreadable == true ? "\(label), unreadable, permission denied" : label)
-            cell.toolTip = item.folder?.isUnreadable == true ? "You don't have permission to view this folder." : nil
+            applyCount(to: cell, item: item)
             return cell
         }
         func menu(_ event: NSEvent) -> NSMenu? {
@@ -360,6 +390,7 @@ struct FolderSidebar: NSViewRepresentable {
 
 final class SidebarFolderCell: NSTableCellView {
     let lockBadge = NSImageView()
+    let countBadge = NSTextField(labelWithString: "")
     var renameField: RenameNameField?
 }
 

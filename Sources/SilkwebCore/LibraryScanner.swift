@@ -39,6 +39,29 @@ public enum LibraryScanner {
         }.value
     }
 
+    /// Refresh one saved file without enumerating the library or reading document bodies.
+    public static func refreshingDates(in snapshot: LibrarySnapshot, documentID: UUID) async throws -> LibrarySnapshot {
+        try await Task.detached(priority: .utility) {
+            guard let index = snapshot.documents.firstIndex(where: { $0.id == documentID }) else { return snapshot }
+            let document = snapshot.documents[index]
+            try LibraryMetadataStore.rejectLink(snapshot.rootURL)
+            var url = snapshot.rootURL
+            for component in document.relativePath.split(separator: "/") {
+                guard component != ".", component != ".." else { throw LibraryError.invalidRelativePath }
+                url.appendPathComponent(String(component))
+                try LibraryMetadataStore.rejectLink(url)
+            }
+            let values = try url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+            var documents = snapshot.documents
+            documents[index].created = values.creationDate
+            documents[index].modified = values.contentModificationDate
+            return LibrarySnapshot(rootURL: snapshot.rootURL, folders: snapshot.folders, documents: documents,
+                                   presentation: LibraryPresentation(folders: snapshot.folders, documents: documents),
+                                   metadata: snapshot.metadata, recoveredMetadataURL: snapshot.recoveredMetadataURL,
+                                   isReadOnly: snapshot.isReadOnly)
+        }.value
+    }
+
     private static func scanOnWorker(root: URL, progress: (@Sendable (Int) -> Void)?) throws -> LibrarySnapshot {
         precondition(!Thread.isMainThread, "Library enumeration must run off the main thread")
         let root = root.standardizedFileURL.resolvingSymlinksInPath()
@@ -63,7 +86,7 @@ public enum LibraryScanner {
         var pending = [(url: root, path: "", id: rootID, folderIndex: 0)]
         var unreadablePaths = Set<String>()
         var nextProgress = Date().addingTimeInterval(1)
-        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .isHiddenKey]
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .isHiddenKey, .creationDateKey, .contentModificationDateKey]
         while let parent = pending.popLast() {
             try Task.checkCancellation()
             let children: [(url: URL, values: URLResourceValues)]
@@ -98,7 +121,8 @@ public enum LibraryScanner {
                 } else if values.isRegularFile == true,
                           ["md", "markdown"].contains(child.pathExtension.lowercased()) {
                     documents.append(LibraryDocument(id: identity(for: path), folderID: parent.id,
-                                                     relativePath: path, name: child.lastPathComponent))
+                                                     relativePath: path, name: child.lastPathComponent,
+                                                     created: values.creationDate, modified: values.contentModificationDate))
                 }
             }
         }
@@ -132,6 +156,7 @@ public enum LibraryScanner {
             }
         }
         return LibrarySnapshot(rootURL: root, folders: folders, documents: documents,
+                               presentation: LibraryPresentation(folders: folders, documents: documents),
                                metadata: metadata, recoveredMetadataURL: recoveredURL, isReadOnly: isReadOnly)
     }
 }

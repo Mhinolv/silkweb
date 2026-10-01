@@ -31,7 +31,7 @@ final class LibrarySplitViewTests: XCTestCase {
         let workspace = LibraryWorkspace()
         workspace.root = root
         let snapshot = try await LibraryScanner.scan(root: root)
-        workspace.install(snapshot, sorted: snapshot.documents)
+        workspace.install(snapshot)
         let name = "Silkweb.Tests." + UUID().uuidString
         defer { clearAutosave(name) }
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
@@ -84,7 +84,7 @@ final class LibrarySplitViewTests: XCTestCase {
             layout(restored, width: width)
             XCTAssertTrue(widths(restored).allSatisfy { $0.isFinite && $0 >= 0 })
         }
-        workspace.install(snapshot, sorted: snapshot.documents)
+        workspace.install(snapshot)
         workspace.loading = false
         await Task.yield()
         layout(restored)
@@ -100,7 +100,7 @@ final class LibrarySplitViewTests: XCTestCase {
         let workspace = LibraryWorkspace()
         workspace.root = root
         let snapshot = try await LibraryScanner.scan(root: root)
-        workspace.install(snapshot, sorted: snapshot.documents)
+        workspace.install(snapshot)
         _ = await workspace.editor.open(root.appendingPathComponent("Note.md"), readOnly: false)
         let name = "Silkweb.Tests." + UUID().uuidString
         defer { clearAutosave(name) }

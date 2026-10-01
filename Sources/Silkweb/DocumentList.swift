@@ -7,53 +7,64 @@ struct DocumentList: View {
     @State private var selectionRevision = 0
     @State private var dateReference = Date()
     var body: some View {
-        Group {
-            if workspace.snapshot?.folders.first(where: { $0.relativePath == workspace.session.selectedFolder })?.isUnreadable == true {
-                ContentUnavailableView("Folder Unavailable", systemImage: "lock",
-                                       description: Text("You don't have permission to view this folder."))
-            } else if workspace.documents.isEmpty {
-                ContentUnavailableView {
-                    Label(workspace.snapshot?.documents.isEmpty == true ? "No Documents Yet" : "No Documents", systemImage: "doc.text")
-                } description: {
-                    Text(workspace.snapshot?.documents.isEmpty == true ? "Create a document or folder to get started." : "This folder is empty.")
-                } actions: {
-                    Button("New Document") { workspace.create(folder: false) }.disabled(!workspace.canMutate)
-                    if workspace.snapshot?.documents.isEmpty == true {
-                        Button("New Folder") { workspace.create(folder: true) }.disabled(!workspace.canMutate)
-                    }
+        VStack(spacing: 0) {
+            if workspace.includesSubfolders {
+                HStack {
+                    Text("Including subfolders · \(workspace.documents.count.formatted()) documents")
+                    Spacer()
+                    Button("Show Only This Folder") { workspace.setIncludeSubfolders(false) }.buttonStyle(.borderless)
                 }
-            } else {
-                ScrollViewReader { proxy in
-                    List(workspace.documents, selection: Binding(get: { workspace.session.selectedDocuments }, set: { workspace.focusColumn = 1; workspace.selectDocuments($0) })) { document in
-                        DocumentRow(document: document, root: workspace.snapshot!.rootURL, workspace: workspace, dateReference: dateReference)
-                            .onDrag {
-                                workspace.dragProvider(workspace.documentDragPaths(document.relativePath))
-                            } preview: {
-                                HStack {
-                                    Label((document.name as NSString).deletingPathExtension, systemImage: "doc.text")
-                                    let count = workspace.documentDragPaths(document.relativePath).count
-                                    if count > 1 {
-                                        Text(count.formatted()).font(.caption.bold()).padding(6)
-                                            .background(.quaternary, in: Capsule())
-                                    }
-                                }.padding(8).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
-                            }
-                            .tag(document.relativePath).id(document.relativePath)
-                            .contextMenu {
-                                Button("Open in New Tab") { }.disabled(true)
-                                Divider()
-                                Button("Rename…") { workspace.beginRename(LibraryRename(path: document.relativePath, isFolder: false)) }.disabled(!workspace.canMutate)
-                                Button("Move To…") { workspace.requestMove(workspace.documentDragPaths(document.relativePath)) }.disabled(!workspace.canMutate)
-                                Button("Reveal in Finder") { workspace.reveal(document.relativePath) }
-                                Divider()
-                                Button("Move to Trash") { workspace.requestTrash(workspace.documentDragPaths(document.relativePath), pane: 1) }.disabled(!workspace.canMutate)
-                            }
+                .font(.caption).padding(.horizontal, 8).frame(height: 28).background(.bar)
+                .accessibilityElement(children: .contain).accessibilityLabel("Including subfolders")
+            }
+            Group {
+                if workspace.snapshot?.folders.first(where: { $0.relativePath == workspace.session.selectedFolder })?.isUnreadable == true {
+                    ContentUnavailableView("Folder Unavailable", systemImage: "lock",
+                                           description: Text("You don't have permission to view this folder."))
+                } else if workspace.documents.isEmpty {
+                    ContentUnavailableView {
+                        Label(workspace.snapshot?.documents.isEmpty == true ? "No Documents Yet" : "No Documents", systemImage: "doc.text")
+                    } description: {
+                        Text(workspace.snapshot?.documents.isEmpty == true ? "Create a document or folder to get started." : "This folder is empty.")
+                    } actions: {
+                        Button("New Document") { workspace.create(folder: false) }.disabled(!workspace.canMutate)
+                        if workspace.snapshot?.documents.isEmpty == true {
+                            Button("New Folder") { workspace.create(folder: true) }.disabled(!workspace.canMutate)
+                        }
                     }
-                    .id(selectionRevision)
-                    .onChange(of: workspace.editor.refusedNavigation) { selectionRevision += 1 }
-                    .onChange(of: workspace.rename) { if let item = workspace.rename, !item.isFolder { proxy.scrollTo(item.path) } }
-                    .onChange(of: workspace.revision) { if let path = workspace.session.selectedDocuments.first { proxy.scrollTo(path) } }
-                    .onKeyPress(.return) { workspace.focusColumn = 1; workspace.beginRename(); return .handled }
+                } else {
+                    ScrollViewReader { proxy in
+                        List(workspace.documents, selection: Binding(get: { workspace.session.selectedDocuments }, set: { workspace.focusColumn = 1; workspace.selectDocuments($0) })) { document in
+                            DocumentRow(document: document, root: workspace.snapshot!.rootURL, workspace: workspace, dateReference: dateReference)
+                                .onDrag {
+                                    workspace.dragProvider(workspace.documentDragPaths(document.relativePath))
+                                } preview: {
+                                    HStack {
+                                        Label((document.name as NSString).deletingPathExtension, systemImage: "doc.text")
+                                        let count = workspace.documentDragPaths(document.relativePath).count
+                                        if count > 1 {
+                                            Text(count.formatted()).font(.caption.bold()).padding(6)
+                                                .background(.quaternary, in: Capsule())
+                                        }
+                                    }.padding(8).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+                                }
+                                .tag(document.relativePath).id(document.relativePath)
+                                .contextMenu {
+                                    Button("Open in New Tab") { }.disabled(true)
+                                    Divider()
+                                    Button("Rename…") { workspace.beginRename(LibraryRename(path: document.relativePath, isFolder: false)) }.disabled(!workspace.canMutate)
+                                    Button("Move To…") { workspace.requestMove(workspace.documentDragPaths(document.relativePath)) }.disabled(!workspace.canMutate)
+                                    Button("Reveal in Finder") { workspace.reveal(document.relativePath) }
+                                    Divider()
+                                    Button("Move to Trash") { workspace.requestTrash(workspace.documentDragPaths(document.relativePath), pane: 1) }.disabled(!workspace.canMutate)
+                                }
+                        }
+                        .id(selectionRevision)
+                        .onChange(of: workspace.editor.refusedNavigation) { selectionRevision += 1 }
+                        .onChange(of: workspace.rename) { if let item = workspace.rename, !item.isFolder { proxy.scrollTo(item.path) } }
+                        .onChange(of: workspace.revision) { if let path = workspace.session.selectedDocuments.first { proxy.scrollTo(path) } }
+                        .onKeyPress(.return) { workspace.focusColumn = 1; workspace.beginRename(); return .handled }
+                    }
                 }
             }
         }
@@ -80,11 +91,14 @@ private struct DocumentRow: View {
                 Text(title).font(.headline).lineLimit(1)
             }
             HStack(spacing: 4) {
-                if let modified = summary?.modified {
-                    Text(DocumentRowPresentation.dateLabel(modified, now: dateReference, locale: locale))
+                if let date = workspace.listPreference.key == .created ? document.created : document.modified {
+                    Text((workspace.listPreference.key == .created ? "Created " : "") + DocumentRowPresentation.dateLabel(date, now: dateReference, locale: locale))
                 }
                 Text(summary?.firstLine ?? "")
             }.font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+            if workspace.includesSubfolders, let path = LibraryPresentation.breadcrumb(for: document, in: workspace.session.selectedFolder) {
+                Label(path, systemImage: "folder").font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+            }
         }
         .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
         .padding(.horizontal, 8)
@@ -94,8 +108,10 @@ private struct DocumentRow: View {
         .listRowInsets(EdgeInsets())
         .accessibilityElement(children: workspace.rename?.path == document.relativePath ? .contain : .ignore)
         .accessibilityLabel(title)
-        .accessibilityValue(summary?.modified.map { "modified \($0.formatted(.relative(presentation: .named)))" } ?? "")
-        .task(id: document.relativePath) { summary = await DocumentSummary.load(document: document, root: root) }
+        .accessibilityValue((workspace.listPreference.key == .created ? document.created : document.modified).map {
+            "\(workspace.listPreference.key == .created ? "created" : "modified") \($0.formatted(.relative(presentation: .named)))"
+        } ?? "")
+        .task(id: document.modified) { summary = await DocumentSummary.load(document: document, root: root) }
     }
 }
 

@@ -2,7 +2,9 @@ import Foundation
 
 /// Paths keep navigation usable even when a read-only library cannot save its identity index.
 public struct LibrarySession: Codable, Equatable, Sendable {
-    public var formatVersion = 1
+    public var formatVersion = 2
+    /// Folder UUIDs survive moves/renames; virtual collections have separate namespaced keys.
+    public var listPreferences: [String: LibraryListPreference] = [:]
     public var selectedFolder: String? = ""
     public var selectedDocuments: Set<String> = []
     public var expandedFolders: Set<String> = [""]
@@ -18,12 +20,15 @@ public struct LibrarySession: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, selectedFolder, selectedDocuments, expandedFolders
+        case formatVersion, selectedFolder, selectedDocuments, expandedFolders, listPreferences
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        formatVersion = try values.decodeIfPresent(Int.self, forKey: .formatVersion) ?? 1
+        let version = try values.decodeIfPresent(Int.self, forKey: .formatVersion) ?? 1
+        guard (1...2).contains(version) else { throw LibraryError.unsupportedMetadataVersion(version) }
+        formatVersion = 2
+        listPreferences = try values.decodeIfPresent([String: LibraryListPreference].self, forKey: .listPreferences) ?? [:]
         selectedFolder = values.contains(.selectedFolder) ? try values.decodeIfPresent(String.self, forKey: .selectedFolder) : ""
         selectedDocuments = try values.decodeIfPresent(Set<String>.self, forKey: .selectedDocuments) ?? []
         expandedFolders = try values.decodeIfPresent(Set<String>.self, forKey: .expandedFolders) ?? [""]
@@ -31,7 +36,8 @@ public struct LibrarySession: Codable, Equatable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(formatVersion, forKey: .formatVersion)
+        try values.encode(2, forKey: .formatVersion)
+        try values.encode(listPreferences, forKey: .listPreferences)
         try values.encode(selectedFolder, forKey: .selectedFolder)
         try values.encode(selectedDocuments, forKey: .selectedDocuments)
         try values.encode(expandedFolders, forKey: .expandedFolders)
@@ -45,7 +51,7 @@ public struct LibrarySession: Codable, Equatable, Sendable {
             try LibraryMetadataStore.rejectLink(file)
             guard FileManager.default.fileExists(atPath: file.path) else { return LibrarySession() }
             let session = try JSONDecoder().decode(Self.self, from: Data(contentsOf: file))
-            guard session.formatVersion == 1 else {
+            guard (1...2).contains(session.formatVersion) else {
                 throw LibraryError.unsupportedMetadataVersion(session.formatVersion)
             }
             return session

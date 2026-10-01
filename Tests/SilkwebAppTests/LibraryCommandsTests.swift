@@ -15,7 +15,7 @@ final class LibraryCommandsTests: XCTestCase {
         let workspace = LibraryWorkspace()
         workspace.root = root
         let snapshot = try await LibraryScanner.scan(root: root)
-        workspace.install(snapshot, sorted: snapshot.documents)
+        workspace.install(snapshot)
         await workspace.editor.configure(root: root)
         return (root, workspace)
     }

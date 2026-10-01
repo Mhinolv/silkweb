@@ -129,10 +129,7 @@ extension LibraryWorkspace {
     func refresh(_ changes: LibraryChangeSet) async throws {
         guard let root else { return }
         let scanned = try await LibraryScanner.scan(root: root)
-        let sorted = await Task.detached {
-            scanned.documents.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        }.value
-        install(scanned, sorted: sorted)
+        install(scanned)
         session = session.applying(changes)
         if let url = editor.url {
             let old = String(url.path.dropFirst(root.path.count + 1))
