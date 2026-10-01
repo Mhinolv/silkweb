@@ -66,9 +66,6 @@ final class DocumentListTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTAssertEqual(workspace.documents.count, 3)
-        if nativeWindowDispatch, window.windowNumber == 0 {
-            throw XCTSkip("WindowServer is unavailable: NSWindow has number 0 and cannot dispatch mouse events. Separate row-handler test covers tracking through the begin-session boundary.")
-        }
         let paths = workspace.documents.map(\.relativePath)
         var starts: [Data] = []
         let type = NSPasteboard.PasteboardType(UTType.silkwebMove.identifier)
@@ -114,6 +111,23 @@ final class DocumentListTests: XCTestCase {
                 case .leftMouseUp: target.mouseUp(with: event); trackedSource = nil
                 default: XCTFail("Unexpected pointer event")
                 }
+            }
+        }
+        if nativeWindowDispatch {
+            // A nonzero window number does not guarantee event delivery in a
+            // sandbox. Probe dispatch independently of the document source so
+            // a broken row hit test or drag handler cannot cause a false skip.
+            let content = try XCTUnwrap(window.contentView)
+            let rect = table.rect(ofRow: 0)
+            let point = content.convert(table.convert(NSPoint(x: rect.maxX - 20, y: rect.midY), to: nil), from: nil)
+            let probe = MouseDispatchProbe(frame: NSRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8))
+            content.addSubview(probe)
+            XCTAssertTrue(content.hitTest(content.convert(point, to: content.superview)) === probe)
+            try send(.leftMouseDown)
+            try send(.leftMouseUp)
+            probe.removeFromSuperview()
+            guard probe.receivedMouseDown else {
+                throw XCTSkip("NSWindow.sendEvent cannot deliver mouseDown to an independent hit-tested NSView (window number: \(window.windowNumber)). Row-handler test asserts the beginDraggingSession boundary; native-window drag proof still requires a dispatch-capable host.")
             }
         }
         for selected in [Set<String>(), Set([paths[0]]), Set(paths)] {
@@ -478,4 +492,13 @@ private final class DocumentListDraggingInfo: NSObject, NSDraggingInfo {
     func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions, for view: NSView?,
                                 classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any],
                                 using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
+}
+
+/// Detects window dispatch availability without invoking document-list code.
+private final class MouseDispatchProbe: NSView {
+    private(set) var receivedMouseDown = false
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { receivedMouseDown = true }
+    override func mouseUp(with event: NSEvent) { }
 }
