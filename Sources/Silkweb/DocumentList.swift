@@ -70,7 +70,6 @@ private struct DocumentRow: View {
     let workspace: LibraryWorkspace
     let dateReference: Date
     @Environment(\.locale) private var locale
-    @State private var lastClick: Date?
     @State private var summary: DocumentSummary?
     private var title: String { URL(fileURLWithPath: document.name).deletingPathExtension().lastPathComponent }
     var body: some View {
@@ -79,14 +78,6 @@ private struct DocumentRow: View {
                 InlineRenameField(item: item, workspace: workspace).frame(height: 24)
             } else {
                 Text(title).font(.headline).lineLimit(1)
-                    .simultaneousGesture(TapGesture().onEnded {
-                        let now = Date()
-                        if workspace.session.selectedDocuments == [document.relativePath],
-                           let lastClick, (0.5...1.5).contains(now.timeIntervalSince(lastClick)) {
-                            workspace.beginRename(LibraryRename(path: document.relativePath, isFolder: false))
-                        }
-                        lastClick = now
-                    })
             }
             HStack(spacing: 4) {
                 if let modified = summary?.modified {
@@ -95,7 +86,12 @@ private struct DocumentRow: View {
                 Text(summary?.firstLine ?? "")
             }.font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
         }
-        .frame(minHeight: 36, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .contentShape([.interaction, .dragPreview], Rectangle())
+        .background(DocumentRowClickObserver(path: document.relativePath, workspace: workspace))
+        .listRowInsets(EdgeInsets())
         .accessibilityElement(children: workspace.rename?.path == document.relativePath ? .contain : .ignore)
         .accessibilityLabel(title)
         .accessibilityValue(summary?.modified.map { "modified \($0.formatted(.relative(presentation: .named)))" } ?? "")
