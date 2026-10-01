@@ -5,7 +5,10 @@ struct DocumentList: View {
     @Bindable var workspace: LibraryWorkspace
     var body: some View {
         Group {
-            if workspace.documents.isEmpty {
+            if workspace.snapshot?.folders.first(where: { $0.relativePath == workspace.session.selectedFolder })?.isUnreadable == true {
+                ContentUnavailableView("Folder Unavailable", systemImage: "lock",
+                                       description: Text("You don't have permission to view this folder."))
+            } else if workspace.documents.isEmpty {
                 ContentUnavailableView(
                     workspace.snapshot?.documents.isEmpty == true ? "No Documents Yet" : "No Documents",
                     systemImage: "doc.text",

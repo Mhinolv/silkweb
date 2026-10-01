@@ -123,16 +123,21 @@ struct FolderSidebar: NSViewRepresentable {
         func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
             guard let item = item as? Item else { return nil }
             let identifier = NSUserInterfaceItemIdentifier("folderCell")
-            let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView ?? NSTableCellView()
+            let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? SidebarFolderCell ?? SidebarFolderCell()
             if cell.textField == nil {
                 cell.identifier = identifier
                 let text = NSTextField(labelWithString: "")
                 text.lineBreakMode = .byTruncatingTail
                 let image = NSImageView()
+                let badge = cell.lockBadge
+                badge.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: nil)
+                badge.contentTintColor = .secondaryLabelColor
                 text.translatesAutoresizingMaskIntoConstraints = false
                 image.translatesAutoresizingMaskIntoConstraints = false
+                badge.translatesAutoresizingMaskIntoConstraints = false
                 cell.addSubview(image)
                 cell.addSubview(text)
+                cell.addSubview(badge)
                 cell.textField = text
                 cell.imageView = image
                 NSLayoutConstraint.activate([
@@ -140,16 +145,21 @@ struct FolderSidebar: NSViewRepresentable {
                     image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                     image.widthAnchor.constraint(equalToConstant: 16), image.heightAnchor.constraint(equalToConstant: 16),
                     text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
-                    text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
-                    text.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+                    text.trailingAnchor.constraint(equalTo: badge.leadingAnchor, constant: -4),
+                    text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                    badge.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+                    badge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                    badge.widthAnchor.constraint(equalToConstant: 12), badge.heightAnchor.constraint(equalToConstant: 12)
                 ])
             }
             cell.textField?.stringValue = item.title
             let symbol = item.folder.map { $0.parentID == nil ? "books.vertical" : "folder" } ?? "doc.on.doc"
             cell.imageView?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            cell.lockBadge.isHidden = item.folder?.isUnreadable != true
             let label = item.folder.map { "\(item.title), \($0.parentID == nil ? "library" : "folder")" } ?? item.title
             cell.setAccessibilityElement(true)
-            cell.setAccessibilityLabel(label)
+            cell.setAccessibilityLabel(item.folder?.isUnreadable == true ? "\(label), unreadable, permission denied" : label)
+            cell.toolTip = item.folder?.isUnreadable == true ? "You don't have permission to view this folder." : nil
             return cell
         }
         func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -169,6 +179,10 @@ struct FolderSidebar: NSViewRepresentable {
             else { workspace.session.expandedFolders.remove(path) }
         }
     }
+}
+
+private final class SidebarFolderCell: NSTableCellView {
+    let lockBadge = NSImageView()
 }
 
 /// Arrow navigation and type-selection remain AppKit's native outline behavior.

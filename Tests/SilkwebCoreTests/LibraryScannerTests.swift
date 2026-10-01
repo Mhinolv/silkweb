@@ -164,6 +164,80 @@ final class LibraryScannerTests: XCTestCase {
         XCTAssertEqual(text, "# Café 日本語\n")
     }
 
+    func testUnreadableSubfoldersStillScanWithReadableSiblings() async throws {
+        try write("Locked/Nested/Hidden.md")
+        try write("Parent/Locked/Hidden.md")
+        try write("Parent/Readable/Note.md")
+        try write("Readable/Note.markdown")
+        try write("Top.md")
+        let blocked = ["Locked", "Parent/Locked"].map { root.appendingPathComponent($0) }
+        defer {
+            for url in blocked {
+                try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+            }
+        }
+        for url in blocked {
+            try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
+        }
+        let snapshot = try await LibraryScanner.scan(root: root)
+        XCTAssertEqual(Set(snapshot.folders.filter(\.isUnreadable).map(\.relativePath)), ["Locked", "Parent/Locked"])
+        XCTAssertEqual(Set(snapshot.folders.map(\.relativePath)), ["", "Locked", "Parent", "Parent/Locked", "Parent/Readable", "Readable"])
+        XCTAssertEqual(Set(snapshot.documents.map(\.relativePath)), ["Parent/Readable/Note.md", "Readable/Note.markdown", "Top.md"])
+        XCTAssertFalse(snapshot.isReadOnly)
+    }
+
+    func testUnreadableFolderPreservesDescendantIDsUntilPermissionsReturn() async throws {
+        try write("Locked/Nested/Hidden.md")
+        try write("Locked/Hidden.md")
+        try write("Locked-Sibling/Deleted.md")
+        let before = try await LibraryScanner.scan(root: root)
+        try FileManager.default.removeItem(at: root.appendingPathComponent("Locked-Sibling/Deleted.md"))
+        let blocked = root.appendingPathComponent("Locked")
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: blocked.path) }
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: blocked.path)
+        for _ in 0..<2 {
+            let snapshot = try await LibraryScanner.scan(root: root)
+            XCTAssertTrue(try XCTUnwrap(snapshot.folders.first { $0.relativePath == "Locked" }).isUnreadable)
+            XCTAssertTrue(snapshot.documents.isEmpty)
+            for path in ["Locked", "Locked/Nested", "Locked/Hidden.md", "Locked/Nested/Hidden.md"] {
+                XCTAssertEqual(snapshot.metadata.IDsByPath[path], before.metadata.IDsByPath[path])
+            }
+            // A similarly named readable sibling must still have deletions pruned.
+            XCTAssertNil(snapshot.metadata.IDsByPath["Locked-Sibling/Deleted.md"])
+            let saved = try LibraryMetadataStore.load(root: root).0
+            XCTAssertEqual(saved, snapshot.metadata)
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: blocked.path)
+        let restored = try await LibraryScanner.scan(root: root)
+        XCTAssertTrue(restored.folders.allSatisfy { !$0.isUnreadable })
+        XCTAssertEqual(Set(restored.documents.map(\.relativePath)), ["Locked/Hidden.md", "Locked/Nested/Hidden.md"])
+        for path in ["Locked", "Locked/Nested", "Locked/Hidden.md", "Locked/Nested/Hidden.md"] {
+            XCTAssertEqual(restored.metadata.IDsByPath[path], before.metadata.IDsByPath[path])
+        }
+        try FileManager.default.removeItem(at: blocked)
+        let deleted = try await LibraryScanner.scan(root: root)
+        XCTAssertFalse(deleted.metadata.IDsByPath.keys.contains { $0 == "Locked" || $0.hasPrefix("Locked/") })
+    }
+
+    func testUnreadableRootStillThrowsPermissionError() async throws {
+        try write("Note.md")
+        let before = try await LibraryScanner.scan(root: root)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path) }
+        // Execute-only access can load the index, but root enumeration must still fail.
+        for mode in [0o000, 0o100] {
+            try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: root.path)
+            do {
+                _ = try await LibraryScanner.scan(root: root)
+                XCTFail("Unreadable roots must fail to open")
+            } catch {
+                XCTAssertEqual((error as NSError).domain, NSCocoaErrorDomain)
+                XCTAssertEqual((error as NSError).code, NSFileReadNoPermissionError)
+            }
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+        XCTAssertEqual(try LibraryMetadataStore.load(root: root).0, before.metadata)
+    }
+
     func testReadOnlyIndexAndCorruptIndexStillOpen() async throws {
         try write("Note.md")
         _ = try await LibraryScanner.scan(root: root)
