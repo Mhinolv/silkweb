@@ -5,6 +5,11 @@ import SilkwebCore
 @MainActor @Observable
 final class LibraryWorkspace {
     let editor = DocumentSession()
+    @ObservationIgnored private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
     var libraryUndo: [LibraryUndo] = []
     var importRequest: ImportRequest?
     var moveRequest: MoveRequest?
@@ -101,14 +106,37 @@ final class LibraryWorkspace {
     }
 
     func restore() {
-        guard root == nil, let data = UserDefaults.standard.data(forKey: "libraryBookmark") else { return }
-        do {
-            var stale = false
-            let url = try URL(resolvingBookmarkData: data, options: [.withSecurityScope], bookmarkDataIsStale: &stale)
-            open(url)
-        } catch {
-            self.error = "Choose your library folder again to restore access."
+        guard root == nil, loadTask == nil else { return }
+        let location = defaults.data(forKey: "libraryLocation").flatMap { try? JSONDecoder().decode(LibraryLocation.self, from: $0) }
+        let legacy = defaults.data(forKey: "libraryBookmark")
+        guard location != nil || legacy != nil else { return }
+        loadTask = Task {
+            do {
+                let restored = try await Task.detached(priority: .userInitiated) {
+                    try LibraryLocationRestore.restore(location, legacyBookmark: legacy)
+                }.value
+                guard !Task.isCancelled, let restored else { return }
+                if let refreshed = restored.refreshedLocation { persistLocation(refreshed) }
+                // Clear this task before open captures the previous load to await.
+                loadTask = nil
+                open(restored.url, usesSecurityScope: restored.usesSecurityScope)
+            } catch {
+                guard !Task.isCancelled else { return }
+                let failure = error as? LibraryLocationError ?? .unreadable
+                errorTitle = failure.title
+                errorSymbol = failure == .notFound ? "externaldrive.badge.questionmark" : "lock"
+                self.error = failure == .notFound
+                    ? "Silkweb can’t find your library. It may have been moved, renamed, or be on a disconnected drive."
+                    : "Silkweb doesn’t have permission to read your library."
+                loadTask = nil
+            }
         }
+    }
+
+    private func persistLocation(_ location: LibraryLocation) {
+        guard let data = try? JSONEncoder().encode(location) else { return }
+        defaults.set(data, forKey: "libraryLocation")
+        defaults.removeObject(forKey: "libraryBookmark")
     }
 
     func chooseFolder() {
@@ -137,7 +165,7 @@ final class LibraryWorkspace {
         }
     }
 
-    func open(_ url: URL) {
+    func open(_ url: URL, usesSecurityScope: Bool = false) {
         let url = url.standardizedFileURL.resolvingSymlinksInPath()
         let previousLoad = loadTask
         previousLoad?.cancel()
@@ -159,7 +187,7 @@ final class LibraryWorkspace {
             await editor.configure(root: url)
             // Let any previous scan finish cancellation before releasing its access.
             scope?.stopAccessingSecurityScopedResource()
-            scope = url.startAccessingSecurityScopedResource() ? url : nil
+            scope = usesSecurityScope && url.startAccessingSecurityScopedResource() ? url : nil
             root = url
             snapshot = nil
             error = nil
@@ -194,9 +222,9 @@ final class LibraryWorkspace {
                 }
                 _ = await editor.open(recoveryURL ?? selectedDocument.map { scanned.rootURL.appendingPathComponent($0.relativePath) }, readOnly: scanned.isReadOnly)
                 watcher = LibraryWatcher(root: url) { [weak self] in await self?.reconcileFinderChanges() }
-                if let bookmark = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
-                    UserDefaults.standard.set(bookmark, forKey: "libraryBookmark")
-                }
+                let location = await Task.detached(priority: .utility) { LibraryLocation.saving(url) }.value
+                guard !Task.isCancelled else { return }
+                persistLocation(location)
             } catch {
                 guard !Task.isCancelled else { return }
                 let cocoa = error as NSError
