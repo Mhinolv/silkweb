@@ -6,6 +6,9 @@ import SilkwebCore
 final class LibraryWorkspace {
     let editor = DocumentSession()
     var libraryUndo: [LibraryUndo] = []
+    var moveRequest: MoveRequest?
+    var recentMoveFolders: [String] = []
+    var dragIdentity = UUID()
     var rename: LibraryRename?
     var mutating = false
     var revision = 0
@@ -14,6 +17,7 @@ final class LibraryWorkspace {
 
     func install(_ snapshot: LibrarySnapshot, sorted: [LibraryDocument]) {
         self.snapshot = snapshot
+        itemPathsByID = Dictionary(uniqueKeysWithValues: snapshot.metadata.IDsByPath.map { ($0.value, $0.key) })
         allDocuments = sorted
         groupedDocuments = Dictionary(grouping: sorted, by: \.folderID)
     }
@@ -33,6 +37,7 @@ final class LibraryWorkspace {
     private var loadTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     private var canSaveSession = true
+    @ObservationIgnored var itemPathsByID: [UUID: String] = [:]
     private var groupedDocuments: [UUID: [LibraryDocument]] = [:]
     private var allDocuments: [LibraryDocument] = []
 
@@ -101,6 +106,9 @@ final class LibraryWorkspace {
             await navigationTask?.value
             guard !mutating else { return }
             libraryUndo = []
+            moveRequest = nil
+            recentMoveFolders = []
+            dragIdentity = UUID()
             rename = nil
             guard await editor.open(nil, readOnly: false) else { return }
             await editor.configure(root: url)
@@ -129,13 +137,11 @@ final class LibraryWorkspace {
                     scanned.documents.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
                 }.value
                 guard !Task.isCancelled else { return }
-                allDocuments = sorted
-                groupedDocuments = Dictionary(grouping: sorted, by: \.folderID)
+                install(scanned, sorted: sorted)
                 session = restored
                 if let path = session.selectedFolder, !scanned.folders.contains(where: { $0.relativePath == path }) {
                     session.selectedFolder = ""
                 }
-                snapshot = scanned
                 session.selectedDocuments.formIntersection(Set(documents.map(\.relativePath)))
                 var recoveryURL: URL?
                 if let drafts = try? await SaveCoordinator().pendingRecoveryDrafts(),
@@ -241,6 +247,7 @@ struct LibraryWorkspaceView: View {
         .alert(workspace.mutationErrorTitle, isPresented: Binding(get: { workspace.mutationError != nil }, set: { if !$0 { workspace.mutationError = nil } })) {
             Button("OK") { workspace.mutationError = nil }
         } message: { Text(workspace.mutationError ?? "") }
+        .sheet(item: $workspace.moveRequest) { request in MovePicker(workspace: workspace, request: request) }
         .task { workspace.restore(); await workspace.resumeEditor() }
         .onChange(of: workspace.session) { workspace.persistSession() }
     }

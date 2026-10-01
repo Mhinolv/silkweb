@@ -17,8 +17,9 @@ struct LibraryRename: Equatable {
 enum LibraryUndo {
     case newFolder(String)
     case rename(LibraryRename, String)
+    case move(MovePlan)
     var title: String {
-        switch self { case .newFolder: return "Undo New Folder"; case .rename: return "Undo Rename" }
+        switch self { case .newFolder: return "Undo New Folder"; case .rename: return "Undo Rename"; case .move: return "Undo Move" }
     }
 }
 
@@ -160,6 +161,7 @@ extension LibraryWorkspace {
     var canUndoLibrary: Bool {
         guard canMutate, let snapshot, let last = libraryUndo.last else { return false }
         switch last {
+        case .move: return true
         case .newFolder(let path):
             return snapshot.folders.contains { $0.relativePath == path }
                 && !snapshot.folders.contains { $0.relativePath.hasPrefix(path + "/") }
@@ -183,6 +185,23 @@ extension LibraryWorkspace {
             do {
                 let engine = try LibraryMutations(root: root)
                 switch last {
+                case .move(let plan):
+                    let oldURL = editor.url
+                    let position = (editor.selection, editor.scroll)
+                    guard await editor.open(nil, readOnly: false) else { return }
+                    do {
+                        let changes = try await commitMove(plan, using: engine)
+                        if let oldURL {
+                            let oldPath = String(oldURL.path.dropFirst(root.path.count + 1))
+                            _ = await editor.open(root.appendingPathComponent(changes.remapping(oldPath)), readOnly: false)
+                            (editor.selection, editor.scroll) = position
+                        }
+                    } catch {
+                        _ = await editor.open(oldURL, readOnly: false)
+                        (editor.selection, editor.scroll) = position
+                        mutationFailure(error, title: "The move can’t be undone because items have changed since.")
+                        return
+                    }
                 case .newFolder(let path):
                     try await engine.removeEmptyFolder(path)
                     if session.selectedFolder == path { session.selectedFolder = (path as NSString).deletingLastPathComponent }

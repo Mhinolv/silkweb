@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import CryptoKit
 
 public enum LibraryNameFailure: Equatable, Sendable {
     case empty, separator, leadingPeriod, tooLong, controlCharacter
@@ -90,7 +91,7 @@ public struct LibraryChangeSet: Equatable, Sendable {
 
 /// Serializes mutations for one open library. Filesystem work runs on the actor's
 /// executor, away from the UI. Callers must save dirty documents before moving them.
-/// No text or links are rewritten here. Use one instance per library.
+/// Batch moves also stage supported link rewrites. Use one instance per library.
 public actor LibraryMutations {
     private let root: URL
 
@@ -383,5 +384,170 @@ public actor LibraryMutations {
 
     private func joined(_ parent: String, _ name: String) -> String {
         parent.isEmpty ? name : parent + "/" + name
+    }
+}
+
+extension LibraryMutations {
+    /// Preflight performs all body reads on this actor, never in a drag callback.
+    /// Keep Both is opt-in; every collision is returned for review before execution.
+    public func planMove(_ paths: [String], toFolder destination: String, keepBoth: Bool = false) throws -> MovePlan {
+        _ = try directory(destination)
+        let paths = MoveSelection.topLevel(paths)
+        guard !paths.contains("") else { throw LibraryMutationError.libraryRoot }
+        guard MoveSelection.permits(paths, destination: destination) else {
+            if let cycle = paths.first(where: { destination == $0 || destination.hasPrefix($0 + "/") }) {
+                throw LibraryMutationError.folderCycle(cycle)
+            }
+            throw MovePlanError.noOp
+        }
+        let (metadata, _) = try LibraryMetadataStore.load(root: root)
+        var changes: [LibraryPathChange] = []
+        var collisions: [String] = []
+        var reserved = Set<String>()
+        let parent = try directory(destination)
+        for path in paths {
+            let source = try item(path)
+            let values = try source.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
+            let folder = values.isDirectory == true
+            guard folder || (values.isRegularFile == true && ["md", "markdown"].contains(source.pathExtension.lowercased())) else {
+                throw LibraryMutationError.unsupportedItem(path)
+            }
+            if folder {
+                var ancestor = parent
+                while true {
+                    if try sameItem(source, ancestor) { throw LibraryMutationError.folderCycle(path) }
+                    if ancestor.path == root.path { break }
+                    ancestor.deleteLastPathComponent()
+                }
+            }
+            guard !(try sameItem(source.deletingLastPathComponent(), parent)) else { throw MovePlanError.noOp }
+            let base = source.lastPathComponent
+            var name = base
+            let ext = folder ? "" : source.pathExtension
+            let stem = ext.isEmpty ? base : (base as NSString).deletingPathExtension
+            var number = 2
+            func occupied(_ name: String) throws -> Bool {
+                try entryExists(parent.appendingPathComponent(name)) || reserved.contains(name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil))
+            }
+            if try occupied(name) {
+                collisions.append(path)
+                if keepBoth {
+                    repeat {
+                        name = try Self.validateName(stem + " \(number)" + (ext.isEmpty ? "" : "." + ext)); number += 1
+                    } while try occupied(name)
+                }
+            }
+            reserved.insert(name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil))
+            changes.append(LibraryPathChange(id: metadata.IDsByPath[path] ?? UUID(), oldPath: path,
+                                            newPath: joined(destination, name), isFolder: folder))
+        }
+        let changeSet = LibraryChangeSet(changes: changes)
+        let inventory = try moveInventory()
+        let caseSensitive = try root.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]).volumeSupportsCaseSensitiveNames == true
+        var canonicalPaths: [String: String] = [:]
+        if !caseSensitive {
+            for path in inventory { canonicalPaths[path.precomposedStringWithCanonicalMapping.lowercased()] = path }
+        }
+        var before: [String: Data] = [:]
+        var after: [String: Data] = [:]
+        var fingerprints: [String: Data] = [:]
+        var newFingerprints: [String: Data] = [:]
+        var unsupported: [UnsupportedMarkdownLink] = []
+        for path in inventory.sorted() {
+            let candidate = root.appendingPathComponent(path)
+            let attributes = try FileManager.default.attributesOfItem(atPath: candidate.path)
+            if attributes[.type] as? FileAttributeType == .typeSymbolicLink {
+                if changeSet.remapping(path) != path {
+                    unsupported.append(UnsupportedMarkdownLink(document: path, syntax: "Symbolic link destination is preserved as written."))
+                }
+                continue
+            }
+            guard ["md", "markdown"].contains((path as NSString).pathExtension.lowercased()),
+                  !path.split(separator: "/").contains(where: { $0.hasPrefix(".") }) else { continue }
+            let url = try item(path)
+            guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { continue }
+            let data = try Data(contentsOf: url)
+            guard let text = String(data: data, encoding: .utf8) else {
+                throw LibraryMutationError.unsupportedItem(path)
+            }
+            fingerprints[path] = Data(SHA256.hash(data: data))
+            let result = MarkdownDestinations.rewrite(text, source: path, changes: changeSet, canonicalPaths: canonicalPaths)
+            if result.text != text {
+                before[path] = data
+                let rewritten = Data(result.text.utf8)
+                after[path] = rewritten
+                newFingerprints[path] = Data(SHA256.hash(data: rewritten))
+            } else { newFingerprints[path] = fingerprints[path] }
+            unsupported += result.unsupported.map { UnsupportedMarkdownLink(document: path, syntax: $0) }
+        }
+        return MovePlan(root: root, changes: changeSet, unsupportedLinks: unsupported, collisions: collisions,
+                        metadata: metadata, before: before, after: after, fingerprints: fingerprints, newFingerprints: newFingerprints, inventory: inventory)
+    }
+
+    /// One commit point for the index; on any error restore rewritten bodies and
+    /// reverse all completed renames. An immutable plan also supplies guarded undo.
+    public func executeMove(_ plan: MovePlan) throws -> LibraryChangeSet {
+        guard plan.root == root, try moveInventory() == plan.inventory,
+              try LibraryMetadataStore.load(root: root).0 == plan.metadata else { throw MovePlanError.changed }
+        for (path, fingerprint) in plan.fingerprints {
+            guard try Data(SHA256.hash(data: Data(contentsOf: item(path)))) == fingerprint else { throw MovePlanError.changed }
+        }
+        // Revalidate destinations on the real volume before touching any body.
+        for change in plan.changes.changes {
+            _ = try item(change.oldPath!)
+            let target = try item(change.newPath)
+            guard !(try entryExists(target)) else {
+                throw LibraryMutationError.collision(path: change.newPath, isFolder: change.isFolder,
+                                                     folderName: target.deletingLastPathComponent().lastPathComponent)
+            }
+        }
+        var rewritten: [String] = []
+        var moved: [LibraryPathChange] = []
+        do {
+            for path in plan.before.keys.sorted() where plan.before[path] != plan.after[path] {
+                try plan.after[path]!.write(to: item(path), options: .atomic)
+                rewritten.append(path)
+            }
+            for change in plan.changes.changes {
+                try exclusiveRename(item(change.oldPath!), item(change.newPath), path: change.newPath)
+                moved.append(change)
+            }
+            try LibraryMetadataStore.save(plan.changes.applying(to: plan.metadata), root: root)
+            return plan.changes
+        } catch {
+            let originalError = error
+            var rollbackError: Error?
+            for change in moved.reversed() {
+                do { try exclusiveRename(item(change.newPath), item(change.oldPath!), path: change.oldPath!) }
+                catch { rollbackError = error }
+            }
+            for path in rewritten {
+                // If a reverse rename failed, restore text wherever it survived.
+                let current = LibraryChangeSet(changes: moved.filter {
+                    !FileManager.default.fileExists(atPath: root.appendingPathComponent($0.oldPath!).path)
+                }).remapping(path)
+                do { try plan.before[path]!.write(to: item(current), options: .atomic) }
+                catch { rollbackError = error }
+            }
+            if let rollbackError {
+                throw LibraryMutationError.rollbackFailed(original: originalError.localizedDescription, current: rollbackError.localizedDescription)
+            }
+            throw originalError
+        }
+    }
+
+    private func moveInventory() throws -> Set<String> {
+        var result = Set<String>()
+        var pending = [(url: root, path: "")]
+        while let parent = pending.popLast() {
+            for url in try FileManager.default.contentsOfDirectory(at: parent.url, includingPropertiesForKeys: [.isDirectoryKey], options: []) {
+                if parent.path.isEmpty && url.lastPathComponent == ".silkweb" { continue }
+                let path = joined(parent.path, url.lastPathComponent)
+                result.insert(path)
+                let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+                if attributes[.type] as? FileAttributeType == .typeDirectory { pending.append((url, path)) }
+            }
+        }
+        return result
     }
 }
