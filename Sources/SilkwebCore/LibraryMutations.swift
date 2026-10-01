@@ -452,6 +452,7 @@ extension LibraryMutations {
         var after: [String: Data] = [:]
         var fingerprints: [String: Data] = [:]
         var newFingerprints: [String: Data] = [:]
+        var unreadableDocuments: [String: UnreadableMoveDocument] = [:]
         var unsupported: [UnsupportedMarkdownLink] = []
         for path in inventory.sorted() {
             let candidate = root.appendingPathComponent(path)
@@ -466,11 +467,19 @@ extension LibraryMutations {
                   !path.split(separator: "/").contains(where: { $0.hasPrefix(".") }) else { continue }
             let url = try item(path)
             guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { continue }
-            let data = try Data(contentsOf: url)
-            guard let text = String(data: data, encoding: .utf8) else {
-                throw LibraryMutationError.unsupportedItem(path)
+            let data: Data
+            do { data = try Data(contentsOf: url) }
+            catch {
+                unreadableDocuments[path] = UnreadableMoveDocument(attributes: attributes)
+                unsupported.append(UnsupportedMarkdownLink(document: path, syntax: "This document couldn’t be read. Its links can’t be checked and will stay as written."))
+                continue
             }
             fingerprints[path] = Data(SHA256.hash(data: data))
+            newFingerprints[path] = fingerprints[path]
+            guard let text = String(data: data, encoding: .utf8) else {
+                unsupported.append(UnsupportedMarkdownLink(document: path, syntax: "This document isn’t UTF-8. Its links can’t be checked and will stay as written."))
+                continue
+            }
             let result = MarkdownDestinations.rewrite(text, source: path, changes: changeSet, canonicalPaths: canonicalPaths)
             if result.text != text {
                 before[path] = data
@@ -481,7 +490,8 @@ extension LibraryMutations {
             unsupported += result.unsupported.map { UnsupportedMarkdownLink(document: path, syntax: $0) }
         }
         return MovePlan(root: root, changes: changeSet, unsupportedLinks: unsupported, collisions: collisions,
-                        metadata: metadata, before: before, after: after, fingerprints: fingerprints, newFingerprints: newFingerprints, inventory: inventory)
+                        metadata: metadata, before: before, after: after, fingerprints: fingerprints, newFingerprints: newFingerprints,
+                        unreadableDocuments: unreadableDocuments, inventory: inventory)
     }
 
     /// One commit point for the index; on any error restore rewritten bodies and
@@ -491,6 +501,12 @@ extension LibraryMutations {
               try LibraryMetadataStore.load(root: root).0 == plan.metadata else { throw MovePlanError.changed }
         for (path, fingerprint) in plan.fingerprints {
             guard try Data(SHA256.hash(data: Data(contentsOf: item(path)))) == fingerprint else { throw MovePlanError.changed }
+        }
+        for (path, snapshot) in plan.unreadableDocuments {
+            let url = try item(path)
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            guard UnreadableMoveDocument(attributes: attributes) == snapshot,
+                  (try? Data(contentsOf: url)) == nil else { throw MovePlanError.changed }
         }
         // Revalidate destinations on the real volume before touching any body.
         for change in plan.changes.changes {

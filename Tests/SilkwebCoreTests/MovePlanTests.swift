@@ -99,6 +99,71 @@ final class MovePlanTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: root.appendingPathComponent("Alias.md").path), root.appendingPathComponent("Two.md").path)
     }
 
+    func testUndecodableDocumentsAreReportedPreservedAndGuarded() async throws {
+        let samples = [Data([0xFF, 0xFE, 0]), Data([0x63, 0x61, 0x66, 0xE9]), Data([0xC3]),
+                       Data(repeating: 0xFF, count: 65_536)]
+        for bytes in samples {
+            for path in ["bad.md", "A/Child/bad.MARKDOWN"] {
+                let (root, engine) = try await fixture()
+                defer { try? FileManager.default.removeItem(at: root) }
+                try bytes.write(to: root.appendingPathComponent(path))
+                let plan = try await engine.planMove(["A"], toFolder: "B")
+                XCTAssertTrue(plan.unsupportedLinks.contains { $0.document == path && $0.syntax.contains("UTF-8") })
+                XCTAssertNotNil(plan.fingerprints[path])
+                XCTAssertEqual(plan.fingerprints[path], plan.newFingerprints[path])
+                XCTAssertNil(plan.before[path])
+                XCTAssertNil(plan.after[path])
+                _ = try await engine.executeMove(plan)
+                let movedPath = plan.changes.remapping(path)
+                XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(movedPath)), bytes)
+                XCTAssertTrue(try text(root, "Two.md").contains("B/A/Child/One.md"))
+                _ = try await engine.executeMove(plan.reversed)
+                XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(path)), bytes)
+
+                // A same-size raw-byte edit must invalidate both preflight and undo.
+                let stale = try await engine.planMove(["A"], toFolder: "B")
+                var edited = bytes
+                edited[edited.startIndex] = 0xFE
+                try edited.write(to: root.appendingPathComponent(path))
+                do { _ = try await engine.executeMove(stale); XCTFail("Expected stale preflight") }
+                catch { XCTAssertEqual(error as? MovePlanError, .changed) }
+                let fresh = try await engine.planMove(["A"], toFolder: "B")
+                _ = try await engine.executeMove(fresh)
+                try bytes.write(to: root.appendingPathComponent(movedPath))
+                do { _ = try await engine.executeMove(fresh.reversed); XCTFail("Expected stale undo") }
+                catch { XCTAssertEqual(error as? MovePlanError, .changed) }
+                XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("A").path))
+            }
+        }
+    }
+
+    func testUnreadableDocumentsDoNotBlockMovesOrUndo() async throws {
+        for path in ["bad.md", "A/Child/bad.md"] {
+            let (root, engine) = try await fixture()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let url = root.appendingPathComponent(path)
+            let bytes = Data("[one](A/Child/One.md)".utf8)
+            try bytes.write(to: url)
+            try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: url.path)
+            XCTAssertThrowsError(try Data(contentsOf: url))
+            let plan = try await engine.planMove(["A"], toFolder: "B")
+            XCTAssertTrue(plan.unsupportedLinks.contains { $0.document == path && $0.syntax.contains("couldn’t be read") })
+            XCTAssertNotNil(plan.unreadableDocuments[path])
+            XCTAssertNil(plan.before[path])
+            _ = try await engine.executeMove(plan)
+            _ = try await engine.executeMove(plan.reversed)
+            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+            XCTAssertEqual(try Data(contentsOf: url), bytes)
+
+            try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: url.path)
+            let stale = try await engine.planMove(["A"], toFolder: "B")
+            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+            do { _ = try await engine.executeMove(stale); XCTFail("Expected refusal after readability changes") }
+            catch { XCTAssertEqual(error as? MovePlanError, .changed) }
+            XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("A").path))
+        }
+    }
+
     func testGrammarSweepCodeUnsupportedAndSuffixes() throws {
         let changes = LibraryChangeSet(changes: [.init(id: UUID(), oldPath: "A", newPath: "B/A", isFolder: true)])
         for source in ["A/One.md", "Two.md", "B/Other.md"] {

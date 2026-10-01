@@ -5,6 +5,20 @@ public struct UnsupportedMarkdownLink: Equatable, Sendable {
     public let syntax: String
 }
 
+/// When bytes cannot be read, guard the file identity and stat information instead.
+/// These documents are never staged for a rewrite.
+struct UnreadableMoveDocument: Equatable, Sendable {
+    let size: UInt64?
+    let modified: Date?
+    let fileNumber: UInt64?
+
+    init(attributes: [FileAttributeKey: Any]) {
+        size = (attributes[.size] as? NSNumber)?.uint64Value
+        modified = attributes[.modificationDate] as? Date
+        fileNumber = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
+    }
+}
+
 public struct MovePlan: Sendable {
     public let root: URL
     public let changes: LibraryChangeSet
@@ -15,6 +29,7 @@ public struct MovePlan: Sendable {
     let after: [String: Data]
     let fingerprints: [String: Data]
     let newFingerprints: [String: Data]
+    let unreadableDocuments: [String: UnreadableMoveDocument]
     let inventory: Set<String>
 
     public var reversed: MovePlan {
@@ -27,6 +42,7 @@ public struct MovePlan: Sendable {
                         after: Dictionary(uniqueKeysWithValues: before.map { (changes.remapping($0.key), $0.value) }),
                         fingerprints: Dictionary(uniqueKeysWithValues: newFingerprints.map { (changes.remapping($0.key), $0.value) }),
                         newFingerprints: Dictionary(uniqueKeysWithValues: fingerprints.map { (changes.remapping($0.key), $0.value) }),
+                        unreadableDocuments: Dictionary(uniqueKeysWithValues: unreadableDocuments.map { (changes.remapping($0.key), $0.value) }),
                         inventory: Set(inventory.map { changes.remapping($0) }))
     }
 }
