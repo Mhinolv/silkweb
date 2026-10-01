@@ -13,6 +13,14 @@ final class DocumentSession {
     var error: String?
     var loading = false
     var refusedNavigation = 0
+    var diskText: String?
+    var diskModified: Date?
+    var showingComparison = false
+    var conflictCopy: URL?
+    private var wasDirtyBeforeDelete = false
+    private var libraryRoot: URL?
+    var externalDeleted: Bool { if case .conflict(diskRevision: nil) = state { return true }; return false }
+    var externalConflict: Bool { if case .conflict(diskRevision: .some) = state { return true }; return false }
     @ObservationIgnored var selection = NSRange(location: 0, length: 0)
     @ObservationIgnored var scroll = NSPoint.zero
     private var positions: [URL: (NSRange, NSPoint)] = [:]
@@ -23,16 +31,22 @@ final class DocumentSession {
 
     var name: String { url?.deletingPathExtension().lastPathComponent ?? "Document" }
     var banner: String? {
+        if externalConflict { return "“\(name)” was changed outside Silkweb while you were editing." }
+        if externalDeleted { return "“\(name)” was moved to the Trash or deleted outside Silkweb." }
         if let error { return error }
         if case .failed = state { return "Silkweb couldn’t save “\(name)”. Your text is safe in this window." }
         if case .conflict = state { return "This document changed on disk. Your text is safe in this window. Save a copy to keep it." }
         if recovered { return "Silkweb recovered unsaved changes to this document." }
+        if let conflictCopy { return "The other version was saved as “\(conflictCopy.deletingPathExtension().lastPathComponent)”." }
         return nil
     }
 
-    func configure(root: URL) async {
+    func configure(root: URL, recoveryDirectory: URL? = nil) async {
         observation?.cancel()
-        coordinator = SaveCoordinator(store: DocumentStore(root: root))
+        libraryRoot = root
+        diskText = nil
+        conflictCopy = nil
+        coordinator = SaveCoordinator(store: DocumentStore(root: root), recoveryDirectory: recoveryDirectory)
         positions = [:]
         url = nil
         text = ""
@@ -50,6 +64,8 @@ final class DocumentSession {
         }
         observation?.cancel()
         url = destination
+        diskText = nil
+        conflictCopy = nil
         text = ""
         state = .clean
         error = nil
@@ -77,6 +93,12 @@ final class DocumentSession {
             announce()
         }
         (selection, scroll) = positions[destination] ?? (NSRange(location: 0, length: 0), .zero)
+        observe(destination)
+        return true
+    }
+
+    private func observe(_ destination: URL) {
+        observation?.cancel()
         let coordinator = coordinator
         observation = Task { [weak self] in
             for await value in await coordinator.states(for: destination) {
@@ -87,13 +109,101 @@ final class DocumentSession {
                 }
             }
         }
-        return true
+    }
+
+    func reconcileExternalChange(movedTo destination: URL? = nil) async {
+        guard !loading, let original = url else { return }
+        loading = true
+        defer { loading = false }
+        observation?.cancel()
+        await tail?.value
+        guard url == original else { return }
+        do {
+            wasDirtyBeforeDelete = externalDeleted ? wasDirtyBeforeDelete : state.isDirty
+            let disk = try await coordinator.reconcile(original, movedTo: destination)
+            let target = destination ?? original
+            guard url == original else { return }
+            url = target
+            state = await coordinator.state(for: target) ?? state
+            if state == .clean, pendingEdits == 0, let disk { text = disk.text }
+            diskText = disk?.text
+            diskModified = try? await Task.detached { try target.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }.value
+            observe(target)
+            if externalConflict || externalDeleted { announce() }
+        } catch {
+            self.error = error.localizedDescription
+            if let url { observe(url) }
+            announce()
+        }
+    }
+
+    func compare() {
+        guard let url else { return }
+        Task {
+            do {
+                diskText = try await coordinator.diskVersion(url).text
+                showingComparison = true
+            } catch { self.error = error.localizedDescription; announce() }
+        }
+    }
+
+    func resolveConflict(keepMine: Bool) async {
+        guard let url, let root = libraryRoot else { return }
+        loading = true
+        defer { loading = false }
+        await tail?.value
+        do {
+            conflictCopy = try await coordinator.resolve(url, keepMine: keepMine, root: root)
+            text = await coordinator.draft(for: url) ?? text
+            state = await coordinator.state(for: url) ?? state
+            recovered = false
+            error = nil
+            showingComparison = false
+            diskText = nil
+            announce()
+        } catch { self.error = error.localizedDescription; announce() }
+    }
+
+    func saveAgain() async {
+        guard let url, let root = libraryRoot else { return }
+        loading = true
+        defer { loading = false }
+        await tail?.value
+        do {
+            self.url = try await coordinator.recreate(url, root: root)
+            state = .clean
+            recovered = false
+            error = nil
+            observe(self.url!)
+        } catch { self.error = error.localizedDescription; announce() }
+    }
+
+    func closeDeleted() async {
+        guard let url else { return }
+        if wasDirtyBeforeDelete {
+            let alert = NSAlert()
+            alert.messageText = "Close without saving “\(name)”?"
+            alert.informativeText = "Your changes will be lost."
+            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: "Close").hasDestructiveAction = true
+            guard alert.runModal() == .alertSecondButtonReturn else { return }
+        }
+        await tail?.value
+        do { try await coordinator.discardRecovery(url); await didCloseWindow() }
+        catch { self.error = error.localizedDescription; announce() }
+    }
+
+    func libraryDisappeared() async {
+        await reconcileExternalChange()
+        do { try await coordinator.preserveUnsavedDrafts() }
+        catch { self.error = "Recovery draft couldn’t be saved: \(error.localizedDescription)"; announce() }
     }
 
     func edit(_ value: String) {
         guard !readOnly, !loading, let url else { return }
         text = value
-        state = .dirty
+        if externalDeleted { wasDirtyBeforeDelete = true }
+        if !externalConflict && !externalDeleted { state = .dirty }
         pendingEdits += 1
         let previous = tail
         let coordinator = coordinator
@@ -101,7 +211,7 @@ final class DocumentSession {
             await previous?.value
             do {
                 try await coordinator.edit(value, at: url)
-                if !recovered { await coordinator.scheduleSave(url) }
+                if !recovered && !externalConflict && !externalDeleted { await coordinator.scheduleSave(url) }
             } catch { self.error = error.localizedDescription }
             pendingEdits -= 1
         }
@@ -111,7 +221,7 @@ final class DocumentSession {
     func flush() async -> Bool {
         await tail?.value
         guard let url, !readOnly else { return true }
-        guard !recovered else { return false }
+        guard !recovered, !externalConflict, !externalDeleted else { return false }
         let value = text
         let result = await coordinator.save(url) ?? .clean
         // Typing may continue while IO runs. Never mark newer text clean.

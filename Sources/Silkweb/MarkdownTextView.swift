@@ -89,8 +89,7 @@ struct MarkdownTextView: NSViewRepresentable {
             scroll.contentView.scroll(to: position)
             scroll.reflectScrolledClipView(scroll.contentView)
         } else if text.string != session.text, !text.hasMarkedText() {
-            text.string = session.text
-            text.undoManager?.removeAllActions()
+            Self.reload(text, in: scroll, value: session.text, selection: session.selection, position: session.scroll)
         }
         text.isEditable = !session.readOnly && !session.loading
         text.setAccessibilityLabel("Document text, \(session.name)")
@@ -100,6 +99,19 @@ struct MarkdownTextView: NSViewRepresentable {
             coordinator.focusRequest = workspace.focusRequest
             if workspace.focusColumn == 2 { text.window?.makeFirstResponder(text) }
         }
+    }
+
+    /// Reload a clean external edit in place, clamping UTF-16 selection and scroll.
+    static func reload(_ text: PlainMarkdownTextView, in scroll: NSScrollView, value: String, selection: NSRange, position: NSPoint) {
+        text.string = value
+        text.undoManager?.removeAllActions()
+        let count = (value as NSString).length
+        let location = min(selection.location, count)
+        text.setSelectedRange(NSRange(location: location, length: min(selection.length, count - location)))
+        text.layoutManager?.ensureLayout(for: text.textContainer!)
+        text.layoutEditor()
+        scroll.contentView.scroll(to: position)
+        scroll.reflectScrolledClipView(scroll.contentView)
     }
 
     @MainActor final class Coordinator: NSObject, NSTextViewDelegate {
@@ -190,27 +202,56 @@ struct EditorBanner: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var opacity = 1.0
     let session: DocumentSession
+    var workspace: LibraryWorkspace? = nil
+    private var informational: Bool {
+        !session.externalConflict && !session.externalDeleted
+            && (session.readOnly || session.recovered || (!session.state.isDirty && session.conflictCopy != nil))
+    }
     var body: some View {
         if let message = session.banner {
             HStack(spacing: 8) {
-                Image(systemName: session.readOnly || session.recovered ? "info.circle" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(session.readOnly || session.recovered ? Color.secondary : Color(nsColor: .systemOrange))
+                Image(systemName: informational ? "info.circle" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(informational ? Color.secondary : Color(nsColor: .systemOrange))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(message).font(.callout)
+                    if session.externalConflict || session.externalDeleted, let error = session.error { Text(error).font(.subheadline).foregroundStyle(.secondary) }
                     if case .failed(let failure, _) = session.state { Text(failure.localizedDescription).font(.subheadline).foregroundStyle(.secondary) }
                 }
                 Spacer()
-                if session.recovered {
+                if session.externalConflict {
+                    Button("Compare…") { session.compare() }
+                    Button("Keep My Version") { Task { await session.resolveConflict(keepMine: true); await workspace?.reconcileFinderChanges() } }
+                    Button("Use Disk Version") { Task { await session.resolveConflict(keepMine: false); await workspace?.reconcileFinderChanges() } }
+                } else if session.externalDeleted {
+                    Button("Save Again") { Task {
+                        await session.saveAgain()
+                        await workspace?.reconcileFinderChanges()
+                        if !session.externalDeleted, let url = session.url { workspace?.showDocument(url) }
+                    } }
+                    Button("Close") { Task { await session.closeDeleted() } }
+                } else if session.recovered {
                     Button("Keep Recovered Text") { session.keepRecovery() }
                     Button("Discard Recovered Text") { session.discardRecovery() }
                 } else if session.state.isDirty {
                     Button("Try Again") { Task { await session.flush() } }
                     Button("Save a Copy…") { session.saveCopy() }
+                } else if let copy = session.conflictCopy {
+                    Button("Show") {
+                        guard let workspace else { return }
+                        Task {
+                            await workspace.reconcileFinderChanges()
+                            workspace.showDocument(copy)
+                        }
+                    }
+                    Button { session.conflictCopy = nil } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel("Dismiss message")
                 }
             }
+            .disabled(session.loading)
             .controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8)
             .frame(minHeight: 36).background(.bar)
             .opacity(opacity)
+            .sheet(isPresented: Binding(get: { session.showingComparison }, set: { session.showingComparison = $0 })) { ConflictSheet(session: session) }
             .task(id: session.refusedNavigation) {
                 guard session.refusedNavigation > 0, !reduceMotion else { return }
                 withAnimation(.easeOut(duration: 0.12)) { opacity = 0.5 }

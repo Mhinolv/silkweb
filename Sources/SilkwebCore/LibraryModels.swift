@@ -6,6 +6,8 @@ public struct LibraryFolder: Identifiable, Equatable, Sendable {
     /// Empty for the library root; otherwise relative to that root.
     public let relativePath: String
     public let name: String
+    /// Transient filesystem identity used only for live Finder reconciliation.
+    public internal(set) var fileIdentity: String? = nil
     /// Scan-time permission state; never persisted because access can change between scans.
     public internal(set) var isUnreadable = false
 }
@@ -15,6 +17,8 @@ public struct LibraryDocument: Identifiable, Equatable, Sendable {
     public let folderID: UUID
     public let relativePath: String
     public let name: String
+    /// Transient filesystem identity used only for live Finder reconciliation.
+    public internal(set) var fileIdentity: String? = nil
     public var created: Date? = nil
     public var modified: Date? = nil
 }

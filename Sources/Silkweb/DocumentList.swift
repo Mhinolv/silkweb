@@ -124,7 +124,7 @@ struct DocumentDetail: View {
                     .font(.callout).frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
                     .padding(.horizontal, 12).background(.bar)
             }
-            EditorBanner(session: workspace.editor)
+            EditorBanner(session: workspace.editor, workspace: workspace)
             if workspace.editor.url != nil {
                 MarkdownTextView(session: workspace.editor, workspace: workspace)
             } else if workspace.session.selectedDocuments.count > 1 {

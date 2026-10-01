@@ -25,6 +25,8 @@ final class LibraryWorkspace {
         documentCache = nil
         presentationRevision += 1
     }
+    private var watcher: LibraryWatcher?
+    private var reconciling = false
     private var navigationTask: Task<Void, Never>?
     var snapshot: LibrarySnapshot?
     var session = LibrarySession()
@@ -152,6 +154,8 @@ final class LibraryWorkspace {
             dragIdentity = UUID()
             rename = nil
             guard await editor.open(nil, readOnly: false) else { return }
+            watcher?.stop()
+            watcher = nil
             await editor.configure(root: url)
             // Let any previous scan finish cancellation before releasing its access.
             scope?.stopAccessingSecurityScopedResource()
@@ -189,6 +193,7 @@ final class LibraryWorkspace {
                     session.selectedDocuments = Set(scanned.documents.filter { scanned.rootURL.appendingPathComponent($0.relativePath) == draft.documentURL }.map(\.relativePath))
                 }
                 _ = await editor.open(recoveryURL ?? selectedDocument.map { scanned.rootURL.appendingPathComponent($0.relativePath) }, readOnly: scanned.isReadOnly)
+                watcher = LibraryWatcher(root: url) { [weak self] in await self?.reconcileFinderChanges() }
                 if let bookmark = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
                     UserDefaults.standard.set(bookmark, forKey: "libraryBookmark")
                 }
@@ -213,12 +218,61 @@ final class LibraryWorkspace {
         }
     }
 
+    func reconcileFinderChanges() async {
+        guard !loading, !mutating, !reconciling, let root, let old = snapshot else {
+            if mutating || reconciling { watcher?.notifyChange() }
+            return
+        }
+        reconciling = true
+        defer { reconciling = false }
+        let installedRevision = presentationRevision
+        do {
+            let scanned = try await LibraryScanner.scan(root: root, previousSnapshot: old)
+            guard self.root == root, !loading, !mutating, installedRevision == presentationRevision else {
+                watcher?.notifyChange()
+                return
+            }
+            await navigationTask?.value
+            if let url = editor.url {
+                let path = String(url.path.dropFirst(root.path.count + 1))
+                let id = old.metadata.IDsByPath[path]
+                let destination = scanned.documents.first { $0.id == id }.map { root.appendingPathComponent($0.relativePath) }
+                await editor.reconcileExternalChange(movedTo: destination)
+            }
+            // Finder batches are installed without row animations.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                session = LibraryReconciler.session(session, from: old, to: scanned)
+                install(scanned)
+                revision += 1
+            }
+        } catch {
+            guard !Task.isCancelled, self.root == root, !loading else { return }
+            if !FileManager.default.fileExists(atPath: root.path) {
+                await editor.libraryDisappeared()
+                errorTitle = "Library Not Found"
+                errorSymbol = "externaldrive.badge.questionmark"
+                self.error = "Silkweb can’t find “\(root.lastPathComponent)”. It may have been moved, renamed, or be on a disconnected drive."
+                snapshot = nil
+            } else {
+                editor.error = error.localizedDescription
+                editor.announce()
+            }
+        }
+    }
+
     func resumeEditor() async {
         guard editor.url == nil, let snapshot else { return }
         _ = await editor.open(selectedDocument.map { snapshot.rootURL.appendingPathComponent($0.relativePath) }, readOnly: snapshot.isReadOnly)
     }
 
     func waitForNavigation() async { await navigationTask?.value }
+
+    func showDocument(_ url: URL) {
+        guard let root else { return }
+        navigate(folder: nil, documents: [String(url.path.dropFirst(root.path.count + 1))])
+    }
 
     func selectDocuments(_ paths: Set<String>) {
         navigate(folder: session.selectedFolder, documents: paths)

@@ -114,7 +114,7 @@ public actor SaveCoordinator {
         guard var entry = entries[url] else { throw CocoaError(.fileReadUnknown) }
         guard text != entry.text else { return }
         entry.text = text
-        entry.state = .dirty
+        if case .conflict = entry.state { } else { entry.state = .dirty }
         entries[url] = entry
         publish(url)
     }
@@ -122,6 +122,7 @@ public actor SaveCoordinator {
     /// Replaces the pending deadline; explicit save/close cancels it.
     public func scheduleSave(_ url: URL, delay: Duration = .seconds(1)) {
         let url = url.standardizedFileURL
+        if case .conflict = entries[url]?.state { return }
         scheduled[url]?.cancel()
         scheduled[url] = Task { [weak self] in
             do {
@@ -176,6 +177,10 @@ public actor SaveCoordinator {
         let url = url.standardizedFileURL
         scheduled.removeValue(forKey: url)?.cancel()
         guard var entry = entries[url], entry.state.isDirty else { return entries[url]?.state }
+        if case .conflict = entry.state {
+            _ = try? reconcile(url)
+            return entries[url]?.state
+        }
         entry.state = .saving
         entry.attempts += 1
         entries[url] = entry
@@ -227,6 +232,110 @@ public actor SaveCoordinator {
         guard entries[url] == nil else { return }
         entries[url] = Entry(text: draft.text, revision: draft.revision, state: .dirty)
         publish(url)
+    }
+
+    /// Reads only the open document; library scans never read all document bodies.
+    public func reconcile(_ url: URL, movedTo destination: URL? = nil) throws -> LoadedDocument? {
+        let old = url.standardizedFileURL
+        let target = destination?.standardizedFileURL ?? old
+        guard var entry = entries[old] else { return nil }
+        scheduled.removeValue(forKey: old)?.cancel()
+        if target != old {
+            entries[old] = nil
+            entries[target] = entry
+            try? FileManager.default.removeItem(at: recoveryURL(old))
+        }
+        do {
+            let disk = try store.load(target)
+            if entry.revision == disk.revision {
+                entries[target] = entry
+                if entry.state.isDirty { scheduleSave(target) }
+                return nil
+            }
+            if entry.state == .clean {
+                entry.text = disk.text
+                entry.revision = disk.revision
+            } else {
+                entry.state = .conflict(diskRevision: disk.revision)
+            }
+            entries[target] = entry
+            if entry.state.isDirty {
+                do { try persistRecovery(target, entry: entry) }
+                catch { recoveryFailures[target] = DocumentSaveFailure(error: error, url: recoveryDirectory) }
+            }
+            publish(target)
+            return disk
+        } catch let error as NSError where error.domain == NSCocoaErrorDomain
+            && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(error.code) {
+            entry.state = .conflict(diskRevision: nil)
+            entries[target] = entry
+            do { try persistRecovery(target, entry: entry) }
+            catch { recoveryFailures[target] = DocumentSaveFailure(error: error, url: recoveryDirectory) }
+            publish(target)
+            return nil
+        }
+    }
+
+    public func diskVersion(_ url: URL) throws -> LoadedDocument { try store.load(url) }
+
+    /// Re-read at resolution time so a second external edit is preserved too.
+    public func resolve(_ url: URL, keepMine: Bool, root: URL, date: Date = Date()) async throws -> URL {
+        guard let entry = entries[url], case .conflict = entry.state else { throw CocoaError(.fileWriteUnknown) }
+        let disk = try store.load(url)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH.mm"
+        // Leave room for the collision suffix even at the filesystem name limit.
+        let suffix = " (Conflict " + formatter.string(from: date) + ")." + url.pathExtension
+        var stem = url.deletingPathExtension().lastPathComponent
+        while (stem + suffix).utf8.count > 240 { stem.removeLast() }
+        let base = stem + suffix
+        let parent = String(url.deletingLastPathComponent().path.dropFirst(root.path.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let mutations = try LibraryMutations(root: root)
+        let name = try await mutations.uniqueName(base: base, in: parent)
+        _ = try await mutations.createDocument(named: name, in: parent, text: keepMine ? disk.text : entry.text)
+        let copy = url.deletingLastPathComponent().appendingPathComponent(name)
+        // An edit queued during the copy IO must also survive resolution.
+        guard let latest = entries[url] else { throw CocoaError(.fileWriteUnknown) }
+        if keepMine {
+            let revision = try store.save(latest.text, to: url, expectedRevision: disk.revision)
+            entries[url] = Entry(text: latest.text, revision: revision, state: .clean)
+        } else {
+            guard latest.text == entry.text else { throw CocoaError(.fileWriteUnknown) }
+            let current = try store.load(url)
+            guard current.revision == disk.revision else { throw DocumentStoreError.conflict(current.revision) }
+            entries[url] = Entry(text: disk.text, revision: disk.revision, state: .clean)
+        }
+        scheduled.removeValue(forKey: url)?.cancel()
+        try? FileManager.default.removeItem(at: recoveryURL(url))
+        publish(url)
+        return copy
+    }
+
+    public func recreate(_ url: URL, root: URL) async throws -> URL {
+        guard let entry = entries[url] else { throw CocoaError(.fileWriteUnknown) }
+        let parent = String(url.deletingLastPathComponent().path.dropFirst(root.path.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let mutations = try LibraryMutations(root: root)
+        // Save Again also restores a containing folder deleted in Finder.
+        var ancestor = ""
+        for component in parent.split(separator: "/") {
+            let next = ancestor.isEmpty ? String(component) : ancestor + "/" + component
+            if !FileManager.default.fileExists(atPath: root.appendingPathComponent(next).path) {
+                _ = try await mutations.createFolder(named: String(component), in: ancestor)
+            }
+            ancestor = next
+        }
+        let name = try await mutations.uniqueName(base: url.lastPathComponent, in: parent)
+        _ = try await mutations.createDocument(named: name, in: parent, text: entry.text)
+        let target = url.deletingLastPathComponent().appendingPathComponent(name)
+        let loaded = try store.load(target)
+        guard let latest = entries[url] else { throw CocoaError(.fileWriteUnknown) }
+        entries[url] = nil
+        entries[target] = Entry(text: latest.text, revision: loaded.revision, state: latest.text == entry.text ? .clean : .dirty)
+        if latest.text != entry.text { scheduleSave(target) }
+        try? FileManager.default.removeItem(at: recoveryURL(url))
+        publish(target)
+        return target
     }
 
     private func recoveryURL(_ url: URL) -> URL {
