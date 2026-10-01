@@ -57,7 +57,12 @@ struct DocumentList: View {
                         .onChange(of: workspace.editor.refusedNavigation) { selectionRevision += 1 }
                         .onChange(of: workspace.rename) { if let item = workspace.rename, !item.isFolder { proxy.scrollTo(item.path) } }
                         .onChange(of: workspace.revision) { if let path = workspace.session.selectedDocuments.first { proxy.scrollTo(path) } }
-                        .onKeyPress(.return) { workspace.focusColumn = 1; workspace.beginRename(); return .handled }
+                        .onKeyPress(.return) {
+                            guard workspace.rename == nil else { return .ignored }
+                            workspace.focusColumn = 1
+                            workspace.beginRename()
+                            return .handled
+                        }
                     }
                 }
             }

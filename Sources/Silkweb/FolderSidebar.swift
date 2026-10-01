@@ -74,7 +74,7 @@ struct FolderSidebar: NSViewRepresentable {
         }
         if coordinator.lastFocusRequest != workspace.focusRequest {
             coordinator.lastFocusRequest = workspace.focusRequest
-            if workspace.focusColumn == 0 {
+            if workspace.focusColumn == 0, workspace.rename == nil {
                 view.window?.makeFirstResponder(coordinator.outline)
             }
         }

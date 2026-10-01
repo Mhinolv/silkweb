@@ -125,7 +125,9 @@ private struct LibraryDocumentPane: View {
         DocumentList(workspace: workspace)
             .focused($focused)
             .onChange(of: focused) { if focused { workspace.focusColumn = 1 } }
-            .onChange(of: workspace.focusRequest) { focused = workspace.focusColumn == 1 }
+            .onChange(of: workspace.focusRequest) {
+                if workspace.rename == nil { focused = workspace.focusColumn == 1 }
+            }
             .onKeyPress(keys: [.tab], phases: .down) { press in
                 workspace.focus(press.modifiers.contains(.shift) ? 0 : 2)
                 return .handled

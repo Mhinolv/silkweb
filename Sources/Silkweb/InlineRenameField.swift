@@ -33,7 +33,8 @@ final class RenameNameField: NSTextField, NSTextFieldDelegate {
         started = true
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.finished else { return }
-            self.window?.makeFirstResponder(self)
+            // selectText starts editing itself. Calling makeFirstResponder first
+            // ends that first edit when selectText restarts it, cancelling rename.
             self.selectText(nil)
         }
     }
@@ -73,7 +74,7 @@ final class RenameNameField: NSTextField, NSTextFieldDelegate {
         case #selector(NSResponder.cancelOperation(_:)):
             complete(nil)
         case #selector(NSResponder.insertNewline(_:)):
-            commit(clickingAway: false)
+            commit()
         case #selector(NSResponder.insertTab(_:)), #selector(NSResponder.insertBacktab(_:)):
             complete(nil)
         default: return false
@@ -82,10 +83,10 @@ final class RenameNameField: NSTextField, NSTextFieldDelegate {
     }
 
     func controlTextDidEndEditing(_ notification: Notification) {
-        if !finished { commit(clickingAway: true) }
+        if !finished { complete(nil) }
     }
 
-    private func commit(clickingAway: Bool) {
+    private func commit() {
         validationTask?.cancel()
         let value = stringValue
         validationTask = Task { [weak self] in
@@ -93,8 +94,8 @@ final class RenameNameField: NSTextField, NSTextFieldDelegate {
             let error = await validate?(value)
             guard !Task.isCancelled, !finished, stringValue == value else { return }
             if let error {
-                if clickingAway { complete(nil) }
-                else { show(error); NSSound.beep() }
+                show(error)
+                NSSound.beep()
             } else { complete(value) }
         }
     }
