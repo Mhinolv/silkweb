@@ -99,7 +99,13 @@ struct FolderSidebar: NSViewRepresentable {
         private var hoverMonitor: Any?
         private var dragCache: (name: NSPasteboard.Name, count: Int, revision: Int, library: UUID, paths: [String]?)?
 
-        init(workspace: LibraryWorkspace, snapshot: LibrarySnapshot) {
+        private let readDragData: (NSPasteboard) -> Data?
+
+        init(workspace: LibraryWorkspace, snapshot: LibrarySnapshot,
+             readDragData: @escaping (NSPasteboard) -> Data? = {
+                 $0.data(forType: NSPasteboard.PasteboardType(UTType.silkwebMove.identifier))
+             }) {
+            self.readDragData = readDragData
             self.workspace = workspace
             super.init()
             configure(snapshot)
@@ -298,7 +304,7 @@ struct FolderSidebar: NSViewRepresentable {
             let count = pasteboard.changeCount
             if let cached = dragCache, cached.name == pasteboard.name, cached.count == count,
                cached.revision == workspace.revision, cached.library == workspace.dragIdentity { return cached.paths }
-            let paths = pasteboard.data(forType: NSPasteboard.PasteboardType(UTType.silkwebMove.identifier)).flatMap { workspace.pathsForDrag($0) }
+            let paths = readDragData(pasteboard).flatMap { workspace.pathsForDrag($0) }
             dragCache = (pasteboard.name, count, workspace.revision, workspace.dragIdentity, paths)
             return paths
         }

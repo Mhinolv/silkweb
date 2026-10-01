@@ -4,6 +4,7 @@ import SilkwebCore
 
 struct DocumentList: View {
     @Bindable var workspace: LibraryWorkspace
+    var makeDragProvider: (([String]) -> NSItemProvider)? = nil
     @State private var selectionRevision = 0
     @State private var dateReference = Date()
     var body: some View {
@@ -36,17 +37,10 @@ struct DocumentList: View {
                     ScrollViewReader { proxy in
                         List(workspace.documents, selection: Binding(get: { workspace.session.selectedDocuments }, set: { workspace.focusColumn = 1; workspace.selectDocuments($0) })) { document in
                             DocumentRow(document: document, root: workspace.snapshot!.rootURL, workspace: workspace, dateReference: dateReference)
-                                .onDrag {
-                                    workspace.dragProvider(workspace.documentDragPaths(document.relativePath))
-                                } preview: {
-                                    HStack {
-                                        Label((document.name as NSString).deletingPathExtension, systemImage: "doc.text")
-                                        let count = workspace.documentDragPaths(document.relativePath).count
-                                        if count > 1 {
-                                            Text(count.formatted()).font(.caption.bold()).padding(6)
-                                                .background(.quaternary, in: Capsule())
-                                        }
-                                    }.padding(8).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+                                // Native List row dragging preserves NSTableView click selection.
+                                .itemProvider {
+                                    guard workspace.canMutate else { return nil }
+                                    return (makeDragProvider ?? workspace.dragProvider)(workspace.documentDragPaths(document.relativePath))
                                 }
                                 .tag(document.relativePath).id(document.relativePath)
                                 .contextMenu {
