@@ -1,12 +1,16 @@
+import AppKit
 import SwiftUI
 
 @main
 struct SilkwebApp: App {
+    @NSApplicationDelegateAdaptor(EditorApplicationDelegate.self) private var appDelegate
     @State private var workspace = LibraryWorkspace()
 
     var body: some Scene {
         Window("Silkweb", id: "library") {
             LibraryWorkspaceView(workspace: workspace)
+                .background(EditorWindowLifecycle(session: workspace.editor))
+                .onAppear { appDelegate.session = workspace.editor }
         }
         .defaultSize(width: 1200, height: 760)
         .commands {
@@ -16,6 +20,15 @@ struct SilkwebApp: App {
                 Button("New Library…") { workspace.newLibrary() }
                     .keyboardShortcut("n", modifiers: [.command, .option])
             }
+            CommandGroup(replacing: .saveItem) {
+                Button("Save") { Task { await workspace.editor.flush() } }
+                    .keyboardShortcut("s").disabled(workspace.editor.url == nil || workspace.editor.readOnly)
+            }
+            CommandGroup(after: .pasteboard) {
+                Button("Paste and Match Style") { NSApp.sendAction(#selector(NSTextView.pasteAsPlainText(_:)), to: nil, from: nil) }
+                    .keyboardShortcut("v", modifiers: [.command, .option, .shift])
+            }
+            TextEditingCommands()
             SidebarCommands()
             ToolbarCommands()
             CommandMenu("Go") {

@@ -20,7 +20,7 @@ public enum LibraryScanner {
                   components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
                 throw LibraryError.invalidRelativePath
             }
-            var url = root.standardizedFileURL
+            var url = root.standardizedFileURL.resolvingSymlinksInPath()
             try LibraryMetadataStore.rejectLink(url)
             for component in components {
                 url.appendPathComponent(String(component))
@@ -32,7 +32,7 @@ public enum LibraryScanner {
 
     private static func scanOnWorker(root: URL, progress: (@Sendable (Int) -> Void)?) throws -> LibrarySnapshot {
         precondition(!Thread.isMainThread, "Library enumeration must run off the main thread")
-        let root = root.standardizedFileURL
+        let root = root.standardizedFileURL.resolvingSymlinksInPath()
         try LibraryMetadataStore.rejectLink(root)
         guard try root.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else {
             throw LibraryError.invalidRoot

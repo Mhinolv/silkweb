@@ -4,6 +4,8 @@ import SilkwebCore
 
 @MainActor @Observable
 final class LibraryWorkspace {
+    let editor = DocumentSession()
+    private var navigationTask: Task<Void, Never>?
     var snapshot: LibrarySnapshot?
     var session = LibrarySession()
     var loading = false
@@ -76,12 +78,16 @@ final class LibraryWorkspace {
     }
 
     func open(_ url: URL) {
+        let url = url.standardizedFileURL.resolvingSymlinksInPath()
         let previousLoad = loadTask
         previousLoad?.cancel()
         saveTask?.cancel()
         loadTask = Task {
             await previousLoad?.value
             guard !Task.isCancelled else { return }
+            await navigationTask?.value
+            guard await editor.open(nil, readOnly: false) else { return }
+            await editor.configure(root: url)
             // Let any previous scan finish cancellation before releasing its access.
             scope?.stopAccessingSecurityScopedResource()
             scope = url.startAccessingSecurityScopedResource() ? url : nil
@@ -115,6 +121,14 @@ final class LibraryWorkspace {
                 }
                 snapshot = scanned
                 session.selectedDocuments.formIntersection(Set(documents.map(\.relativePath)))
+                var recoveryURL: URL?
+                if let drafts = try? await SaveCoordinator().pendingRecoveryDrafts(),
+                   let draft = drafts.first(where: { $0.documentURL.path.hasPrefix(scanned.rootURL.path + "/") }) {
+                    recoveryURL = draft.documentURL
+                    session.selectedFolder = nil
+                    session.selectedDocuments = Set(scanned.documents.filter { scanned.rootURL.appendingPathComponent($0.relativePath) == draft.documentURL }.map(\.relativePath))
+                }
+                _ = await editor.open(recoveryURL ?? selectedDocument.map { scanned.rootURL.appendingPathComponent($0.relativePath) }, readOnly: scanned.isReadOnly)
                 if let bookmark = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
                     UserDefaults.standard.set(bookmark, forKey: "libraryBookmark")
                 }
@@ -136,6 +150,35 @@ final class LibraryWorkspace {
                 }
             }
             loading = false
+        }
+    }
+
+    func resumeEditor() async {
+        guard editor.url == nil, let snapshot else { return }
+        _ = await editor.open(selectedDocument.map { snapshot.rootURL.appendingPathComponent($0.relativePath) }, readOnly: snapshot.isReadOnly)
+    }
+
+    func waitForNavigation() async { await navigationTask?.value }
+
+    func selectDocuments(_ paths: Set<String>) {
+        navigate(folder: session.selectedFolder, documents: paths)
+    }
+
+    func selectFolder(_ path: String?) {
+        navigate(folder: path, documents: [])
+    }
+
+    private func navigate(folder: String?, documents: Set<String>) {
+        guard !loading else { return }
+        let previous = navigationTask
+        navigationTask = Task {
+            await previous?.value
+            let destination = documents.count == 1 ? documents.first.flatMap { path in
+                snapshot?.documents.first(where: { $0.relativePath == path }).map { snapshot!.rootURL.appendingPathComponent($0.relativePath) }
+            } : nil
+            guard await editor.open(destination, readOnly: snapshot?.isReadOnly == true) else { return }
+            session.selectedFolder = folder
+            session.selectedDocuments = documents
         }
     }
 
@@ -181,11 +224,11 @@ struct LibraryWorkspaceView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 560)
-        .task { workspace.restore() }
+        .task { workspace.restore(); await workspace.resumeEditor() }
         .onChange(of: workspace.session) { workspace.persistSession() }
         .onChange(of: workspace.focusRequest) {
             visibility = .all
-            focusedColumn = workspace.focusColumn == 0 ? nil : workspace.focusColumn
+            focusedColumn = workspace.focusColumn == 1 ? 1 : nil
         }
     }
 
@@ -209,14 +252,9 @@ struct LibraryWorkspaceView: View {
                 }
         } detail: {
             DocumentDetail(workspace: workspace)
-                .focused($focusedColumn, equals: 2)
-                .onKeyPress(keys: [.tab], phases: .down) { press in
-                    workspace.focus(press.modifiers.contains(.shift) ? 1 : 0)
-                    return .handled
-                }
         }
         .navigationSplitViewStyle(.balanced)
-        .navigationTitle(workspace.selectedDocument.map { URL(fileURLWithPath: $0.name).deletingPathExtension().lastPathComponent } ?? workspace.folderName)
+        .navigationTitle(workspace.editor.url == nil ? workspace.folderName : workspace.editor.name)
         .navigationSubtitle(workspace.subtitle)
     }
 

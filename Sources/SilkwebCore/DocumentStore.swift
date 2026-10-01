@@ -45,8 +45,10 @@ public struct DiskDocumentFileSystem: DocumentFileSystem {
 
 public struct DocumentStore: Sendable {
     private let fileSystem: any DocumentFileSystem
+    private let root: URL?
 
-    public init(fileSystem: any DocumentFileSystem = DiskDocumentFileSystem()) {
+    public init(fileSystem: any DocumentFileSystem = DiskDocumentFileSystem(), root: URL? = nil) {
+        self.root = root?.standardizedFileURL.resolvingSymlinksInPath()
         self.fileSystem = fileSystem
     }
 
@@ -77,14 +79,18 @@ public struct DocumentStore: Sendable {
         guard url.isFileURL, ["md", "markdown"].contains(url.pathExtension.lowercased()) else {
             throw LibraryError.invalidRelativePath
         }
-        var ancestor = url.standardizedFileURL
-        while ancestor.path != "/" {
-            // macOS exposes its system temporary locations through these aliases.
-            // Library-provided symlinks below them are still rejected.
-            if ["/var", "/tmp"].contains(ancestor.path) { break }
+        let canonical = url.standardizedFileURL
+        if let root {
+            try LibraryMetadataStore.rejectLink(root)
+            guard canonical.path.hasPrefix(root.path + "/") else { throw LibraryError.invalidRelativePath }
+        }
+        // With a library root, inspect only its descendants. Standalone callers
+        // accept ancestor aliases, but never a linked document itself.
+        var ancestor = canonical
+        repeat {
             try LibraryMetadataStore.rejectLink(ancestor)
             ancestor.deleteLastPathComponent()
-        }
+        } while root != nil && ancestor != root && ancestor.path != "/"
     }
 }
 

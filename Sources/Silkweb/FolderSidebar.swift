@@ -154,8 +154,12 @@ struct FolderSidebar: NSViewRepresentable {
         }
         func outlineViewSelectionDidChange(_ notification: Notification) {
             guard !restoring, let outline, let item = outline.item(atRow: outline.selectedRow) as? Item else { return }
-            workspace.session.selectedFolder = item.folder?.relativePath
-            workspace.session.selectedDocuments = []
+            workspace.selectFolder(item.folder?.relativePath)
+            Task {
+                // Wait for the guarded switch; restore the row if saving refused it.
+                await workspace.waitForNavigation()
+                restore()
+            }
         }
         func outlineViewItemDidExpand(_ notification: Notification) { expansion(notification, expanded: true) }
         func outlineViewItemDidCollapse(_ notification: Notification) { expansion(notification, expanded: false) }

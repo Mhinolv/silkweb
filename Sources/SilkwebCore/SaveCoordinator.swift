@@ -85,6 +85,7 @@ public actor SaveCoordinator {
     private let store: DocumentStore
     private let recoveryDirectory: URL
     private var entries: [URL: Entry] = [:]
+    private var scheduled: [URL: Task<Void, Never>] = [:]
     private var recoveryFailures: [URL: DocumentSaveFailure] = [:]
     private var observers: [URL: [UUID: AsyncStream<DocumentSaveState>.Continuation]] = [:]
 
@@ -118,6 +119,41 @@ public actor SaveCoordinator {
         publish(url)
     }
 
+    /// Replaces the pending deadline; explicit save/close cancels it.
+    public func scheduleSave(_ url: URL, delay: Duration = .seconds(1)) {
+        let url = url.standardizedFileURL
+        scheduled[url]?.cancel()
+        scheduled[url] = Task { [weak self] in
+            do {
+                try await Task.sleep(for: delay)
+                try Task.checkCancellation()
+                _ = await self?.save(url)
+            } catch { }
+        }
+    }
+
+    /// Failed closes retain the entry so the UI can refuse navigation.
+    @discardableResult
+    public func close(_ url: URL) -> Bool {
+        let url = url.standardizedFileURL
+        guard save(url)?.isDirty != true else { return false }
+        entries[url] = nil
+        recoveryFailures[url] = nil
+        return true
+    }
+
+    /// Explicitly confirmed discard, including the on-disk recovery copy.
+    public func discardRecovery(_ url: URL) throws {
+        let url = url.standardizedFileURL
+        let recovery = recoveryURL(url)
+        if FileManager.default.fileExists(atPath: recovery.path) {
+            try FileManager.default.removeItem(at: recovery)
+        }
+        scheduled.removeValue(forKey: url)?.cancel()
+        entries[url] = nil
+        recoveryFailures[url] = nil
+    }
+
     public func state(for url: URL) -> DocumentSaveState? { entries[url.standardizedFileURL]?.state }
     public func draft(for url: URL) -> String? { entries[url.standardizedFileURL]?.text }
     public func recoveryFailure(for url: URL) -> DocumentSaveFailure? { recoveryFailures[url.standardizedFileURL] }
@@ -138,6 +174,7 @@ public actor SaveCoordinator {
     @discardableResult
     public func save(_ url: URL) -> DocumentSaveState? {
         let url = url.standardizedFileURL
+        scheduled.removeValue(forKey: url)?.cancel()
         guard var entry = entries[url], entry.state.isDirty else { return entries[url]?.state }
         entry.state = .saving
         entry.attempts += 1

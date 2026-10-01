@@ -234,6 +234,109 @@ final class SaveCoordinatorTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "original")
     }
 
+    func testDebounceReplacesDeadlineAndFlushCancelsPendingSave() async throws {
+        let url = try document()
+        let coordinator = SaveCoordinator(recoveryDirectory: recovery)
+        _ = try await coordinator.open(url)
+        try await coordinator.edit("first", at: url)
+        await coordinator.scheduleSave(url, delay: .milliseconds(200))
+        try await Task.sleep(for: .milliseconds(50))
+        try await coordinator.edit("latest 日本語", at: url)
+        await coordinator.scheduleSave(url, delay: .milliseconds(400))
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "original")
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "latest 日本語")
+        try await coordinator.edit("explicit flush", at: url)
+        await coordinator.scheduleSave(url, delay: .seconds(60))
+        let saved = await coordinator.save(url)
+        XCTAssertEqual(saved, .clean)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "explicit flush")
+        let closed = await coordinator.close(url)
+        XCTAssertTrue(closed)
+        try Data("fresh disk".utf8).write(to: url, options: .atomic)
+        let reopened = try await coordinator.open(url)
+        XCTAssertEqual(reopened.text, "fresh disk")
+    }
+
+    func testCloseFlushSweepAndDiscardRecovery() async throws {
+        for text in ["", "🕸 日本語\n", String(repeating: "x", count: 1_000_000)] {
+            for scheduled in [false, true] {
+                let url = try document("\(UUID()).md")
+                let coordinator = SaveCoordinator(recoveryDirectory: recovery)
+                _ = try await coordinator.open(url)
+                try await coordinator.edit(text, at: url)
+                if scheduled { await coordinator.scheduleSave(url, delay: .seconds(60)) }
+                let closed = await coordinator.close(url)
+                XCTAssertTrue(closed)
+                XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), text)
+                let evicted = await coordinator.draft(for: url)
+                XCTAssertNil(evicted)
+            }
+        }
+        let url = try document()
+        let failed = SaveCoordinator(store: DocumentStore(fileSystem: FailingFileSystem(point: .replace, code: Int(ENOSPC))), recoveryDirectory: recovery)
+        _ = try await failed.open(url)
+        try await failed.edit("retained", at: url)
+        let closed = await failed.close(url)
+        XCTAssertFalse(closed)
+        let retained = await failed.draft(for: url)
+        XCTAssertEqual(retained, "retained")
+        let restarted = SaveCoordinator(recoveryDirectory: recovery)
+        let drafts = try await restarted.pendingRecoveryDrafts()
+        let draft = try XCTUnwrap(drafts.first)
+        await restarted.restore(draft)
+        try await restarted.discardRecovery(url)
+        let remaining = try await restarted.pendingRecoveryDrafts()
+        XCTAssertTrue(remaining.isEmpty)
+        let disk = try await restarted.open(url)
+        XCTAssertEqual(disk.text, "original")
+    }
+
+    func testZeroDelayAndScheduledFailureKeepBuffer() async throws {
+        for failing in [false, true] {
+            let url = try document("\(UUID()).md")
+            let store = failing ? DocumentStore(fileSystem: FailingFileSystem(point: .stage, code: Int(EACCES))) : DocumentStore()
+            let coordinator = SaveCoordinator(store: store, recoveryDirectory: recovery)
+            _ = try await coordinator.open(url)
+            let stream = await coordinator.states(for: url)
+            var iterator = stream.makeAsyncIterator()
+            _ = await iterator.next()
+            try await coordinator.edit("scheduled", at: url)
+            _ = await iterator.next()
+            await coordinator.scheduleSave(url, delay: .zero)
+            let saving = await iterator.next()
+            XCTAssertEqual(saving, .saving)
+            let result = await iterator.next()
+            XCTAssertEqual(result?.isDirty, failing)
+            let buffer = await coordinator.draft(for: url)
+            XCTAssertEqual(buffer, "scheduled")
+            XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), failing ? "original" : "scheduled")
+        }
+    }
+
+    func testLibraryWithSymlinkedAncestorAndInternalLinks() async throws {
+        let actual = root.appendingPathComponent("Actual/Library")
+        try FileManager.default.createDirectory(at: actual, withIntermediateDirectories: true)
+        let alias = root.appendingPathComponent("Alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: actual.deletingLastPathComponent())
+        let aliasedRoot = alias.appendingPathComponent("Library")
+        try Data("old".utf8).write(to: actual.appendingPathComponent("Note.md"))
+        let snapshot = try await LibraryScanner.scan(root: aliasedRoot)
+        XCTAssertEqual(snapshot.rootURL, actual.resolvingSymlinksInPath())
+        XCTAssertEqual(snapshot.documents.count, 1)
+        let store = DocumentStore(root: aliasedRoot)
+        let url = snapshot.rootURL.appendingPathComponent("Note.md")
+        let loaded = try store.load(url)
+        _ = try store.save("new", to: url, expectedRevision: loaded.revision)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "new")
+        let linkedFolder = snapshot.rootURL.appendingPathComponent("Linked")
+        try FileManager.default.createSymbolicLink(at: linkedFolder, withDestinationURL: snapshot.rootURL)
+        XCTAssertThrowsError(try store.load(linkedFolder.appendingPathComponent("Note.md")))
+        let rescan = try await LibraryScanner.scan(root: aliasedRoot)
+        XCTAssertEqual(rescan.documents.count, 1)
+    }
+
     func testRecoveryTolerantDefaultsAndFutureVersionRejection() throws {
         let url = root.appendingPathComponent("old.md")
         let data = try JSONSerialization.data(withJSONObject: ["documentURL": url.absoluteString, "text": "old draft"])
