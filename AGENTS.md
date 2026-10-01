@@ -36,6 +36,7 @@ Do **not** open or read the product owner's personal MWeb library/notes content 
 | App (SwiftUI scenes, views, AppKit bridges, menus/commands) | `Sources/Silkweb/` |
 | Unit tests for core | `Tests/SilkwebCoreTests/` |
 | Build / bundling scripts, Info.plist | `scripts/` |
+| Design system: naming, look, **keyboard shortcut map** (source of truth — check before adding any shortcut) | `docs/design-system.md` |
 
 Put anything testable in `SilkwebCore` and cover it with XCTest. The app target stays thin.
 
