@@ -1,7 +1,7 @@
 #!/bin/sh
 # Wrap the SwiftPM debug binary into build/Silkweb.app so it launches like a normal Mac app.
 set -e
-BIN="$(swift build --show-bin-path)/Silkweb"
+BIN=".build/debug/Silkweb"
 APP="build/Silkweb.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
