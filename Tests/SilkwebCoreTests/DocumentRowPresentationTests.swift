@@ -73,6 +73,10 @@ final class DocumentRowPresentationTests: XCTestCase {
             ("[link text](https://example.com/path_(part)) and `code`", "link text and code"),
             ("``inline ` code``", "inline ` code"),
             ("snake_case and C#", "snake_case and C#"),
+            ("2*3*4", "2*3*4"),
+            ("# Title\n---\n```swift\nlet answer = 42\n```", "let answer = 42"),
+            ("```swift\n```\n---\nBody", "Body"),
+            ("---\n***\n___", "No additional text"),
             ("\r\n\t\r\n> 日本語 👩🏽‍💻 ☕️ **文章**", "日本語 👩🏽‍💻 ☕️ 文章"),
             ("", "No additional text"), (" \n\t\r\n", "No additional text"),
             ("# Title\n\n", "No additional text")

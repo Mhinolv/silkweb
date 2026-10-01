@@ -27,17 +27,14 @@ public enum DocumentRowPresentation {
 
     public static func snippet(_ markdown: String, title: String) -> String {
         var isLeadingLine = true
-        for rawLine in markdown.split(whereSeparator: \.isNewline) {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            guard !line.isEmpty else { continue }
-            let isHeading = heading.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil
-            let text = plainText(line)
+        for (line, isHeading) in snippetLines(MarkdownParser.parse(markdown).blocks) {
+            let text = summaryText(line).trimmingCharacters(in: .whitespaces)
+            guard !text.isEmpty else { continue }
             if isLeadingLine && isHeading && text == title {
                 isLeadingLine = false
                 continue
             }
             isLeadingLine = false
-            guard !text.isEmpty else { continue }
             // Keep the original row summary bound without splitting CJK or emoji graphemes.
             var result = ""
             var bytes = 0
@@ -52,33 +49,37 @@ public enum DocumentRowPresentation {
         return "No additional text"
     }
 
-    private static let heading = try! NSRegularExpression(pattern: #"^#{1,6}(?:\s+|$)"#)
-    private static let prefixes = try! NSRegularExpression(pattern: #"^(?:>\s*|[-+*]\s+|\d+[.)]\s+|\[[ xX]\]\s+)"#)
-    private static let closingHeading = try! NSRegularExpression(pattern: #"\s+#+\s*$"#)
-    private static let links = try! NSRegularExpression(pattern: #"!?\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)"#)
-    private static let code = try! NSRegularExpression(pattern: #"(`+)(.*?)\1"#)
-    private static let emphasis = [
-        #"\*\*(.+?)\*\*"#, #"__(.+?)__"#, #"~~(.+?)~~"#,
-        #"\*([^*]+)\*"#, #"(?<!\w)_([^_]+)_(?!\w)"#
-    ].map { try! NSRegularExpression(pattern: $0) }
-
-    private static func replacing(_ regex: NSRegularExpression, in text: String, with template: String = "") -> String {
-        regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: template)
+    private static func snippetLines(_ blocks: [MarkdownBlock]) -> [(String, Bool)] {
+        blocks.flatMap { block -> [(String, Bool)] in
+            switch block {
+            case .paragraph(let children):
+                return children.map(\.plainText).joined().components(separatedBy: "\n").map { ($0, false) }
+            case .heading(_, let children): return [(children.map(\.plainText).joined(), true)]
+            case .code(_, let text): return text.components(separatedBy: "\n").map { ($0, false) }
+            case .quote(let children): return snippetLines(children)
+            case .list(_, let items): return items.flatMap { snippetLines($0) }
+            case .thematicBreak: return []
+            }
+        }
     }
 
-    private static func plainText(_ line: String) -> String {
-        var text = line
-        // Strip nested block prefixes, e.g. a quoted task list.
-        while true {
-            let stripped = replacing(prefixes, in: text)
-            if stripped == text { break }
-            text = stripped
+    /// Row summaries retain the older task/strike cleanup even though these extensions
+    /// remain literal text in HTML until the extended-renderer ticket.
+    private static func summaryText(_ source: String) -> String {
+        var text = source.trimmingCharacters(in: .whitespaces)
+        var task = false
+        for marker in ["- ", "+ ", "* "] {
+            if text.hasPrefix(marker), ["[ ]", "[x]", "[X]"].contains(where: { text.dropFirst(2).hasPrefix($0) }) {
+                text = String(text.dropFirst(2)); break
+            }
         }
-        let withoutHeading = replacing(heading, in: text)
-        if withoutHeading != text { text = replacing(closingHeading, in: withoutHeading) }
-        text = replacing(links, in: text, with: "$1")
-        text = replacing(code, in: text, with: "$2")
-        for pattern in emphasis { text = replacing(pattern, in: text, with: "$1") }
-        return text.trimmingCharacters(in: .whitespaces)
+        for marker in ["[ ] ", "[x] ", "[X] "] where text.hasPrefix(marker) {
+            text = String(text.dropFirst(marker.count)); task = true; break
+        }
+        if task { text = MarkdownParser.parseInline(text).map(\.plainText).joined() }
+        // Paired strike delimiters only; unmatched tildes stay visible.
+        let pieces = text.components(separatedBy: "~~")
+        if pieces.count > 2, pieces.count % 2 == 1 { text = pieces.joined() }
+        return text
     }
 }
