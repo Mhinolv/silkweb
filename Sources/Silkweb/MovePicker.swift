@@ -15,6 +15,7 @@ struct MoveRequest: Identifiable {
 struct MovePicker: View {
     @Bindable var workspace: LibraryWorkspace
     let request: MoveRequest
+    var importChoice: ((String?) -> Void)? = nil
     @State private var filter = ""
     @State private var destination: String?
     @State private var expanded: Set<String> = [""]
@@ -26,13 +27,14 @@ struct MovePicker: View {
 
     private var folders: [LibraryFolder] { workspace.snapshot?.folders ?? [] }
     private var title: String {
+        if importChoice != nil { return "Import Into…" }
         guard request.paths.count == 1 else { return "Move \(request.paths.count) Items To…" }
         let path = request.paths[0]
         let filename = (path as NSString).lastPathComponent
         let name = folders.contains(where: { $0.relativePath == path }) ? filename : (filename as NSString).deletingPathExtension
         return "Move “\(name)” To…"
     }
-    private func valid(_ path: String) -> Bool { MoveSelection.permits(request.paths, destination: path) }
+    private func valid(_ path: String) -> Bool { importChoice != nil || MoveSelection.permits(request.paths, destination: path) }
     private var visible: [LibraryFolder] {
         if !filter.isEmpty { return folders.filter { $0.name.localizedStandardContains(filter) || $0.relativePath.localizedStandardContains(filter) } }
         let byParent = Dictionary(grouping: folders, by: \.parentID)
@@ -61,11 +63,14 @@ struct MovePicker: View {
             HStack {
                 Button("New Folder…") { createFolder() }.disabled(destination == nil || !workspace.canMutate)
                 Spacer()
-                Button("Cancel") { workspace.moveRequest = nil }.keyboardShortcut(.cancelAction)
-                Button("Move") {
+                Button("Cancel") { if let importChoice { importChoice(nil) } else { workspace.moveRequest = nil } }.keyboardShortcut(.cancelAction)
+                Button(importChoice == nil ? "Move" : "Choose") {
                     guard let destination, valid(destination) else { return }
-                    workspace.moveRequest = nil
-                    workspace.move(request.paths, to: destination)
+                    if let importChoice { importChoice(destination) }
+                    else {
+                        workspace.moveRequest = nil
+                        workspace.move(request.paths, to: destination)
+                    }
                 }.keyboardShortcut(.defaultAction).disabled(renamingPath != nil || (destination.map { !valid($0) } ?? true))
             }
         }.padding(20).frame(width: 440, height: 480)

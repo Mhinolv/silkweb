@@ -15,7 +15,7 @@ public enum MarkdownDestinations {
     private static let delimiters = try! NSRegularExpression(pattern: #"\]\("#)
     private static let code = try! NSRegularExpression(pattern: #"(`+).*?\1"#)
 
-    public static func rewrite(_ text: String, source: String, changes: LibraryChangeSet, canonicalPaths: [String: String] = [:]) -> Result {
+    public static func rewrite(_ text: String, source: String, changes: LibraryChangeSet, canonicalPaths: [String: String] = [:], visit: ((String) -> Void)? = nil) -> Result {
         let newSource = changes.remapping(source)
         var output = ""
         var unsupported: [String] = []
@@ -50,6 +50,7 @@ public enum MarkdownDestinations {
                 let original = ns.substring(with: range)
                 let angled = original.hasPrefix("<") && original.hasSuffix(">")
                 let destination = angled ? String(original.dropFirst().dropLast()) : original
+                visit?(destination)
                 guard !destination.hasPrefix("#"), !destination.hasPrefix("/"),
                       !destination.contains(":") else { continue }
                 guard !destination.contains("\\"), !destination.contains("("), !destination.contains(")"),
@@ -66,7 +67,7 @@ public enum MarkdownDestinations {
                     unsupported.append(ns.substring(with: match.range)); continue
                 }
                 let relativeTarget = String(target.dropFirst("/silkweb-root/".count))
-                let actualTarget = canonicalPaths[relativeTarget.precomposedStringWithCanonicalMapping.lowercased()] ?? relativeTarget
+                let actualTarget = canonicalPaths[relativeTarget] ?? canonicalPaths[relativeTarget.precomposedStringWithCanonicalMapping.lowercased()] ?? relativeTarget
                 let mappedTarget = changes.remapping(actualTarget)
                 let newTarget = mappedTarget == actualTarget ? relativeTarget : mappedTarget
                 guard newSource != source || newTarget != relativeTarget else { continue }

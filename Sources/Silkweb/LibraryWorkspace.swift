@@ -6,6 +6,7 @@ import SilkwebCore
 final class LibraryWorkspace {
     let editor = DocumentSession()
     var libraryUndo: [LibraryUndo] = []
+    var importRequest: ImportRequest?
     var moveRequest: MoveRequest?
     var trashPlan: DeletionPlan?
     var mutationRevealURLs: [URL] = []
@@ -145,6 +146,7 @@ final class LibraryWorkspace {
             await navigationTask?.value
             guard !mutating else { return }
             libraryUndo = []
+            importRequest = nil
             moveRequest = nil
             recentMoveFolders = []
             dragIdentity = UUID()
@@ -293,6 +295,7 @@ struct LibraryWorkspaceView: View {
             Button("Move to Trash", role: .destructive) { workspace.confirmTrash() }.keyboardShortcut(.defaultAction)
             Button("Cancel", role: .cancel) { workspace.cancelTrash() }.keyboardShortcut(.cancelAction)
         } message: { Text(workspace.trashMessage) }
+        .sheet(item: $workspace.importRequest) { request in ImportSheet(workspace: workspace, request: request) }
         .sheet(item: $workspace.moveRequest) { request in MovePicker(workspace: workspace, request: request) }
         .task { workspace.restore(); await workspace.resumeEditor() }
         .onChange(of: workspace.session) { workspace.persistSession() }
