@@ -46,7 +46,7 @@ struct DocumentList: View {
                                 Button("Move To…") { workspace.requestMove(workspace.documentDragPaths(document.relativePath)) }.disabled(!workspace.canMutate)
                                 Button("Reveal in Finder") { workspace.reveal(document.relativePath) }
                                 Divider()
-                                Button("Move to Trash") { }.disabled(true)
+                                Button("Move to Trash") { workspace.requestTrash(workspace.documentDragPaths(document.relativePath), pane: 1) }.disabled(!workspace.canMutate)
                             }
                     }
                     .id(selectionRevision)

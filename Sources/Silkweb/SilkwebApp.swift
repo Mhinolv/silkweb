@@ -23,6 +23,8 @@ struct SilkwebApp: App {
                     .disabled(!workspace.canMutate || workspace.selectedItem == nil)
                 Button("Move To…") { workspace.requestMove() }
                     .keyboardShortcut("m", modifiers: [.control, .command]).disabled(!workspace.canMutate || workspace.movePaths.isEmpty)
+                Button(workspace.trashMenuTitle) { workspace.requestTrash() }
+                    .keyboardShortcut(.delete, modifiers: .command).disabled(!workspace.canTrashSelection)
                 Button("Reveal in Finder") { workspace.reveal() }
                     .keyboardShortcut("r", modifiers: [.command, .option]).disabled(workspace.snapshot == nil)
                 Divider()

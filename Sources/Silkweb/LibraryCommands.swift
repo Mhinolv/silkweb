@@ -18,8 +18,9 @@ enum LibraryUndo {
     case newFolder(String)
     case rename(LibraryRename, String)
     case move(MovePlan)
+    case trash([TrashedItem])
     var title: String {
-        switch self { case .newFolder: return "Undo New Folder"; case .rename: return "Undo Rename"; case .move: return "Undo Move" }
+        switch self { case .newFolder: return "Undo New Folder"; case .rename: return "Undo Rename"; case .move: return "Undo Move"; case .trash: return "Undo Move to Trash" }
     }
 }
 
@@ -142,6 +143,7 @@ extension LibraryWorkspace {
     }
 
     func mutationFailure(_ error: Error, title: String? = nil) {
+        mutationRevealURLs = []
         mutationErrorTitle = title ?? error.localizedDescription
         mutationError = (error as? LocalizedError)?.recoverySuggestion ?? error.localizedDescription
     }
@@ -161,7 +163,7 @@ extension LibraryWorkspace {
     var canUndoLibrary: Bool {
         guard canMutate, let snapshot, let last = libraryUndo.last else { return false }
         switch last {
-        case .move: return true
+        case .move, .trash: return true
         case .newFolder(let path):
             return snapshot.folders.contains { $0.relativePath == path }
                 && !snapshot.folders.contains { $0.relativePath.hasPrefix(path + "/") }
@@ -185,6 +187,15 @@ extension LibraryWorkspace {
             do {
                 let engine = try LibraryMutations(root: root)
                 switch last {
+                case .trash(let items):
+                    let result = await (try TrashService(root: root)).restore(items)
+                    let restored = Set(result.items.map(\.originalPath))
+                    let remaining = items.filter { !restored.contains($0.originalPath) }
+                    libraryUndo.removeLast()
+                    if !remaining.isEmpty { libraryUndo.append(.trash(remaining)) }
+                    try await refresh(LibraryChangeSet(changes: []))
+                    reportTrashFailures(result.failures, reveal: remaining.map(\.trashURL), restoring: true)
+                    return
                 case .move(let plan):
                     let oldURL = editor.url
                     let position = (editor.selection, editor.scroll)

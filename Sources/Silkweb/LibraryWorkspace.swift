@@ -7,6 +7,9 @@ final class LibraryWorkspace {
     let editor = DocumentSession()
     var libraryUndo: [LibraryUndo] = []
     var moveRequest: MoveRequest?
+    var trashPlan: DeletionPlan?
+    var mutationRevealURLs: [URL] = []
+    var mutationRevealTitle = "Reveal in Finder"
     var recentMoveFolders: [String] = []
     var dragIdentity = UUID()
     var rename: LibraryRename?
@@ -245,8 +248,18 @@ struct LibraryWorkspaceView: View {
         }
         .frame(minWidth: 900, minHeight: 560)
         .alert(workspace.mutationErrorTitle, isPresented: Binding(get: { workspace.mutationError != nil }, set: { if !$0 { workspace.mutationError = nil } })) {
+            if !workspace.mutationRevealURLs.isEmpty {
+                Button(workspace.mutationRevealTitle) {
+                    NSWorkspace.shared.activateFileViewerSelecting(workspace.mutationRevealURLs)
+                    workspace.mutationError = nil
+                }
+            }
             Button("OK") { workspace.mutationError = nil }
         } message: { Text(workspace.mutationError ?? "") }
+        .alert(workspace.trashTitle, isPresented: Binding(get: { workspace.trashPlan != nil }, set: { if !$0 && workspace.trashPlan != nil { workspace.cancelTrash() } })) {
+            Button("Move to Trash", role: .destructive) { workspace.confirmTrash() }.keyboardShortcut(.defaultAction)
+            Button("Cancel", role: .cancel) { workspace.cancelTrash() }.keyboardShortcut(.cancelAction)
+        } message: { Text(workspace.trashMessage) }
         .sheet(item: $workspace.moveRequest) { request in MovePicker(workspace: workspace, request: request) }
         .task { workspace.restore(); await workspace.resumeEditor() }
         .onChange(of: workspace.session) { workspace.persistSession() }

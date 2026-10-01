@@ -237,8 +237,9 @@ struct FolderSidebar: NSViewRepresentable {
             let reveal = menu.addItem(withTitle: "Reveal in Finder", action: #selector(revealFolder(_:)), keyEquivalent: "")
             reveal.target = self; reveal.representedObject = folder.relativePath
             menu.addItem(.separator())
-            let trash = menu.addItem(withTitle: "Move to Trash", action: nil, keyEquivalent: "")
-            trash.isEnabled = false
+            let trash = menu.addItem(withTitle: "Move to Trash", action: #selector(trashFolder(_:)), keyEquivalent: "")
+            trash.target = self; trash.representedObject = folder.relativePath
+            trash.isEnabled = workspace.canMutate && !folder.relativePath.isEmpty
             return menu
         }
         @objc private func newDocument(_ sender: NSMenuItem) { workspace.create(folder: false, parent: sender.representedObject as? String) }
@@ -249,6 +250,9 @@ struct FolderSidebar: NSViewRepresentable {
         }
         @objc private func moveFolder(_ sender: NSMenuItem) {
             if let path = sender.representedObject as? String { workspace.requestMove([path]) }
+        }
+        @objc private func trashFolder(_ sender: NSMenuItem) {
+            if let path = sender.representedObject as? String { workspace.requestTrash([path], pane: 0) }
         }
         @objc private func revealFolder(_ sender: NSMenuItem) { workspace.reveal(sender.representedObject as? String) }
 
