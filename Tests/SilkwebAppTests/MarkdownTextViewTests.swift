@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+import SilkwebCore
 @testable import Silkweb
 
 final class MarkdownTextViewTests: XCTestCase {
@@ -99,4 +100,110 @@ private final class ReentrantTextContainer: NSTextContainer {
             onGeometryChange?()
         }
     }
+}
+
+extension MarkdownTextViewTests {
+    @MainActor
+    func testFormattingUndoIMEAndIndentOffscreen() throws {
+        let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
+        let text = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
+        let delegate = FormattingUndoDelegate()
+        text.delegate = delegate
+        delegate.manager.groupsByEvent = false
+        for command in [MarkdownCommand.bold, .italic, .strike, .inlineCode, .link, .heading(0), .heading(1), .heading(6), .quote, .bullet, .numbered, .task, .codeBlock, .indent, .outdent] {
+            text.string = "    日本語 👩🏽‍💻\nsecond"
+            text.styler.reload()
+            let original = text.string
+            text.setSelectedRange(NSRange(location: 4, length: original.utf16.count - 4))
+            delegate.manager.removeAllActions()
+            text.format(command)
+            text.styler.restyle()
+            let formatted = text.string
+            XCTAssertTrue(delegate.manager.canUndo)
+            XCTAssertEqual(delegate.manager.undoActionName, command.name)
+            delegate.manager.undo()
+            XCTAssertEqual(text.string, original)
+            XCTAssertFalse(delegate.manager.canUndo)
+            delegate.manager.redo()
+            XCTAssertEqual(text.string, formatted)
+            for width: CGFloat in [0, 1, 80, 320, 1200, 4096] {
+                scroll.setFrameSize(NSSize(width: width, height: 760))
+                scroll.tile()
+                text.layoutEditor()
+                text.layoutManager?.ensureLayout(for: text.textContainer!)
+                XCTAssertEqual(text.string, formatted)
+            }
+        }
+        delegate.manager.groupsByEvent = true
+        text.string = "- item"
+        text.setSelectedRange(NSRange(location: 6, length: 0))
+        text.insertNewline(nil)
+        XCTAssertEqual(text.string, "- item\n- ")
+        text.insertNewline(nil)
+        XCTAssertEqual(text.string, "- item\n")
+        text.string = "plain"
+        text.setSelectedRange(NSRange(location: 5, length: 0))
+        text.insertTab(nil)
+        XCTAssertEqual(text.string, "plain    ")
+        text.string = "- item"
+        text.setSelectedRange(NSRange(location: 6, length: 0))
+        text.insertTab(nil)
+        XCTAssertEqual(text.string, "    - item")
+        text.insertBacktab(nil)
+        XCTAssertEqual(text.string, "- item")
+        text.insertLineBreak(nil)
+        XCTAssertEqual(text.string, "- item\n")
+
+        text.string = "IME"
+        text.setMarkedText("日本", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: 0, length: 3))
+        XCTAssertTrue(text.hasMarkedText())
+        let marked = text.string
+        text.format(.bold)
+        XCTAssertEqual(text.string, marked)
+        text.unmarkText()
+        text.isEditable = false
+        text.format(.bold)
+        XCTAssertEqual(text.string, marked)
+    }
+
+    @MainActor
+    func testIncrementalStylingDoesNotChangeTextOrUndoAndPropagatesFences() throws {
+        let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
+        let text = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
+        let storage = try XCTUnwrap(text.textStorage)
+        let delegate = FormattingUndoDelegate()
+        text.delegate = delegate
+        text.string = "# Title\n**bold** and `code`\n```\nfenced\n```\nafter\n" + String(repeating: "plain\n", count: 1000)
+        text.styler.reload()
+        let original = text.string
+        let font = try XCTUnwrap(storage.attribute(.font, at: 2, effectiveRange: nil) as? NSFont)
+        XCTAssertEqual(font.pointSize, 24)
+        let code = (original as NSString).range(of: "fenced").location
+        XCTAssertNotNil(storage.attribute(.backgroundColor, at: code, effectiveRange: nil))
+        delegate.manager.removeAllActions()
+        text.setSelectedRange(NSRange(location: 2, length: 1))
+        text.insertText("X", replacementRange: text.selectedRange())
+        text.styler.restyle()
+        XCTAssertLessThan(text.styler.lastStyledRange.length, 60)
+        XCTAssertEqual(text.string, (original as NSString).replacingCharacters(in: NSRange(location: 2, length: 1), with: "X"))
+        let opening = (text.string as NSString).range(of: "```\n")
+        text.insertText("", replacementRange: opening)
+        text.styler.restyle()
+        let newCode = (text.string as NSString).range(of: "fenced").location
+        let after = (text.string as NSString).range(of: "after").location
+        XCTAssertNil(storage.attribute(.backgroundColor, at: newCode, effectiveRange: nil))
+        XCTAssertNotNil(storage.attribute(.backgroundColor, at: after, effectiveRange: nil))
+        let saved = text.string
+        text.styler.reload()
+        XCTAssertEqual(text.string, saved)
+        scroll.setFrameSize(NSSize(width: 1, height: 1))
+        text.layoutEditor()
+        text.viewDidMoveToWindow()
+        XCTAssertTrue(text.frame.height.isFinite)
+    }
+}
+
+@MainActor private final class FormattingUndoDelegate: NSObject, NSTextViewDelegate {
+    let manager = UndoManager()
+    func undoManager(for view: NSTextView) -> UndoManager? { manager }
 }

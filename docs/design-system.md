@@ -85,7 +85,7 @@ Before adding any shortcut, check it against this table. 1.25 audits the final m
 | Format | Link / Image… | ⌘K / ⌃⌘I | 1.12 / 1.15 |
 | Format ▸ Heading | Heading 1–6 / Body Text | ⌃⌘1…⌃⌘6 / ⌃⌘0 | 1.12 |
 | Format | Quote / Bulleted / Numbered / Task List / Code Block | ⌘' / ⌥⌘U / ⌥⌘O / ⌥⌘X / ⌃⇧⌘C | 1.12 |
-| Format | Shift Right / Shift Left | ⌘] / ⌘[ (Tab / ⇧Tab inside list items) | 1.12 |
+| Format | Shift Right / Shift Left | ⌘] / ⌘[ (Tab / ⇧Tab indent lists and selected lines; Tab elsewhere inserts 4 spaces) | 1.12 |
 | Format | Insert Table… | ⌃⌘T | 1.14 |
 | View | Editor ↔ Preview toggle | ⌘R | 1.18 |
 | View | Split Editor and Preview | ⌘4 | 1.18 |
@@ -106,4 +106,4 @@ Deliberately unassigned: ⌘1–⌘9 tab selection (⌘4/⌘7/⌘8 are view comm
 - Every icon-only control has an `accessibilityLabel` and a `.help()` tooltip using the menu wording.
 - Every drag-and-drop action has a menu/keyboard equivalent (Move To…).
 - Use semantic colors only, which gives contrast in both appearances. Never convey state by color alone.
-- Respect Reduce Motion (no spring/expand animations) and Full Keyboard Access (visible focus rings, Tab order: sidebar → list → editor → inspector).
+- Respect Reduce Motion (no spring/expand animations) and Full Keyboard Access (visible focus rings, Tab order outside the editor: sidebar → list → editor → inspector; in the editor Tab edits indentation, and pane focus uses ⌥⌘1/2/3 or ⌃Tab).

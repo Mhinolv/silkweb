@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import SilkwebCore
 
 struct EditorStyle: Equatable {
     var fontSize: CGFloat = 15
@@ -69,6 +70,8 @@ struct MarkdownTextView: NSViewRepresentable {
         text.textContainer?.heightTracksTextView = false
         text.textContainer?.lineFragmentPadding = 0
         scroll.documentView = text
+        text.styler.editor = text
+        text.textStorage?.delegate = text.styler
         text.layoutEditor()
         return scroll
     }
@@ -82,6 +85,7 @@ struct MarkdownTextView: NSViewRepresentable {
             let position = session.scroll
             coordinator.url = session.url
             text.string = session.text
+            text.styler.reload()
             text.undoManager?.removeAllActions()
             let count = (text.string as NSString).length
             text.setSelectedRange(NSRange(location: min(selection.location, count), length: min(selection.length, max(0, count - selection.location))))
@@ -92,6 +96,7 @@ struct MarkdownTextView: NSViewRepresentable {
             Self.reload(text, in: scroll, value: session.text, selection: session.selection, position: session.scroll)
         }
         text.isEditable = !session.readOnly && !session.loading
+        if FormattingTarget.shared.editor === text { FormattingTarget.shared.refresh() }
         text.setAccessibilityLabel("Document text, \(session.name)")
         text.window?.isDocumentEdited = session.state.isDirty
         text.needsDisplay = true
@@ -104,6 +109,7 @@ struct MarkdownTextView: NSViewRepresentable {
     /// Reload a clean external edit in place, clamping UTF-16 selection and scroll.
     static func reload(_ text: PlainMarkdownTextView, in scroll: NSScrollView, value: String, selection: NSRange, position: NSPoint) {
         text.string = value
+        text.styler.reload()
         text.undoManager?.removeAllActions()
         let count = (value as NSString).length
         let location = min(selection.location, count)
@@ -142,6 +148,7 @@ struct MarkdownTextView: NSViewRepresentable {
 final class PlainMarkdownTextView: NSTextView {
     var style = EditorStyle()
     weak var session: DocumentSession?
+    let styler = MarkdownStyler()
     var moveFocus: ((Bool) -> Void)?
     private var isLayingOutEditor = false
 
@@ -183,8 +190,47 @@ final class PlainMarkdownTextView: NSTextView {
         guard isEditable, let value = NSPasteboard.general.string(forType: .string) else { return }
         insertText(value, replacementRange: selectedRange())
     }
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { FormattingTarget.shared.editor = self; FormattingTarget.shared.refresh() }
+        return accepted
+    }
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        if accepted, FormattingTarget.shared.editor === self {
+            FormattingTarget.shared.editor = nil
+            FormattingTarget.shared.refresh()
+        }
+        return accepted
+    }
+    override func didChangeText() {
+        super.didChangeText()
+        if !hasMarkedText() { styler.schedule() }
+        FormattingTarget.shared.refresh()
+    }
+    override func unmarkText() {
+        super.unmarkText()
+        styler.schedule()
+        FormattingTarget.shared.refresh()
+    }
+    override func insertNewline(_ sender: Any?) {
+        guard !hasMarkedText() else { super.insertNewline(sender); return }
+        apply(MarkdownEditing.newline(text: string, selection: selectedRange()), name: "Typing")
+    }
+    override func insertLineBreak(_ sender: Any?) {
+        guard !hasMarkedText() else { super.insertLineBreak(sender); return }
+        apply(MarkdownEditing.newline(text: string, selection: selectedRange(), plain: true), name: "Typing")
+    }
+    override func insertTab(_ sender: Any?) {
+        guard !hasMarkedText() else { super.insertTab(sender); return }
+        let source = string as NSString
+        let line = source.substring(with: source.lineRange(for: selectedRange()))
+        if selectedRange().length > 0 || MarkdownEditing.listPrefix(line) != nil { format(.indent) }
+        else { insertText("    ", replacementRange: selectedRange()) }
+    }
+    override func insertBacktab(_ sender: Any?) { format(.outdent) }
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 48, !event.modifierFlags.contains(.option), !event.modifierFlags.contains(.control) {
+        if event.keyCode == 48, event.modifierFlags.contains(.control) {
             moveFocus?(event.modifierFlags.contains(.shift))
         } else { super.keyDown(with: event) }
     }

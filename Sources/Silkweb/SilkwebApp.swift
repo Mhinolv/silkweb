@@ -40,7 +40,7 @@ struct SilkwebApp: App {
                     .keyboardShortcut("s").disabled(workspace.editor.url == nil || workspace.editor.readOnly)
             }
             CommandGroup(replacing: .undoRedo) {
-                Button(workspace.usesTextUndo ? "Undo" : workspace.libraryUndo.last?.title ?? "Undo") {
+                Button(workspace.usesTextUndo ? (NSApp.keyWindow?.firstResponder as? NSTextView)?.undoManager?.undoMenuItemTitle ?? "Undo" : workspace.libraryUndo.last?.title ?? "Undo") {
                     if workspace.usesTextUndo { NSApp.sendAction(Selector(("undo:")), to: nil, from: nil) }
                     else { workspace.undoLibrary() }
                 }.keyboardShortcut("z").disabled(!workspace.usesTextUndo && !workspace.canUndoLibrary)
@@ -52,6 +52,7 @@ struct SilkwebApp: App {
                     .keyboardShortcut("v", modifiers: [.command, .option, .shift])
             }
             TextEditingCommands()
+            FormatCommands()
             CommandGroup(replacing: .sidebar) {
                 Button("Toggle Sidebar") { workspace.sidebarToggleRequest += 1 }
                     .keyboardShortcut("s", modifiers: [.control, .command])

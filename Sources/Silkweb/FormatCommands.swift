@@ -1,0 +1,115 @@
+import AppKit
+import SwiftUI
+import SilkwebCore
+
+@MainActor @Observable final class FormattingTarget {
+    static let shared = FormattingTarget()
+    weak var editor: PlainMarkdownTextView?
+    var enabled = false
+    func refresh() { enabled = editor?.isEditable == true && editor?.hasMarkedText() == false }
+}
+
+struct FormatItem {
+    let command: MarkdownCommand
+    let key: String
+    let modifiers: NSEvent.ModifierFlags
+    static let groups: [[FormatItem]] = [
+        [.init(command: .bold, key: "b", modifiers: .command), .init(command: .italic, key: "i", modifiers: .command), .init(command: .strike, key: "x", modifiers: [.command, .shift]), .init(command: .inlineCode, key: "c", modifiers: [.command, .control])],
+        [.init(command: .link, key: "k", modifiers: .command)],
+        (1...6).map { .init(command: .heading($0), key: "\($0)", modifiers: [.command, .control]) } + [.init(command: .heading(0), key: "0", modifiers: [.command, .control])],
+        [.init(command: .quote, key: "'", modifiers: .command), .init(command: .bullet, key: "u", modifiers: [.command, .option]), .init(command: .numbered, key: "o", modifiers: [.command, .option]), .init(command: .task, key: "x", modifiers: [.command, .option]), .init(command: .codeBlock, key: "c", modifiers: [.command, .shift, .control])],
+        [.init(command: .indent, key: "]", modifiers: .command), .init(command: .outdent, key: "[", modifiers: .command)]
+    ]
+    var title: String {
+        if case .heading(let level) = command { return level == 0 ? "Body Text" : "Heading \(level)" }
+        return command.name
+    }
+    var swiftModifiers: EventModifiers {
+        var result: EventModifiers = []
+        if modifiers.contains(.command) { result.insert(.command) }
+        if modifiers.contains(.control) { result.insert(.control) }
+        if modifiers.contains(.option) { result.insert(.option) }
+        if modifiers.contains(.shift) { result.insert(.shift) }
+        return result
+    }
+}
+
+struct FormatCommands: Commands {
+    private let target = FormattingTarget.shared
+    var body: some Commands {
+        CommandGroup(replacing: .textFormatting) {
+            ForEach(Array(FormatItem.groups.enumerated()), id: \.offset) { index, group in
+                if index > 0 { Divider() }
+                if index == 2 { Menu("Heading") { items(group) } }
+                else { items(group) }
+            }
+        }
+    }
+    @ViewBuilder private func items(_ group: [FormatItem]) -> some View {
+        ForEach(Array(group.enumerated()), id: \.offset) { _, item in
+            Button(item.title) { target.editor?.format(item.command) }
+                .keyboardShortcut(KeyEquivalent(Character(item.key)), modifiers: item.swiftModifiers)
+                .disabled(!target.enabled)
+        }
+    }
+}
+
+extension PlainMarkdownTextView {
+    func format(_ command: MarkdownCommand) {
+        guard isEditable, !hasMarkedText() else { return }
+        apply(MarkdownEditing.edit(command, text: string, selection: selectedRange(), clipboard: command == .link ? NSPasteboard.general.string(forType: .string) : nil), name: command.name)
+    }
+
+    func apply(_ edit: MarkdownEdit, name: String) {
+        guard isEditable, !hasMarkedText(), let storage = textStorage else { return }
+        breakUndoCoalescing()
+        undoManager?.beginUndoGrouping()
+        defer { undoManager?.endUndoGrouping(); breakUndoCoalescing() }
+        guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
+        storage.replaceCharacters(in: edit.range, with: edit.replacement)
+        didChangeText()
+        setSelectedRange(edit.selection)
+        undoManager?.setActionName(name)
+    }
+
+    @objc func performFormat(_ sender: NSMenuItem) {
+        if let item = sender.representedObject as? FormatMenuAction { format(item.command) }
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event) ?? NSMenu()
+        let formatMenu = NSMenu(title: "Format")
+        for (index, group) in FormatItem.groups.enumerated() {
+            if index > 0 { formatMenu.addItem(.separator()) }
+            let destination: NSMenu
+            if index == 2 {
+                let heading = NSMenuItem(title: "Heading", action: nil, keyEquivalent: "")
+                destination = NSMenu(title: "Heading")
+                heading.submenu = destination
+                formatMenu.addItem(heading)
+            } else { destination = formatMenu }
+            for item in group {
+                let entry = NSMenuItem(title: item.title, action: #selector(performFormat(_:)), keyEquivalent: item.key)
+                entry.keyEquivalentModifierMask = item.modifiers
+                entry.target = self
+                entry.representedObject = FormatMenuAction(item.command)
+                destination.addItem(entry)
+            }
+        }
+        let parent = NSMenuItem(title: "Format", action: nil, keyEquivalent: "")
+        parent.submenu = formatMenu
+        menu.addItem(.separator())
+        menu.addItem(parent)
+        return menu
+    }
+
+    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(performFormat(_:)) { return window?.firstResponder === self && isEditable && !hasMarkedText() }
+        return super.validateMenuItem(menuItem)
+    }
+}
+
+private final class FormatMenuAction: NSObject {
+    let command: MarkdownCommand
+    init(_ command: MarkdownCommand) { self.command = command }
+}
