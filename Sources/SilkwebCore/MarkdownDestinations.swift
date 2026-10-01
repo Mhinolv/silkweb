@@ -78,7 +78,8 @@ public enum MarkdownDestinations {
                 var allowed = CharacterSet.urlPathAllowed
                 allowed.remove(charactersIn: "?#%()<>\\")
                 let normalized = relative.isEmpty ? "." : relative
-                let replacement = (normalized.addingPercentEncoding(withAllowedCharacters: allowed) ?? normalized) + suffix
+                let trailingSlash = path.hasSuffix("/") ? "/" : ""
+                let replacement = (normalized.addingPercentEncoding(withAllowedCharacters: allowed) ?? normalized) + trailingSlash + suffix
                 mutable.replaceCharacters(in: range, with: angled ? "<" + replacement + ">" : replacement)
             }
             let candidateMatches = candidates.matches(in: line, range: full)

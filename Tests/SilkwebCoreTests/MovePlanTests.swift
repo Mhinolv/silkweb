@@ -164,6 +164,119 @@ final class MovePlanTests: XCTestCase {
         }
     }
 
+    func testIgnoredEntriesAddedAfterPreflightOrMoveDoNotBlockTransactions() async throws {
+        for movingFolder in [false, true] {
+            for afterMove in [false, true] {
+                let (root, engine) = try await fixture()
+                defer { try? FileManager.default.removeItem(at: root) }
+                let one = try text(root, "A/Child/One.md")
+                let two = try text(root, "Two.md")
+                let plan = try await engine.planMove([movingFolder ? "A" : "A/Child/One.md"], toFolder: "B")
+                if afterMove { _ = try await engine.executeMove(plan) }
+                let parents = ["", "A", "A/Child", "B"].map {
+                    afterMove ? plan.changes.remapping($0) : $0
+                }
+                let names = [".DS_Store", "._file", "._note.md", "Icon\r", "asset.dat"]
+                let bytes = Data([0, 1, 255])
+                for parent in parents {
+                    let directory = root.appendingPathComponent(parent)
+                    for name in names { try bytes.write(to: directory.appendingPathComponent(name)) }
+                    let hidden = directory.appendingPathComponent(".ignored")
+                    try FileManager.default.createDirectory(at: hidden, withIntermediateDirectories: false)
+                    try bytes.write(to: hidden.appendingPathComponent("note.md"))
+                    let flagged = directory.appendingPathComponent("Hidden.md")
+                    try bytes.write(to: flagged)
+                    var values = URLResourceValues()
+                    values.isHidden = true
+                    var flaggedURL = flagged
+                    try flaggedURL.setResourceValues(values)
+                    try FileManager.default.createSymbolicLink(at: directory.appendingPathComponent("Alias.md"),
+                                                              withDestinationURL: root.appendingPathComponent("Two.md"))
+                }
+                if !afterMove { _ = try await engine.executeMove(plan) }
+                _ = try await engine.executeMove(plan.reversed)
+                XCTAssertEqual(try text(root, "A/Child/One.md"), one)
+                XCTAssertEqual(try text(root, "Two.md"), two)
+                for parent in ["", "A", "A/Child", "B"] {
+                    for name in names + [".ignored/note.md", "Hidden.md"] {
+                        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(parent).appendingPathComponent(name)), bytes)
+                    }
+                }
+            }
+        }
+    }
+
+    func testFolderMoveCarriesExistingIgnoredContentsAndPreservesAssetAliases() async throws {
+        let (root, engine) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bytes = Data([255, 0, 127])
+        for name in [".DS_Store", "._file", "Icon\r"] {
+            try bytes.write(to: root.appendingPathComponent("A/" + name))
+        }
+        let alias = FileManager.default.fileExists(atPath: root.appendingPathComponent("A/ASSET.PNG").path)
+        if alias { try Data("![asset](a/ASSET.PNG)".utf8).write(to: root.appendingPathComponent("Two.md")) }
+        let plan = try await engine.planMove(["A"], toFolder: "B")
+        _ = try await engine.executeMove(plan)
+        if alias { XCTAssertEqual(try text(root, "Two.md"), "![asset](B/A/asset.png)") }
+        for name in [".DS_Store", "._file", "Icon\r"] {
+            XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("B/A/" + name)), bytes)
+        }
+        _ = try await engine.executeMove(plan.reversed)
+        for name in [".DS_Store", "._file", "Icon\r"] {
+            XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("A/" + name)), bytes)
+        }
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("A/asset.png")), Data([0, 1, 255]))
+    }
+
+    func testManagedInventoryAndBodiesStillInvalidatePreflightAndUndo() async throws {
+        for afterMove in [false, true] {
+            for change in ["rewrittenBody", "unchangedBody", "newDocument", "newFolder", "removedDocument"] {
+                let (root, engine) = try await fixture()
+                defer { try? FileManager.default.removeItem(at: root) }
+                _ = try await engine.createDocument(named: "Unchanged.md", text: "original")
+                let plan = try await engine.planMove(["A"], toFolder: "B")
+                if afterMove { _ = try await engine.executeMove(plan) }
+                switch change {
+                case "rewrittenBody": try Data("edited".utf8).write(to: root.appendingPathComponent("Two.md"))
+                case "unchangedBody": try Data("modified".utf8).write(to: root.appendingPathComponent("Unchanged.md"))
+                case "newDocument": try Data().write(to: root.appendingPathComponent("New.md"))
+                case "newFolder": try FileManager.default.createDirectory(at: root.appendingPathComponent("New"), withIntermediateDirectories: false)
+                default: try FileManager.default.removeItem(at: root.appendingPathComponent("Unchanged.md"))
+                }
+                do {
+                    _ = try await engine.executeMove(afterMove ? plan.reversed : plan)
+                    XCTFail("Expected refusal for \(change), afterMove=\(afterMove)")
+                } catch { XCTAssertEqual(error as? MovePlanError, .changed) }
+                XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(afterMove ? "B/A" : "A").path))
+            }
+        }
+    }
+
+    func testFolderLinkTrailingSlashAndSuffixSweep() {
+        let changes = LibraryChangeSet(changes: [.init(id: UUID(), oldPath: "A", newPath: "B/A", isFolder: true)])
+        // Incoming, outgoing, unchanged, self-directory, root, and encoded slash.
+        let cases = [("Two.md", "A/", "B/A/"), ("A/One.md", "../B/", "../"),
+                     ("A/One.md", "./", "./"), ("A/One.md", "../", "../../"),
+                     ("Two.md", "B/", "B/"), ("Two.md", "A%2F", "B/A/")]
+        for (source, destination, expected) in cases {
+            for suffix in ["", "#heading", "?mode=1", "?mode=1#heading", "#heading?mode=1"] {
+                for angle in [false, true] {
+                    for title in ["", " \"Title\"", " 'Title'"] {
+                        for reference in [false, true] {
+                            func link(_ path: String) -> String {
+                                let token = angle ? "<\(path)\(suffix)>" : path + suffix
+                                return reference ? "[ref]: \(token)\(title)" : "[dir](\(token)\(title))"
+                            }
+                            let result = MarkdownDestinations.rewrite(link(destination), source: source, changes: changes)
+                            XCTAssertEqual(result.text, link(expected))
+                            XCTAssertTrue(result.unsupported.isEmpty)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     func testGrammarSweepCodeUnsupportedAndSuffixes() throws {
         let changes = LibraryChangeSet(changes: [.init(id: UUID(), oldPath: "A", newPath: "B/A", isFolder: true)])
         for source in ["A/One.md", "Two.md", "B/Other.md"] {

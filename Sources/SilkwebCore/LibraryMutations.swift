@@ -442,11 +442,12 @@ extension LibraryMutations {
                                             newPath: joined(destination, name), isFolder: folder))
         }
         let changeSet = LibraryChangeSet(changes: changes)
-        let inventory = try moveInventory()
+        let contents = try moveInventory()
+        let inventory = contents.managed
         let caseSensitive = try root.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]).volumeSupportsCaseSensitiveNames == true
         var canonicalPaths: [String: String] = [:]
         if !caseSensitive {
-            for path in inventory { canonicalPaths[path.precomposedStringWithCanonicalMapping.lowercased()] = path }
+            for path in contents.linkTargets { canonicalPaths[path.precomposedStringWithCanonicalMapping.lowercased()] = path }
         }
         var before: [String: Data] = [:]
         var after: [String: Data] = [:]
@@ -454,7 +455,7 @@ extension LibraryMutations {
         var newFingerprints: [String: Data] = [:]
         var unreadableDocuments: [String: UnreadableMoveDocument] = [:]
         var unsupported: [UnsupportedMarkdownLink] = []
-        for path in inventory.sorted() {
+        for path in contents.linkTargets.sorted() {
             let candidate = root.appendingPathComponent(path)
             let attributes = try FileManager.default.attributesOfItem(atPath: candidate.path)
             if attributes[.type] as? FileAttributeType == .typeSymbolicLink {
@@ -463,8 +464,7 @@ extension LibraryMutations {
                 }
                 continue
             }
-            guard ["md", "markdown"].contains((path as NSString).pathExtension.lowercased()),
-                  !path.split(separator: "/").contains(where: { $0.hasPrefix(".") }) else { continue }
+            guard inventory.contains(path) else { continue }
             let url = try item(path)
             guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { continue }
             let data: Data
@@ -497,7 +497,7 @@ extension LibraryMutations {
     /// One commit point for the index; on any error restore rewritten bodies and
     /// reverse all completed renames. An immutable plan also supplies guarded undo.
     public func executeMove(_ plan: MovePlan) throws -> LibraryChangeSet {
-        guard plan.root == root, try moveInventory() == plan.inventory,
+        guard plan.root == root, try moveInventory().managed == plan.inventory,
               try LibraryMetadataStore.load(root: root).0 == plan.metadata else { throw MovePlanError.changed }
         for (path, fingerprint) in plan.fingerprints {
             guard try Data(SHA256.hash(data: Data(contentsOf: item(path)))) == fingerprint else { throw MovePlanError.changed }
@@ -552,18 +552,23 @@ extension LibraryMutations {
         }
     }
 
-    private func moveInventory() throws -> Set<String> {
-        var result = Set<String>()
+    private func moveInventory() throws -> (managed: Set<String>, linkTargets: Set<String>) {
+        var managed = Set<String>()
+        var linkTargets = Set<String>()
         var pending = [(url: root, path: "")]
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .isHiddenKey]
         while let parent = pending.popLast() {
-            for url in try FileManager.default.contentsOfDirectory(at: parent.url, includingPropertiesForKeys: [.isDirectoryKey], options: []) {
-                if parent.path.isEmpty && url.lastPathComponent == ".silkweb" { continue }
+            for url in try FileManager.default.contentsOfDirectory(at: parent.url, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles]) {
+                let values = try url.resourceValues(forKeys: keys)
+                guard values.isHidden != true, !url.lastPathComponent.hasPrefix(".") else { continue }
                 let path = joined(parent.path, url.lastPathComponent)
-                result.insert(path)
-                let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-                if attributes[.type] as? FileAttributeType == .typeDirectory { pending.append((url, path)) }
+                // Assets and symlinks remain available for link canonicalization
+                // and diagnostics, but are excluded from managed-item staleness.
+                linkTargets.insert(path)
+                if LibraryScanner.isManagedItem(url, values: values) { managed.insert(path) }
+                if values.isDirectory == true, values.isSymbolicLink != true { pending.append((url, path)) }
             }
         }
-        return result
+        return (managed, linkTargets)
     }
 }

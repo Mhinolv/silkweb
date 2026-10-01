@@ -1,6 +1,15 @@
 import Foundation
 
 public enum LibraryScanner {
+    /// Shared with move staleness checks so ignored filesystem entries cannot
+    /// invalidate a transaction. Symlinks are never library-owned items.
+    static func isManagedItem(_ url: URL, values: URLResourceValues) -> Bool {
+        guard values.isSymbolicLink != true, values.isHidden != true,
+              !url.lastPathComponent.hasPrefix(".") else { return false }
+        return values.isDirectory == true || (values.isRegularFile == true
+            && ["md", "markdown"].contains(url.pathExtension.lowercased()))
+    }
+
     /// All enumeration, metadata IO and encoding run away from the caller's actor.
     public static func scan(root: URL, progress: (@Sendable (Int) -> Void)? = nil) async throws -> LibrarySnapshot {
         let worker = Task.detached(priority: .userInitiated) {
@@ -80,8 +89,7 @@ public enum LibraryScanner {
             }
             for (child, values) in children {
                 try Task.checkCancellation()
-                guard values.isSymbolicLink != true, values.isHidden != true,
-                      !child.lastPathComponent.hasPrefix(".") else { continue }
+                guard isManagedItem(child, values: values) else { continue }
                 let path = parent.path.isEmpty ? child.lastPathComponent : parent.path + "/" + child.lastPathComponent
                 if values.isDirectory == true {
                     let id = identity(for: path)
