@@ -167,10 +167,13 @@ extension LibraryWorkspace {
     func documentDragPaths(_ path: String) -> [String] {
         session.selectedDocuments.contains(path) ? Array(session.selectedDocuments).sorted() : [path]
     }
+    func documentDragData(_ paths: [String]) -> Data {
+        try! JSONEncoder().encode(InternalMove(library: dragIdentity, ids: paths.compactMap { snapshot?.metadata.IDsByPath[$0] }))
+    }
     func dragProvider(_ paths: [String]) -> NSItemProvider {
         let provider = NSItemProvider()
         guard canMutate else { return provider }
-        let payload = try! JSONEncoder().encode(InternalMove(library: dragIdentity, ids: paths.compactMap { snapshot?.metadata.IDsByPath[$0] }))
+        let payload = documentDragData(paths)
         provider.registerDataRepresentation(forTypeIdentifier: UTType.silkwebMove.identifier, visibility: .ownProcess) { completion in
             completion(payload, nil); return nil
         }

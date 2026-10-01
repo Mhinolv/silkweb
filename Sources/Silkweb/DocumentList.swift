@@ -5,7 +5,6 @@ import SilkwebCore
 struct DocumentList: View {
     @Bindable var workspace: LibraryWorkspace
     var makeDragProvider: (([String]) -> NSItemProvider)? = nil
-    @State private var selectionRevision = 0
     @State private var dateReference = Date()
     var body: some View {
         VStack(spacing: 0) {
@@ -34,36 +33,8 @@ struct DocumentList: View {
                         }
                     }
                 } else {
-                    ScrollViewReader { proxy in
-                        List(workspace.documents, selection: Binding(get: { workspace.session.selectedDocuments }, set: { workspace.focusColumn = 1; workspace.selectDocuments($0) })) { document in
-                            DocumentRow(document: document, root: workspace.snapshot!.rootURL, workspace: workspace, dateReference: dateReference)
-                                // Native List row dragging preserves NSTableView click selection.
-                                .itemProvider {
-                                    guard workspace.canMutate else { return nil }
-                                    return (makeDragProvider ?? workspace.dragProvider)(workspace.documentDragPaths(document.relativePath))
-                                }
-                                .tag(document.relativePath).id(document.relativePath)
-                                .contextMenu {
-                                    Button("Open in New Tab") { }.disabled(true)
-                                    Divider()
-                                    Button("Rename…") { workspace.beginRename(LibraryRename(path: document.relativePath, isFolder: false)) }.disabled(!workspace.canMutate)
-                                    Button("Move To…") { workspace.requestMove(workspace.documentDragPaths(document.relativePath)) }.disabled(!workspace.canMutate)
-                                    Button("Reveal in Finder") { workspace.reveal(document.relativePath) }
-                                    Divider()
-                                    Button("Move to Trash") { workspace.requestTrash(workspace.documentDragPaths(document.relativePath), pane: 1) }.disabled(!workspace.canMutate)
-                                }
-                        }
-                        .id(selectionRevision)
-                        .onChange(of: workspace.editor.refusedNavigation) { selectionRevision += 1 }
-                        .onChange(of: workspace.rename) { if let item = workspace.rename, !item.isFolder { proxy.scrollTo(item.path) } }
-                        .onChange(of: workspace.revision) { if let path = workspace.session.selectedDocuments.first { proxy.scrollTo(path) } }
-                        .onKeyPress(.return) {
-                            guard workspace.rename == nil else { return .ignored }
-                            workspace.focusColumn = 1
-                            workspace.beginRename()
-                            return .handled
-                        }
-                    }
+                    DocumentTable(workspace: workspace, documents: workspace.documents,
+                                  dateReference: dateReference, makeDragProvider: makeDragProvider)
                 }
             }
         }
@@ -74,11 +45,12 @@ struct DocumentList: View {
     }
 }
 
-private struct DocumentRow: View {
+struct DocumentRow: View {
     let document: LibraryDocument
     let root: URL
     let workspace: LibraryWorkspace
     let dateReference: Date
+    let pointerState: DocumentRowPointerState
     @Environment(\.locale) private var locale
     @State private var summary: DocumentSummary?
     private var title: String { URL(fileURLWithPath: document.name).deletingPathExtension().lastPathComponent }
@@ -103,15 +75,23 @@ private struct DocumentRow: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .contentShape([.interaction, .dragPreview], Rectangle())
-        .background(DocumentRowClickObserver(path: document.relativePath, workspace: workspace))
+        .overlay(DocumentRowClickObserver(path: document.relativePath, workspace: workspace, pointerState: pointerState))
         .listRowInsets(EdgeInsets())
         .accessibilityElement(children: workspace.rename?.path == document.relativePath ? .contain : .ignore)
         .accessibilityLabel(title)
         .accessibilityValue((workspace.listPreference.key == .created ? document.created : document.modified).map {
             "\(workspace.listPreference.key == .created ? "created" : "modified") \($0.formatted(.relative(presentation: .named)))"
         } ?? "")
-        .task(id: document.modified) { summary = await DocumentSummary.load(document: document, root: root) }
+        .task(id: DocumentSummaryIdentity(path: document.relativePath, modified: document.modified)) {
+            summary = nil
+            summary = await DocumentSummary.load(document: document, root: root)
+        }
     }
+}
+
+private struct DocumentSummaryIdentity: Hashable {
+    let path: String
+    let modified: Date?
 }
 
 struct DocumentDetail: View {

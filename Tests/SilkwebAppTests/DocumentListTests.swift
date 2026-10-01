@@ -11,6 +11,202 @@ final class DocumentListTests: XCTestCase {
     }
 
     @MainActor
+    func testWindowMouseEventsBeginDocumentDrags() async throws {
+        try await exerciseDocumentPointerEvents(nativeWindowDispatch: true)
+    }
+
+    @MainActor
+    func testOffscreenRowMouseTrackingAndSelection() async throws {
+        try await exerciseDocumentPointerEvents(nativeWindowDispatch: false)
+    }
+
+    @MainActor
+    private func exerciseDocumentPointerEvents(nativeWindowDispatch: Bool) async throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for name in ["A", "B", "C"] {
+            try Data("# \(name)".utf8).write(to: root.appendingPathComponent(name + ".md"))
+        }
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("Destination"), withIntermediateDirectories: false)
+        let workspace = LibraryWorkspace()
+        workspace.root = root
+        workspace.install(try await LibraryScanner.scan(root: root))
+        await workspace.editor.configure(root: root)
+        workspace.session.selectedFolder = ""
+        workspace.session.selectedDocuments = []
+        let name = "Silkweb.DragTests." + UUID().uuidString
+        defer {
+            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(name) {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: name)
+        let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 1200, height: 760),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.contentViewController = controller
+        if nativeWindowDispatch {
+            window.makeKey()
+            window.orderBack(nil) // Outside all screens; never launch the app GUI.
+        }
+        controller.view.setFrameSize(NSSize(width: 1200, height: 760))
+        defer { window.orderOut(nil); window.contentViewController = nil }
+        // Nested hosting controllers realize their content over several layout turns.
+        for _ in 0..<50 {
+            controller.view.layoutSubtreeIfNeeded()
+            for table in descendants(controller.view).compactMap({ $0 as? NSTableView }) {
+                for row in 0..<table.numberOfRows {
+                    _ = table.rowView(atRow: row, makeIfNecessary: true)
+                    _ = table.view(atColumn: 0, row: row, makeIfNecessary: true)
+                }
+                table.layoutSubtreeIfNeeded()
+            }
+            if descendants(controller.view).compactMap({ $0 as? DocumentRowClickView }).count == 3 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(workspace.documents.count, 3)
+        if nativeWindowDispatch, window.windowNumber == 0 {
+            throw XCTSkip("WindowServer is unavailable: NSWindow has number 0 and cannot dispatch mouse events. Separate row-handler test covers tracking through the begin-session boundary.")
+        }
+        let paths = workspace.documents.map(\.relativePath)
+        var starts: [Data] = []
+        let type = NSPasteboard.PasteboardType(UTType.silkwebMove.identifier)
+        let sources = descendants(controller.view).compactMap { $0 as? DocumentRowClickView }
+        let table = try XCTUnwrap(descendants(controller.view).compactMap { $0 as? DocumentTableView }.first)
+        table.startDraggingSession = { items, event, sender in
+            XCTAssertEqual(event.type, .leftMouseDragged)
+            XCTAssertEqual((sender as? DocumentRowClickView)?.path, paths[0])
+            XCTAssertEqual(items.count, 1)
+            XCTAssertGreaterThan(items[0].draggingFrame.width, 0)
+            guard let writer = items[0].item as? NSPasteboardItem,
+                  let data = writer.data(forType: type) else { XCTFail("Missing move payload"); return }
+            starts.append(data)
+        }
+        let source = try XCTUnwrap(sources.first { $0.path == paths[0] })
+        XCTAssertFalse(source.mouseDownCanMoveWindow)
+        let row = try XCTUnwrap(source.nativeRow)
+        let firstRowIndex = table.row(for: row)
+        XCTAssertEqual(firstRowIndex, 0)
+        var trackedSource: DocumentRowClickView?
+        func send(_ type: NSEvent.EventType, offset: CGFloat = 0, rowIndex: Int = 0,
+                  modifiers: NSEvent.ModifierFlags = [], timestamp: TimeInterval? = nil) throws {
+            let rect = table.rect(ofRow: rowIndex)
+            let point = table.convert(NSPoint(x: rect.maxX - 20 + offset, y: rect.midY), to: nil)
+            let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point,
+                modifierFlags: modifiers, timestamp: timestamp ?? ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 1,
+                clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1))
+            if nativeWindowDispatch {
+                // No direct handler, provider or canDragRows calls on the required path.
+                window.sendEvent(event)
+            } else {
+                // Explicit sandbox fallback, separate from the required native-window test.
+                // Exercise the actual hit-tested row, not a provider or gesture helper.
+                if type == .leftMouseDown {
+                    let content = try XCTUnwrap(window.contentView)
+                    trackedSource = try XCTUnwrap(content.hitTest(content.convert(point, from: nil)) as? DocumentRowClickView)
+                }
+                let target = try XCTUnwrap(trackedSource)
+                switch type {
+                case .leftMouseDown: target.mouseDown(with: event)
+                case .leftMouseDragged: target.mouseDragged(with: event)
+                case .leftMouseUp: target.mouseUp(with: event); trackedSource = nil
+                default: XCTFail("Unexpected pointer event")
+                }
+            }
+        }
+        for selected in [Set<String>(), Set([paths[0]]), Set(paths)] {
+            workspace.session.selectedDocuments = selected
+            controller.view.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(50))
+            let previous = starts.count
+            try send(.leftMouseDown)
+            // Run navigation/layout between down and drag to catch row invalidation.
+            await workspace.waitForNavigation()
+            controller.view.layoutSubtreeIfNeeded()
+            try send(.leftMouseDragged, offset: 2)
+            XCTAssertEqual(starts.count, previous, "Below threshold must remain a click")
+            for offset: CGFloat in [-8, -16, -24] { try send(.leftMouseDragged, offset: offset) }
+            try send(.leftMouseUp, offset: -24)
+            XCTAssertEqual(starts.count, previous + 1, "Selection: \(selected)")
+            if let data = starts.last {
+                XCTAssertEqual(Set(try XCTUnwrap(workspace.pathsForDrag(data))),
+                               selected.isEmpty ? [paths[0]] : selected)
+            }
+            XCTAssertNil(workspace.rename)
+        }
+        workspace.mutating = true
+        let previous = starts.count
+        try send(.leftMouseDown)
+        try send(.leftMouseDragged, offset: -8)
+        try send(.leftMouseUp, offset: -8)
+        XCTAssertEqual(starts.count, previous, "Mutation-disabled lists cannot start drags")
+        workspace.mutating = false
+        func click(_ rowIndex: Int, modifiers: NSEvent.ModifierFlags = [], timestamp: TimeInterval? = nil) async throws {
+            try send(.leftMouseDown, rowIndex: rowIndex, modifiers: modifiers, timestamp: timestamp)
+            try send(.leftMouseUp, rowIndex: rowIndex, modifiers: modifiers, timestamp: timestamp)
+            await workspace.waitForNavigation()
+            controller.view.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        try await click(0)
+        XCTAssertEqual(workspace.session.selectedDocuments, [paths[0]])
+        try await click(1, modifiers: .command)
+        XCTAssertEqual(workspace.session.selectedDocuments, Set(paths.prefix(2)))
+        try await click(0)
+        try await click(2, modifiers: .shift)
+        XCTAssertEqual(workspace.session.selectedDocuments, Set(paths))
+        // Native keyboard selection remains on the same table.
+        try await click(0)
+        let arrow = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, characters: "\u{f701}", charactersIgnoringModifiers: "\u{f701}", isARepeat: false, keyCode: 125))
+        table.keyDown(with: arrow)
+        await workspace.waitForNavigation()
+        XCTAssertEqual(workspace.session.selectedDocuments, [paths[1]])
+        // Use native event timestamps to exercise slow-click timing without sleeping between clicks.
+        let timestamp = ProcessInfo.processInfo.systemUptime + 3
+        try await click(0, timestamp: timestamp)
+        try await click(0, timestamp: timestamp + 0.75)
+        try await Task.sleep(for: .seconds(NSEvent.doubleClickInterval + 0.1))
+        XCTAssertEqual(workspace.rename?.path, paths[0])
+        workspace.rename = nil
+
+        // Feed payloads captured at the actual begin-session boundary into the
+        // existing sidebar delegate, for both a single document and a selection.
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        XCTAssertEqual(starts.count, 3)
+        guard starts.count == 3 else { return }
+        for payload in [starts[0], starts[2]] {
+            let moving = try XCTUnwrap(workspace.pathsForDrag(payload))
+            let coordinator = FolderSidebar.Coordinator(workspace: workspace, snapshot: try XCTUnwrap(workspace.snapshot),
+                                                         readDragData: { _ in payload })
+            let sidebar = FolderSidebar.makeScrollView(coordinator: coordinator)
+            let outline = try XCTUnwrap(sidebar.documentView as? NSOutlineView)
+            let destination = try XCTUnwrap(coordinator.itemsByPath["Destination"])
+            let info = DocumentListDraggingInfo(pasteboard: board, window: window, source: table)
+            XCTAssertEqual(coordinator.outlineView(outline, validateDrop: info, proposedItem: destination,
+                                                 proposedChildIndex: NSOutlineViewDropOnItemIndex), .move)
+            XCTAssertTrue(coordinator.outlineView(outline, acceptDrop: info, item: destination,
+                                                 childIndex: NSOutlineViewDropOnItemIndex))
+            for _ in 0..<500 where workspace.mutating { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertFalse(workspace.mutating)
+            XCTAssertNil(workspace.mutationError)
+            for path in moving {
+                XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path))
+                XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("Destination/" + path).path))
+            }
+            FolderSidebar.dismantleNSView(sidebar, coordinator: coordinator)
+            workspace.move(moving.map { "Destination/" + $0 }, to: "")
+            for _ in 0..<500 where workspace.mutating { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertFalse(workspace.mutating)
+            XCTAssertNil(workspace.mutationError)
+        }
+    }
+
+    @MainActor
     func testRealMouseClicksSelectRowsAndExtendSelection() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -93,8 +289,7 @@ final class DocumentListTests: XCTestCase {
             menu.performActionForItem(at: index)
         }
 
-        // SwiftUI handles the row provider in its NSTableView subclass rather than
-        // exposing AppKit's optional data-source pasteboard-writer method.
+        // Preserve the legacy provider/drop coverage alongside the new row-source tests.
         XCTAssertTrue(table.canDragRows(with: IndexSet(integersIn: 0..<3),
                                         at: NSPoint(x: 24, y: table.rect(ofRow: 0).midY)))
         let provider = try XCTUnwrap(nativeProvider, "Native table must request the row item provider")
@@ -204,7 +399,8 @@ final class DocumentListTests: XCTestCase {
                 let hit = try XCTUnwrap(row.hitTest(row.convert(point, to: row.superview)))
                 XCTAssertTrue(hit === row || hit.isDescendant(of: row))
                 XCTAssertTrue(rect.contains(point), "Row excludes \(point)")
-                XCTAssertNil(observer.hitTest(point), "Observer must not intercept native selection or dragging")
+                XCTAssertTrue(observer.hitTest(row.convert(point, to: observer.superview)) === observer,
+                              "AppKit source owns primary-button tracking")
             }
         }
         let coordinator = FolderSidebar.Coordinator(workspace: workspace, snapshot: snapshot)
