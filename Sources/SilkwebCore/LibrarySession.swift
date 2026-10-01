@@ -9,6 +9,14 @@ public struct LibrarySession: Codable, Equatable, Sendable {
 
     public init() {}
 
+    public func applying(_ changes: LibraryChangeSet) -> LibrarySession {
+        var result = self
+        result.selectedFolder = selectedFolder.map { changes.remapping($0) }
+        result.selectedDocuments = Set(selectedDocuments.map { changes.remapping($0) })
+        result.expandedFolders = Set(expandedFolders.map { changes.remapping($0) })
+        return result
+    }
+
     private enum CodingKeys: String, CodingKey {
         case formatVersion, selectedFolder, selectedDocuments, expandedFolders
     }
@@ -82,5 +90,17 @@ public struct DocumentSummary: Sendable {
                 return DocumentSummary(modified: nil, firstLine: "")
             }
         }.value
+    }
+}
+
+extension LibraryChangeSet {
+    public func remapping(_ path: String) -> String {
+        for change in changes {
+            guard let old = change.oldPath else { continue }
+            if path == old || (change.isFolder && path.hasPrefix(old + "/")) {
+                return change.newPath + path.dropFirst(old.count)
+            }
+        }
+        return path
     }
 }

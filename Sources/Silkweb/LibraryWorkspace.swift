@@ -5,6 +5,18 @@ import SilkwebCore
 @MainActor @Observable
 final class LibraryWorkspace {
     let editor = DocumentSession()
+    var libraryUndo: [LibraryUndo] = []
+    var rename: LibraryRename?
+    var mutating = false
+    var revision = 0
+    var mutationError: String?
+    var mutationErrorTitle = ""
+
+    func install(_ snapshot: LibrarySnapshot, sorted: [LibraryDocument]) {
+        self.snapshot = snapshot
+        allDocuments = sorted
+        groupedDocuments = Dictionary(grouping: sorted, by: \.folderID)
+    }
     private var navigationTask: Task<Void, Never>?
     var snapshot: LibrarySnapshot?
     var session = LibrarySession()
@@ -86,6 +98,9 @@ final class LibraryWorkspace {
             await previousLoad?.value
             guard !Task.isCancelled else { return }
             await navigationTask?.value
+            guard !mutating else { return }
+            libraryUndo = []
+            rename = nil
             guard await editor.open(nil, readOnly: false) else { return }
             await editor.configure(root: url)
             // Let any previous scan finish cancellation before releasing its access.
@@ -169,7 +184,7 @@ final class LibraryWorkspace {
     }
 
     private func navigate(folder: String?, documents: Set<String>) {
-        guard !loading else { return }
+        guard !loading, !mutating else { return }
         let previous = navigationTask
         navigationTask = Task {
             await previous?.value
@@ -224,8 +239,12 @@ struct LibraryWorkspaceView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 560)
+        .alert(workspace.mutationErrorTitle, isPresented: Binding(get: { workspace.mutationError != nil }, set: { if !$0 { workspace.mutationError = nil } })) {
+            Button("OK") { workspace.mutationError = nil }
+        } message: { Text(workspace.mutationError ?? "") }
         .task { workspace.restore(); await workspace.resumeEditor() }
         .onChange(of: workspace.session) { workspace.persistSession() }
+        .onChange(of: focusedColumn) { if focusedColumn == 1 { workspace.focusColumn = 1 } }
         .onChange(of: workspace.focusRequest) {
             visibility = .all
             focusedColumn = workspace.focusColumn == 1 ? 1 : nil
@@ -238,6 +257,13 @@ struct LibraryWorkspaceView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("LIBRARY").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 12)
                     FolderSidebar(snapshot: snapshot, workspace: workspace)
+                    Menu {
+                        Button("New Folder") { workspace.create(folder: true) }
+                        Button("New Document") { workspace.create(folder: false) }
+                    } label: { Image(systemName: "plus") }
+                    .menuStyle(.borderlessButton).fixedSize().padding(8)
+                    .accessibilityLabel("Add").help("Add")
+                    .disabled(!workspace.canMutate)
                 }
                 .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
             } else {

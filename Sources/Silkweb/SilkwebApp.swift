@@ -15,14 +15,31 @@ struct SilkwebApp: App {
         .defaultSize(width: 1200, height: 760)
         .commands {
             CommandGroup(replacing: .newItem) {
+                Button("New Document") { workspace.create(folder: false) }
+                    .keyboardShortcut("n").disabled(!workspace.canMutate)
+                Button("New Folder") { workspace.create(folder: true) }
+                    .keyboardShortcut("n", modifiers: [.command, .shift]).disabled(!workspace.canMutate)
+                Button("Rename…") { workspace.beginRename() }
+                    .disabled(!workspace.canMutate || workspace.selectedItem == nil)
+                Button("Reveal in Finder") { workspace.reveal() }
+                    .keyboardShortcut("r", modifiers: [.command, .option]).disabled(workspace.snapshot == nil)
+                Divider()
                 Button("Open Folder in Place…") { workspace.chooseFolder() }
                     .keyboardShortcut("o")
                 Button("New Library…") { workspace.newLibrary() }
                     .keyboardShortcut("n", modifiers: [.command, .option])
             }
             CommandGroup(replacing: .saveItem) {
-                Button("Save") { Task { await workspace.editor.flush() } }
+                Button("Save") { Task { await workspace.editor.save() } }
                     .keyboardShortcut("s").disabled(workspace.editor.url == nil || workspace.editor.readOnly)
+            }
+            CommandGroup(replacing: .undoRedo) {
+                Button(workspace.usesTextUndo ? "Undo" : workspace.libraryUndo.last?.title ?? "Undo") {
+                    if workspace.usesTextUndo { NSApp.sendAction(Selector(("undo:")), to: nil, from: nil) }
+                    else { workspace.undoLibrary() }
+                }.keyboardShortcut("z").disabled(!workspace.usesTextUndo && !workspace.canUndoLibrary)
+                Button("Redo") { NSApp.sendAction(Selector(("redo:")), to: nil, from: nil) }
+                    .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!workspace.usesTextRedo)
             }
             CommandGroup(after: .pasteboard) {
                 Button("Paste and Match Style") { NSApp.sendAction(#selector(NSTextView.pasteAsPlainText(_:)), to: nil, from: nil) }

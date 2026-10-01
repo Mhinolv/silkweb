@@ -91,7 +91,7 @@ final class DocumentSession {
     }
 
     func edit(_ value: String) {
-        guard !readOnly, let url else { return }
+        guard !readOnly, !loading, let url else { return }
         text = value
         state = .dirty
         pendingEdits += 1
@@ -118,6 +118,17 @@ final class DocumentSession {
         if value == text, pendingEdits == 0 { state = result }
         if result.isDirty { announce() }
         return !result.isDirty && value == text && pendingEdits == 0
+    }
+
+    func save() async -> Bool {
+        recovered = false
+        return await flush()
+    }
+
+    func followRename(to destination: URL) async {
+        let position = (selection, scroll)
+        _ = await open(destination, readOnly: readOnly)
+        (selection, scroll) = position
     }
 
     func keepRecovery() {

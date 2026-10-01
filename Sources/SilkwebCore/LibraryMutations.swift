@@ -65,6 +65,8 @@ public struct LibraryPathChange: Equatable, Sendable {
 public struct LibraryChangeSet: Equatable, Sendable {
     public let changes: [LibraryPathChange]
 
+    public init(changes: [LibraryPathChange]) { self.changes = changes }
+
     /// Folder descendants retain their identities without enumerating their bodies.
     public func applying(to metadata: LibraryMetadata) -> LibraryMetadata {
         var result = metadata
@@ -117,6 +119,23 @@ public actor LibraryMutations {
         }
     }
 
+    /// Used only by Undo New Folder. rmdir atomically refuses nonempty folders.
+    public func removeEmptyFolder(_ path: String) throws {
+        let source = try item(path)
+        let (metadata, _) = try LibraryMetadataStore.load(root: root)
+        guard rmdir(source.path) == 0 else { throw operationError(path, isFolder: true) }
+        var updated = metadata
+        updated.IDsByPath.removeValue(forKey: path)
+        do { try LibraryMetadataStore.save(updated, root: root) }
+        catch {
+            // Restore the empty folder if its index could not be committed.
+            guard mkdir(source.path, 0o755) == 0 else {
+                throw LibraryMutationError.rollbackFailed(original: path, current: path)
+            }
+            throw error
+        }
+    }
+
     public func createDocument(named name: String, in parentPath: String = "", text: String = "") throws -> LibraryChangeSet {
         let name = try Self.validateName(name)
         return try perform(operation: "created", name: LibraryMutationError.displayName(name)) {
@@ -146,6 +165,22 @@ public actor LibraryMutations {
         }
     }
 
+    /// Read-only preflight for live rename feedback, using the volume's lookup rules.
+    public func validateRename(_ path: String, to name: String) throws {
+        let name = try Self.validateName(name)
+        let source = try item(path)
+        let isFolder = try source.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+        let parent = source.deletingLastPathComponent()
+        let destination = parent.appendingPathComponent(name)
+        if !isFolder && !["md", "markdown"].contains(destination.pathExtension.lowercased()) {
+            throw LibraryMutationError.unsupportedItem(name)
+        }
+        guard try entryExists(destination), source.path != destination.path else { return }
+        let names = try FileManager.default.contentsOfDirectory(atPath: parent.path)
+        if !names.contains(name), try sameItem(source, destination) { return }
+        throw LibraryMutationError.collision(path: destination.path, isFolder: isFolder, folderName: parent.lastPathComponent)
+    }
+
     public func move(_ path: String, toFolder parentPath: String) throws -> LibraryChangeSet {
         return try perform(operation: "moved", name: LibraryMutationError.displayName((path as NSString).lastPathComponent)) {
             let components = try Self.components(path, allowRoot: false)
@@ -165,6 +200,12 @@ public actor LibraryMutations {
             throw LibraryMutationError.invalidName(.controlCharacter)
         }
         return name
+    }
+
+    /// Inline fields edit only the base name, preserving a document's original extension.
+    public static func renameFilename(_ input: String, for path: String, isFolder: Bool) throws -> String {
+        let base = try validateName(input)
+        return try validateName(isFolder ? base : base + "." + (path as NSString).pathExtension)
     }
 
     /// Uses the actual volume's lookup rules, including case and Unicode equivalence.
