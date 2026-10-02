@@ -31,6 +31,7 @@ struct SnapshotScenario {
     var focusOutline = false
     /// Draw the editor caret (normally hidden in captures) right after this source text.
     var visibleCaret: String? = nil
+    var createDocument = false
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
     static let image = "Snapshot Fixtures/Image Fixture.md"
@@ -86,6 +87,8 @@ struct SnapshotScenario {
         .init(name: "quick-open", quickQuery: "brew"),
         .init(name: "search-results", searchQuery: "coffee"),
         .init(name: "empty-document", document: "Snapshot Fixtures/Empty Document.md"),
+        .init(name: "new-document", folder: "", document: "Snapshot Fixtures/Empty Document.md", createDocument: true),
+        .init(name: "new-document-in-folder", folder: "Snapshot Fixtures/Empty Folder", document: "Snapshot Fixtures/Empty Document.md", createDocument: true),
         .init(name: "read-only-banner", document: "Snapshot Fixtures/Read Only.md"),
         .init(name: "tabs-open", document: image, tabs: [pourOver, image, "Snapshot Fixtures/Empty Document.md"]),
     ]
@@ -319,6 +322,16 @@ final class SnapshotHarness {
             workspace.mediaDirectoryName = "media"
             if migration == "progress" { workspace.mediaProgress = ("media", 12, 40) }
             else { workspace.mediaFailures = [.init(name: "kettle.png", reason: "The file is locked.")] }
+        }
+        if scenario.createDocument {
+            workspace.create(folder: false, parent: scenario.folder)
+            for _ in 0..<500 {
+                if !workspace.mutating { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            guard !workspace.mutating, workspace.mutationError == nil else {
+                throw SnapshotFailure.error("New document did not finish")
+            }
         }
         workspace.preview.mode = scenario.mode
         workspace.preview.showsOutline = scenario.outline
@@ -560,7 +573,7 @@ final class SnapshotHarness {
                 for editor in Self.descendants(view).compactMap({ $0 as? PlainMarkdownTextView }) where scenario.visibleCaret == nil {
                     editor.insertionPointColor = .clear
                 }
-                if scenario.name == "empty-document", let editor = workspace.preview.editor { window.makeFirstResponder(editor) }
+                if (scenario.name == "empty-document" || scenario.createDocument), let editor = workspace.preview.editor { window.makeFirstResponder(editor) }
                 window.title = workspace.editor.url == nil ? workspace.folderName : workspace.editor.name
                 window.subtitle = workspace.subtitle
                 capture.windowTitle = window.title

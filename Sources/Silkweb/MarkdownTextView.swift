@@ -142,7 +142,7 @@ struct MarkdownTextView: NSViewRepresentable {
         if text.isEditable != editable { text.isEditable = editable; text.needsDisplay = true }
         if active, FormattingTarget.shared.editor === text { FormattingTarget.shared.refresh() }
         text.setAccessibilityLabel("Document text, \(session.name)")
-        text.setAccessibilityPlaceholderValue(text.isEditable ? "Start writing…" : nil)
+        text.setAccessibilityPlaceholderValue(text.placeholderEnabled ? "Start writing…" : nil)
         if active { text.window?.isDocumentEdited = workspace.allEditors.contains { $0.state.isDirty } }
         if coordinator.focusRequest != workspace.focusRequest {
             coordinator.focusRequest = workspace.focusRequest
@@ -397,7 +397,7 @@ final class PlainMarkdownTextView: NSTextView {
         super.drawInsertionPoint(in: rect, color: color, turnedOn: flag)
         // NSTextView clears the caret directly, without calling draw(_:).
         // Restore the placeholder under that narrow strip when the caret turns off.
-        if !flag, string.isEmpty, isEditable {
+        if !flag, string.isEmpty, placeholderEnabled {
             NSGraphicsContext.saveGraphicsState()
             NSBezierPath(rect: rect).addClip()
             drawBackground(in: rect)
@@ -448,8 +448,14 @@ final class PlainMarkdownTextView: NSTextView {
         return NSRect(x: rect.minX, y: top, width: rect.width, height: bottom - top)
     }
 
+    // Loading locks input while a new note is prepared. It must not erase the
+    // current empty editor's placeholder before the new tab is ready to install.
+    var placeholderEnabled: Bool {
+        isEditable || (session?.loading == true && session?.readOnly == false)
+    }
+
     private func drawPlaceholder() {
-        guard string.isEmpty, isEditable else { return }
+        guard string.isEmpty, placeholderEnabled else { return }
         var attributes = typingAttributes
         attributes[.foregroundColor] = NSColor.tertiaryLabelColor
         let value = NSAttributedString(string: "Start writing…", attributes: attributes)
