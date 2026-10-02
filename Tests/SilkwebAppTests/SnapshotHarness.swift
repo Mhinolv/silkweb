@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 import WebKit
-import SilkwebCore
+@testable import SilkwebCore
 @testable import Silkweb
 
 /// QA infrastructure only: scenarios configure production state, never draw substitute UI.
@@ -18,11 +18,14 @@ struct SnapshotScenario {
     var searchQuery: String? = nil
     var tabs: [String] = []
     var scrollToEnd = false
+    var resizeSidebar = false
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
     static let image = "Snapshot Fixtures/Image Fixture.md"
     static let initial: [SnapshotScenario] = [
         .init(name: "library-overview"),
+        .init(name: "sidebar-resized", folder: "Coffee", resizeSidebar: true),
+        .init(name: "sidebar-folder-rename", folder: "Coffee", rename: true),
         .init(name: "folder-selected", folder: "Coffee/Brewing Guides"),
         .init(name: "editor-document", document: pourOver),
         .init(name: "editor-long-scrolled-end", document: "Snapshot Fixtures/Long Document.md", tabs: [pourOver, "Snapshot Fixtures/Long Document.md"], scrollToEnd: true),
@@ -157,6 +160,9 @@ final class SnapshotHarness {
         for name in [".silkweb"] {
             try? FileManager.default.removeItem(at: root.appendingPathComponent(name))
         }
+        for name in ["A very long folder name that truncates before its count", "Private folder with a very long unreadable name"] {
+            try FileManager.default.createDirectory(at: root.appendingPathComponent(name), withIntermediateDirectories: true)
+        }
         let fixtures = root.appendingPathComponent("Snapshot Fixtures")
         try FileManager.default.createDirectory(at: fixtures, withIntermediateDirectories: true)
         let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 400, pixelsHigh: 240,
@@ -257,7 +263,16 @@ final class SnapshotHarness {
             workspace.root = root
             workspace.recoveryDirectory = root.appendingPathComponent("Snapshot Recovery")
             let snapshot = try await bounded("library scan") { try await LibraryScanner.scan(root: root) }
-            workspace.install(snapshot)
+            if scenario.resizeSidebar {
+                var folders = snapshot.folders
+                if let index = folders.firstIndex(where: { $0.name == "Private folder with a very long unreadable name" }) {
+                    // Deterministic scan-time permission fixture without changing filesystem permissions.
+                    folders[index].isUnreadable = true
+                }
+                workspace.install(LibrarySnapshot(rootURL: snapshot.rootURL, folders: folders, documents: snapshot.documents,
+                    presentation: LibraryPresentation(folders: folders, documents: snapshot.documents), metadata: snapshot.metadata,
+                    recoveredMetadataURL: snapshot.recoveredMetadataURL, isReadOnly: snapshot.isReadOnly))
+            } else { workspace.install(snapshot) }
             try await bounded("scenario configuration") { try await self.configure(scenario, workspace: workspace) }
             let controller = NSHostingController(rootView: AnyView(LibraryWorkspaceView(workspace: workspace)
                 .environment(\.colorScheme, dark ? .dark : .light)))
@@ -275,10 +290,17 @@ final class SnapshotHarness {
                 columns.splitView.setPosition(220 + columns.navigationController.splitView.dividerThickness + 300, ofDividerAt: 0)
                 controller.view.layoutSubtreeIfNeeded()
                 columns.navigationController.splitView.setPosition(220, ofDividerAt: 0)
+                if scenario.resizeSidebar {
+                    for width: CGFloat in [180, 320, 200, 260] {
+                        columns.navigationController.splitView.setPosition(width, ofDividerAt: 0)
+                        controller.view.layoutSubtreeIfNeeded()
+                        try await Task.sleep(for: .milliseconds(50))
+                    }
+                }
             }
             if scenario.rename {
-                guard let path = scenario.document else { throw SnapshotFailure.error("Rename scenario needs a document") }
-                workspace.beginRename(LibraryRename(path: path, isFolder: false))
+                guard let path = scenario.document ?? scenario.folder else { throw SnapshotFailure.error("Rename scenario needs an item") }
+                workspace.beginRename(LibraryRename(path: path, isFolder: scenario.document == nil))
                 try await wait("inline rename") { workspace.rename != nil && Self.descendants(controller.view).contains { $0 is RenameNameField } }
             }
             if scenario.quickQuery != nil || scenario.searchQuery != nil {

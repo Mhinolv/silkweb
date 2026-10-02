@@ -146,7 +146,7 @@ struct FolderSidebar: NSViewRepresentable {
         }
         private func applyCount(to cell: SidebarFolderCell, item: Item) {
             let count = item.folder.flatMap { counts[$0.id] } ?? FolderDocumentCount(direct: totalCount, recursive: totalCount)
-            cell.countBadge.stringValue = count.badge
+            cell.countBadge.stringValue = count.inlineSuffix
             cell.setAccessibilityValue(count.accessibilityValue)
             cell.toolTip = item.folder?.isUnreadable == true ? "You don't have permission to view this folder." : count.tooltip
         }
@@ -191,15 +191,20 @@ struct FolderSidebar: NSViewRepresentable {
                 cell.identifier = identifier
                 let text = NSTextField(labelWithString: "")
                 text.lineBreakMode = .byTruncatingTail
+                text.font = .systemFont(ofSize: 13)
+                text.setContentHuggingPriority(NSLayoutConstraint.Priority(251), for: .horizontal)
+                text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
                 let image = NSImageView()
                 let count = cell.countBadge
-                count.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+                count.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
                 count.textColor = .secondaryLabelColor
                 count.setContentCompressionResistancePriority(.required, for: .horizontal)
                 count.translatesAutoresizingMaskIntoConstraints = false
+                count.setAccessibilityElement(false)
                 let badge = cell.lockBadge
                 badge.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: nil)
                 badge.contentTintColor = .secondaryLabelColor
+                badge.setAccessibilityElement(false)
                 text.translatesAutoresizingMaskIntoConstraints = false
                 image.translatesAutoresizingMaskIntoConstraints = false
                 badge.translatesAutoresizingMaskIntoConstraints = false
@@ -209,18 +214,21 @@ struct FolderSidebar: NSViewRepresentable {
                 cell.addSubview(count)
                 cell.textField = text
                 cell.imageView = image
+                cell.titleToLock = text.trailingAnchor.constraint(equalTo: badge.leadingAnchor)
+                cell.lockToCount = badge.trailingAnchor.constraint(equalTo: count.leadingAnchor)
+                cell.lockWidth = badge.widthAnchor.constraint(equalToConstant: 0)
                 NSLayoutConstraint.activate([
                     image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
                     image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                     image.widthAnchor.constraint(equalToConstant: 16), image.heightAnchor.constraint(equalToConstant: 16),
                     text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
-                    text.trailingAnchor.constraint(equalTo: badge.leadingAnchor, constant: -4),
+                    cell.titleToLock!,
                     text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                    badge.trailingAnchor.constraint(equalTo: count.leadingAnchor, constant: -4),
-                    count.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
-                    count.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                    cell.lockToCount!,
+                    count.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
+                    count.firstBaselineAnchor.constraint(equalTo: text.firstBaselineAnchor),
                     badge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                    badge.widthAnchor.constraint(equalToConstant: 12), badge.heightAnchor.constraint(equalToConstant: 12)
+                    cell.lockWidth!, badge.heightAnchor.constraint(equalToConstant: 12)
                 ])
             }
             cell.renameField?.removeFromSuperview()
@@ -246,7 +254,7 @@ struct FolderSidebar: NSViewRepresentable {
             cell.textField?.stringValue = item.title
             let symbol = item.folder.map { $0.parentID == nil ? "books.vertical" : "folder" } ?? "doc.on.doc"
             cell.imageView?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-            cell.lockBadge.isHidden = item.folder?.isUnreadable != true
+            cell.configureCluster(unreadable: item.folder?.isUnreadable == true, renaming: cell.renameField != nil)
             let label = item.folder.map { "\(item.title), \($0.parentID == nil ? "library" : "folder")" } ?? item.title
             cell.setAccessibilityElement(true)
             cell.setAccessibilityLabel(item.folder?.isUnreadable == true ? "\(label), unreadable, permission denied" : label)
@@ -398,6 +406,31 @@ final class SidebarFolderCell: NSTableCellView {
     let lockBadge = NSImageView()
     let countBadge = NSTextField(labelWithString: "")
     var renameField: RenameNameField?
+    var titleToLock: NSLayoutConstraint?
+    var lockToCount: NSLayoutConstraint?
+    var lockWidth: NSLayoutConstraint?
+
+    func configureCluster(unreadable: Bool, renaming: Bool) {
+        countBadge.isHidden = renaming
+        lockBadge.isHidden = renaming || !unreadable
+        lockWidth?.constant = unreadable ? 12 : 0
+        titleToLock?.constant = unreadable ? -4 : 0
+        // The suffix already starts with a space; retain four points around the lock.
+        lockToCount?.constant = unreadable ? -4 : 0
+        updateSecondaryColor()
+    }
+
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { updateSecondaryColor() }
+    }
+
+    private func updateSecondaryColor() {
+        let color: NSColor = backgroundStyle == .emphasized
+            ? NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.75)
+            : .secondaryLabelColor
+        countBadge.textColor = color
+        lockBadge.contentTintColor = color
+    }
 }
 
 /// Arrow navigation and type-selection remain AppKit's native outline behavior.

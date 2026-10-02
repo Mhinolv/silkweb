@@ -2,6 +2,20 @@ import XCTest
 @testable import SilkwebCore
 
 final class LibraryPresentationTests: XCTestCase {
+    func testSidebarInlineSuffixUsesOnlyDirectCountIncludingZero() {
+        for direct in [0, 1, 2, 999, 1_204, 10_000, Int.max] {
+            for recursive in [direct, Int.max] {
+                let count = FolderDocumentCount(direct: direct, recursive: recursive)
+                XCTAssertEqual(count.inlineSuffix, " (\(direct.formatted()))")
+                XCTAssertTrue(count.tooltip.contains(recursive.formatted() + " including subfolders"))
+                XCTAssertTrue(count.accessibilityValue.contains(recursive.formatted() + " including subfolders"))
+            }
+        }
+        XCTAssertEqual(FolderDocumentCount().inlineSuffix, " (0)")
+        XCTAssertEqual(FolderDocumentCount(direct: 2, recursive: 8).inlineSuffix, " (2)")
+        XCTAssertEqual(FolderDocumentCount(direct: 1_204).inlineSuffix, " (1,204)")
+    }
+
     func testCountsNaturalFoldersAndRecursiveBoundary() {
         let root = LibraryFolder(id: UUID(), parentID: nil, relativePath: "", name: "Library")
         let two = LibraryFolder(id: UUID(), parentID: root.id, relativePath: "Chapter 2", name: "Chapter 2")

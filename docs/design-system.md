@@ -26,14 +26,15 @@ Copy style: sentence case for messages and title case for menu items and buttons
 - Sidebar layout:
 ```
 LIBRARY
-  [doc.on.doc]      All Documents        1,204
-  [books.vertical]  My Library             12   ← root folder (dir name); root docs live here
-     ▸ [folder]     Projects                8
-     ▾ [folder]     Writing                 3
-          [folder]  Drafts
-TAGS                                           ← section hidden until a tag exists (1.21)
-  [tag]             research                9
+  [doc.on.doc]      All Documents (1,204)
+  [books.vertical]  My Library (12)     ← root folder (dir name); root docs live here
+     ▸ [folder]     Projects (8)
+     ▾ [folder]     Writing (3)
+          [folder]  Drafts (0)
+TAGS                                    ← section hidden until a tag exists (1.21)
+  [tag]             research (9)
 ```
+- Sidebar counts are inline after the name: a space and the direct count in parentheses, `secondaryLabelColor`, same font as the title with monospaced digits, `(0)` shown. The name truncates first; the count never clips. No trailing count column.
 - Sidebar is an `NSOutlineView` bridge (source-list style). SwiftUI `OutlineGroup` can't do spring-loading, inline rename, or lazy expansion at 1k folders. Document list may be SwiftUI `List` or `NSTableView`, whichever handles 10k rows smoothly. Both support multi-selection.
 
 ## 4. Visual tokens (system only)

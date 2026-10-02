@@ -33,6 +33,8 @@ public struct FolderDocumentCount: Equatable, Sendable {
     public var direct: Int
     public var recursive: Int
     public init(direct: Int = 0, recursive: Int = 0) { self.direct = direct; self.recursive = recursive }
+    /// Shared visible suffix for sidebar folder rows and future tag rows, including zero.
+    public var inlineSuffix: String { " (\(direct.formatted()))" }
     public var badge: String { direct == 0 ? "" : direct.formatted() }
     public var accessibilityValue: String { "\(direct.formatted()) documents, \(recursive.formatted()) including subfolders" }
     public var tooltip: String { "\(direct.formatted()) documents · \(recursive.formatted()) including subfolders" }
