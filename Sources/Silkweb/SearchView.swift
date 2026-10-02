@@ -13,11 +13,13 @@ struct SearchView<Content: View>: View {
         #if DEBUG
         let _ = { search.resultsBodyCount += 1 }()
         #endif
-        VStack(spacing: 0) {
+        PinnedColumn {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search Library", text: $search.text)
                     .textFieldStyle(.plain).focused($fieldFocused)
+                    .accessibilityIdentifier("library-search")
+                    .columnLayoutAnchor("library-search")
                     .onSubmit { openSelected() }
                     .onKeyPress(.downArrow) {
                         selected = selected ?? search.results.first?.id
@@ -29,13 +31,14 @@ struct SearchView<Content: View>: View {
                         .buttonStyle(.plain).help("Clear Search").accessibilityLabel("Clear Search")
                 }
             }.padding(8)
-            ZStack {
+        } content: {
+            ZStack(alignment: .top) {
                 content()
                     .opacity(search.text.isEmpty ? 1 : 0)
                     .allowsHitTesting(search.text.isEmpty)
                     .accessibilityHidden(!search.text.isEmpty)
                 if !search.text.isEmpty {
-                    VStack(spacing: 0) {
+                    PinnedColumn {
                         Picker("Search Scope", selection: $search.folderScope) {
                             Text("All Documents").tag(nil as UUID?)
                             if let folder = workspace.selectedFolder {
@@ -46,33 +49,40 @@ struct SearchView<Content: View>: View {
                             if search.isSearching { ProgressView().controlSize(.small) }
                             Text(LibrarySearch.resultCount(search.results.count))
                         }
-                            .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 8)
-                        if search.results.isEmpty && !search.hasPendingQuery {
-                            ContentUnavailableView.search(text: search.text)
-                            if search.folderScope != nil {
-                                Button("Search All Documents") { search.folderScope = nil }.padding(.bottom, 8)
-                            }
-                        } else {
-                            List(search.results, selection: $selected) { result in
-                                Button {
-                                    selected = result.id
-                                    openSelected()
-                                } label: {
-                                    SearchResultRow(result: result, query: search.resultText)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .contentShape(Rectangle())
+                            .font(.caption).monospacedDigit().foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 8)
+                    } content: {
+                        VStack(spacing: 0) {
+                            if search.results.isEmpty && !search.hasPendingQuery {
+                                ColumnEmptyState {
+                                    VStack(spacing: 8) {
+                                        ContentUnavailableView.search(text: search.text)
+                                        if search.folderScope != nil {
+                                            Button("Search All Documents") { search.folderScope = nil }
+                                        }
+                                    }
                                 }
-                                .buttonStyle(.plain)
-                                .tag(result.id)
+                            } else {
+                                List(search.results, selection: $selected) { result in
+                                    Button {
+                                        selected = result.id
+                                        openSelected()
+                                    } label: {
+                                        SearchResultRow(result: result, query: search.resultText)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .tag(result.id)
+                                }
+                                .focused($resultsFocused)
+                                .onKeyPress(.return) { openSelected(); return .handled }
                             }
-                            .focused($resultsFocused)
-                            .onKeyPress(.return) { openSelected(); return .handled }
-                        }
-                        if let note = search.error ?? search.indexingNote {
-                            Text(note).font(.caption).foregroundStyle(.secondary).padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                            if let note = search.error ?? search.indexingNote {
+                                Text(note).font(.caption).foregroundStyle(.secondary).padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .background(Color(nsColor: .textBackgroundColor))
                 }
             }

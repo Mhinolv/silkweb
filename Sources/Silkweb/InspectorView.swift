@@ -18,17 +18,20 @@ struct InspectorView: View {
     var body: some View {
         let current = preview.currentHeading(caret: workspace.editor.caretLocation)
         let shallowest = preview.headings.map(\.level).min() ?? 1
-        return VStack(alignment: .leading, spacing: 0) {
-            Text("Outline").font(.headline).padding(12)
+        return PinnedColumn {
+            Text("Outline").font(.headline).columnLayoutAnchor("outline-title")
+                .padding(12).accessibilityIdentifier("outline-title")
             if !preview.headings.isEmpty {
-                Text(preview.headings.count == 1 ? "1 heading" : "\(preview.headings.count) headings")
+                Text(CountPresentation.label(preview.headings.count, unit: .heading))
                     .font(.caption).monospacedDigit().foregroundStyle(.secondary)
                     .padding(.horizontal, 12).frame(height: 28)
             }
             Divider()
+        } content: {
             if preview.headings.isEmpty {
-                ContentUnavailableView("No Headings", systemImage: "list.bullet.indent", description: Text("Start a line with # to add a heading."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ColumnEmptyState {
+                    ContentUnavailableView("No Headings", systemImage: "list.bullet.indent", description: Text("Start a line with # to add a heading."))
+                }
             } else {
                 ScrollViewReader { proxy in
                     List(selection: $selectedHeading) {

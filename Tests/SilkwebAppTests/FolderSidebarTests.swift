@@ -32,7 +32,7 @@ final class FolderSidebarTests: XCTestCase {
             try XCTUnwrap(coordinator.outlineView(outline, viewFor: outline.tableColumns[0], item: item) as? SidebarFolderCell)
         }
         XCTAssertEqual(try cell(item).countBadge.stringValue, " (1)")
-        XCTAssertEqual(try cell(item).accessibilityValue() as? String, "1 documents, 2 including subfolders")
+        XCTAssertEqual(try cell(item).accessibilityValue() as? String, "1 document, 2 including subfolders")
         XCTAssertEqual(try cell(coordinator.roots[0]).countBadge.stringValue, " (3)")
         XCTAssertEqual(try cell(coordinator.itemsByPath[""]!).countBadge.stringValue, " (1)")
         XCTAssertEqual(try cell(coordinator.itemsByPath["Empty"]!).countBadge.stringValue, " (0)")

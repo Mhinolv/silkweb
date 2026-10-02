@@ -8,21 +8,24 @@ struct DocumentList: View {
     @State private var dateReference = Date()
     var body: some View {
         SearchView(workspace: workspace, search: workspace.search) {
-            VStack(spacing: 0) {
+            PinnedColumn {
                 if workspace.includesSubfolders {
                     HStack {
-                        Text("Including subfolders · \(workspace.documents.count.formatted()) documents")
+                        Text("Including subfolders · \(CountPresentation.label(workspace.documents.count, unit: .document))")
                         Spacer()
                         Button("Show Only This Folder") { workspace.setIncludeSubfolders(false) }.buttonStyle(.borderless)
                     }
-                    .font(.caption).padding(.horizontal, 8).frame(height: 28).background(.bar)
+                    .font(.caption).monospacedDigit().padding(.horizontal, 8).frame(height: 28).background(.bar)
                     .accessibilityElement(children: .contain).accessibilityLabel("Including subfolders")
                 }
-                VStack(spacing: 0) {
-                    if workspace.snapshot?.folders.first(where: { $0.relativePath == workspace.session.selectedFolder })?.isUnreadable == true {
+            } content: {
+                if workspace.snapshot?.folders.first(where: { $0.relativePath == workspace.session.selectedFolder })?.isUnreadable == true {
+                    ColumnEmptyState {
                         ContentUnavailableView("Folder Unavailable", systemImage: "lock",
-                                               description: Text("You don't have permission to view this folder."))
-                    } else if workspace.documents.isEmpty {
+                                           description: Text("You don't have permission to view this folder."))
+                    }
+                } else if workspace.documents.isEmpty {
+                    ColumnEmptyState {
                         ContentUnavailableView {
                             Label(workspace.snapshot?.documents.isEmpty == true ? "No Documents Yet" : "No Documents", systemImage: "doc.text")
                         } description: {
@@ -33,10 +36,10 @@ struct DocumentList: View {
                                 Button("New Folder") { workspace.create(folder: true) }.disabled(!workspace.canMutate)
                             }
                         }
-                    } else {
-                        DocumentTable(workspace: workspace, documents: workspace.documents,
-                                      dateReference: dateReference, makeDragProvider: makeDragProvider)
                     }
+                } else {
+                    DocumentTable(workspace: workspace, documents: workspace.documents,
+                                  dateReference: dateReference, makeDragProvider: makeDragProvider)
                 }
             }
         }

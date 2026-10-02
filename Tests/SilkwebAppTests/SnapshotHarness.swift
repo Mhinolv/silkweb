@@ -28,6 +28,9 @@ struct SnapshotScenario {
         .init(name: "sidebar-resized", folder: "Coffee", resizeSidebar: true),
         .init(name: "sidebar-folder-rename", folder: "Coffee", rename: true),
         .init(name: "folder-selected", folder: "Coffee/Brewing Guides"),
+        .init(name: "empty-folder", folder: "Snapshot Fixtures/Empty Folder"),
+        .init(name: "outline-empty", document: "Snapshot Fixtures/Empty Document.md", outline: true),
+        .init(name: "search-empty", searchQuery: "silkweb-no-matches-fixture"),
         .init(name: "editor-document", document: pourOver),
         .init(name: "editor-long-scrolled-end", document: "Snapshot Fixtures/Long Document.md", tabs: [pourOver, "Snapshot Fixtures/Long Document.md"], scrollToEnd: true, legacyScroller: true),
         .init(name: "editor-image", document: image),
@@ -197,6 +200,7 @@ final class SnapshotHarness {
         """
         try Data(hierarchy.utf8).write(to: fixtures.appendingPathComponent("Outline Hierarchy.md"), options: .atomic)
         try Data(LongEditorFixture.document.utf8).write(to: fixtures.appendingPathComponent("Long Document.md"), options: .atomic)
+        try FileManager.default.createDirectory(at: fixtures.appendingPathComponent("Empty Folder"), withIntermediateDirectories: true)
         try Data().write(to: fixtures.appendingPathComponent("Empty Document.md"), options: .atomic)
         // Exercise the app's real invalid-UTF8 read-only banner without permission tricks.
         try Data(Array("# Read Only\n\nThis fixture opens read-only.\n".utf8) + [0xFF]).write(to: fixtures.appendingPathComponent("Read Only.md"), options: .atomic)
@@ -313,7 +317,10 @@ final class SnapshotHarness {
                 try await wait("editor content") {
                     Self.descendants(controller.view).compactMap { $0 as? PlainMarkdownTextView }.contains { $0.string == workspace.editor.text }
                 }
-                if scenario.outline { try await wait("outline parsing") { !workspace.preview.headings.isEmpty } }
+                if scenario.outline {
+                    let expected = MarkdownParser.parse(workspace.editor.text).headings
+                    try await wait("outline parsing") { workspace.preview.headings == expected }
+                }
             }
             if let text = scenario.caretHeading {
                 guard let heading = workspace.preview.headings.first(where: { $0.text == text }),

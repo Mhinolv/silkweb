@@ -128,7 +128,7 @@ struct ImportSheet: View {
                     Text("No Markdown documents found").font(.headline)
                     Text("“\(request.source.lastPathComponent)” doesn’t contain any .md or .markdown files.")
                 } else {
-                    Text("\(plan.documentCount) documents, \(plan.assetCount) images and attachments, \(plan.folderCount) folders (\(plan.emptyFolders) empty) will be copied into a new folder “\(plan.folderName)”.")
+                    Text("\(CountPresentation.label(plan.documentCount, unit: .document)), \(plan.assetCount) images and attachments, \(plan.folderCount) folders (\(plan.emptyFolders) empty) will be copied into a new folder “\(plan.folderName)”.")
                 }
                 if plan.folderName != request.source.lastPathComponent {
                     Text(plan.folderNameCollision

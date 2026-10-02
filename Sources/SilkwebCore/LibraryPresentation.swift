@@ -36,8 +36,8 @@ public struct FolderDocumentCount: Equatable, Sendable {
     /// Shared visible suffix for sidebar folder rows and future tag rows, including zero.
     public var inlineSuffix: String { " (\(direct.formatted()))" }
     public var badge: String { direct == 0 ? "" : direct.formatted() }
-    public var accessibilityValue: String { "\(direct.formatted()) documents, \(recursive.formatted()) including subfolders" }
-    public var tooltip: String { "\(direct.formatted()) documents · \(recursive.formatted()) including subfolders" }
+    public var accessibilityValue: String { "\(CountPresentation.label(direct, unit: .document)), \(recursive.formatted()) including subfolders" }
+    public var tooltip: String { "\(CountPresentation.label(direct, unit: .document)) · \(recursive.formatted()) including subfolders" }
 }
 
 /// Built once on the scan worker. Views never sort or read file attributes.

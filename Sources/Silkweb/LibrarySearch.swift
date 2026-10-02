@@ -151,7 +151,7 @@ final class LibrarySearch {
     }
 
     static func resultCount(_ count: Int) -> String {
-        "\(count.formatted()) \(count == 1 ? "result" : "results")"
+        CountPresentation.label(count, unit: .result)
     }
 
     func toggleQuickOpen() {

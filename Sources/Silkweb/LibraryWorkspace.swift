@@ -115,7 +115,7 @@ final class LibraryWorkspace {
         snapshot?.folders.first { $0.relativePath == session.selectedFolder }?.name ?? "All Documents"
     }
     var subtitle: String {
-        search.text.isEmpty ? "\(documents.count.formatted()) documents" + (includesSubfolders ? " (with subfolders)" : "") : "\(search.results.count.formatted()) results"
+        search.text.isEmpty ? CountPresentation.label(documents.count, unit: .document) + (includesSubfolders ? " (with subfolders)" : "") : CountPresentation.label(search.results.count, unit: .result)
     }
 
     func restore() {
@@ -514,8 +514,8 @@ struct DelayedLibraryProgress: View {
     let count: Int?
     @State private var visible = false
     var body: some View {
-        Group {
-            if visible { ProgressView(count.map { "Loading library… \($0.formatted()) documents" } ?? "Loading library…").controlSize(.small) }
+        ColumnEmptyState {
+            if visible { ProgressView(count.map { "Loading library… \(CountPresentation.label($0, unit: .document))" } ?? "Loading library…").controlSize(.small) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task { try? await Task.sleep(for: .milliseconds(300)); if !Task.isCancelled { visible = true } }

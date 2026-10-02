@@ -49,7 +49,7 @@ struct QuickOpenPanel: View {
             HStack(spacing: 4) {
                 if search.isQuickSearching { ProgressView().controlSize(.small) }
                 Text(search.quickText.isEmpty ? "Recent" : LibrarySearch.resultCount(search.quickResults.count))
-            }.font(.caption).foregroundStyle(.secondary)
+            }.font(.caption).monospacedDigit().foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 8)
             if search.quickResults.isEmpty && !search.quickHasPendingQuery {
                 Text(search.error ?? (search.quickText.isEmpty ? "No recent documents" : "No documents named “\(search.quickText)”"))
