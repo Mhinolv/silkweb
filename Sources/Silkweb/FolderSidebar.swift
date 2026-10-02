@@ -155,7 +155,7 @@ struct FolderSidebar: NSViewRepresentable {
             }
             itemsByTag = [:]
             tagsGroup = nil
-            if !tags.isEmpty {
+            do {
                 let group = Item(folder: nil, title: "Tags")
                 group.isTagsGroup = true
                 group.children = tags.map { tag in
@@ -228,7 +228,7 @@ struct FolderSidebar: NSViewRepresentable {
             ((item as? Item)?.children ?? roots)[index]
         }
         func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-            !((item as? Item)?.children.isEmpty ?? true)
+            (item as? Item)?.isTagsGroup == true || !((item as? Item)?.children.isEmpty ?? true)
         }
         func outlineView(_ outlineView: NSOutlineView, objectValueFor tableColumn: NSTableColumn?, byItem item: Any?) -> Any? {
             (item as? Item)?.title

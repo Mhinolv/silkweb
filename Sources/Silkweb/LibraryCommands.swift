@@ -196,6 +196,7 @@ extension LibraryWorkspace {
                         var result = current
                         result.tags = metadata.tags
                         result.tagsByDocument = metadata.tagsByDocument
+                        result.tagRecency = metadata.tagRecency
                         return result
                     }
                     try await refresh(LibraryChangeSet(changes: []))

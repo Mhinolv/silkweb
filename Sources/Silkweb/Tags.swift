@@ -14,26 +14,35 @@ extension LibraryWorkspace {
     }
     var effectiveTagFilters: Set<UUID> { tagFilters.union(session.selectedTagID.map { [$0] } ?? []) }
     func selectTag(_ id: UUID) {
-        tagFilters = []
-        selectFolder(nil)
-        Task { await waitForNavigation(); session.selectedTagID = id; persistSession() }
+        navigate(folder: nil, documents: [], tag: id, changesScope: true)
+    }
+    func tagState(_ tag: LibraryTag) -> NSControl.StateValue {
+        guard let metadata = snapshot?.metadata else { return .off }
+        let ids = tagDocumentIDs
+        let count = ids.filter { metadata.tagsByDocument[$0.uuidString]?.contains(tag.id) == true }.count
+        return count == 0 ? .off : count == ids.count ? .on : .mixed
     }
     func showInfo() { inspectorInfo = true; preview.showsOutline = true; tagFocusRequest += 1 }
     func editTags(_ names: [String]) {
         let ids = tagDocumentIDs
-        guard let metadata = snapshot?.metadata,
-              TagEditor.edit(names, documents: ids, metadata: metadata) != metadata else { return }
-        let removing = commonTagNames.contains { old in
-            !names.contains { $0.compare(old, options: .caseInsensitive) == .orderedSame }
-        }
-        changeTags(title: removing ? "Undo Remove Tag" : "Undo Add Tag") { TagEditor.edit(names, documents: ids, metadata: $0) }
+        guard let metadata = snapshot?.metadata else { return }
+        let updated = TagEditor.edit(names, documents: ids, metadata: metadata)
+        guard updated != metadata else { return }
+        let oldIDs = TagEditor.commonTags(documents: ids, metadata: metadata)
+        let newIDs = TagEditor.commonTags(documents: ids, metadata: updated)
+        let removed = oldIDs.subtracting(newIDs), added = newIDs.subtracting(oldIDs)
+        let changes = removed.isEmpty ? added : removed
+        let changedNames = (metadata.tags + updated.tags).filter { changes.contains($0.id) }.reduce(into: [UUID: String]()) { $0[$1.id] = $1.name }
+        let verb = removed.isEmpty ? "Add" : "Remove"
+        let title = changedNames.count == 1 ? "Undo \(verb) Tag “\(changedNames.values.first!)”" : "Undo \(verb) Tags"
+        changeTags(title: title) { TagEditor.edit(names, documents: ids, metadata: $0) }
     }
     func toggleTag(_ tag: LibraryTag, paths: Set<String>) {
         guard let snapshot else { return }
         let ids = Set(paths.compactMap { snapshot.metadata.IDsByPath[$0] })
         let common = TagEditor.commonTags(documents: ids, metadata: snapshot.metadata)
         let names = tags.filter { common.contains($0.id) && $0.id != tag.id }.map(\.name)
-        changeTags(title: common.contains(tag.id) ? "Undo Remove Tag" : "Undo Add Tag") {
+        changeTags(title: "Undo \(common.contains(tag.id) ? "Remove" : "Add") Tag “\(tag.name)”") {
             TagEditor.edit(common.contains(tag.id) ? names : names + [tag.name], documents: ids, metadata: $0)
         }
     }
@@ -123,12 +132,26 @@ struct DocumentInfo: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Tags").font(.headline)
-                    TagTokenField(names: workspace.commonTagNames, suggestions: workspace.tags.map(\.name),
-                                  focusRequest: workspace.tagFocusRequest, enabled: workspace.canEditTags, onChange: workspace.editTags)
-                        .frame(minHeight: 28)
-                    Text("Tags are saved in this library’s Silkweb index, not in the document file.")
-                        .font(.caption).foregroundStyle(.tertiary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Tags").font(.headline)
+                        TagTokenField(names: workspace.commonTagNames, suggestions: workspace.tags.map(\.name),
+                                      focusRequest: workspace.tagFocusRequest, enabled: workspace.canEditTags, onChange: workspace.editTags)
+                            .frame(minHeight: 28)
+                        if !workspace.recentTags.isEmpty {
+                            Text("Recent").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                .padding(.top, 4)
+                            RecentTagFlow {
+                                ForEach(workspace.recentTags) { tag in
+                                    RecentTagPill(tag: tag, state: workspace.tagState(tag), enabled: workspace.canEditTags) {
+                                        workspace.toggleTag(tag, paths: workspace.session.selectedDocuments)
+                                    }
+                                }
+                            }
+                            .accessibilityElement(children: .contain).accessibilityLabel("Recent tags")
+                        }
+                        Text("Saved in Silkweb’s index, not in the file.")
+                            .font(.caption).foregroundStyle(.tertiary)
+                    }
                     if let document = workspace.selectedDocument {
                         Text("Location").font(.headline)
                         let parent = (document.relativePath as NSString).deletingLastPathComponent
@@ -155,7 +178,8 @@ struct TagTokenField: NSViewRepresentable {
         let field = container.field
         field.placeholderString = "Add tags"
         field.tokenizingCharacterSet = CharacterSet(charactersIn: ",\t\n")
-        field.completionDelay = 0.1
+        // A controlled nonactivating completion list commits mouse and keyboard identically.
+        field.completionDelay = .greatestFiniteMagnitude
         field.delegate = context.coordinator
         field.target = context.coordinator
         field.action = #selector(Coordinator.commit(_:))
@@ -188,6 +212,7 @@ struct TagTokenField: NSViewRepresentable {
         private var validating = false
         init(onChange: @escaping ([String]) -> Void) { self.onChange = onChange }
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            if let field = control as? TagInputField, field.handleCompletionCommand(selector) { return true }
             let backwards = selector == #selector(NSResponder.deleteBackward(_:))
             let forwards = selector == #selector(NSResponder.deleteForward(_:))
             if (backwards || forwards), Self.isTokenDeletion(textView, backwards: backwards) {
@@ -224,7 +249,13 @@ struct TagTokenField: NSViewRepresentable {
             onChange(field.objectValue as? [String] ?? [])
         }
         func controlTextDidChange(_ notification: Notification) {
-            (notification.object as? TagInputField)?.contentChanged()
+            if let field = notification.object as? TagInputField {
+                field.contentChanged()
+                if let editor = field.currentEditor() as? NSTextView {
+                    let prefix = editor.string.components(separatedBy: "\u{FFFC}").last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    field.showCompletions(suggestions.filter { !$0.isEmpty && !prefix.isEmpty && $0.range(of: prefix, options: [.caseInsensitive, .anchored]) != nil })
+                }
+            }
         }
         func controlTextDidEndEditing(_ notification: Notification) {
             if let field = notification.object as? NSTokenField { commit(field) }
@@ -262,6 +293,7 @@ final class TagTokenContainer: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         field.cell = WrappingTagCell(textCell: "")
+        field.tokenStyle = .rounded
         field.font = .systemFont(ofSize: 13)
         field.isEditable = true
         field.isSelectable = true
@@ -343,13 +375,18 @@ final class TagTokenContainer: NSView {
 /// Requests issued before SwiftUI attaches the field are fulfilled once it has a window.
 final class TagInputField: NSTokenField {
     weak var container: TagTokenContainer?
+    var completionRows: [NSButton] = []
+    var completionIndex = 0
+    let completionPanel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     override var objectValue: Any? { didSet { contentChanged() } }
     func contentChanged() { container?.contentChanged() }
     override func textDidBeginEditing(_ notification: Notification) {
         super.textDidBeginEditing(notification)
+        if let editor = currentEditor() as? NSTextView { editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0)) }
         contentChanged()
     }
     override func textDidEndEditing(_ notification: Notification) {
+        dismissCompletions()
         super.textDidEndEditing(notification)
         contentChanged()
     }
@@ -357,6 +394,7 @@ final class TagInputField: NSTokenField {
     private(set) var fulfilledFocus = 0
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if window == nil { dismissCompletions() }
         focusIfNeeded()
     }
     func focusIfNeeded() {
@@ -365,6 +403,9 @@ final class TagInputField: NSTokenField {
         DispatchQueue.main.async { [weak self, weak window] in
             guard let self, self.window === window else { return }
             window?.makeFirstResponder(self)
+            if let editor = self.currentEditor() as? NSTextView {
+                editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+            }
         }
     }
 }

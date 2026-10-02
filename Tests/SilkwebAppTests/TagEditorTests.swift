@@ -108,7 +108,7 @@ final class TagEditorTests: XCTestCase {
         for _ in 0..<100 where workspace.mutating { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(workspace.tags.map(\.name), ["Research"])
         XCTAssertEqual(workspace.snapshot?.metadata.tagsByDocument.count, 2)
-        XCTAssertEqual(workspace.libraryUndo.last?.title, "Undo Add Tag")
+        XCTAssertEqual(workspace.libraryUndo.last?.title, "Undo Add Tag “Research”")
         for info in [false, true, false, true] {
             workspace.inspectorInfo = info
             for width in [200.0, 240.0, 320.0, 200.0] {
@@ -121,7 +121,7 @@ final class TagEditorTests: XCTestCase {
         workspace.editTags([])
         for _ in 0..<100 where workspace.mutating { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(workspace.tags.isEmpty)
-        XCTAssertEqual(workspace.libraryUndo.last?.title, "Undo Remove Tag")
+        XCTAssertEqual(workspace.libraryUndo.last?.title, "Undo Remove Tag “Research”")
         workspace.undoLibrary()
         for _ in 0..<100 where workspace.mutating { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(workspace.tags.map(\.name), ["Research"])

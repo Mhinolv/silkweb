@@ -143,6 +143,6 @@ final class TagLayoutTests: XCTestCase {
         window.contentViewController = nil
         workspace.session.selectedTagID = nil
         workspace.install(initial); coordinator.configure(initial); coordinator.restore()
-        XCTAssertFalse(coordinator.roots.contains { $0.title == "Tags" })
+        XCTAssertTrue(coordinator.roots.contains { $0.title == "Tags" })
     }
 }

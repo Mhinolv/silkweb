@@ -2,9 +2,11 @@ import Foundation
 
 /// Rebuildable identity index. Markdown bodies are never stored here.
 public struct LibraryMetadata: Codable, Equatable, Sendable {
-    public static let currentVersion = 2
+    public static let currentVersion = 3
     public var formatVersion: Int
     public var tags: [LibraryTag] = []
+    /// Most recently applied first; IDs keep history stable through renames.
+    public var tagRecency: [UUID] = []
     public var tagsByDocument: [String: Set<UUID>] = [:]
     public var IDsByPath: [String: UUID]
 
@@ -13,7 +15,7 @@ public struct LibraryMetadata: Codable, Equatable, Sendable {
         self.IDsByPath = IDsByPath
     }
 
-    private enum CodingKeys: String, CodingKey { case formatVersion, IDsByPath, tags, tagsByDocument }
+    private enum CodingKeys: String, CodingKey { case formatVersion, IDsByPath, tags, tagsByDocument, tagRecency }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -22,6 +24,7 @@ public struct LibraryMetadata: Codable, Equatable, Sendable {
         formatVersion = (1...Self.currentVersion).contains(version) ? Self.currentVersion : version
         tags = try values.decodeIfPresent([LibraryTag].self, forKey: .tags) ?? []
         tagsByDocument = try values.decodeIfPresent([String: Set<UUID>].self, forKey: .tagsByDocument) ?? [:]
+        tagRecency = (try? values.decode([UUID].self, forKey: .tagRecency)) ?? []
         IDsByPath = try values.decodeIfPresent([String: UUID].self, forKey: .IDsByPath) ?? [:]
     }
 }

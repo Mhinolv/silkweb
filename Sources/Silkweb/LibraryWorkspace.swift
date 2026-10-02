@@ -24,6 +24,7 @@ final class LibraryWorkspace {
     }
     var tagCounts: [UUID: Int] = [:]
     var tags: [LibraryTag] = []
+    var recentTags: [LibraryTag] = []
     var inspectorInfo = false
     var tagFocusRequest = 0
     var tagRenameID: UUID?
@@ -55,6 +56,7 @@ final class LibraryWorkspace {
         var counts: [UUID: Int] = [:]
         for ids in snapshot.metadata.tagsByDocument.values { for id in ids { counts[id, default: 0] += 1 } }
         tagCounts = counts
+        recentTags = TagEditor.recentTags(metadata: snapshot.metadata)
         search.install(snapshot)
         itemPathsByID = Dictionary(uniqueKeysWithValues: snapshot.metadata.IDsByPath.map { ($0.value, $0.key) })
         documentCache = nil
@@ -458,11 +460,10 @@ final class LibraryWorkspace {
     }
 
     func selectFolder(_ path: String?) {
-        session.selectedTagID = nil
-        navigate(folder: path, documents: [])
+        navigate(folder: path, documents: [], tag: nil, changesScope: true)
     }
 
-    func navigate(folder: String?, documents: Set<String>, pinned: Bool = false) {
+    func navigate(folder: String?, documents: Set<String>, pinned: Bool = false, tag: UUID? = nil, changesScope: Bool = false) {
         guard !loading, !mutating else { return }
         let previous = navigationTask
         navigationTask = Task {
@@ -471,8 +472,13 @@ final class LibraryWorkspace {
                 snapshot?.documents.first(where: { $0.relativePath == path })
             } : nil
             if let document { guard await openTab(document, pinned: pinned) else { return } }
-            session.selectedFolder = folder
-            session.selectedDocuments = documents
+            var next = session
+            next.selectedFolder = folder
+            next.selectedDocuments = documents
+            if changesScope { next.selectedTagID = tag }
+            session = next
+            // Install the new tag scope before clearing toolbar filters: never expose the full library.
+            if changesScope && tag != nil { tagFilters = [] }
             if let path = documents.count == 1 ? documents.first : nil,
                let id = snapshot?.metadata.IDsByPath[path], let index = search.index {
                 try? await index.recordOpened(id, persist: snapshot?.isReadOnly == false)

@@ -28,12 +28,17 @@ public enum TagEditor {
         var result = metadata
         let old = commonTags(documents: documents, metadata: metadata)
         var desired = Set<UUID>()
+        var orderedIDs: [UUID] = []
         for input in names {
             guard let name = normalize(input) else { continue }
             let tag = existing(name, in: result.tags) ?? LibraryTag(name: name)
             if !result.tags.contains(where: { $0.id == tag.id }) { result.tags.append(tag) }
-            desired.insert(tag.id)
+            if desired.insert(tag.id).inserted { orderedIDs.append(tag.id) }
         }
+        let applied = desired.subtracting(old)
+        // Preserve input order for deterministic multi-tag commits. Only new applications count.
+        let appliedIDs = orderedIDs.filter { applied.contains($0) }
+        result.tagRecency = appliedIDs + result.tagRecency.filter { !applied.contains($0) }
         for id in documents {
             var tags = result.tagsByDocument[id.uuidString] ?? []
             tags.subtract(old.subtracting(desired)); tags.formUnion(desired)
@@ -48,6 +53,7 @@ public enum TagEditor {
             for key in result.tagsByDocument.keys where result.tagsByDocument[key]?.contains(id) == true {
                 result.tagsByDocument[key]?.remove(id); result.tagsByDocument[key]?.insert(existing.id)
             }
+            result.tagRecency = result.tagRecency.map { $0 == id ? existing.id : $0 }
             result.tags.remove(at: index)
         } else { result.tags[index].name = name }
         return pruning(result)
@@ -64,8 +70,25 @@ public enum TagEditor {
         result.tagsByDocument = result.tagsByDocument.filter { live.contains($0.key) }.mapValues { $0.intersection(known) }.filter { !$0.value.isEmpty }
         let used = result.tagsByDocument.values.reduce(into: Set<UUID>()) { $0.formUnion($1) }
         result.tags.removeAll { !used.contains($0.id) }
+        var seen = Set<UUID>()
+        result.tagRecency = result.tagRecency.filter { used.contains($0) && seen.insert($0).inserted }
         result.formatVersion = LibraryMetadata.currentVersion
         return result
+    }
+    /// Choose by application history, fill missing history by usage, then display naturally sorted.
+    public static func recentTags(metadata: LibraryMetadata, limit: Int = 6) -> [LibraryTag] {
+        guard limit > 0 else { return [] }
+        let byID = Dictionary(metadata.tags.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var counts: [UUID: Int] = [:]
+        for ids in metadata.tagsByDocument.values { for id in ids { counts[id, default: 0] += 1 } }
+        let fallback = metadata.tags.sorted {
+            let a = counts[$0.id, default: 0], b = counts[$1.id, default: 0]
+            return a == b ? $0.name.localizedStandardCompare($1.name) == .orderedAscending : a > b
+        }
+        var seen = Set<UUID>()
+        return (metadata.tagRecency.compactMap { byID[$0] } + fallback)
+            .filter { seen.insert($0.id).inserted }.prefix(limit)
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
     public static func matches(_ document: LibraryDocument, folder: LibraryFolder?, includeSubfolders: Bool,
                                tags: Set<UUID>, metadata: LibraryMetadata, searchIDs: Set<UUID>? = nil) -> Bool {

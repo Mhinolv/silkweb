@@ -38,8 +38,10 @@ struct SnapshotScenario {
         .init(name: "export-missing-images", exportWarning: true),
         .init(name: "tags-sidebar-collapsed", tagState: "collapsed"),
         .init(name: "tags-sidebar-expanded", tagState: "expanded"),
+        .init(name: "tags-sidebar-empty", tagState: "zero"),
         .init(name: "tags-info-many", document: pourOver, tagState: "many"),
         .init(name: "tags-info", document: pourOver, tagState: "info"),
+        .init(name: "tags-info-choose", tagState: "choose", selectedDocuments: [pourOver, image]),
         .init(name: "tags-info-empty", tagState: "empty"),
         .init(name: "tags-multi-selection", tagState: "multi", selectedDocuments: [pourOver, image]),
         .init(name: "tags-selected", tagState: "selected"),
@@ -321,13 +323,33 @@ final class SnapshotHarness {
         if let state = scenario.tagState, let snapshot = workspace.snapshot {
             let ids = Set(snapshot.documents.filter { [SnapshotScenario.pourOver, SnapshotScenario.image].contains($0.relativePath) }.map(\.id))
             let names = state == "many" ? (1...20).map { "research topic \($0)" } : ["research", "draft"]
-            _ = try await TagStore.update(root: snapshot.rootURL) { TagEditor.edit(names, documents: ids, metadata: $0) }
+            let choosePaths = [SnapshotScenario.pourOver, SnapshotScenario.image]
+            _ = try await TagStore.update(root: snapshot.rootURL) { metadata in
+                if state == "zero" { return metadata.tags.reduce(metadata) { TagEditor.delete($1.id, metadata: $0) } }
+                if state == "info" {
+                    let allNames = ["coffee", "draft", "kyoto", "notes", "research", "travel", "archive", "writing"]
+                    let otherIDs = Set(snapshot.documents.map(\.id)).subtracting(ids)
+                    var result = TagEditor.edit(allNames, documents: otherIDs, metadata: metadata)
+                    result = TagEditor.edit(["coffee", "research"], documents: ids, metadata: result)
+                    result.tagRecency = ["coffee", "draft", "kyoto", "notes", "research", "travel"].compactMap { TagEditor.existing($0, in: result.tags)?.id }
+                    return result
+                }
+                if state == "choose" {
+                    let allNames = ["Coffee brewing experiments", "Drafts awaiting another review", "Field notes from Kyoto", "Long distance travel planning", "Research and reference reading", "Writing small useful tools"]
+                    let a = snapshot.metadata.IDsByPath[choosePaths[0]]!, b = snapshot.metadata.IDsByPath[choosePaths[1]]!
+                    let otherIDs = Set(snapshot.documents.map(\.id)).subtracting([a, b])
+                    var result = TagEditor.edit(allNames, documents: otherIDs, metadata: metadata)
+                    result = TagEditor.edit([allNames[0], allNames[1]], documents: [a], metadata: result)
+                    return TagEditor.edit([allNames[0]], documents: [b], metadata: result)
+                }
+                return TagEditor.edit(names, documents: ids, metadata: metadata)
+            }
             workspace.tagsExpanded = state != "collapsed"
             workspace.install(try await LibraryScanner.scan(root: snapshot.rootURL))
             if state == "rename", let tag = workspace.tags.first { workspace.tagRenameID = tag.id; workspace.tagRenameName = tag.name }
             if state == "filter" { workspace.tagFilters = Set(workspace.tags.map(\.id)) }
             if state == "selected", let id = workspace.tags.first?.id { workspace.session.selectedTagID = id; workspace.session.selectedFolder = nil }
-            if ["info", "empty", "multi", "many"].contains(state) { workspace.inspectorInfo = true; workspace.preview.showsOutline = true }
+            if ["info", "empty", "multi", "many", "choose"].contains(state) { workspace.inspectorInfo = true; workspace.preview.showsOutline = true }
         }
         if let query = scenario.quickQuery { workspace.search.toggleQuickOpen(); workspace.search.quickText = query }
         if let query = scenario.searchQuery { workspace.search.text = query }

@@ -213,7 +213,7 @@ final class FolderSidebarTests: XCTestCase {
                     let titleRect = text.alignmentRect(forFrame: text.frame)
                     let countRect = cell.countBadge.alignmentRect(forFrame: cell.countBadge.frame)
                     let lockRect = cell.lockBadge.alignmentRect(forFrame: cell.lockBadge.frame)
-                    let count = item.folder.flatMap { snapshot.presentation.counts[$0.id] }
+                    let count = item.isTagsGroup ? FolderDocumentCount(direct: 0, recursive: 0) : item.folder.flatMap { snapshot.presentation.counts[$0.id] }
                         ?? FolderDocumentCount(direct: snapshot.documents.count, recursive: snapshot.documents.count)
                     XCTAssertEqual(cell.countBadge.stringValue, count.inlineSuffix)
                     XCTAssertFalse(cell.countBadge.isHidden)
@@ -221,7 +221,7 @@ final class FolderSidebarTests: XCTestCase {
                     XCTAssertLessThanOrEqual(countRect.maxX, cell.bounds.maxX - 3.5)
                     XCTAssertGreaterThan(titleRect.width, 0)
                     XCTAssertEqual(text.lineBreakMode, .byTruncatingTail)
-                    XCTAssertEqual(cell.accessibilityValue() as? String, count.accessibilityValue)
+                    XCTAssertEqual(cell.accessibilityValue() as? String, item.isTagsGroup ? "0 tags" : count.accessibilityValue)
                     XCTAssertFalse(cell.accessibilityLabel()?.contains(count.inlineSuffix) ?? true)
                     if item.folder?.isUnreadable == true {
                         XCTAssertFalse(cell.lockBadge.isHidden)
@@ -231,7 +231,7 @@ final class FolderSidebarTests: XCTestCase {
                     } else {
                         XCTAssertTrue(cell.lockBadge.isHidden)
                         XCTAssertEqual(countRect.minX, titleRect.maxX, accuracy: 0.5)
-                        XCTAssertEqual(cell.toolTip, count.tooltip)
+                        XCTAssertEqual(cell.toolTip, item.isTagsGroup ? nil : count.tooltip)
                     }
                     if item.title == "Short" {
                         XCTAssertEqual(titleRect.width, text.intrinsicContentSize.width, accuracy: 0.5)
