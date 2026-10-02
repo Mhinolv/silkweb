@@ -50,6 +50,7 @@ struct SilkwebApp: App {
             CommandGroup(after: .pasteboard) {
                 Button("Paste and Match Style") { NSApp.sendAction(#selector(NSTextView.pasteAsPlainText(_:)), to: nil, from: nil) }
                     .keyboardShortcut("v", modifiers: [.command, .option, .shift])
+                FindMenu(workspace: workspace)
             }
             TextEditingCommands()
             FormatCommands()

@@ -36,11 +36,12 @@ struct MarkdownTextView: NSViewRepresentable {
 
     /// Shared construction keeps offscreen regression tests on the production editor hierarchy.
     static func makeEditorScrollView(style: EditorStyle) -> NSScrollView {
-        let scroll = NSScrollView()
+        let scroll = EditorScrollView()
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.backgroundColor = .textBackgroundColor
         scroll.automaticallyAdjustsContentInsets = false
+        scroll.findBarPosition = .aboveContent
         let text = PlainMarkdownTextView()
         text.style = style
         text.isRichText = false
@@ -48,6 +49,7 @@ struct MarkdownTextView: NSViewRepresentable {
         text.registerForDraggedTypes([.fileURL])
         text.allowsUndo = true
         text.usesFindBar = true
+        text.isIncrementalSearchingEnabled = true
         text.isContinuousSpellCheckingEnabled = true
         text.isGrammarCheckingEnabled = false
         text.isAutomaticQuoteSubstitutionEnabled = false
