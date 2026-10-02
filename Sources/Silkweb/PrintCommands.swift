@@ -43,20 +43,16 @@ extension LibraryWorkspace {
                 }
                 let renderer = PrintCoordinator()
                 defer { renderer.hostWindow.close() }
-                try await renderer.load(html: result.html)
-                // Print into a staging file so a failed print job cannot damage an existing PDF.
-                let staging = destination.map { $0.deletingLastPathComponent().appendingPathComponent(".silkweb-print-" + UUID().uuidString + ".pdf") }
-                defer { if let staging { try? FileManager.default.removeItem(at: staging) } }
-                let succeeded = try await renderer.print(info: printInfo, title: name, destination: staging,
-                                                         window: NSApp.keyWindow)
                 if let destination {
-                    guard succeeded, let staging else { throw CocoaError(.fileWriteUnknown) }
+                    let data = try await renderer.exportPDF(html: result.html, info: printInfo, title: name)
                     try await Task.detached(priority: .userInitiated) {
-                        let data = try Data(contentsOf: staging)
-                        guard data.starts(with: Data("%PDF-".utf8)) else { throw CocoaError(.fileWriteUnknown) }
                         try data.write(to: destination, options: .atomic)
                     }.value
                     preview.defaults.set(destination.deletingLastPathComponent().path, forKey: ExportCommands.directoryKey)
+                } else {
+                    guard let window = NSApp.keyWindow else { throw CocoaError(.userCancelled) }
+                    try await renderer.load(html: result.html)
+                    _ = try await renderer.print(info: printInfo, title: name, window: window)
                 }
             } catch {
                 mutationFailure(error, title: exportPDF ? "“\(name)” couldn’t be exported as PDF." : "“\(name)” couldn’t be printed.")

@@ -1,6 +1,7 @@
 /* Original print layout. Screen and print media share a light page. */
 :root { color-scheme: light; }
-@page { margin: 18mm 16mm; }
+/* Physical margins belong to NSPrintInfo (and PDF page assembly). */
+@page { margin: 0; }
 body { margin: 0; font: 11pt/1.5 -apple-system, BlinkMacSystemFont, sans-serif; color: #000; background: #fff; }
 .sw-doc { width: 100%; max-width: none; padding: 0; overflow-wrap: anywhere; }
 .sw-doc > :first-child { margin-top: 0; }

@@ -1,7 +1,8 @@
 import AppKit
 import WebKit
+import PDFKit
 
-/// A short-lived, offscreen renderer. The native print operation owns pagination.
+/// A short-lived, offscreen renderer shared by native printing and PDF export.
 @MainActor
 final class PrintCoordinator: NSObject, WKNavigationDelegate {
     nonisolated static let stylesheet: String = {
@@ -47,37 +48,132 @@ final class PrintCoordinator: NSObject, WKNavigationDelegate {
         }
     }
 
-    func operation(info: NSPrintInfo, title: String, destination: URL? = nil) -> NSPrintOperation {
+    func operation(info: NSPrintInfo, title: String) -> NSPrintOperation {
         let copy = info.copy() as! NSPrintInfo
-        if let destination {
-            copy.jobDisposition = .save
-            copy.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = destination
-        } else { copy.jobDisposition = .spool }
+        copy.jobDisposition = .spool
         let operation = web.printOperation(with: copy)
         operation.jobTitle = title
-        operation.showsPrintPanel = destination == nil
+        operation.showsPrintPanel = true
         operation.showsProgressPanel = true
-        // WKWebView's printing view must paginate on the main thread. AppKit's
-        // background printing path can spin indefinitely waiting for WebKit.
         operation.canSpawnSeparateThread = false
         operation.printPanel.options.insert(.showsPreview)
         return operation
     }
 
-    /// Show the standard panel separately so time spent choosing a printer does not
-    /// count against the rendering deadline. Never enter run()'s synchronous loop.
-    func print(info: NSPrintInfo, title: String, destination: URL? = nil,
-               window: NSWindow? = nil, timeoutInterval: TimeInterval = 60,
-               showsProgressPanel: Bool = true) async throws -> Bool {
+    /// Native printing is always a sheet on the document window.
+    func print(info: NSPrintInfo, title: String, window: NSWindow,
+               timeoutInterval: TimeInterval = 60) async throws -> Bool {
         guard NSPrintOperation.current == nil else { throw CocoaError(.userCancelled) }
-        let operation = operation(info: info, title: title, destination: destination)
-        return try await run(operation, window: window, timeoutInterval: timeoutInterval,
-                             showsProgressPanel: showsProgressPanel)
+        return try await run(operation(info: info, title: title), window: window,
+                             timeoutInterval: timeoutInterval)
     }
 
-    func run(_ operation: NSPrintOperation, window: NSWindow? = nil,
-             timeoutInterval: TimeInterval = 60, showsProgressPanel: Bool = true) async throws -> Bool {
-        let parent = window ?? hostWindow
+    /// createPDF captures screen layout, not @page pagination. Fixed-height CSS
+    /// columns apply the same break rules, then one capture is sliced into paper
+    /// pages. Margins are added exactly once, from the user's Page Setup settings.
+    func exportPDF(html: String, info: NSPrintInfo, title: String,
+                   timeoutInterval: TimeInterval = 15) async throws -> Data {
+        let paper = info.paperSize
+        let width = paper.width - info.leftMargin - info.rightMargin
+        let height = paper.height - info.topMargin - info.bottomMargin
+        guard width.isFinite, height.isFinite, width > 0, height > 0 else {
+            throw PDFExportError.invalidPage
+        }
+        // CSS uses 96 pixels per inch; PDF paper and margins use 72 points.
+        // Layout in CSS pixels, then page assembly scales to physical points so
+        // the stylesheet's 11pt body type remains 11pt in the deliverable.
+        let layoutWidth = width * 96 / 72
+        let layoutHeight = height * 96 / 72
+        return try await PDFExportJob().wait(timeoutInterval: timeoutInterval, cancel: { [weak self] in
+            self?.web.stopLoading()
+            self?.finish(.failure(PDFExportError.timedOut))
+        }) { [self] in
+            web.setFrameSize(NSSize(width: layoutWidth, height: layoutHeight))
+            try await load(html: html)
+            let value = try await javascript("""
+                const style = document.createElement('style');
+                style.textContent = `html, body { margin: 0; width: ${width}px; }
+                    .sw-doc { width: ${width}px; height: ${height}px;
+                        column-width: ${width}px; column-gap: 0; column-fill: auto; }
+                    img { max-height: ${height}px; }`;
+                document.head.appendChild(style);
+                await document.fonts.ready;
+                // scrollWidth rounds to integral CSS pixels; ceil would add a
+                // blank page for fractional paper widths, even on empty notes.
+                return Math.max(1, Math.round(document.querySelector('.sw-doc').scrollWidth / width));
+                """, arguments: ["width": layoutWidth, "height": layoutHeight])
+            guard let count = value as? Int, count > 0, count <= 10_000 else {
+                throw PDFExportError.invalidPage
+            }
+            try Task.checkCancellation()
+            let configuration = WKPDFConfiguration()
+            configuration.rect = CGRect(x: 0, y: 0, width: layoutWidth * CGFloat(count), height: layoutHeight)
+            let capture: Data = try await withCheckedThrowingContinuation { continuation in
+                web.createPDF(configuration: configuration) { result in
+                    continuation.resume(with: result)
+                }
+            }
+            try Task.checkCancellation()
+            // PDF parsing and page assembly are independent of AppKit/WebKit.
+            let left = info.leftMargin, bottom = info.bottomMargin
+            let assembly = Task.detached(priority: .userInitiated) {
+                try Self.paginate(capture, count: count, paper: paper,
+                                  content: CGSize(width: width, height: height),
+                                  left: left, bottom: bottom, title: title)
+            }
+            return try await withTaskCancellationHandler {
+                try await assembly.value
+            } onCancel: {
+                assembly.cancel()
+            }
+        }
+    }
+
+    func javascript(_ script: String, arguments: [String: Any] = [:]) async throws -> Any? {
+        try await withCheckedThrowingContinuation { continuation in
+            web.callAsyncJavaScript(script, arguments: arguments, in: nil, in: .defaultClient) { result in
+                continuation.resume(with: result)
+            }
+        }
+    }
+
+    nonisolated static func paginate(_ capture: Data, count: Int, paper: CGSize,
+                                    content: CGSize, left: CGFloat, bottom: CGFloat,
+                                    title: String) throws -> Data {
+        guard let provider = CGDataProvider(data: capture as CFData),
+              let source = CGPDFDocument(provider), source.numberOfPages == 1,
+              let page = source.page(at: 1) else { throw PDFExportError.invalidPDF }
+        let output = NSMutableData()
+        var box = CGRect(origin: .zero, size: paper)
+        guard let consumer = CGDataConsumer(data: output),
+              let context = CGContext(consumer: consumer, mediaBox: &box,
+                                      [kCGPDFContextTitle: title] as CFDictionary) else {
+            throw PDFExportError.invalidPDF
+        }
+        for index in 0..<count {
+            try Task.checkCancellation()
+            context.beginPDFPage(nil)
+            context.saveGState()
+            context.translateBy(x: left, y: bottom)
+            context.clip(to: CGRect(origin: .zero, size: content))
+            let strip = CGRect(x: -CGFloat(index) * content.width, y: 0,
+                               width: CGFloat(count) * content.width, height: content.height)
+            context.concatenate(page.getDrawingTransform(.mediaBox, rect: strip, rotate: 0, preserveAspectRatio: false))
+            context.drawPDFPage(page)
+            context.restoreGState()
+            context.endPDFPage()
+        }
+        context.closePDF()
+        // Validate the deliverable rather than publishing a partial capture.
+        guard let document = PDFDocument(data: output as Data), document.pageCount == count else {
+            throw PDFExportError.invalidPDF
+        }
+        return output as Data
+    }
+
+    private func run(_ operation: NSPrintOperation, window: NSWindow,
+                     timeoutInterval: TimeInterval) async throws -> Bool {
+        let parent = window
         if operation.showsPrintPanel {
             // The standard panel queries the current operation for preview pages.
             NSPrintOperation.current = operation
@@ -90,7 +186,7 @@ final class PrintCoordinator: NSObject, WKNavigationDelegate {
             guard response == .printed else { return false }
         }
         operation.showsPrintPanel = false
-        operation.showsProgressPanel = showsProgressPanel
+        operation.showsProgressPanel = true
         return try await PrintJob.run(operation, window: parent, timeoutInterval: timeoutInterval) { [web] in
             web.stopLoading()
             // Invalidate the print source and dismiss any system progress sheet.
@@ -186,6 +282,52 @@ final class PrintJob: NSObject {
         timer = nil
         let continuation = completion
         completion = nil
+        continuation?.resume(with: result)
+    }
+}
+
+enum PDFExportError: LocalizedError, Equatable {
+    case timedOut, invalidPage, invalidPDF
+    var errorDescription: String? {
+        switch self {
+        case .timedOut: return "PDF rendering took too long. Try exporting a smaller document."
+        case .invalidPage: return "The selected paper size and margins leave no printable area."
+        case .invalidPDF: return "The rendered PDF could not be read."
+        }
+    }
+}
+
+/// A deadline covers loading, image decoding, capture and page assembly. Late
+/// WebKit callbacks cannot complete an export a second time or publish a file.
+@MainActor
+final class PDFExportJob {
+    private var completion: CheckedContinuation<Data, Error>?
+    private var deadline: Task<Void, Never>?
+    private var work: Task<Void, Never>?
+
+    func wait(timeoutInterval: TimeInterval, cancel: @escaping () -> Void,
+              render: @escaping () async throws -> Data) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            completion = continuation
+            deadline = Task { [self] in
+                do { try await Task.sleep(for: .seconds(timeoutInterval)) } catch { return }
+                work?.cancel()
+                finish(.failure(PDFExportError.timedOut))
+                cancel()
+            }
+            work = Task { [self] in
+                do { finish(.success(try await render())) }
+                catch { finish(.failure(error)) }
+            }
+        }
+    }
+
+    private func finish(_ result: Result<Data, Error>) {
+        deadline?.cancel()
+        deadline = nil
+        let continuation = completion
+        completion = nil
+        work = nil
         continuation?.resume(with: result)
     }
 }
