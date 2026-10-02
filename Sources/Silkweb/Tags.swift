@@ -90,8 +90,9 @@ extension LibraryWorkspace {
         let documents = snapshot.presentation.documentsByID
         return search.results.filter { result in
             guard let document = documents[result.id] else { return false }
+            // Folder search always includes descendants; the toggle only scopes the plain list.
             return TagEditor.matches(document, folder: search.folderScope == nil ? nil : selectedFolder,
-                                     includeSubfolders: includesSubfolders, tags: effectiveTagFilters, metadata: snapshot.metadata)
+                                     includeSubfolders: true, tags: effectiveTagFilters, metadata: snapshot.metadata)
         }
     }
 }

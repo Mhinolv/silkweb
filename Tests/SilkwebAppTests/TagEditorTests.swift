@@ -6,6 +6,66 @@ import XCTest
 
 final class TagEditorTests: XCTestCase {
     @MainActor
+    func testFolderSearchIncludesDescendantsRegardlessOfListPreference() async throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("Writing/Drafts/Deep"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let direct = "Writing/A.md", nested = "Writing/Drafts/B.md"
+        let deep = "Writing/Drafts/Deep/C.md", outside = "Else.md"
+        for path in [direct, nested, deep, outside] {
+            try "needle".write(to: root.appendingPathComponent(path), atomically: true, encoding: .utf8)
+        }
+        try "unrelated".write(to: root.appendingPathComponent("Writing/Drafts/Other.md"), atomically: true, encoding: .utf8)
+        let initial = try await LibraryScanner.scan(root: root)
+        let researchIDs = Set(initial.documents.map(\.id))
+        let draftIDs = Set(initial.documents.filter { [nested, deep, outside].contains($0.relativePath) }.map(\.id))
+        _ = try await TagStore.update(root: root) {
+            TagEditor.edit(["research", "draft"], documents: draftIDs,
+                           metadata: TagEditor.edit(["research"], documents: researchIDs, metadata: $0))
+        }
+        let snapshot = try await LibraryScanner.scan(root: root)
+        let workspace = LibraryWorkspace()
+        workspace.root = root
+        workspace.install(snapshot)
+        await workspace.search.waitForIndex()
+        workspace.session.selectedFolder = "Writing"
+        let folder = try XCTUnwrap(workspace.selectedFolder)
+        let research = try XCTUnwrap(workspace.tags.first { $0.name == "research" }?.id)
+        let draft = try XCTUnwrap(workspace.tags.first { $0.name == "draft" }?.id)
+        let cases: [(filters: Set<UUID>, folderPaths: Set<String>, libraryPaths: Set<String>)] = [
+            ([], [direct, nested, deep], [direct, nested, deep, outside]),
+            ([research], [direct, nested, deep], [direct, nested, deep, outside]),
+            ([research, draft], [nested, deep], [nested, deep, outside]),
+            ([UUID()], [], [])
+        ]
+        for scoped in [false, true] {
+            workspace.search.folderScope = scoped ? folder.id : nil
+            for query in ["needle", "absent"] {
+                workspace.search.text = query
+                await workspace.search.query(quick: false)
+                for testCase in cases {
+                    workspace.tagFilters = testCase.filters
+                    let expected = query == "absent" ? Set<String>() : (scoped ? testCase.folderPaths : testCase.libraryPaths)
+                    for include in [false, true] {
+                        workspace.setIncludeSubfolders(include)
+                        XCTAssertEqual(Set(workspace.filteredSearchResults.compactMap { snapshot.presentation.documentsByID[$0.id]?.relativePath }), expected,
+                                       "scope=\(scoped), query=\(query), tags=\(testCase.filters.count), include=\(include)")
+                        XCTAssertEqual(workspace.subtitle, LibrarySearch.resultCount(expected.count))
+                    }
+                }
+            }
+        }
+        // The toggle still controls the ordinary folder list, including non-search matches.
+        workspace.search.text = ""
+        workspace.tagFilters = []
+        workspace.setIncludeSubfolders(false)
+        XCTAssertEqual(Set(workspace.documents.map(\.relativePath)), [direct])
+        workspace.setIncludeSubfolders(true)
+        XCTAssertEqual(Set(workspace.documents.map(\.relativePath)), [direct, nested, deep, "Writing/Drafts/Other.md"])
+    }
+
+    @MainActor
     func testRealInfoHierarchyTokenLifecycleAndMultiSelection() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
