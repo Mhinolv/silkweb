@@ -9,7 +9,7 @@ final class MarkdownParserTests: XCTestCase {
             ("", "<article class=\"sw-doc sw-empty\"></article>"),
             (" \n\t\r\n", "<article class=\"sw-doc sw-empty\"></article>"),
             ("A paragraph\ncontinued.\n\nAnother.", article("<p>A paragraph\ncontinued.</p>\n<p>Another.</p>\n")),
-            ("# One\n## Two ##\n### Three\n#### Four\n##### Five\n###### Six", article("<h1>One</h1>\n<h2>Two</h2>\n<h3>Three</h3>\n<h4>Four</h4>\n<h5>Five</h5>\n<h6>Six</h6>\n")),
+            ("# One\n## Two ##\n### Three\n#### Four\n##### Five\n###### Six", article("<h1 id=\"one\">One</h1>\n<h2 id=\"two\">Two</h2>\n<h3 id=\"three\">Three</h3>\n<h4 id=\"four\">Four</h4>\n<h5 id=\"five\">Five</h5>\n<h6 id=\"six\">Six</h6>\n")),
             ("**Bold** and *italic* and __strong__ and _emphasis_", article("<p><strong>Bold</strong> and <em>italic</em> and <strong>strong</strong> and <em>emphasis</em></p>\n")),
             ("***both*** and ___both___", article("<p><strong><em>both</em></strong> and <strong><em>both</em></strong></p>\n")),
             ("**bold *italic* end**", article("<p><strong>bold <em>italic</em> end</strong></p>\n")),
@@ -39,7 +39,7 @@ final class MarkdownParserTests: XCTestCase {
         XCTAssertEqual(HTMLRenderer.render("```\n```"), article("<pre><code></code></pre>\n"))
         XCTAssertEqual(HTMLRenderer.render("````\na\n```\nb\n````"), article("<pre><code>a\n```\nb\n</code></pre>\n"))
         XCTAssertEqual(HTMLRenderer.render("` **literal** `"), article("<p><code>**literal**</code></p>\n"))
-        XCTAssertEqual(HTMLRenderer.render("   # Indented"), article("<h1>Indented</h1>\n"))
+        XCTAssertEqual(HTMLRenderer.render("   # Indented"), article("<h1 id=\"indented\">Indented</h1>\n"))
         XCTAssertTrue(HTMLRenderer.render("    # Literal").contains("<p># Literal</p>"))
     }
 
@@ -131,8 +131,7 @@ final class MarkdownParserTests: XCTestCase {
     }
 
     func testUnsupportedAndUnclosedSyntaxStaysVisible() {
-        for source in ["| A | B |", "| --- | --- |", "- [x] **Task**", "[^note]: Footnote",
-                       "[ref]: https://example.com", "~~deleted~~", "####### Not heading", "[unclosed](", "*unclosed", "`unclosed"] {
+        for source in ["| A | B |", "| --- | --- |", "[ref]: https://example.com", "####### Not heading", "[unclosed](", "*unclosed", "`unclosed"] {
             let html = HTMLRenderer.render(source)
             XCTAssertTrue(html.contains(source), source)
         }

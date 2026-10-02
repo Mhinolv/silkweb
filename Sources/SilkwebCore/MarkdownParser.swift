@@ -6,9 +6,29 @@ public enum MarkdownParser {
     public static let maximumNesting = 32
 
     public static func parse(_ source: String) -> MarkdownDocument {
-        let normalized = source.replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-        return MarkdownDocument(blocks: blocks(normalized.components(separatedBy: "\n"), depth: 0))
+        // Keep original UTF-16 offsets even when source uses CRLF or CR newlines.
+        let raw = source as NSString
+        var lines: [SourceLine] = []
+        var offset = 0
+        while offset < raw.length {
+            let range = raw.lineRange(for: NSRange(location: offset, length: 0))
+            let text = raw.substring(with: range).trimmingCharacters(in: .newlines)
+            lines.append(SourceLine(text: text, range: NSRange(location: offset, length: (text as NSString).length)))
+            offset = NSMaxRange(range)
+        }
+        if source.isEmpty || source.last == "\n" || source.last == "\r" {
+            lines.append(SourceLine(text: "", range: NSRange(location: raw.length, length: 0)))
+        }
+        var ranges: [NSRange] = []
+        var footnotes: [String: [MarkdownInline]] = [:]
+        let parsed = blocks(lines, depth: 0, ranges: &ranges, footnotes: &footnotes)
+        return MarkdownDocument(blocks: parsed, headingSourceRanges: ranges, footnotes: footnotes)
+    }
+
+    private struct SourceLine {
+        let text: String
+        let range: NSRange
+        func replacingText(_ text: String) -> SourceLine { SourceLine(text: text, range: range) }
     }
 
     private struct ListMarker {
@@ -88,19 +108,18 @@ public enum MarkdownParser {
     private static func unsupported(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         if trimmed.hasPrefix("["), trimmed.contains("]:") { return true }
-        if trimmed.hasPrefix("|"), trimmed.hasSuffix("|") { return true }
-        if let marker = listMarker(line) {
-            return ["[ ]", "[x]", "[X]"].contains { marker.content.hasPrefix($0) }
-        }
         return false
     }
 
     private static func beginsBlock(_ line: String) -> Bool {
         line.trimmingCharacters(in: .whitespaces).isEmpty || heading(line) != nil || fence(line) != nil
             || thematic(line) || quoteContent(line) != nil || listMarker(line) != nil || unsupported(line)
+            || line.trimmingCharacters(in: .whitespaces) == "[TOC]"
     }
 
-    private static func blocks(_ lines: [String], depth: Int) -> [MarkdownBlock] {
+    private static func blocks(_ sourceLines: [SourceLine], depth: Int, ranges: inout [NSRange],
+                               footnotes: inout [String: [MarkdownInline]]) -> [MarkdownBlock] {
+        let lines = sourceLines.map(\.text)
         guard depth < maximumNesting else {
             return [.paragraph([.text(lines.joined(separator: "\n"))])]
         }
@@ -109,7 +128,32 @@ public enum MarkdownParser {
         while index < lines.count {
             let line = lines[index]
             if line.trimmingCharacters(in: .whitespaces).isEmpty { index += 1; continue }
-            if unsupported(line) {
+            if let definition = MarkdownExtensions.footnoteDefinition(line) {
+                var content = [definition.text]
+                index += 1
+                while index < lines.count, lines[index].hasPrefix("    ") {
+                    content.append(String(lines[index].dropFirst(4))); index += 1
+                }
+                if footnotes[definition.label] == nil {
+                    footnotes[definition.label] = content.enumerated().flatMap { offset, text in
+                        parseInline(text) + (offset + 1 < content.count ? [.softBreak] : [])
+                    }
+                }
+            } else if line.trimmingCharacters(in: .whitespaces) == "[TOC]" {
+                result.append(.tableOfContents); index += 1
+            } else if index + 1 < lines.count,
+                      let header = MarkdownExtensions.tableCells(line),
+                      let alignments = MarkdownExtensions.tableAlignments(lines[index + 1]),
+                      header.count == alignments.count {
+                index += 2
+                var rows: [[[MarkdownInline]]] = []
+                while index < lines.count, !beginsBlock(lines[index]),
+                      let cells = MarkdownExtensions.tableCells(lines[index]) {
+                    let padded = Array((cells + Array(repeating: "", count: max(0, header.count - cells.count))).prefix(header.count))
+                    rows.append(padded.map(parseInline)); index += 1
+                }
+                result.append(.table(header: header.map(parseInline), alignments: alignments, rows: rows))
+            } else if unsupported(line) {
                 result.append(.paragraph([.text(line)])); index += 1
             } else if let opener = fence(line) {
                 index += 1
@@ -125,39 +169,44 @@ public enum MarkdownParser {
                 let text = content.isEmpty || (!closed && content.last == "") ? code : code + "\n"
                 result.append(.code(language: opener.info.isEmpty ? nil : opener.info, text: text))
             } else if let (level, content) = heading(line) {
-                result.append(.heading(level: level, content: parseInline(content))); index += 1
+                result.append(.heading(level: level, content: parseInline(content)))
+                ranges.append(sourceLines[index].range); index += 1
             } else if thematic(line) {
                 result.append(.thematicBreak); index += 1
             } else if quoteContent(line) != nil {
-                var content: [String] = []
+                var content: [SourceLine] = []
                 while index < lines.count, let quoted = quoteContent(lines[index]) {
-                    content.append(quoted); index += 1
+                    content.append(sourceLines[index].replacingText(quoted)); index += 1
                 }
-                result.append(.quote(blocks(content, depth: depth + 1)))
+                result.append(.quote(blocks(content, depth: depth + 1, ranges: &ranges, footnotes: &footnotes)))
             } else if let first = listMarker(line), first.indent <= 3 {
                 var items: [[MarkdownBlock]] = []
                 while index < lines.count, let marker = listMarker(lines[index]),
                       marker.indent == first.indent, (marker.start == nil) == (first.start == nil),
                       !thematic(lines[index]), !unsupported(lines[index]) {
-                    var content = [marker.content]
+                    let task = MarkdownExtensions.task(marker.content)
+                    var content = [sourceLines[index].replacingText(task?.text ?? marker.content)]
                     index += 1
                     while index < lines.count {
                         let next = lines[index]
                         let indent = next.prefix(while: { $0 == " " }).count
                         if !next.isEmpty, indent >= marker.width {
-                            content.append(String(next.dropFirst(marker.width))); index += 1
+                            content.append(sourceLines[index].replacingText(String(next.dropFirst(marker.width)))); index += 1
                         } else if next.isEmpty, index + 1 < lines.count,
                                   lines[index + 1].prefix(while: { $0 == " " }).count >= marker.width {
-                            content.append(""); index += 1
+                            content.append(sourceLines[index].replacingText("")); index += 1
                         } else { break }
                     }
-                    items.append(blocks(content, depth: depth + 1))
+                    let children = blocks(content, depth: depth + 1, ranges: &ranges, footnotes: &footnotes)
+                    items.append(task.map { [.taskItem(checked: $0.checked, content: children)] } ?? children)
                 }
                 result.append(.list(start: first.start, items: items))
             } else {
                 var content = [line]
                 index += 1
                 while index < lines.count, !beginsBlock(lines[index]) {
+                    if index + 1 < lines.count, let header = MarkdownExtensions.tableCells(lines[index]),
+                       let alignments = MarkdownExtensions.tableAlignments(lines[index + 1]), header.count == alignments.count { break }
                     content.append(lines[index]); index += 1
                 }
                 var children: [MarkdownInline] = []
@@ -176,11 +225,11 @@ public enum MarkdownParser {
     public static func parseInline(_ text: String) -> [MarkdownInline] {
         let chars = Array(text)
         var budget = chars.count * 16 + 256
-        return inline(chars, range: 0..<chars.count, depth: 0, budget: &budget)
+        return inline(chars, range: 0..<chars.count, depth: 0, allowLinks: true, budget: &budget)
     }
 
     private static func inline(_ chars: [Character], range: Range<Int>, depth: Int,
-                               budget: inout Int) -> [MarkdownInline] {
+                               allowLinks: Bool, budget: inout Int) -> [MarkdownInline] {
         guard depth < maximumNesting else { return [.text(String(chars[range]))] }
         var result: [MarkdownInline] = []
         var pending = ""
@@ -220,7 +269,37 @@ public enum MarkdownParser {
                 pending += String(chars[i..<end]); i = end; continue
             }
             let image = c == "!" && i + 1 < range.upperBound && chars[i + 1] == "["
-            if c == "[" || image {
+            if allowLinks, c == "[", i + 2 < range.upperBound, chars[i + 1] == "^" {
+                var end = i + 2
+                while end < range.upperBound, chars[end] != "]", !chars[end].isWhitespace, chars[end] != "[", budget > 0 {
+                    end += 1; budget -= 1
+                }
+                if end > i + 2, end < range.upperBound, chars[end] == "]" {
+                    flush(); result.append(.footnoteReference(String(chars[(i + 2)..<end])))
+                    i = end + 1; continue
+                }
+            }
+            // Bare URLs must begin at a word boundary and cannot nest inside link labels.
+            if (c == "h" || c == "w"), allowLinks,
+               i == range.lowerBound || !(chars[i - 1].isLetter || chars[i - 1].isNumber || "_/@".contains(chars[i - 1])) {
+                let prefix = String(chars[i..<min(i + 8, range.upperBound)])
+                if prefix.hasPrefix("https://") || prefix.hasPrefix("http://") || prefix.hasPrefix("www.") {
+                    var end = i
+                    while end < range.upperBound, !chars[end].isWhitespace, !"<>\"".contains(chars[end]), budget > 0 {
+                        end += 1; budget -= 1
+                    }
+                    while end > i, ".,;:!?".contains(chars[end - 1]) { end -= 1 }
+                    for (open, close) in [(Character("("), Character(")")), ("[", "]")] {
+                        let segment = chars[i..<end]
+                        var excess = segment.filter { $0 == close }.count - segment.filter { $0 == open }.count
+                        while excess > 0, end > i, chars[end - 1] == close { end -= 1; excess -= 1 }
+                    }
+                    let label = String(chars[i..<end])
+                    flush(); result.append(.link(label: [.text(label)], destination: label.hasPrefix("www.") ? "https://" + label : label, title: nil))
+                    i = end; continue
+                }
+            }
+            if allowLinks, c == "[" || image {
                 let labelStart = i + (image ? 2 : 1)
                 var cursor = labelStart
                 var bracketDepth = 1
@@ -233,21 +312,21 @@ public enum MarkdownParser {
                 }
                 if bracketDepth == 0, cursor + 1 < range.upperBound, chars[cursor + 1] == "(",
                    let target = destination(chars, start: cursor + 2, limit: range.upperBound, budget: &budget) {
-                    let label = inline(chars, range: labelStart..<cursor, depth: depth + 1, budget: &budget)
+                    let label = inline(chars, range: labelStart..<cursor, depth: depth + 1, allowLinks: false, budget: &budget)
                     flush()
                     result.append(image ? .image(alt: label.map(\.plainText).joined(), destination: target.url, title: target.title)
                                   : .link(label: label, destination: target.url, title: target.title))
                     i = target.end; continue
                 }
             }
-            if c == "*" || c == "_" {
+            if c == "*" || c == "_" || (c == "~" && i + 1 < range.upperBound && chars[i + 1] == "~") {
                 let count: Int
-                if i + 2 < range.upperBound, chars[i + 1] == c, chars[i + 2] == c { count = 3 }
+                if c != "~", i + 2 < range.upperBound, chars[i + 1] == c, chars[i + 2] == c { count = 3 }
                 else { count = i + 1 < range.upperBound && chars[i + 1] == c ? 2 : 1 }
                 let before = i > range.lowerBound ? chars[i - 1] : nil
                 let after = i + count < range.upperBound ? chars[i + count] : nil
                 // Deliberately avoid intraword markers, including arithmetic such as 2*3*4.
-                if let after, !after.isWhitespace, before == nil || !(before!.isLetter || before!.isNumber) {
+                if let after, !after.isWhitespace, c == "~" || before == nil || !(before!.isLetter || before!.isNumber) {
                     var cursor = i + count
                     var closing: Int?
                     while cursor + count <= range.upperBound, budget > 0 {
@@ -256,24 +335,40 @@ public enum MarkdownParser {
                         let matches = (0..<count).allSatisfy { chars[cursor + $0] == c }
                         let following = cursor + count < range.upperBound ? chars[cursor + count] : nil
                         if matches, cursor > i + count, !chars[cursor - 1].isWhitespace,
-                           following == nil || !(following!.isLetter || following!.isNumber),
+                           c == "~" || following == nil || !(following!.isLetter || following!.isNumber),
                            (count > 1 || following != c) { closing = cursor; break }
                         cursor += 1
                     }
                     if let closing {
-                        let children = inline(chars, range: (i + count)..<closing, depth: depth + 1, budget: &budget)
+                        let children = inline(chars, range: (i + count)..<closing, depth: depth + 1, allowLinks: allowLinks, budget: &budget)
                         flush()
-                        if count == 3 { result.append(.strong([.emphasis(children)])) }
+                        if c == "~" { result.append(.strikethrough(children)) }
+                        else if count == 3 { result.append(.strong([.emphasis(children)])) }
                         else { result.append(count == 2 ? .strong(children) : .emphasis(children)) }
                         i = closing + count; continue
                     }
                 }
             }
             if c == "<" {
+                let prefix = String(chars[i..<min(i + 4, range.upperBound)])
+                let terminator = prefix == "<!--" ? Array("-->") : prefix.hasPrefix("<?") ? Array("?>") : [Character(">")]
                 var cursor = i + 1
-                while cursor < range.upperBound, chars[cursor] != ">", budget > 0 { cursor += 1; budget -= 1 }
+                while cursor < range.upperBound, budget > 0 {
+                    budget -= 1
+                    if cursor + 1 >= terminator.count,
+                       (0..<terminator.count).allSatisfy({ chars[cursor + 1 - terminator.count + $0] == terminator[$0] }) { break }
+                    cursor += 1
+                }
                 if cursor < range.upperBound, chars[cursor] == ">" {
-                    flush(); result.append(.rawHTML(String(chars[i...cursor]))); i = cursor + 1; continue
+                    let candidate = String(chars[(i + 1)..<cursor])
+                    if allowLinks, (candidate.hasPrefix("https://") || candidate.hasPrefix("http://")), !candidate.contains(where: \.isWhitespace) {
+                        flush(); result.append(.link(label: [.text(candidate)], destination: candidate, title: nil))
+                        i = cursor + 1; continue
+                    }
+                    let raw = String(chars[i...cursor])
+                    if MarkdownExtensions.isRawHTML(raw) {
+                        flush(); result.append(.rawHTML(raw)); i = cursor + 1; continue
+                    }
                 }
             }
             pending.append(c); i += 1

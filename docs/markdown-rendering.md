@@ -7,10 +7,10 @@ and render off the main thread and debounce editor updates. No saved formats cha
 
 HTML uses `<article class="sw-doc">` (`sw-empty` for an empty document), headings,
 paragraphs, emphasis, strong, inline/fenced code, quotes, lists, links, images and
-rules. Standard elements have no styles/classes except fenced code's
-`language-…` hook. The first info-string word is filtered to ASCII letters, digits,
-`_`, `+` and `-`; there is no highlighting. Lists retain paragraph wrappers and
-ordered starting numbers. Soft breaks emit a newline with `.standard`, or `<br>`
+rules. No inline styles are emitted. Extension class hooks are listed below; fenced
+code uses a `language-…` hook. The first info-string word is filtered to ASCII letters, digits,
+`_`, `+` and `-`; there is no highlighting. Ordinary lists retain paragraph wrappers and
+ordered starting numbers; task-item leading text follows its checkbox directly. Soft breaks emit a newline with `.standard`, or `<br>`
 with `.preserve`; two trailing spaces or a trailing backslash give a hard break.
 
 | Source | Supported behavior / deliberate deviation from CommonMark |
@@ -18,14 +18,19 @@ with `.preserve`; two trailing spaces or a trailing backslash give a hard break.
 | ATX headings | One to six hashes, up to three leading spaces; whitespace-separated closing hashes removed. Setext headings are not supported; dash underlines render as thematic breaks. |
 | Emphasis / strong | Paired `*`/`_` and `**`/`__`, including triple markers and simple nested content; intraword markers are literal (`2*3*4`, `snake_case`). Complex adjacent delimiter runs do not implement CommonMark delimiter rules. |
 | Code | Matching-length backticks; fenced backticks/tildes of length ≥3, including unclosed fences. Code is escaped and never parsed as Markdown. Indented code is not implemented. |
-| Links / images | Inline labels, balanced destination parentheses (at most 32 levels), angle-delimited destinations and optional single/double-quoted titles. No reference links, autolinks or entity decoding. Backslash escapes supported. |
+| Links / images | Inline labels, balanced destination parentheses (at most 32 levels), angle-delimited destinations and optional single/double-quoted titles. No reference links or entity decoding. HTTP(S) angle and bare autolinks plus bare `www.` links are supported; `www.` destinations use HTTPS. Trailing sentence punctuation and unmatched closing parentheses/brackets are excluded. Autolinks do not nest inside link labels. Backslash escapes supported. |
 | Quotes / lists | Explicit `>` on every quoted line. Space-indented list children/continuations must align with the parent's content column. Ordered markers have at most nine digits. Lazy continuation, tabs as list indentation, and CommonMark tight/loose rules are not implemented. |
-| HTML | Angle-delimited source is escaped in `sw-raw-html` spans, including tags/comments/autolinks; other text is always escaped. HTML inside code is ordinary escaped code. |
-| Extensions | Table rows with leading/trailing pipes, task-list lines, reference/footnote definition lines remain literal paragraph text. Strike, TOC, wikilinks, other unsupported syntax remain visible; no tables/tasks/footnotes/TOC semantics until 1.17. |
+| HTML | Tag-shaped source, comments, declarations and processing instructions are escaped in `sw-raw-html` spans; comparison prose such as `1 < 2 and 3 > 2` stays plain escaped text. HTML inside code is ordinary escaped code. |
+| Tables | Pipe headers followed by matching delimiter columns (at least three dashes). Leading/trailing pipes are optional for multi-column tables; one-column tables require a pipe. Escaped pipes remain literal, including in code spans. Short rows are padded, excess cells ignored. Inline formatting is supported. `sw-table-wrap` surrounds a semantic table with `thead`/`tbody`; optional `sw-align-left/center/right` classes apply to header and body cells. |
+| Tasks / strike | List items beginning `[ ]`, `[x]` or `[X]` followed by whitespace/end render disabled checkboxes with `sw-task` on the item and `sw-task-list` on its list (including mixed/ordered lists). Paired `~~` emits `del`, including inline children. |
+| Headings / TOC | `MarkdownDocument.headings` exposes level, plain text, ID and original UTF-16 source range (excluding newline, including quote/list prefixes). Direct ASTs without ranges report `NSNotFound`. Unicode letters/numbers are retained in lowercase slugs; other runs become hyphens; empty slugs use `section`. Duplicate/colliding IDs get numeric suffixes in document order. Standalone `[TOC]` emits `sw-toc` navigation, nested under the nearest preceding lower-level heading; missing levels do not create empty entries. No headings means no TOC output. Code remains literal. |
+| Footnotes | `[^label]` and `[^label]: text`, with contiguous four-space-indented continuations. Labels are case-sensitive, without whitespace/brackets; first definition wins. Definition content supports inline Markdown and soft breaks, not separate block paragraphs/lists. First reference order assigns numbers. Missing definitions remain literal; unused definitions are omitted. Repeated references have distinct `fnref-N-K` IDs and individual back-links. Referenced definitions render once at the end in `sw-footnotes`, including cyclic references without recursion. |
+| Unsupported | Reference-link definitions, wikilinks and other unsupported syntax remain visible. |
 | Resource limits | Block/inline nesting stops at 32. Inline lookahead has a work budget proportional to each source line. On exhaustion the remaining source stays literal and escaped, with no truncation. |
 
 URLs allow absolute HTTP(S), mailto links (not images), fragments and local relative
-paths. Unknown/active schemes, controls, backslashes, malformed percent encoding,
+paths (including attribute-escaped ampersands in relative queries/fragments).
+Unknown/active schemes, controls, backslashes, malformed percent encoding,
 network-path references and absolute local paths are blocked. Image-only `data:`
 URLs allow PNG/JPEG/GIF/WebP MIME types with valid base64 payloads up to 4 MiB of
 encoded data. SVG, other data formats, malformed/oversized payloads and all data
@@ -46,5 +51,5 @@ load images. CSS, CSP/resource handlers, export and print are owned by their tic
 
 Document-list snippets walk this AST, omit thematic breaks/fence markers, skip a
 matching leading title heading and retain the existing 512-byte grapheme limit.
-Row summaries alone remove task/strike delimiters for compatibility with existing
-list behavior; these extensions stay literal in the HTML output.
+Row summaries also walk table/task nodes and remove paired literal task/strike delimiters
+for compatibility with existing list behavior.

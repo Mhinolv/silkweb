@@ -58,13 +58,15 @@ public enum DocumentRowPresentation {
             case .code(_, let text): return text.components(separatedBy: "\n").map { ($0, false) }
             case .quote(let children): return snippetLines(children)
             case .list(_, let items): return items.flatMap { snippetLines($0) }
-            case .thematicBreak: return []
+            case .taskItem(_, let children): return snippetLines(children)
+            case .table(let header, _, let rows):
+                return ([header] + rows).map { ($0.map { $0.map(\.plainText).joined() }.joined(separator: " "), false) }
+            case .thematicBreak, .tableOfContents: return []
             }
         }
     }
 
-    /// Row summaries retain the older task/strike cleanup even though these extensions
-    /// remain literal text in HTML until the extended-renderer ticket.
+    /// Retain cleanup for literal or unsupported row-summary syntax.
     private static func summaryText(_ source: String) -> String {
         var text = source.trimmingCharacters(in: .whitespaces)
         var task = false
