@@ -25,6 +25,7 @@ struct EditorPasteContent {
     weak var editor: PlainMarkdownTextView?
     var root: URL?
     var documentID: UUID?
+    weak var workspace: LibraryWorkspace?
     private(set) var busy = false
     var readContent: (NSPasteboard) -> EditorPasteContent = { EditorPasteContent(pasteboard: $0) }
 
@@ -53,15 +54,15 @@ struct EditorPasteContent {
 
     @discardableResult func paste(_ content: EditorPasteContent) -> Bool {
         guard let editor, editor.isEditable, !editor.hasMarkedText(), !busy else { return false }
-        if let text = content.plainText {
-            editor.insertText(text, replacementRange: editor.selectedRange())
-            return true
-        }
         let inputs = Self.files(in: content, imagesOnly: true)
         if !inputs.isEmpty { return add(inputs) }
         let png = content.png
         let raster = png ?? content.tiff
-        guard let raster else { return false }
+        guard let raster else {
+            guard let text = content.plainText else { return false }
+            editor.insertText(text, replacementRange: editor.selectedRange())
+            return true
+        }
         return start(count: 1) {
             let data: Data
             if let png { data = png }
@@ -85,7 +86,24 @@ struct EditorPasteContent {
 
     private func start(count: Int, prepare: @escaping @Sendable () -> AssetBatchFailure) -> Bool {
         guard let editor, editor.isEditable, !editor.hasMarkedText(), !busy,
-              let root, let id = documentID, let session = editor.session, let document = session.url else { return false }
+              let session = editor.session else { return false }
+        // A restored editor can exist before the snapshot arrives. Resolve from
+        // the current snapshot at insertion time rather than caching a missing ID.
+        let root = workspace != nil ? workspace?.root : root
+        let id: UUID?
+        if let workspace {
+            id = workspace.snapshot?.documents.first {
+                root?.appendingPathComponent($0.relativePath) == session.url
+            }?.id
+        } else {
+            id = documentID
+        }
+        guard let root, let id, let document = session.url else {
+            session.assetFailures = []
+            session.assetMessage = "Silkweb couldn’t add files because this document isn’t available in the library. Try again after the library has loaded."
+            NSAccessibility.post(element: editor, notification: .announcementRequested, userInfo: [.announcement: session.assetMessage!, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+            return false
+        }
         let original = editor.string
         let selection = editor.selectedRange()
         busy = true

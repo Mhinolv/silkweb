@@ -11,7 +11,7 @@ final class EditorPasteHandlerTests: XCTestCase {
         defer { board.releaseGlobally() }
         let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
         let text = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
-        text.assetHandler.readContent = { _ in EditorPasteContent(plainText: "plain text", png: self.png) }
+        text.assetHandler.readContent = { _ in EditorPasteContent(plainText: "plain text") }
         XCTAssertTrue(text.assetHandler.paste(from: board))
         XCTAssertEqual(text.string, "plain text")
         text.setMarkedText("日本", selectedRange: NSRange(location: 2, length: 0), replacementRange: text.selectedRange())
@@ -22,6 +22,93 @@ final class EditorPasteHandlerTests: XCTestCase {
         let content = EditorPasteContent(fileURLs: [URL(fileURLWithPath: "/tmp/image.heic"), URL(fileURLWithPath: "/tmp/report.pdf")])
         XCTAssertEqual(EditorPasteHandler.files(in: content, imagesOnly: true).map(\.name), ["image.heic"])
         XCTAssertEqual(EditorPasteHandler.files(in: content, imagesOnly: false).map(\.isImage), [true, false])
+    }
+
+    @MainActor func testLateSnapshotImagePasteAndFinderPrecedenceOffscreen() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let doc = root.appendingPathComponent("restored.md")
+        try "before".write(to: doc, atomically: true, encoding: .utf8)
+        let image = root.appendingPathComponent("Finder image.PNG")
+        try png.write(to: image)
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1, pixelsHigh: 1,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 4, bitsPerPixel: 32))
+        bitmap.setColor(.red, atX: 0, y: 0)
+        let tiff = try XCTUnwrap(bitmap.tiffRepresentation)
+        let contents = [
+            EditorPasteContent(plainText: image.lastPathComponent, fileURLs: [image]),
+            EditorPasteContent(plainText: "clipboard filename", png: png),
+            EditorPasteContent(plainText: "clipboard filename", tiff: tiff)
+        ]
+        for content in contents {
+            let workspace = LibraryWorkspace()
+            workspace.root = root
+            let session = workspace.editor
+            session.url = doc
+            let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
+            let text = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
+            let coordinator = MarkdownTextView.Coordinator(session: session)
+            coordinator.textView = text
+            text.delegate = coordinator
+            text.configureAssetInsertion(session: session, workspace: workspace)
+            text.string = "before"
+            text.setSelectedRange(NSRange(location: 6, length: 0))
+            XCTAssertNil(workspace.snapshot)
+            workspace.install(try await LibraryScanner.scan(root: root))
+            // No reconfiguration/reselection after the snapshot arrives.
+            text.assetHandler.readContent = { _ in content }
+            text.paste(nil)
+            try await finish(text.assetHandler)
+            XCTAssertNil(session.assetMessage)
+            XCTAssertEqual(session.text, text.string)
+            XCTAssertTrue(text.string.hasPrefix("before\n!["))
+            let id = try XCTUnwrap(workspace.snapshot?.documents.first { $0.relativePath == "restored.md" }?.id)
+            XCTAssertTrue(text.string.contains(".silkweb-assets/\(id.uuidString)/"))
+            let directory = root.appendingPathComponent(".silkweb-assets/\(id.uuidString)")
+            XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+            for width: CGFloat in [0, 1, 80, 320, 1200, 4096] {
+                scroll.setFrameSize(NSSize(width: width, height: 200))
+                scroll.tile()
+                text.viewDidMoveToWindow()
+                text.layoutManager?.ensureLayout(for: text.textContainer!)
+                XCTAssertTrue(text.frame.height.isFinite)
+                XCTAssertEqual(session.text, text.string)
+            }
+        }
+    }
+
+    @MainActor func testUnresolvedDocumentReportsAssetBannerForPasteAndDrop() async throws {
+        let workspace = LibraryWorkspace()
+        let session = workspace.editor
+        workspace.root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        session.url = workspace.root?.appendingPathComponent("missing.md")
+        let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
+        let text = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
+        text.configureAssetInsertion(session: session, workspace: workspace)
+        // A stale cached ID must not bypass the current snapshot's missing ID.
+        text.assetHandler.documentID = UUID()
+        text.string = "unchanged"
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        for content in [EditorPasteContent(plainText: "filename", png: png),
+                        EditorPasteContent(fileURLs: [URL(fileURLWithPath: "/tmp/missing.png")])] {
+            session.assetMessage = nil
+            text.assetHandler.readContent = { _ in content }
+            XCTAssertFalse(text.assetHandler.paste(from: board))
+            XCTAssertNotNil(session.assetMessage)
+            XCTAssertNil(session.banner)
+            XCTAssertEqual(text.string, "unchanged")
+            XCTAssertFalse(text.assetHandler.busy)
+            XCTAssertTrue(text.isEditable)
+        }
+        session.assetMessage = nil
+        XCTAssertFalse(text.readSelection(from: board, type: .fileURL))
+        XCTAssertNotNil(session.assetMessage)
+        session.assetMessage = nil
+        XCTAssertFalse(text.assetHandler.add([.init(name: "image.png", isImage: true, data: png)]))
+        XCTAssertNotNil(session.assetMessage)
     }
 
     @MainActor func testRawPasteDropUndoRedoAndResizeOffscreen() async throws {

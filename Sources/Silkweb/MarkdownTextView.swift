@@ -86,11 +86,7 @@ struct MarkdownTextView: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let text = scroll.documentView as? PlainMarkdownTextView else { return }
         let coordinator = context.coordinator
-        text.session = session
-        if coordinator.url != session.url || text.assetHandler.root != workspace.root {
-            text.assetHandler.root = workspace.root
-            text.assetHandler.documentID = workspace.snapshot?.documents.first { workspace.root?.appendingPathComponent($0.relativePath) == session.url }?.id
-        }
+        text.configureAssetInsertion(session: session, workspace: workspace)
         workspace.preview.editor = text
         if coordinator.url != session.url {
             let selection = session.selection
@@ -168,6 +164,10 @@ final class PlainMarkdownTextView: NSTextView {
         return handler
     }()
     var moveFocus: ((Bool) -> Void)?
+    func configureAssetInsertion(session: DocumentSession, workspace: LibraryWorkspace) {
+        self.session = session
+        assetHandler.workspace = workspace
+    }
     var viewportObserver: NSObjectProtocol?
     deinit { if let viewportObserver { NotificationCenter.default.removeObserver(viewportObserver) } }
     private var isLayingOutEditor = false
