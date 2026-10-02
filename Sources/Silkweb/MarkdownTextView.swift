@@ -8,10 +8,10 @@ struct EditorStyle: Equatable {
     var lineHeight: CGFloat
     var maximumWidth: CGFloat
     var horizontalInset: CGFloat = 40
-    var topInset: CGFloat = 24
+    var topInset: CGFloat = 16
 
     init(fontSize: CGFloat? = nil, lineHeight: CGFloat? = nil, maximumWidth: CGFloat? = nil,
-         horizontalInset: CGFloat = 40, topInset: CGFloat = 24,
+         horizontalInset: CGFloat = 40, topInset: CGFloat = 16,
          preferences: WritingPreferences = WritingPreferences.load()) {
         fontFamily = preferences.fontFamily
         self.fontSize = fontSize ?? CGFloat(preferences.fontSize)

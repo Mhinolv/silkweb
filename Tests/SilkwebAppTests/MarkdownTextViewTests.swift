@@ -36,7 +36,7 @@ final class MarkdownTextViewTests: XCTestCase {
                     let expectedWidth = max(1, min(style.maximumWidth, viewport.width - 80))
                     XCTAssertEqual(container.containerSize.width, expectedWidth, accuracy: 0.001)
                     XCTAssertEqual(text.textContainerInset.width, max(40, (viewport.width - expectedWidth) / 2), accuracy: 0.001)
-                    XCTAssertEqual(text.textContainerInset.height, 24)
+                    XCTAssertEqual(text.textContainerInset.height, 16)
                     XCTAssertEqual(scroll.contentInsets.bottom, 0, accuracy: 0.001)
                     XCTAssertEqual(text.minSize.height, viewport.height, accuracy: 0.001)
                     XCTAssertTrue(text.frame.height.isFinite)

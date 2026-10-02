@@ -125,6 +125,92 @@ final class DocumentTabsTests: XCTestCase {
         XCTAssertEqual(saved.resolving(in: rescanned).tabs.map(\.documentID), [b.id])
     }
 
+    @MainActor func testSingleTabDetailVisibilityAndStableContentOrigin() async throws {
+        _ = NSApplication.shared
+        let workspace = try await fixture()
+        defer { try? FileManager.default.removeItem(at: workspace.root!) }
+        let host = NSHostingView(rootView: DocumentDetail(workspace: workspace))
+        host.sizingOptions = []
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 560),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.contentView = nil; window.close() }
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        func settle() async throws {
+            for _ in 0..<5 {
+                host.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        func bar() throws -> EditorTabBarView {
+            try XCTUnwrap(descendants(host).compactMap { $0 as? EditorTabBarView }.first)
+        }
+        func editorFrame() throws -> NSRect {
+            let editor = try XCTUnwrap(descendants(host).compactMap { $0 as? PlainMarkdownTextView }
+                .first { $0.string == workspace.editor.text })
+            let scroll = try XCTUnwrap(editor.enclosingScrollView)
+            XCTAssertEqual(editor.textContainerInset.height, 16)
+            return scroll.convert(scroll.bounds, to: host)
+        }
+        try await settle()
+        XCTAssertFalse(descendants(host).contains { $0 is EditorTabBarView })
+        await select("A", in: workspace, pinned: true)
+        try await settle()
+        XCTAssertEqual(try bar().buttons.count, 1)
+        XCTAssertEqual(try bar().accessibilityRole(), .tabGroup)
+        XCTAssertEqual(try bar().buttons[0].frame.width, 220, accuracy: 1)
+        XCTAssertFalse(try bar().overflow.isHidden)
+        for size in [NSSize(width: 420, height: 300), NSSize(width: 900, height: 560), NSSize(width: 1600, height: 1000)] {
+            window.setContentSize(size)
+            for mode in DocumentViewMode.allCases {
+                workspace.preview.mode = mode
+                try await settle()
+                let singleBar = try bar().convert(try bar().bounds, to: host)
+                XCTAssertEqual(singleBar.height, 28, accuracy: 1)
+                let singleEditor = mode == .preview ? nil : try editorFrame()
+                await select("B", in: workspace, pinned: true)
+                try await settle()
+                XCTAssertEqual(try bar().buttons.count, 2)
+                XCTAssertEqual(try bar().convert(try bar().bounds, to: host), singleBar)
+                if let singleEditor {
+                    XCTAssertEqual(try editorFrame().minY, singleEditor.minY, accuracy: 1)
+                    XCTAssertEqual(try editorFrame().maxY, singleEditor.maxY, accuracy: 1)
+                }
+                let closed = await workspace.closeTab(workspace.activeTabID!)
+                XCTAssertTrue(closed)
+                try await settle()
+                XCTAssertEqual(try bar().buttons.count, 1)
+                if let singleEditor { XCTAssertEqual(try editorFrame(), singleEditor) }
+            }
+        }
+        workspace.preview.mode = .editor
+        try await settle()
+        let withoutBanner = try editorFrame()
+        workspace.editor.readOnly = true
+        workspace.editor.error = "This document is read-only."
+        try await settle()
+        let withBanner = try editorFrame()
+        XCTAssertGreaterThanOrEqual(withoutBanner.height - withBanner.height, 36)
+        let tabFrame = try bar().convert(try bar().bounds, to: host)
+        XCTAssertFalse(tabFrame.intersects(withBanner))
+        workspace.editor.readOnly = false
+        workspace.editor.error = nil
+        workspace.selectDocuments(["A.md", "B.md"])
+        await workspace.waitForNavigation()
+        workspace.activeTabID = nil
+        try await settle()
+        XCTAssertNil(workspace.editor.url)
+        XCTAssertEqual(try bar().buttons.count, 1, "Multi-selection retains the existing tab strip")
+        XCTAssertEqual(try bar().convert(try bar().bounds, to: host).minY, host.bounds.minY, accuracy: 1)
+        let closed = await workspace.closeTab(workspace.tabs[0].id)
+        XCTAssertTrue(closed)
+        try await settle()
+        XCTAssertFalse(descendants(host).contains { $0 is EditorTabBarView })
+        XCTAssertFalse(descendants(host).contains { $0 is PlainMarkdownTextView })
+        XCTAssertFalse(window.isVisible)
+    }
+
     @MainActor func testOffscreenTabsAndEditorLifecycleResizeSweep() async throws {
         let workspace = try await fixture()
         defer { try? FileManager.default.removeItem(at: workspace.root!) }

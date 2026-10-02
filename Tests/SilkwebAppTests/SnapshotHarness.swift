@@ -17,6 +17,7 @@ struct SnapshotScenario {
     var quickQuery: String? = nil
     var searchQuery: String? = nil
     var tabs: [String] = []
+    var selectedDocuments: Set<String>? = nil
     var scrollToEnd = false
     var legacyScroller = false
     var resizeSidebar = false
@@ -31,7 +32,8 @@ struct SnapshotScenario {
         .init(name: "empty-folder", folder: "Snapshot Fixtures/Empty Folder"),
         .init(name: "outline-empty", document: "Snapshot Fixtures/Empty Document.md", outline: true),
         .init(name: "search-empty", searchQuery: "silkweb-no-matches-fixture"),
-        .init(name: "editor-document", document: "Snapshot Fixtures/Editor Typography.md"),
+        .init(name: "editor-document", document: "Snapshot Fixtures/Editor Typography.md", tabs: ["Snapshot Fixtures/Editor Typography.md"]),
+        .init(name: "tabs-multi-selection", tabs: [pourOver], selectedDocuments: [pourOver, image]),
         .init(name: "editor-long-scrolled-end", document: "Snapshot Fixtures/Long Document.md", tabs: [pourOver, "Snapshot Fixtures/Long Document.md"], scrollToEnd: true, legacyScroller: true),
         .init(name: "editor-image", document: image),
         .init(name: "preview-headings", document: "Snapshot Fixtures/Preview Headings.md", mode: .preview),
@@ -243,6 +245,12 @@ final class SnapshotHarness {
             workspace.activateTab(tab.id, syncSelection: false)
             workspace.session.selectedDocuments = [path]
             if scenario.folder == nil { workspace.session.selectedFolder = (path as NSString).deletingLastPathComponent }
+        }
+        if let selected = scenario.selectedDocuments {
+            workspace.selectDocuments(selected)
+            await workspace.waitForNavigation()
+            // Exercise the existing multi-selection placeholder with tabs retained.
+            workspace.activeTabID = nil
         }
         workspace.preview.mode = scenario.mode
         workspace.preview.showsOutline = scenario.outline
