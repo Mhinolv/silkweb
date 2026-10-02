@@ -42,12 +42,13 @@ extension LibraryWorkspace {
                     destination = url
                 }
                 let renderer = PrintCoordinator()
+                defer { renderer.hostWindow.close() }
                 try await renderer.load(html: result.html)
                 // Print into a staging file so a failed print job cannot damage an existing PDF.
                 let staging = destination.map { $0.deletingLastPathComponent().appendingPathComponent(".silkweb-print-" + UUID().uuidString + ".pdf") }
                 defer { if let staging { try? FileManager.default.removeItem(at: staging) } }
-                let operation = renderer.operation(info: printInfo, title: name, destination: staging)
-                let succeeded = operation.run()
+                let succeeded = try await renderer.print(info: printInfo, title: name, destination: staging,
+                                                         window: NSApp.keyWindow)
                 if let destination {
                     guard succeeded, let staging else { throw CocoaError(.fileWriteUnknown) }
                     try await Task.detached(priority: .userInitiated) {

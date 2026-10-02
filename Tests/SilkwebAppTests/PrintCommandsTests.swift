@@ -85,20 +85,58 @@ final class PrintCommandsTests: XCTestCase {
         XCTAssertEqual(panel.directoryURL?.path, "/tmp/print-folder")
     }
 
+    @MainActor func testPrintJobDeadlineAndLateCompletion() async throws {
+        let job = PrintJob()
+        var cancelled = false
+        let start = Date()
+        do {
+            _ = try await job.wait(timeoutInterval: 0.02, cancel: { cancelled = true }, start: {})
+            XCTFail("A print job that never completes must time out")
+        } catch {
+            XCTAssertEqual((error as? URLError)?.code, .timedOut)
+        }
+        XCTAssertTrue(cancelled)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 1)
+        job.finish(.success(true)) // A delayed AppKit callback must not resume twice.
+    }
+
+    @MainActor func testPrintJobSuccessAndCancellationCancelDeadline() async throws {
+        for success in [false, true] {
+            let job = PrintJob()
+            var cancelled = false
+            let result = try await job.wait(timeoutInterval: 0.01, cancel: { cancelled = true }) {
+                job.finish(.success(success))
+            }
+            XCTAssertEqual(result, success)
+            try await Task.sleep(for: .milliseconds(30))
+            XCTAssertFalse(cancelled)
+        }
+    }
+
     /// Runs only in the registered offscreen QA host: WebKit cannot render in the agent sandbox.
     @MainActor func testRealWebHierarchyAndMultipagePDF() async throws {
         _ = NSApplication.shared
         guard !SnapshotHarness.isWebKitUnavailable(environment: ProcessInfo.processInfo.environment, activationPolicy: NSApp.activationPolicy().rawValue) else {
             throw XCTSkip("WebKit PDF pagination requires the outside-sandbox QA host")
         }
+        // An async expectation alone cannot fail a regression that blocks the main
+        // run loop. A worker deadline terminates this test host rather than leaving
+        // QA with another indefinitely spinning xctest process.
+        let watchdog = DispatchWorkItem {
+            fatalError("Offscreen PDF smoke exceeded its 90-second process deadline")
+        }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 90, execute: watchdog)
+        defer { watchdog.cancel() }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
         let data = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZJkAAAAASUVORK5CYII=")!
         try data.write(to: root.appendingPathComponent("image.png"))
         let renderer = PrintCoordinator()
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: 720, height: 900))
-        host.addSubview(renderer.web)
+        defer { renderer.hostWindow.close() }
+        let host = try XCTUnwrap(renderer.hostWindow.contentView)
+        XCTAssertTrue(renderer.web.window === renderer.hostWindow)
+        XCTAssertFalse(renderer.hostWindow.isVisible)
         for (index, markdown) in ["", "# Small\n\nBody", "# Long\n\n" + String(repeating: "Paragraph text.\n\n", count: 300) + "| Wide | Table |\n| --- | --- |\n| \(String(repeating: "wide", count: 200)) | text |\n\n```\n\(String(repeating: "code\n", count: 50))```\n\n![Image](image.png)"].enumerated() {
             let result = HTMLExport.prepare(markdown: markdown, title: "Smoke", documentURL: root.appendingPathComponent("note.md"), libraryRoot: root, stylesheet: PrintCoordinator.stylesheet, printOutput: true)
             try await renderer.load(html: result.html)
@@ -111,13 +149,13 @@ final class PrintCommandsTests: XCTestCase {
             let operation = renderer.operation(info: PrintCoordinator.defaultPrintInfo(), title: "Smoke", destination: destination)
             XCTAssertFalse(operation.showsPrintPanel)
             XCTAssertEqual(operation.jobTitle, "Smoke")
-            operation.showsProgressPanel = false
-            XCTAssertTrue(operation.run())
+            XCTAssertFalse(operation.canSpawnSeparateThread, "WebKit pagination must stay on its main thread")
+            let succeeded = try await renderer.run(operation, timeoutInterval: 15, showsProgressPanel: false)
+            XCTAssertTrue(succeeded)
             let pdf = try Data(contentsOf: destination)
             XCTAssertTrue(pdf.starts(with: Data("%PDF-".utf8)))
             let document = try XCTUnwrap(CGPDFDocument(destination as CFURL))
             XCTAssertGreaterThanOrEqual(document.numberOfPages, index == 2 ? 2 : 1)
         }
-        renderer.web.removeFromSuperview()
     }
 }
