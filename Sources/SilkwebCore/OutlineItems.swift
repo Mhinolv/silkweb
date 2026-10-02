@@ -9,7 +9,8 @@ public struct OutlineItem: Equatable, Sendable, Identifiable {
     public let id: String
     public let content: Content
     public let sourceRange: NSRange
-    public let parentLevel: Int?
+    /// Tree depth: enclosing headings for a heading, parent depth + 1 for an image.
+    public let depth: Int
     public private(set) var sourceLine: String? = nil
     public private(set) var isInlineImage = true
 
@@ -25,14 +26,22 @@ public struct OutlineItem: Equatable, Sendable, Identifiable {
         }
     }
 
-    public func indent(shallowest: Int) -> Double {
-        guard let parentLevel else { return 0 }
-        return Double(min(6, max(0, parentLevel - shallowest + 1))) * 12
+    public var indent: Double { OutlineRowStyle.indent(depth: depth) }
+
+    /// Depth from the actual heading stack, so skipped `#` levels add nothing.
+    public static func depths(_ headings: [MarkdownHeading]) -> [Int] {
+        var stack: [Int] = []
+        return headings.map { heading in
+            while let last = stack.last, last >= heading.level { stack.removeLast() }
+            defer { stack.append(heading.level) }
+            return stack.count
+        }
     }
 
     public static func parse(_ text: String, headings: [MarkdownHeading]? = nil) -> [OutlineItem] {
         let headings = headings ?? MarkdownParser.parse(text).headings
-        let headingItems = headings.map { OutlineItem(id: $0.id, content: .heading($0), sourceRange: $0.sourceRange, parentLevel: nil) }
+        let depths = depths(headings)
+        let headingItems = zip(headings, depths).map { OutlineItem(id: $0.id, content: .heading($0), sourceRange: $0.sourceRange, depth: $1) }
         guard text.contains("![") else { return headingItems }
         let source = text as NSString
         var lines: [(String, NSRange)] = []
@@ -82,8 +91,8 @@ public struct OutlineItem: Equatable, Sendable, Identifiable {
             }
             let direct = InlineImages.paragraph(line)
             for image in InlineImages.paragraph(expanded as String) {
-                let parent = headings.last { $0.sourceRange.location <= range.location }?.level
-                result.append(OutlineItem(id: "outline_image_\(imageIndex)", content: .image(image), sourceRange: range, parentLevel: parent, sourceLine: line.trimmingCharacters(in: .newlines), isInlineImage: direct.contains(image)))
+                let parent = headings.lastIndex { $0.sourceRange.location <= range.location }
+                result.append(OutlineItem(id: "outline_image_\(imageIndex)", content: .image(image), sourceRange: range, depth: parent.map { depths[$0] + 1 } ?? 0, sourceLine: line.trimmingCharacters(in: .newlines), isInlineImage: direct.contains(image)))
                 imageIndex += 1
             }
         }

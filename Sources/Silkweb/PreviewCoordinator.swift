@@ -138,15 +138,16 @@ final class PreviewCoordinator {
         return currentHeading(caret: caret)
     }
 
-    func navigate(_ item: OutlineItem) {
-        navigate(id: item.id, range: item.sourceRange)
+    /// The Outline keeps keyboard focus after a click or Return (`focusEditor: false`).
+    func navigate(_ item: OutlineItem, focusEditor: Bool = true) {
+        navigate(id: item.id, range: item.sourceRange, focusEditor: focusEditor)
     }
 
     func navigate(_ heading: MarkdownHeading) {
         navigate(id: heading.id, range: heading.sourceRange)
     }
 
-    private func navigate(id: String, range: NSRange) {
+    private func navigate(id: String, range: NSRange, focusEditor: Bool = true) {
         pendingAnchor = id
         if mode != .editor { scrollPreview(to: id) }
         guard let editor, range.location != NSNotFound else { return }
@@ -160,7 +161,7 @@ final class PreviewCoordinator {
             scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, rect.minY + editor.textContainerOrigin.y - scroll.contentSize.height / 3)))
             scroll.reflectScrolledClipView(scroll.contentView)
         }
-        if mode != .preview { editor.window?.makeFirstResponder(editor) }
+        if focusEditor, mode != .preview { editor.window?.makeFirstResponder(editor) }
     }
 
     func scrollPreview(to anchor: String) {

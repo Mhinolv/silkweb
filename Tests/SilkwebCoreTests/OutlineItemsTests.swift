@@ -24,7 +24,7 @@ final class OutlineItemsTests: XCTestCase {
         """
         let items = OutlineItem.parse(text)
         XCTAssertEqual(items.map(\.label), ["Before", "Title", "Child", "Portrait", "Detail", "Transparent", "End", "Missing", "Remote", "Outside"])
-        XCTAssertEqual(items.map { $0.indent(shallowest: 1) }, [0, 0, 0, 24, 0, 36, 0, 24, 24, 24])
+        XCTAssertEqual(items.map(\.indent), [0, 0, 10, 20, 20, 30, 10, 20, 20, 20])
         XCTAssertEqual(items.map(\.sourceRange.location), items.map(\.sourceRange.location).sorted())
         let root = URL(fileURLWithPath: "/tmp/outline-root")
         let document = root.appendingPathComponent("note.md")
@@ -50,7 +50,7 @@ final class OutlineItemsTests: XCTestCase {
         for count in [1, 2, 200] {
             let images = OutlineItem.parse("###### Deep\n" + Array(repeating: "![x](a.png)\n", count: count).joined())
             XCTAssertEqual(images.count, count + 1)
-            XCTAssertEqual(images.last?.indent(shallowest: 1), 72)
+            XCTAssertEqual(images.last?.indent, 10)
             XCTAssertEqual(Set(images.map(\.id)).count, count + 1)
         }
     }

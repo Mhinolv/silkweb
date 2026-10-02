@@ -8,6 +8,7 @@ struct InspectorView: View {
     @State private var outlineHovered = false
     @State private var manualScrollUntil = Date.distantPast
     @FocusState private var outlineFocused: Bool
+    @Environment(\.controlActiveState) private var activeState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var preview: PreviewCoordinator { workspace.preview }
 
@@ -17,7 +18,6 @@ struct InspectorView: View {
     }
     var body: some View {
         let current = preview.currentItem(caret: workspace.editor.caretLocation)
-        let shallowest = preview.headings.map(\.level).min() ?? 1
         let items = preview.outlineItems.isEmpty ? OutlineItem.parse("", headings: preview.headings) : preview.outlineItems
         let imageCount = items.count - preview.headings.count
         let summary = [(preview.headings.count, CountPresentation.Unit.heading), (imageCount, .image)]
@@ -42,16 +42,18 @@ struct InspectorView: View {
                         Section("Headings") {
                             ForEach(items) { item in
                                 Button {
+                                    // A click selects and focuses the Outline so ↑/↓ work right away.
                                     selectedHeading = item.id
-                                    preview.navigate(item)
+                                    outlineFocused = true
+                                    preview.navigate(item, focusEditor: false)
                                 } label: {
                                     Group {
                                         switch item.content {
-                                        case .heading(let heading): row(heading, current: current == item.id, shallowest: shallowest)
+                                        case .heading(let heading): row(heading, depth: item.depth, current: current == item.id)
                                         case .image:
                                             OutlineImageRow(item: item, document: preview.renderedURL, root: workspace.root,
-                                                indent: item.indent(shallowest: shallowest), current: current == item.id,
-                                                selected: outlineFocused && selectedHeading == item.id)
+                                                indent: item.indent, current: current == item.id,
+                                                selected: showsSelection(item.id))
                                         }
                                     }
                                         .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
@@ -86,9 +88,16 @@ struct InspectorView: View {
                         selectedHeading = nil
                         manualScrollUntil = .distantPast
                     }
+                    .onChange(of: items.map(\.id)) { _, ids in
+                        if let selectedHeading, !ids.contains(selectedHeading) { self.selectedHeading = nil }
+                    }
+                    .onChange(of: outlineFocused) { _, focused in
+                        // Tab into the Outline starts at the current row.
+                        if focused, selectedHeading == nil { selectedHeading = current ?? items.first?.id }
+                    }
                     .onKeyPress(.return) {
                         guard let item = items.first(where: { $0.id == selectedHeading }) else { return .ignored }
-                        preview.navigate(item)
+                        preview.navigate(item, focusEditor: false)
                         return .handled
                     }
                     .accessibilityLabel("Heading outline")
@@ -98,10 +107,15 @@ struct InspectorView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private func row(_ heading: MarkdownHeading, current: Bool, shallowest: Int) -> some View {
-        let style = OutlineRowStyle(level: heading.level, shallowest: shallowest,
+    /// The List draws the accent fill only while focused in the key window.
+    private func showsSelection(_ id: String) -> Bool {
+        outlineFocused && activeState == .key && selectedHeading == id
+    }
+
+    private func row(_ heading: MarkdownHeading, depth: Int, current: Bool) -> some View {
+        let style = OutlineRowStyle(level: heading.level, depth: depth,
                                     isFirst: heading.id == preview.headings.first?.id)
-        let selected = outlineFocused && selectedHeading == heading.id
+        let selected = showsSelection(heading.id)
         return HStack(spacing: 8) {
             Rectangle().fill(current && !selected ? Color.accentColor : .clear).frame(width: 3)
             Text(heading.text).font(.system(size: style.fontSize, weight: style.isSemibold ? .semibold : .regular))

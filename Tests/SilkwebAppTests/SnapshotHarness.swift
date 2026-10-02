@@ -24,6 +24,7 @@ struct SnapshotScenario {
     var resizeSidebar = false
     var mediaMigration: String? = nil
     var tableInsert: String? = nil
+    var focusOutline = false
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
     static let image = "Snapshot Fixtures/Image Fixture.md"
@@ -55,6 +56,9 @@ struct SnapshotScenario {
         .init(name: "outline-images-only", document: "Snapshot Fixtures/Images Only.md", outline: true),
         .init(name: "outline-image-states", document: "Snapshot Fixtures/Image States.md", outline: true),
         .init(name: "outline-images", document: "Snapshot Fixtures/Outline Images.md", outline: true, caretImage: "![Portrait]"),
+        // Outline focused with the second image row selected. The unordered host window is never
+        // key, so the List draws its non-key selection; the accent fill needs a key window.
+        .init(name: "outline-images-focused", document: "Snapshot Fixtures/Outline Images.md", outline: true, caretImage: "![Portrait]", focusOutline: true),
         .init(name: "outline-hierarchy", document: "Snapshot Fixtures/Outline Hierarchy.md", outline: true, caretHeading: "Grind size"),
         .init(name: "rename-active", document: pourOver, rename: true),
         .init(name: "quick-open", quickQuery: "brew"),
@@ -246,6 +250,13 @@ final class SnapshotHarness {
         ## Technique
 
         # Another brew
+
+        # Settling In
+        ###### Jamestown Campground, PA
+        ![IMG_0412](portrait.png)
+        ### Building A Home
+        ###### Lake Erie
+        ![IMG_0533](fixture.png)
         """
         try Data(hierarchy.utf8).write(to: fixtures.appendingPathComponent("Outline Hierarchy.md"), options: .atomic)
         try Data(LongEditorFixture.document.utf8).write(to: fixtures.appendingPathComponent("Long Document.md"), options: .atomic)
@@ -408,6 +419,17 @@ final class SnapshotHarness {
             }
             controller.view.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(300))
+            if scenario.focusOutline {
+                // Focusing the List selects the current (caret) row, as Tab or a click would.
+                let count = workspace.preview.outlineItems.count
+                guard let table = Self.descendants(controller.view).compactMap({ $0 as? NSTableView })
+                    .first(where: { !($0 is DocumentTableView) && [count, count + 1].contains($0.numberOfRows) }) else {
+                    throw SnapshotFailure.error("Missing outline list")
+                }
+                window.makeFirstResponder(table)
+                controller.view.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(300))
+            }
             if scenario.outline {
                 for split in Self.descendants(controller.view).compactMap({ $0 as? NSSplitView }) {
                     let panes = split.arrangedSubviews
