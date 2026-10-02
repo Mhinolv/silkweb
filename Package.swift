@@ -8,7 +8,7 @@ let package = Package(
         // Pure model / storage / markdown logic — no UI, unit-testable.
         .target(name: "SilkwebCore"),
         // SwiftUI + AppKit app.
-        .executableTarget(name: "Silkweb", dependencies: ["SilkwebCore"]),
+        .executableTarget(name: "Silkweb", dependencies: ["SilkwebCore"], resources: [.process("Resources")]),
         .testTarget(name: "SilkwebCoreTests", dependencies: ["SilkwebCore"]),
         .testTarget(name: "SilkwebAppTests", dependencies: ["Silkweb"]),
     ],

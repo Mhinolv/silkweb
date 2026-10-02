@@ -96,6 +96,7 @@ private struct DocumentSummaryIdentity: Hashable {
 
 struct DocumentDetail: View {
     let workspace: LibraryWorkspace
+    @State private var isNarrow = true
     var body: some View {
         VStack(spacing: 0) {
             if workspace.snapshot?.isReadOnly == true {
@@ -105,7 +106,8 @@ struct DocumentDetail: View {
             }
             EditorBanner(session: workspace.editor, workspace: workspace)
             if workspace.editor.url != nil {
-                MarkdownTextView(session: workspace.editor, workspace: workspace)
+                DocumentPanes(workspace: workspace)
+                if let error = workspace.preview.error { Text(error).font(.callout).foregroundStyle(.secondary).padding(8) }
             } else if workspace.session.selectedDocuments.count > 1 {
                 ContentUnavailableView("\(workspace.session.selectedDocuments.count) Documents Selected", systemImage: "doc.on.doc")
             } else {
@@ -113,5 +115,21 @@ struct DocumentDetail: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .inspector(isPresented: Binding(get: { workspace.preview.showsOutline }, set: { workspace.preview.showsOutline = $0 })) {
+            InspectorView(workspace: workspace).inspectorColumnWidth(min: 200, ideal: 240, max: 320)
+        }
+        .onChange(of: workspace.editor.text, initial: true) { render() }
+        .onChange(of: workspace.editor.url) { render() }
+        .onGeometryChange(for: Bool.self) { $0.size.width < 600 } action: { narrow in
+            isNarrow = narrow
+            if narrow, workspace.preview.mode == .split { workspace.preview.showsOutline = false }
+        }
+        .onChange(of: workspace.preview.mode) {
+            if isNarrow, workspace.preview.mode == .split { workspace.preview.showsOutline = false }
+        }
+    }
+
+    private func render() {
+        workspace.preview.schedule(text: workspace.editor.text, document: workspace.editor.url, root: workspace.root)
     }
 }

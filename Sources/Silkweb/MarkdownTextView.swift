@@ -72,6 +72,12 @@ struct MarkdownTextView: NSViewRepresentable {
         scroll.documentView = text
         text.styler.editor = text
         text.textStorage?.delegate = text.styler
+        scroll.contentView.postsFrameChangedNotifications = true
+        text.viewportObserver = NotificationCenter.default.addObserver(
+            forName: NSView.frameDidChangeNotification, object: scroll.contentView, queue: .main
+        ) { [weak text] _ in
+            MainActor.assumeIsolated { text?.layoutEditor() }
+        }
         text.layoutEditor()
         return scroll
     }
@@ -80,6 +86,7 @@ struct MarkdownTextView: NSViewRepresentable {
         guard let text = scroll.documentView as? PlainMarkdownTextView else { return }
         let coordinator = context.coordinator
         text.session = session
+        workspace.preview.editor = text
         if coordinator.url != session.url {
             let selection = session.selection
             let position = session.scroll
@@ -139,6 +146,7 @@ struct MarkdownTextView: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView else { return }
             session.selection = textView.selectedRange()
+            session.caretLocation = session.selection.location
             session.scroll = textView.enclosingScrollView?.contentView.bounds.origin ?? .zero
         }
     }
@@ -150,6 +158,8 @@ final class PlainMarkdownTextView: NSTextView {
     weak var session: DocumentSession?
     let styler = MarkdownStyler()
     var moveFocus: ((Bool) -> Void)?
+    var viewportObserver: NSObjectProtocol?
+    deinit { if let viewportObserver { NotificationCenter.default.removeObserver(viewportObserver) } }
     private var isLayingOutEditor = false
 
     override func setFrameSize(_ newSize: NSSize) {

@@ -21,6 +21,7 @@ final class DocumentSession {
     private var libraryRoot: URL?
     var externalDeleted: Bool { if case .conflict(diskRevision: nil) = state { return true }; return false }
     var externalConflict: Bool { if case .conflict(diskRevision: .some) = state { return true }; return false }
+    var caretLocation = 0
     @ObservationIgnored var selection = NSRange(location: 0, length: 0)
     @ObservationIgnored var scroll = NSPoint.zero
     private var positions: [URL: (NSRange, NSPoint)] = [:]

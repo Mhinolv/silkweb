@@ -5,10 +5,12 @@ import SilkwebCore
 @MainActor @Observable
 final class LibraryWorkspace {
     let editor = DocumentSession()
+    let preview: PreviewCoordinator
     @ObservationIgnored private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        preview = PreviewCoordinator(defaults: defaults)
     }
     var libraryUndo: [LibraryUndo] = []
     var importRequest: ImportRequest?
@@ -340,7 +342,11 @@ final class LibraryWorkspace {
         }
     }
 
-    func focus(_ column: Int) { focusColumn = column; focusRequest += 1 }
+    func focus(_ column: Int) {
+        if column == 2, preview.mode == .preview { preview.mode = preview.lastWritingMode }
+        focusColumn = column
+        focusRequest += 1
+    }
 }
 
 struct LibraryWorkspaceView: View {
@@ -389,6 +395,14 @@ struct LibraryWorkspaceView: View {
     private var libraryColumns: some View {
         LibrarySplitView(workspace: workspace)
         .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Picker("View Mode", selection: Binding(get: { workspace.preview.mode }, set: { workspace.preview.mode = $0 })) {
+                    ForEach(DocumentViewMode.allCases, id: \.self) { mode in
+                        Label(mode.title, systemImage: mode.symbol).tag(mode).help(mode.title)
+                    }
+                }.pickerStyle(.segmented).labelStyle(.iconOnly).help("Editor, Split or Preview")
+                Button("Show Outline", systemImage: "list.bullet.indent") { workspace.preview.showsOutline.toggle() }.help("Show Outline")
+            }
             ToolbarItem(placement: .navigation) {
                 Button("Toggle Sidebar", systemImage: "sidebar.left") { workspace.sidebarToggleRequest += 1 }
                     .help("Toggle Sidebar")

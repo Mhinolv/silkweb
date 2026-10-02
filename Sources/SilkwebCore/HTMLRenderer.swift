@@ -9,11 +9,13 @@ public enum HTMLRenderer {
         /// Supply both URLs to allow file links, or relative paths containing parent components.
         public var libraryRoot: URL?
         public var documentURL: URL?
+        public var offlinePreview: Bool
 
-        public init(lineBreaks: LineBreaks = .standard, libraryRoot: URL? = nil, documentURL: URL? = nil) {
+        public init(lineBreaks: LineBreaks = .standard, libraryRoot: URL? = nil, documentURL: URL? = nil, offlinePreview: Bool = false) {
             self.lineBreaks = lineBreaks
             self.libraryRoot = libraryRoot
             self.documentURL = documentURL
+            self.offlinePreview = offlinePreview
         }
     }
 
@@ -144,13 +146,16 @@ public enum HTMLRenderer {
                 guard allowed(destination, image: false, options: options) else {
                     return "<span class=\"sw-blocked-link\" title=\"Link not opened: this kind of link isn’t allowed.\">" + content + "</span>"
                 }
-                return "<a href=\"" + escape(destination) + "\"" + titleAttribute(title) + ">" + content + "</a>"
+                return "<a href=\"" + escape(localDestination(destination, options: options)) + "\"" + titleAttribute(title) + ">" + content + "</a>"
             case .image(let alt, let destination, let title):
                 guard allowed(destination, image: true, options: options) else {
                     return "<span class=\"sw-blocked-link\" title=\"Link not opened: this kind of link isn’t allowed.\">" + escape(alt) + "</span>"
                 }
-                let image = "<img src=\"" + escape(destination) + "\" alt=\"" + escape(alt) + "\"" + titleAttribute(title) + ">"
                 let scheme = URLComponents(string: destination)?.scheme?.lowercased()
+                if options.offlinePreview, scheme == "http" || scheme == "https" || scheme == "data" {
+                    return "<span class=\"sw-remote-image\">Remote image not loaded: " + escape(alt) + "</span>"
+                }
+                let image = "<img src=\"" + escape(localDestination(destination, options: options)) + "\" alt=\"" + escape(alt) + "\"" + titleAttribute(title) + ">"
                 return scheme == "http" || scheme == "https"
                     ? "<span class=\"sw-remote-image\">" + image + "</span>" : image
             }
@@ -195,6 +200,13 @@ public enum HTMLRenderer {
             return "<li id=\"fn-\(item.number)\"><p>" + item.body + " " + links + "</p></li>\n"
         }.joined()
         return "<section class=\"sw-footnotes\"><hr><ol>\n" + items + "</ol></section>\n"
+    }
+
+    private static func localDestination(_ destination: String, options: Options) -> String {
+        guard options.offlinePreview, !destination.hasPrefix("#"),
+              URLComponents(string: destination)?.scheme == nil,
+              let document = options.documentURL else { return destination }
+        return URL(string: destination, relativeTo: document)?.absoluteURL.absoluteString ?? destination
     }
 
     private static func titleAttribute(_ title: String?) -> String {

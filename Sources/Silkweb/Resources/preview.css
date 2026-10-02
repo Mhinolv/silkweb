@@ -1,0 +1,18 @@
+:root { color-scheme: light dark; }
+body { font: 16px/1.6 -apple-system; color: -apple-system-label; background: -apple-system-text-background; margin: 0; }
+.sw-doc { max-width: 720px; margin: 0 auto; padding: 32px 40px 80px; overflow-wrap: break-word; }
+h1,h2,h3,h4,h5,h6 { font-weight: 600; margin-top: 1.6em; margin-bottom: .5em; }
+h1 { font-size: 2em; } h2 { font-size: 1.5em; } h3 { font-size: 1.25em; } h4,h5,h6 { font-size: 1em; }
+a { color: -apple-system-blue; text-decoration: none; } a:hover { text-decoration: underline; }
+code { font-family: ui-monospace, monospace; font-size: .9em; background: color-mix(in srgb, -apple-system-label 8%, transparent); border-radius: 4px; padding: .1em .3em; }
+pre { padding: 12px 16px; border-radius: 6px; background: color-mix(in srgb, -apple-system-label 8%, transparent); overflow-x: auto; }
+pre code { padding: 0; background: transparent; }
+blockquote { border-left: 3px solid -apple-system-separator; padding-left: 1em; margin-left: 0; color: -apple-system-secondary-label; }
+.sw-table-wrap { overflow-x: auto; } table { border-collapse: collapse; }
+th,td { border: 1px solid -apple-system-separator; padding: 6px 12px; } th { font-weight: 600; background: color-mix(in srgb, -apple-system-label 8%, transparent); }
+.sw-align-left { text-align: left; } .sw-align-center { text-align: center; } .sw-align-right { text-align: right; }
+img { max-width: 100%; } .sw-remote-image { display: inline-block; border: 1px dashed -apple-system-separator; padding: 8px; color: -apple-system-secondary-label; }
+.sw-raw-html { font-family: ui-monospace, monospace; color: -apple-system-tertiary-label; } .sw-blocked-link { color: -apple-system-secondary-label; text-decoration: underline dotted; }
+.sw-task { list-style: none; } .sw-task input { accent-color: -apple-system-control-accent; }
+.sw-toc { border-left: 3px solid -apple-system-separator; padding: 12px 16px; } .sw-toc::before { content: 'Contents'; font-weight: 600; } .sw-footnotes { font-size: .9em; }
+.sw-empty::before { content: 'Nothing to preview'; display: block; text-align: center; color: -apple-system-tertiary-label; }
