@@ -31,7 +31,7 @@ struct SnapshotScenario {
         .init(name: "empty-folder", folder: "Snapshot Fixtures/Empty Folder"),
         .init(name: "outline-empty", document: "Snapshot Fixtures/Empty Document.md", outline: true),
         .init(name: "search-empty", searchQuery: "silkweb-no-matches-fixture"),
-        .init(name: "editor-document", document: pourOver),
+        .init(name: "editor-document", document: "Snapshot Fixtures/Editor Typography.md"),
         .init(name: "editor-long-scrolled-end", document: "Snapshot Fixtures/Long Document.md", tabs: [pourOver, "Snapshot Fixtures/Long Document.md"], scrollToEnd: true, legacyScroller: true),
         .init(name: "editor-image", document: image),
         .init(name: "preview-mode", document: pourOver, mode: .preview),
@@ -179,6 +179,8 @@ final class SnapshotHarness {
         try bitmap.representation(using: .png, properties: [:])!.write(to: fixtures.appendingPathComponent("fixture.png"), options: .atomic)
         let imageText = "# Image Fixture\n\n![Local fixture](fixture.png)\n\n![Remote fixture](https://example.invalid/snapshot.png)\n"
         try Data(imageText.utf8).write(to: fixtures.appendingPathComponent("Image Fixture.md"), options: .atomic)
+        let typography = "# Heading one\n\n## Heading two\n\n### Heading three\n\n#### Heading four\n\n##### Heading five\n\n###### Heading six\n\nBody: café, 日本語, 👩🏽‍💻. **Strong**, *emphasis*, ~~strike~~ and `code`.\n\n> A quote\n\n- [ ] A task with [a link](https://example.invalid)\n\n```swift\nlet source = true\n```\n"
+        try Data(typography.utf8).write(to: fixtures.appendingPathComponent("Editor Typography.md"), options: .atomic)
         let hierarchy = """
         # Pour-Over in Five Steps
 

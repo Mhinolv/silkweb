@@ -177,9 +177,9 @@ extension MarkdownTextViewTests {
         text.styler.reload()
         let original = text.string
         let font = try XCTUnwrap(storage.attribute(.font, at: 2, effectiveRange: nil) as? NSFont)
-        XCTAssertEqual(font.pointSize, 24)
+        XCTAssertEqual(font.pointSize, 15)
         let code = (original as NSString).range(of: "fenced").location
-        XCTAssertNotNil(storage.attribute(.backgroundColor, at: code, effectiveRange: nil))
+        XCTAssertNil(storage.attribute(.backgroundColor, at: code, effectiveRange: nil))
         delegate.manager.removeAllActions()
         text.setSelectedRange(NSRange(location: 2, length: 1))
         text.insertText("X", replacementRange: text.selectedRange())
@@ -192,7 +192,7 @@ extension MarkdownTextViewTests {
         let newCode = (text.string as NSString).range(of: "fenced").location
         let after = (text.string as NSString).range(of: "after").location
         XCTAssertNil(storage.attribute(.backgroundColor, at: newCode, effectiveRange: nil))
-        XCTAssertNotNil(storage.attribute(.backgroundColor, at: after, effectiveRange: nil))
+        XCTAssertEqual(storage.attribute(.foregroundColor, at: after, effectiveRange: nil) as? NSColor, .secondaryLabelColor)
         let saved = text.string
         text.styler.reload()
         XCTAssertEqual(text.string, saved)
@@ -206,4 +206,78 @@ extension MarkdownTextViewTests {
 @MainActor private final class FormattingUndoDelegate: NSObject, NSTextViewDelegate {
     let manager = UndoManager()
     func undoManager(for view: NSTextView) -> UndoManager? { manager }
+}
+
+extension MarkdownTextViewTests {
+    @MainActor
+    func testSourceTypographyAcrossHeadingLevelsAppearancesAndResize() throws {
+        for size in [1.0, 15, 72] {
+            var preferences = WritingPreferences()
+            preferences.fontSize = size
+            let style = EditorStyle(preferences: preferences)
+            let scroll = MarkdownTextView.makeEditorScrollView(style: style)
+            let host = NSView(frame: NSRect(x: 0, y: 0, width: 1400, height: 900))
+            host.addSubview(scroll)
+            let text = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
+            let storage = try XCTUnwrap(text.textStorage)
+            XCTAssertEqual(style.bodyFont.fontName, "Menlo-Regular")
+            XCTAssertEqual(style.lineHeight, 1.6)
+            XCTAssertEqual(style.paragraphStyle.paragraphSpacing, 0)
+            XCTAssertEqual(style.paragraphStyle.defaultTabInterval,
+                           4 * (" " as NSString).size(withAttributes: [.font: style.bodyFont]).width)
+            let source = (1...6).map { String(repeating: "#", count: $0) + " Heading \($0)" }.joined(separator: "\n") + "\nBody **bold** *italic* `code`\n```swift\nfenced\n```\n"
+            for appearance in [NSAppearance.Name.aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua] {
+                host.appearance = NSAppearance(named: appearance)
+                text.string = source
+                text.styler.reload()
+                for level in 1...6 {
+                    let location = (source as NSString).range(of: "Heading \(level)").location
+                    let font = try XCTUnwrap(storage.attribute(.font, at: location, effectiveRange: nil) as? NSFont)
+                    XCTAssertEqual(font.pointSize, style.bodyFont.pointSize)
+                    XCTAssertTrue(NSFontManager.shared.traits(of: font).contains(.boldFontMask))
+                    XCTAssertEqual(storage.attribute(.foregroundColor, at: location, effectiveRange: nil) as? NSColor, .editorHeading)
+                    for marker in (location - level - 1)..<location {
+                        XCTAssertEqual(storage.attribute(.foregroundColor, at: marker, effectiveRange: nil) as? NSColor, .tertiaryLabelColor)
+                        XCTAssertEqual(storage.attribute(.font, at: marker, effectiveRange: nil) as? NSFont, style.bodyFont)
+                    }
+                }
+                let body = (source as NSString).range(of: "Body").location
+                XCTAssertEqual(storage.attribute(.font, at: body, effectiveRange: nil) as? NSFont, style.bodyFont)
+                let code = (source as NSString).range(of: "code").location
+                XCTAssertNotNil(storage.attribute(.backgroundColor, at: code, effectiveRange: nil))
+                let fenced = (source as NSString).range(of: "fenced").location
+                XCTAssertNil(storage.attribute(.backgroundColor, at: fenced, effectiveRange: nil))
+                for width: CGFloat in [0, 1, 80, 320, 800, 1400, 4096, 320] {
+                    scroll.setFrameSize(NSSize(width: width, height: 900))
+                    scroll.tile()
+                    text.layoutEditor()
+                    text.layoutManager?.ensureLayout(for: text.textContainer!)
+                    XCTAssertTrue(text.frame.height.isFinite)
+                    XCTAssertEqual(text.string, source)
+                }
+            }
+            scroll.removeFromSuperview()
+            host.addSubview(scroll)
+            text.viewDidMoveToWindow()
+        }
+    }
+
+    @MainActor
+    func testSavedWritingPreferencesFeedEditorMetrics() throws {
+        let suite = "SilkwebTypographyTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(WritingPreferences.load(from: defaults), WritingPreferences())
+        defaults.set(Data("{\"fontFamily\":\"Helvetica\",\"fontSize\":21,\"lineHeight\":1.75,\"maximumWidth\":900,\"future\":true}".utf8), forKey: "writingPreferences")
+        let style = EditorStyle(preferences: WritingPreferences.load(from: defaults))
+        XCTAssertEqual(style.bodyFont.familyName, "Helvetica")
+        XCTAssertEqual(style.bodyFont.pointSize, 21)
+        XCTAssertEqual(style.lineHeight, 1.75)
+        XCTAssertEqual(style.maximumWidth, 900)
+        let scroll = MarkdownTextView.makeEditorScrollView(style: style)
+        let text = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
+        text.string = "# Title\nBody"
+        text.styler.reload()
+        XCTAssertEqual((text.textStorage?.attribute(.font, at: 2, effectiveRange: nil) as? NSFont)?.pointSize, 21)
+    }
 }

@@ -3,11 +3,37 @@ import SwiftUI
 import SilkwebCore
 
 struct EditorStyle: Equatable {
-    var fontSize: CGFloat = 15
-    var lineHeight: CGFloat = 1.5
-    var maximumWidth: CGFloat = 720
+    var fontFamily: String
+    var fontSize: CGFloat
+    var lineHeight: CGFloat
+    var maximumWidth: CGFloat
     var horizontalInset: CGFloat = 40
     var topInset: CGFloat = 24
+
+    init(fontSize: CGFloat? = nil, lineHeight: CGFloat? = nil, maximumWidth: CGFloat? = nil,
+         horizontalInset: CGFloat = 40, topInset: CGFloat = 24,
+         preferences: WritingPreferences = WritingPreferences.load()) {
+        fontFamily = preferences.fontFamily
+        self.fontSize = fontSize ?? CGFloat(preferences.fontSize)
+        self.lineHeight = lineHeight ?? CGFloat(preferences.lineHeight)
+        self.maximumWidth = maximumWidth ?? CGFloat(preferences.maximumWidth)
+        self.horizontalInset = horizontalInset
+        self.topInset = topInset
+    }
+
+    var bodyFont: NSFont {
+        NSFont(name: fontFamily == "Menlo" ? "Menlo-Regular" : fontFamily, size: fontSize)
+            ?? .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+    }
+
+    var paragraphStyle: NSParagraphStyle {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineHeightMultiple = lineHeight
+        paragraph.paragraphSpacing = 0
+        paragraph.tabStops = []
+        paragraph.defaultTabInterval = 4 * (" " as NSString).size(withAttributes: [.font: bodyFont]).width
+        return paragraph
+    }
 }
 
 struct MarkdownTextView: NSViewRepresentable {
@@ -58,9 +84,8 @@ struct MarkdownTextView: NSViewRepresentable {
         text.isAutomaticLinkDetectionEnabled = false
         text.isAutomaticDataDetectionEnabled = false
         text.isAutomaticSpellingCorrectionEnabled = false
-        text.font = .systemFont(ofSize: style.fontSize)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineHeightMultiple = style.lineHeight
+        text.font = style.bodyFont
+        let paragraph = style.paragraphStyle
         text.defaultParagraphStyle = paragraph
         text.typingAttributes = [.font: text.font!, .paragraphStyle: paragraph, .foregroundColor: NSColor.labelColor]
         text.textColor = .labelColor

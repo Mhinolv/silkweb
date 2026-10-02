@@ -50,9 +50,8 @@ import SilkwebCore
             fenced = checkpoints[position] ?? false
         }
         let styledStart = position
-        let base = NSFont.systemFont(ofSize: editor.style.fontSize)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineHeightMultiple = editor.style.lineHeight
+        let base = editor.style.bodyFont
+        let paragraph = editor.style.paragraphStyle
         let defaults: [NSAttributedString.Key: Any] = [.font: base, .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph]
         let undoRegistration = editor.undoManager?.isUndoRegistrationEnabled == true
         if undoRegistration { editor.undoManager?.disableUndoRegistration() }
@@ -66,12 +65,16 @@ import SilkwebCore
                 for token in result.tokens {
                     let tokenRange = NSRange(location: position + token.range.location, length: token.range.length)
                     switch token.kind {
-                    case .marker: storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: tokenRange)
-                    case .heading(let level):
-                        let scales: [CGFloat] = [1.6, 1.35, 1.15, 1, 1, 1]
-                        storage.addAttribute(.font, value: NSFont.systemFont(ofSize: editor.style.fontSize * scales[level - 1], weight: .semibold), range: tokenRange)
+                    case .marker:
+                        storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: tokenRange)
+                        if result.tokens.contains(where: { if case .heading = $0.kind { return true }; return false }), token.range.location == 0 {
+                            storage.addAttribute(.font, value: base, range: tokenRange)
+                        }
+                    case .heading:
+                        storage.addAttributes([.font: NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask),
+                                               .foregroundColor: NSColor.editorHeading], range: tokenRange)
                     case .bold, .italic:
-                        storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: tokenRange)
+                        storage.addAttribute(.foregroundColor, value: NSColor.labelColor, range: tokenRange)
                         storage.enumerateAttribute(.font, in: tokenRange) { value, subrange, _ in
                             let font = value as? NSFont ?? base
                             let trait: NSFontTraitMask = token.kind == .bold ? .boldFontMask : .italicFontMask
@@ -80,7 +83,11 @@ import SilkwebCore
                     case .strike:
                         storage.addAttributes([.strikethroughStyle: NSUnderlineStyle.single.rawValue, .foregroundColor: NSColor.secondaryLabelColor], range: tokenRange)
                     case .code:
-                        storage.addAttributes([.font: NSFont.monospacedSystemFont(ofSize: editor.style.fontSize * 0.92, weight: .regular), .backgroundColor: NSColor.quaternarySystemFill], range: tokenRange)
+                        if fenced {
+                            storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: tokenRange)
+                        } else {
+                            storage.addAttribute(.backgroundColor, value: NSColor.quaternarySystemFill, range: tokenRange)
+                        }
                     case .link: storage.addAttribute(.foregroundColor, value: NSColor.linkColor, range: tokenRange)
                     case .quote: storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: tokenRange)
                     }
@@ -104,5 +111,19 @@ import SilkwebCore
         checkpoints = [:]
         dirty = NSRange(location: 0, length: editor?.textStorage?.length ?? 0)
         restyle()
+    }
+}
+
+// Original editor-only accent; all other editor colors remain semantic.
+extension NSColor {
+    static let editorHeading = NSColor(name: "SilkwebEditorHeading") { appearance in
+        let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let contrast = appearance.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua,
+                                                   .accessibilityHighContrastDarkAqua])
+        let highContrast = contrast == .accessibilityHighContrastAqua || contrast == .accessibilityHighContrastDarkAqua
+        let rgb: (CGFloat, CGFloat, CGFloat) = highContrast
+            ? (dark ? (166, 211, 230) : (31, 85, 112))
+            : (dark ? (134, 188, 214) : (42, 106, 134))
+        return NSColor(srgbRed: rgb.0 / 255, green: rgb.1 / 255, blue: rgb.2 / 255, alpha: 1)
     }
 }
