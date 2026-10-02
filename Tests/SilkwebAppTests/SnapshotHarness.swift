@@ -18,6 +18,7 @@ struct SnapshotScenario {
     var searchQuery: String? = nil
     var tabs: [String] = []
     var scrollToEnd = false
+    var legacyScroller = false
     var resizeSidebar = false
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
@@ -28,7 +29,7 @@ struct SnapshotScenario {
         .init(name: "sidebar-folder-rename", folder: "Coffee", rename: true),
         .init(name: "folder-selected", folder: "Coffee/Brewing Guides"),
         .init(name: "editor-document", document: pourOver),
-        .init(name: "editor-long-scrolled-end", document: "Snapshot Fixtures/Long Document.md", tabs: [pourOver, "Snapshot Fixtures/Long Document.md"], scrollToEnd: true),
+        .init(name: "editor-long-scrolled-end", document: "Snapshot Fixtures/Long Document.md", tabs: [pourOver, "Snapshot Fixtures/Long Document.md"], scrollToEnd: true, legacyScroller: true),
         .init(name: "editor-image", document: image),
         .init(name: "preview-mode", document: pourOver, mode: .preview),
         .init(name: "split-mode", document: pourOver, mode: .split),
@@ -330,6 +331,12 @@ final class SnapshotHarness {
                     }
                 }
                 controller.view.layoutSubtreeIfNeeded()
+            }
+            if scenario.legacyScroller, let scroll = workspace.preview.editor?.enclosingScrollView {
+                scroll.scrollerStyle = .legacy
+                scroll.autohidesScrollers = false
+                controller.view.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(300))
             }
             if scenario.scrollToEnd, let editor = workspace.preview.editor {
                 editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))

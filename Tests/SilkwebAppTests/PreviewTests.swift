@@ -248,7 +248,7 @@ final class PreviewTests: XCTestCase {
                     controller.view.layoutSubtreeIfNeeded()
                     scroll.tile()
                     // No explicit layoutEditor: the clip-view frame notification drives it.
-                    XCTAssertEqual(scroll.contentInsets.bottom, scroll.contentSize.height / 2, accuracy: 0.01)
+                    XCTAssertEqual(scroll.contentInsets.bottom, 0, accuracy: 0.01)
                     XCTAssertEqual(editor.minSize.height, scroll.contentSize.height, accuracy: 0.01)
                     XCTAssertTrue(editor.frame.height.isFinite)
                     XCTAssertEqual(editor.string, source)

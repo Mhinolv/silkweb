@@ -186,6 +186,7 @@ final class PlainMarkdownTextView: NSTextView {
     }
     private var isLayingOutEditor = false
     private var contentSizingTask: Task<Void, Never>?
+    private var needsEndMarginAfterEdit = false
 
     /// TextKit's viewport layout alone leaves the document frame sized to a partial
     /// layout. Coalesce loads, restyling and width changes before fitting the full text.
@@ -197,6 +198,12 @@ final class PlainMarkdownTextView: NSTextView {
             guard let self, !self.hasMarkedText(), let container = self.textContainer else { return }
             self.layoutManager?.ensureLayout(for: container)
             self.sizeToFit()
+            if self.needsEndMarginAfterEdit {
+                self.needsEndMarginAfterEdit = false
+                if self.selectedRange() == NSRange(location: self.textStorage?.length ?? 0, length: 0) {
+                    self.scrollToEndOfDocument(nil)
+                }
+            }
             if let scroll = self.enclosingScrollView { scroll.reflectScrolledClipView(scroll.contentView) }
         }
     }
@@ -226,8 +233,17 @@ final class PlainMarkdownTextView: NSTextView {
             scheduleContentSizing()
         }
         var contentInsets = scroll.contentInsets
-        contentInsets.bottom = viewport.height / 2
+        contentInsets.bottom = 0
         if scroll.contentInsets.bottom != contentInsets.bottom { scroll.contentInsets = contentInsets }
+        // AppKit applies content insets to the scroller track as well. Cancel all
+        // edges so future typewriter insets do not shorten or shift the track.
+        let scrollerInsets = NSEdgeInsets(top: -contentInsets.top, left: -contentInsets.left,
+                                          bottom: -contentInsets.bottom, right: -contentInsets.right)
+        let current = scroll.scrollerInsets
+        if current.top != scrollerInsets.top || current.left != scrollerInsets.left
+            || current.bottom != scrollerInsets.bottom || current.right != scrollerInsets.right {
+            scroll.scrollerInsets = scrollerInsets
+        }
         let minimum = NSSize(width: 0, height: viewport.height)
         if minSize != minimum { minSize = minimum }
     }
@@ -274,11 +290,15 @@ final class PlainMarkdownTextView: NSTextView {
     }
     override func didChangeText() {
         super.didChangeText()
-        if !hasMarkedText() { styler.schedule() }
+        if !hasMarkedText() {
+            needsEndMarginAfterEdit = true
+            styler.schedule()
+        }
         FormattingTarget.shared.refresh()
     }
     override func unmarkText() {
         super.unmarkText()
+        needsEndMarginAfterEdit = true
         styler.schedule()
         FormattingTarget.shared.refresh()
     }
