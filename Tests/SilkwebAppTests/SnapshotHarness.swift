@@ -11,6 +11,7 @@ struct SnapshotScenario {
     var folder: String? = nil
     var document: String? = nil
     var mode: DocumentViewMode = .editor
+    var tagState: String? = nil
     var outline = false
     var sidebarsHidden = false
     var caretHeading: String? = nil
@@ -33,6 +34,14 @@ struct SnapshotScenario {
     static let image = "Snapshot Fixtures/Image Fixture.md"
     static let initial: [SnapshotScenario] = [
         .init(name: "library-overview"),
+        .init(name: "tags-info", document: pourOver, tagState: "info"),
+        .init(name: "tags-info-empty", tagState: "empty"),
+        .init(name: "tags-multi-selection", tagState: "multi", selectedDocuments: [pourOver, image]),
+        .init(name: "tags-selected", tagState: "selected"),
+        .init(name: "tags-rename", tagState: "rename"),
+        .init(name: "tags-filter", folder: "Coffee/Brewing Guides", tagState: "filter"),
+        .init(name: "tags-filter-empty", folder: "Snapshot Fixtures/Empty Folder", tagState: "filter"),
+        .init(name: "tags-search", folder: "Coffee/Brewing Guides", tagState: "filter", searchQuery: "coffee"),
         .init(name: "sidebars-collapsed", document: pourOver, sidebarsHidden: true),
         .init(name: "table-insert-default", tableInsert: "default"),
         .init(name: "table-insert-maximum", tableInsert: "maximum"),
@@ -304,6 +313,15 @@ final class SnapshotHarness {
         }
         workspace.preview.mode = scenario.mode
         workspace.preview.showsOutline = scenario.outline
+        if let state = scenario.tagState, let snapshot = workspace.snapshot {
+            let ids = Set(snapshot.documents.filter { [SnapshotScenario.pourOver, SnapshotScenario.image].contains($0.relativePath) }.map(\.id))
+            _ = try await TagStore.update(root: snapshot.rootURL) { TagEditor.edit(["research", "draft"], documents: ids, metadata: $0) }
+            workspace.install(try await LibraryScanner.scan(root: snapshot.rootURL))
+            if state == "rename", let tag = workspace.tags.first { workspace.tagRenameID = tag.id; workspace.tagRenameName = tag.name }
+            if state == "filter" { workspace.tagFilters = Set(workspace.tags.map(\.id)) }
+            if state == "selected", let id = workspace.tags.first?.id { workspace.session.selectedTagID = id; workspace.session.selectedFolder = nil }
+            if ["info", "empty", "multi"].contains(state) { workspace.inspectorInfo = true; workspace.preview.showsOutline = true }
+        }
         if let query = scenario.quickQuery { workspace.search.toggleQuickOpen(); workspace.search.quickText = query }
         if let query = scenario.searchQuery { workspace.search.text = query }
     }

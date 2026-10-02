@@ -13,7 +13,8 @@ struct SearchView<Content: View>: View {
         #if DEBUG
         let _ = { search.resultsBodyCount += 1 }()
         #endif
-        PinnedColumn {
+        let results = workspace.filteredSearchResults
+        return PinnedColumn {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search Library", text: $search.text)
@@ -22,7 +23,7 @@ struct SearchView<Content: View>: View {
                     .columnLayoutAnchor("library-search")
                     .onSubmit { openSelected() }
                     .onKeyPress(.downArrow) {
-                        selected = selected ?? search.results.first?.id
+                        selected = selected ?? results.first?.id
                         resultsFocused = true
                         return .handled
                     }
@@ -39,6 +40,7 @@ struct SearchView<Content: View>: View {
                     .accessibilityHidden(!search.text.isEmpty)
                 if !search.text.isEmpty {
                     PinnedColumn {
+                        TagFilterBar(workspace: workspace)
                         Picker("Search Scope", selection: $search.folderScope) {
                             Text("All Documents").tag(nil as UUID?)
                             if let folder = workspace.selectedFolder {
@@ -47,12 +49,12 @@ struct SearchView<Content: View>: View {
                         }.pickerStyle(.segmented).padding(.horizontal, 8).padding(.bottom, 8)
                         HStack(spacing: 4) {
                             if search.isSearching { ProgressView().controlSize(.small) }
-                            Text(LibrarySearch.resultCount(search.results.count))
+                            Text(LibrarySearch.resultCount(results.count))
                         }
                             .font(.caption).monospacedDigit().foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 8)
                     } content: {
                         VStack(spacing: 0) {
-                            if search.results.isEmpty && !search.hasPendingQuery {
+                            if results.isEmpty && !search.hasPendingQuery {
                                 ColumnEmptyState {
                                     VStack(spacing: 8) {
                                         ContentUnavailableView.search(text: search.text)
@@ -62,7 +64,7 @@ struct SearchView<Content: View>: View {
                                     }
                                 }
                             } else {
-                                List(search.results, selection: $selected) { result in
+                                List(results, selection: $selected) { result in
                                     Button {
                                         selected = result.id
                                         openSelected()
@@ -94,8 +96,8 @@ struct SearchView<Content: View>: View {
             if new.isEmpty { search.results = [] }
         }
         .onChange(of: workspace.session.selectedFolder) { search.folderScope = workspace.selectedFolder?.id }
-        .onChange(of: search.results) { selected = SearchNavigation.selection(selected, in: search.results) }
-        .onChange(of: search.resultText) { selected = search.results.first?.id }
+        .onChange(of: results) { selected = SearchNavigation.selection(selected, in: results) }
+        .onChange(of: search.resultText) { selected = results.first?.id }
         .onExitCommand { search.text = ""; search.results = [] }
         .task(id: SearchRequestIdentity(text: search.text, scope: search.folderScope, revision: search.revision)) {
             if !search.text.isEmpty { await search.query(quick: false) }
@@ -103,7 +105,7 @@ struct SearchView<Content: View>: View {
     }
 
     private func openSelected() {
-        guard let result = search.results.first(where: { $0.id == selected }) ?? search.results.first else { return }
+        guard let result = workspace.filteredSearchResults.first(where: { $0.id == selected }) ?? workspace.filteredSearchResults.first else { return }
         let query = search.text
         Task { await workspace.openSearchResult(result, findText: query) }
     }

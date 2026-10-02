@@ -22,6 +22,16 @@ final class LibraryWorkspace {
         self.columnAutosaveName = columnAutosaveName
         preview = PreviewCoordinator(defaults: defaults)
     }
+    var tagCounts: [UUID: Int] = [:]
+    var tags: [LibraryTag] = []
+    var inspectorInfo = false
+    var tagFocusRequest = 0
+    var tagRenameID: UUID?
+    var tagRenameName = ""
+    var tagEditing = false
+    @ObservationIgnored var tagEditTask: Task<Void, Never>?
+    @ObservationIgnored var pendingTagEdits = 0
+    var tagFilters: Set<UUID> = [] { didSet { documentCache = nil } }
     var libraryUndo: [LibraryUndo] = []
     var importRequest: ImportRequest?
     var moveRequest: MoveRequest?
@@ -38,6 +48,12 @@ final class LibraryWorkspace {
 
     func install(_ snapshot: LibrarySnapshot) {
         self.snapshot = snapshot
+        tagFilters.formIntersection(Set(snapshot.metadata.tags.map(\.id)))
+        if let id = session.selectedTagID, !snapshot.metadata.tags.contains(where: { $0.id == id }) { session.selectedTagID = nil }
+        tags = snapshot.metadata.tags.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        var counts: [UUID: Int] = [:]
+        for ids in snapshot.metadata.tagsByDocument.values { for id in ids { counts[id, default: 0] += 1 } }
+        tagCounts = counts
         search.install(snapshot)
         itemPathsByID = Dictionary(uniqueKeysWithValues: snapshot.metadata.IDsByPath.map { ($0.value, $0.key) })
         documentCache = nil
@@ -73,14 +89,14 @@ final class LibraryWorkspace {
     private var canSaveSession = true
     @ObservationIgnored var itemPathsByID: [UUID: String] = [:]
     @ObservationIgnored private var presentationRevision = 0
-    @ObservationIgnored private var documentCache: (folder: String?, preference: LibraryListPreference, documents: [LibraryDocument])?
+    @ObservationIgnored private var documentCache: (folder: String?, preference: LibraryListPreference, tag: UUID?, documents: [LibraryDocument])?
 
     var selectedFolder: LibraryFolder? {
-        snapshot?.folders.first { $0.relativePath == session.selectedFolder }
+        session.selectedTagID == nil ? snapshot?.folders.first { $0.relativePath == session.selectedFolder } : nil
     }
-    private var preferenceID: String { selectedFolder.map { "folder:" + $0.id.uuidString } ?? "all" }
+    private var preferenceID: String { if let id = session.selectedTagID { return "tag:" + id.uuidString }; return selectedFolder.map { "folder:" + $0.id.uuidString } ?? "all" }
     var listPreference: LibraryListPreference { session.listPreferences[preferenceID] ?? LibraryListPreference() }
-    var includesSubfolders: Bool { session.selectedFolder != nil && listPreference.includeSubfolders }
+    var includesSubfolders: Bool { selectedFolder != nil && listPreference.includeSubfolders }
     func setSortKey(_ key: DocumentSortKey) {
         var preference = listPreference
         preference.select(key)
@@ -101,12 +117,14 @@ final class LibraryWorkspace {
     var documents: [LibraryDocument] {
         guard let snapshot else { return [] }
         let preference = listPreference
-        if let cached = documentCache, cached.folder == session.selectedFolder, cached.preference == preference {
+        if let cached = documentCache, cached.folder == session.selectedFolder, cached.preference == preference, cached.tag == session.selectedTagID {
             return cached.documents
         }
-        guard session.selectedFolder == nil || selectedFolder != nil else { return [] }
-        let documents = snapshot.presentation.documents(in: selectedFolder, preference: preference)
-        documentCache = (session.selectedFolder, preference, documents)
+        guard session.selectedTagID != nil || session.selectedFolder == nil || selectedFolder != nil else { return [] }
+        let documents = snapshot.presentation.documents(in: selectedFolder, preference: preference).filter {
+            TagEditor.matches($0, folder: nil, includeSubfolders: false, tags: effectiveTagFilters, metadata: snapshot.metadata)
+        }
+        documentCache = (session.selectedFolder, preference, session.selectedTagID, documents)
         return documents
     }
     func refreshSavedDocumentDates() async {
@@ -122,10 +140,10 @@ final class LibraryWorkspace {
         return documents.first { session.selectedDocuments.contains($0.relativePath) }
     }
     var folderName: String {
-        snapshot?.folders.first { $0.relativePath == session.selectedFolder }?.name ?? "All Documents"
+        tags.first { $0.id == session.selectedTagID }?.name ?? snapshot?.folders.first { $0.relativePath == session.selectedFolder }?.name ?? "All Documents"
     }
     var subtitle: String {
-        search.text.isEmpty ? CountPresentation.label(documents.count, unit: .document) + (includesSubfolders ? " (with subfolders)" : "") : CountPresentation.label(search.results.count, unit: .result)
+        search.text.isEmpty ? CountPresentation.label(documents.count, unit: .document) + (includesSubfolders ? " (with subfolders)" : "") : CountPresentation.label(filteredSearchResults.count, unit: .result)
     }
 
     func restore() {
@@ -201,6 +219,9 @@ final class LibraryWorkspace {
             guard !Task.isCancelled else { return }
             await navigationTask?.value
             guard !mutating else { return }
+            tagFilters = []
+            tags = []
+            tagCounts = [:]
             libraryUndo = []
             importRequest = nil
             moveRequest = nil
@@ -240,7 +261,7 @@ final class LibraryWorkspace {
                 catch { /* A rebuildable navigation session can fall back to its defaults. */ }
                 guard !Task.isCancelled else { return }
                 install(scanned)
-                session = restored
+                session = restored.pruningPreferences(folderIDs: Set(scanned.folders.map(\.id)), tagIDs: Set(scanned.metadata.tags.map(\.id)))
                 var windowSession: WindowSessionMetadata?
                 canSaveWindowSession = true
                 do { windowSession = try await WindowSessionMetadata.load(root: url) }
@@ -434,6 +455,7 @@ final class LibraryWorkspace {
     }
 
     func selectFolder(_ path: String?) {
+        session.selectedTagID = nil
         navigate(folder: path, documents: [])
     }
 
@@ -456,10 +478,14 @@ final class LibraryWorkspace {
         }
     }
 
+    private var prunedSession: LibrarySession {
+        session.pruningPreferences(folderIDs: Set(snapshot?.folders.map(\.id) ?? []), tagIDs: Set(tags.map(\.id)))
+    }
+
     func persistSession() {
         saveTask?.cancel()
         guard !loading, !restoringTabs, let snapshot, !snapshot.isReadOnly, canSaveSession else { return }
-        let session = session
+        let session = prunedSession
         let window = windowMetadata()
         let saveWindow = canSaveWindowSession
         saveTask = Task {
@@ -480,7 +506,7 @@ final class LibraryWorkspace {
         await saveTask?.value
         guard let snapshot, !snapshot.isReadOnly, canSaveSession else { return }
         do {
-            try await session.save(root: root ?? snapshot.rootURL)
+            try await prunedSession.save(root: root ?? snapshot.rootURL)
             if canSaveWindowSession { try await windowMetadata().save(root: root ?? snapshot.rootURL) }
         } catch { NSLog("Silkweb could not save navigation: %@", error.localizedDescription) }
     }
@@ -562,7 +588,10 @@ struct LibraryWorkspaceView: View {
                         Label(mode.title, systemImage: mode.symbol).tag(mode).help(mode.title)
                     }
                 }.pickerStyle(.segmented).labelStyle(.iconOnly).help("Editor, Split or Preview")
-                Button("Show Outline", systemImage: "list.bullet.indent") { workspace.preview.showsOutline.toggle() }.help("Show Outline")
+                Button("Show Outline", systemImage: "list.bullet.indent") { workspace.inspectorInfo = false; workspace.preview.showsOutline.toggle() }.help("Show Outline")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button("Show Document Info", systemImage: "info.circle") { workspace.showInfo() }.help("Show Document Info")
             }
             ToolbarItem(placement: .navigation) {
                 Button(workspace.sidebarsTitle, systemImage: "sidebar.left") { workspace.toggleSidebars() }
@@ -582,6 +611,16 @@ struct LibraryWorkspaceView: View {
                 .help("Sort By")
                 .accessibilityLabel("Sort By, \(workspace.listPreference.key.title), \(workspace.listPreference.directionTitle)")
                 .disabled(workspace.snapshot == nil)
+            }
+            ToolbarItem(placement: .navigation) {
+                Menu {
+                    ForEach(workspace.tags) { tag in
+                        Toggle(tag.name, isOn: Binding(get: { workspace.tagFilters.contains(tag.id) }, set: { on in
+                            if on { workspace.tagFilters.insert(tag.id) } else { workspace.tagFilters.remove(tag.id) }
+                        }))
+                    }
+                } label: { Label("Filter by Tag", systemImage: "tag") }
+                .help("Filter by Tag").disabled(workspace.tags.isEmpty)
             }
         }
         .navigationTitle(workspace.editor.url == nil ? workspace.folderName : workspace.editor.name)

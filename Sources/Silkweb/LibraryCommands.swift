@@ -15,12 +15,13 @@ struct LibraryRename: Equatable {
 }
 
 enum LibraryUndo {
+    case tags(LibraryMetadata, String)
     case newFolder(String)
     case rename(LibraryRename, String)
     case move(MovePlan)
     case trash([TrashedItem])
     var title: String {
-        switch self { case .newFolder: return "Undo New Folder"; case .rename: return "Undo Rename"; case .move: return "Undo Move"; case .trash: return "Undo Move to Trash" }
+        switch self { case .tags(_, let title): return title; case .newFolder: return "Undo New Folder"; case .rename: return "Undo Rename"; case .move: return "Undo Move"; case .trash: return "Undo Move to Trash" }
     }
 }
 
@@ -165,7 +166,7 @@ extension LibraryWorkspace {
     var canUndoLibrary: Bool {
         guard canMutate, let snapshot, let last = libraryUndo.last else { return false }
         switch last {
-        case .move, .trash: return true
+        case .move, .trash, .tags: return true
         case .newFolder(let path):
             return snapshot.folders.contains { $0.relativePath == path }
                 && !snapshot.folders.contains { $0.relativePath.hasPrefix(path + "/") }
@@ -190,6 +191,14 @@ extension LibraryWorkspace {
             do {
                 let engine = try LibraryMutations(root: root)
                 switch last {
+                case .tags(let metadata, _):
+                    _ = try await TagStore.update(root: root) { current in
+                        var result = current
+                        result.tags = metadata.tags
+                        result.tagsByDocument = metadata.tagsByDocument
+                        return result
+                    }
+                    try await refresh(LibraryChangeSet(changes: []))
                 case .trash(let items):
                     let result = await (try TrashService(root: root)).restore(items)
                     let restored = Set(result.items.map(\.originalPath))

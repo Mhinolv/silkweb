@@ -136,10 +136,38 @@ struct DocumentTable: NSViewRepresentable {
             add("Move To…", #selector(move(_:)), enabled: workspace.canMutate)
             add("Reveal in Finder", #selector(reveal(_:)))
             menu.addItem(.separator())
+            let tagsItem = NSMenuItem(title: "Tags", action: nil, keyEquivalent: "")
+            let submenu = NSMenu()
+            let paths = workspace.documentDragPaths(path)
+            let ids = Set(paths.compactMap { workspace.snapshot?.metadata.IDsByPath[$0] })
+            for tag in workspace.tags {
+                let item = NSMenuItem(title: tag.name, action: #selector(toggleTag(_:)), keyEquivalent: "")
+                item.target = self; item.representedObject = TagMenuSelection(tag: tag, paths: Set(paths))
+                let count = ids.filter { workspace.snapshot?.metadata.tagsByDocument[$0.uuidString]?.contains(tag.id) == true }.count
+                item.state = count == 0 ? .off : count == ids.count ? .on : .mixed
+                item.isEnabled = workspace.canMutate
+                submenu.addItem(item)
+            }
+            submenu.addItem(.separator())
+            let edit = NSMenuItem(title: "Edit Tags…", action: #selector(editTags(_:)), keyEquivalent: "")
+            edit.target = self; edit.representedObject = path; edit.isEnabled = workspace.canMutate
+            submenu.addItem(edit)
+            tagsItem.submenu = submenu
+            menu.addItem(tagsItem)
             add("Move to Trash", #selector(trash(_:)), enabled: workspace.canMutate)
             return menu
         }
 
+        private struct TagMenuSelection { let tag: LibraryTag; let paths: Set<String> }
+        @objc private func toggleTag(_ sender: NSMenuItem) {
+            guard let selection = sender.representedObject as? TagMenuSelection else { return }
+            workspace.toggleTag(selection.tag, paths: selection.paths)
+        }
+        @objc private func editTags(_ sender: NSMenuItem) {
+            guard let path = sender.representedObject as? String else { return }
+            workspace.selectDocuments(Set(workspace.documentDragPaths(path)))
+            Task { await workspace.waitForNavigation(); workspace.showInfo() }
+        }
         @objc private func openTab(_ sender: NSMenuItem) {
             workspace.openSelectionInNewTab(sender.representedObject as? String)
         }

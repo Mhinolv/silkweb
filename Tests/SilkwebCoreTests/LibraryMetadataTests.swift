@@ -11,7 +11,7 @@ final class LibraryMetadataTests: XCTestCase {
         let data = try JSONEncoder().encode(metadata)
         XCTAssertEqual(try JSONDecoder().decode(LibraryMetadata.self, from: data), metadata)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        XCTAssertEqual(json["formatVersion"] as? Int, 1)
+        XCTAssertEqual(json["formatVersion"] as? Int, LibraryMetadata.currentVersion)
         XCTAssertNil(json["body"])
     }
 

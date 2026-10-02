@@ -46,7 +46,7 @@ final class LibraryScannerTests: XCTestCase {
         let snapshot = try await LibraryScanner.scan(root: root)
         XCTAssertEqual(snapshot.folders.count, 1)
         XCTAssertTrue(snapshot.documents.isEmpty)
-        XCTAssertEqual(snapshot.metadata.formatVersion, 1)
+        XCTAssertEqual(snapshot.metadata.formatVersion, LibraryMetadata.currentVersion)
         XCTAssertNil(snapshot.recoveredMetadataURL)
     }
 

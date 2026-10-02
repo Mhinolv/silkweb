@@ -46,7 +46,7 @@ struct FolderSidebar: NSViewRepresentable {
             coordinator?.expandHover(); return true
         }
         outline.dragEnded = { [weak coordinator] in coordinator?.finishDrag(accepted: false) }
-        outline.allowsEmptySelection = false
+        outline.allowsEmptySelection = true
         outline.autosaveExpandedItems = false
         outline.setAccessibilityLabel("Folders")
         scroll.documentView = outline
@@ -67,6 +67,9 @@ struct FolderSidebar: NSViewRepresentable {
             coordinator.revision = workspace.revision
             if coordinator.configure(snapshot) { coordinator.restore() }
             else { coordinator.updateVisibleCounts() }
+        }
+        if workspace.session.selectedTagID != nil, coordinator.outline?.selectedRow != -1 {
+            coordinator.restore()
         }
         if coordinator.rename != workspace.rename {
             coordinator.rename = workspace.rename
@@ -158,7 +161,7 @@ struct FolderSidebar: NSViewRepresentable {
             for path in workspace.session.expandedFolders.sorted(by: { $0.count < $1.count }) {
                 if let item = itemsByPath[path] { outline.expandItem(item) }
             }
-            let item = workspace.session.selectedFolder.flatMap { itemsByPath[$0] } ?? roots.first
+            let item = workspace.session.selectedTagID == nil ? (workspace.session.selectedFolder.flatMap { itemsByPath[$0] } ?? roots.first) : nil
             if let item {
                 var parent = outline.parent(forItem: item)
                 while let ancestor = parent {
@@ -168,6 +171,7 @@ struct FolderSidebar: NSViewRepresentable {
                 let row = outline.row(forItem: item)
                 if row >= 0 { outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false); outline.scrollRowToVisible(row) }
             }
+            if item == nil { outline.deselectAll(nil) }
             restoring = false
         }
 

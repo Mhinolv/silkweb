@@ -42,12 +42,14 @@ public struct FolderDocumentCount: Equatable, Sendable {
 
 /// Built once on the scan worker. Views never sort or read file attributes.
 public struct LibraryPresentation: Sendable {
+    public let documentsByID: [UUID: LibraryDocument]
     public let counts: [UUID: FolderDocumentCount]
     public let children: [UUID: [LibraryFolder]]
     private let ordered: [DocumentSortKey: [[LibraryDocument]]]
     private let directDocuments: [DocumentSortKey: [[UUID: [LibraryDocument]]]]
 
     public init(folders: [LibraryFolder], documents: [LibraryDocument]) {
+        documentsByID = Dictionary(uniqueKeysWithValues: documents.map { ($0.id, $0) })
         var counts = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, FolderDocumentCount()) })
         for document in documents { counts[document.folderID, default: FolderDocumentCount()].direct += 1 }
         for folder in folders {

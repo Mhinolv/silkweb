@@ -72,7 +72,9 @@ public enum LibraryScanner {
             throw LibraryError.invalidRoot
         }
         let (previous, recoveredURL) = try LibraryMetadataStore.load(root: root)
-        var metadata = LibraryMetadata()
+        var metadata = previous
+        metadata.formatVersion = LibraryMetadata.currentVersion
+        metadata.IDsByPath = [:]
         var usedIDs = Set<UUID>()
         var liveIDs: [String: UUID] = [:]
         for folder in previousSnapshot?.folders ?? [] {
@@ -190,6 +192,7 @@ public enum LibraryScanner {
             return updated
         }
         try Task.checkCancellation()
+        metadata = TagEditor.pruning(metadata)
         let locations = try LibraryMetadataStore.locations(root: root)
         let metadataTarget = FileManager.default.fileExists(atPath: locations.file.path) ? locations.file :
             (FileManager.default.fileExists(atPath: locations.directory.path) ? locations.directory : root)

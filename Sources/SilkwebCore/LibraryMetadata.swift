@@ -2,8 +2,10 @@ import Foundation
 
 /// Rebuildable identity index. Markdown bodies are never stored here.
 public struct LibraryMetadata: Codable, Equatable, Sendable {
-    public static let currentVersion = 1
+    public static let currentVersion = 2
     public var formatVersion: Int
+    public var tags: [LibraryTag] = []
+    public var tagsByDocument: [String: Set<UUID>] = [:]
     public var IDsByPath: [String: UUID]
 
     public init(IDsByPath: [String: UUID] = [:]) {
@@ -11,11 +13,15 @@ public struct LibraryMetadata: Codable, Equatable, Sendable {
         self.IDsByPath = IDsByPath
     }
 
-    private enum CodingKeys: String, CodingKey { case formatVersion, IDsByPath }
+    private enum CodingKeys: String, CodingKey { case formatVersion, IDsByPath, tags, tagsByDocument }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        formatVersion = try values.decodeIfPresent(Int.self, forKey: .formatVersion) ?? 1
+        let version = try values.decodeIfPresent(Int.self, forKey: .formatVersion) ?? 1
+        // Retain unsupported versions so the store refuses to overwrite them.
+        formatVersion = (1...Self.currentVersion).contains(version) ? Self.currentVersion : version
+        tags = try values.decodeIfPresent([LibraryTag].self, forKey: .tags) ?? []
+        tagsByDocument = try values.decodeIfPresent([String: Set<UUID>].self, forKey: .tagsByDocument) ?? [:]
         IDsByPath = try values.decodeIfPresent([String: UUID].self, forKey: .IDsByPath) ?? [:]
     }
 }

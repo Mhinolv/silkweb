@@ -139,6 +139,13 @@ final class ColumnLayoutTests: XCTestCase {
                 print("Outline empty \(size) \(mode): \(empty)")
                 XCTAssertEqual(empty.minY, populated.minY, accuracy: 4)
                 XCTAssertEqual(empty.minY, 12, accuracy: 4)
+                // Info's empty state must consume the remaining panel height so
+                // switching segments never vertically centers the shared header.
+                workspace.inspectorInfo = true
+                try await settle(columns.view)
+                XCTAssertEqual(try frame("outline-title", in: frames).minY, populated.minY, accuracy: 4)
+                workspace.inspectorInfo = false
+                try await settle(columns.view)
                 let captured = Frames()
                 captured.values = frames.values
                 emptyStates.append((captured, empty))

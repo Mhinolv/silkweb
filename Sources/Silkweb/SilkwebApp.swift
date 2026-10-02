@@ -63,7 +63,8 @@ struct SilkwebApp: App {
             CommandGroup(after: .sidebar) {
                 Button(workspace.preview.mode == .preview ? "Show Editor" : "Show Preview") { workspace.preview.togglePreview() }.keyboardShortcut("r")
                 Toggle("Split Editor and Preview", isOn: Binding(get: { workspace.preview.mode == .split }, set: { workspace.preview.mode = $0 ? .split : .editor })).keyboardShortcut("4")
-                Toggle("Show Outline", isOn: Binding(get: { workspace.preview.showsOutline }, set: { workspace.preview.showsOutline = $0 })).keyboardShortcut("7")
+                Button("Show Document Info") { workspace.showInfo() }.keyboardShortcut("8")
+                Toggle("Show Outline", isOn: Binding(get: { workspace.preview.showsOutline }, set: { workspace.inspectorInfo = false; workspace.preview.showsOutline = $0 })).keyboardShortcut("7")
                 Divider()
                 Menu("Sort By") { DocumentSortItems(workspace: workspace) }
                     .disabled(workspace.snapshot == nil)

@@ -9,6 +9,7 @@ struct DocumentList: View {
     var body: some View {
         SearchView(workspace: workspace, search: workspace.search) {
             PinnedColumn {
+                TagFilterBar(workspace: workspace)
                 if workspace.includesSubfolders {
                     HStack {
                         Text("Including subfolders · \(CountPresentation.label(workspace.documents.count, unit: .document))")
@@ -23,6 +24,16 @@ struct DocumentList: View {
                     ColumnEmptyState {
                         ContentUnavailableView("Folder Unavailable", systemImage: "lock",
                                            description: Text("You don't have permission to view this folder."))
+                    }
+                } else if workspace.documents.isEmpty && !workspace.effectiveTagFilters.isEmpty {
+                    ColumnEmptyState {
+                        ContentUnavailableView {
+                            Label("No Matching Documents", systemImage: "tag")
+                        } description: {
+                            Text("No documents in “\(workspace.folderName)” have all of these tags.")
+                        } actions: {
+                            Button("Clear Filters") { workspace.tagFilters = []; workspace.session.selectedTagID = nil }
+                        }
                     }
                 } else if workspace.documents.isEmpty {
                     ColumnEmptyState {

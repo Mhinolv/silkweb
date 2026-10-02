@@ -17,14 +17,21 @@ struct InspectorView: View {
         let resume: Date
     }
     var body: some View {
+        VStack(spacing: 0) {
+            Picker("Inspector", selection: Binding(get: { workspace.inspectorInfo }, set: { workspace.inspectorInfo = $0 })) {
+                Text("Outline").tag(false)
+                Text("Info").tag(true)
+            }.pickerStyle(.segmented).labelsHidden().columnLayoutAnchor("outline-title").padding(12)
+            if workspace.inspectorInfo { DocumentInfo(workspace: workspace).frame(maxWidth: .infinity, maxHeight: .infinity) } else { outline }
+        }
+    }
+    private var outline: some View {
         let current = preview.currentItem(caret: workspace.editor.caretLocation)
         let items = preview.outlineItems.isEmpty ? OutlineItem.parse("", headings: preview.headings) : preview.outlineItems
         let imageCount = items.count - preview.headings.count
         let summary = [(preview.headings.count, CountPresentation.Unit.heading), (imageCount, .image)]
             .filter { $0.0 > 0 }.map { CountPresentation.label($0.0, unit: $0.1) }.joined(separator: " · ")
         return PinnedColumn {
-            Text("Outline").font(.headline).columnLayoutAnchor("outline-title")
-                .padding(12).accessibilityIdentifier("outline-title")
             if !items.isEmpty {
                 Text(summary)
                     .font(.caption).monospacedDigit().foregroundStyle(.secondary)
