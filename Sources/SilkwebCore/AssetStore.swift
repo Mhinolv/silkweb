@@ -49,7 +49,7 @@ public actor AssetStore {
                 let root = root.standardizedFileURL
                 guard document.standardizedFileURL.path.hasPrefix(root.path + "/") else { throw LibraryMutationError.outsideRoot }
                 try LibraryMetadataStore.rejectLink(root)
-                let assets = root.appendingPathComponent(".silkweb-assets", isDirectory: true)
+                let assets = try MediaDirectory.prepare(root: root)
                 let directory = assets.appendingPathComponent(id.uuidString, isDirectory: true)
                 for folder in [assets, directory] {
                     try LibraryMetadataStore.rejectLink(folder)

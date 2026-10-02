@@ -18,7 +18,7 @@ public struct ImportPlan: Sendable {
     public let outsideLinks: [String]
     public let emptyFolders: Int
     public var documentCount: Int { entries.filter(\.isDocument).count }
-    public var assetCount: Int { entries.filter { !$0.isFolder && !$0.isDocument }.count }
+    public var assetCount: Int { entries.filter { !$0.isFolder && !$0.isDocument && ($0.sourcePath as NSString).lastPathComponent != MediaDirectory.marker }.count }
     public var folderCount: Int { entries.filter(\.isFolder).count }
 }
 
@@ -90,7 +90,7 @@ public enum FolderImporter {
         var items: [(String, Bool)] = []
         var documents: [String: String] = [:]
         var skipped: [String] = []
-        func walk(_ path: String) throws {
+        func walk(_ path: String, assets: Bool = false) throws {
             try Task.checkCancellation()
             let directory = source.appendingPathComponent(path)
             let children: [URL]
@@ -102,10 +102,11 @@ public enum FolderImporter {
                 do {
                     let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isHiddenKey, .isRegularFileKey])
                     if values.isSymbolicLink == true { skipped.append(relative + " — Symbolic link"); continue }
+                    if assets && url.lastPathComponent == MediaDirectory.marker { items.append((relative, false)); continue }
                     if values.isHidden == true || url.lastPathComponent.hasPrefix(".") { skipped.append(relative + " — Hidden item"); continue }
-                    if values.isDirectory == true { items.append((relative, true)); try walk(relative) }
+                    if values.isDirectory == true { items.append((relative, true)); try walk(relative, assets: assets || MediaDirectory.isMarked(url)) }
                     else if values.isRegularFile == true {
-                        if ["md", "markdown"].contains(url.pathExtension.lowercased()) {
+                        if !assets && ["md", "markdown"].contains(url.pathExtension.lowercased()) {
                             documents[relative] = try String(contentsOf: url, encoding: .utf8)
                         }
                         items.append((relative, false))
@@ -114,7 +115,7 @@ public enum FolderImporter {
                 catch { skipped.append(relative + " — Couldn’t be read") }
             }
         }
-        try walk("")
+        try walk("", assets: MediaDirectory.isMarked(source))
         let files = Set(items.filter { !$0.1 }.map { $0.0 })
         var canonicalFiles: [String: String] = [:]
         for path in files.sorted().reversed() { canonicalFiles[path.precomposedStringWithCanonicalMapping.lowercased()] = path }
@@ -146,10 +147,10 @@ public enum FolderImporter {
         var entries: [ImportPlan.Entry] = []
         var renamed: [String] = []
         for (path, folder) in items {
-            guard folder || documents[path] != nil || linked.contains(path) else { skipped.append(path + " — Not a Markdown document or a linked image"); continue }
+            guard folder || documents[path] != nil || linked.contains(path) || (path as NSString).lastPathComponent == MediaDirectory.marker else { skipped.append(path + " — Not a Markdown document or a linked image"); continue }
             let parent = (path as NSString).deletingLastPathComponent
             var siblingNames = names[parent] ?? []
-            let name = unique((path as NSString).lastPathComponent, used: &siblingNames, folder: folder)
+            let name = (path as NSString).lastPathComponent == MediaDirectory.marker ? MediaDirectory.marker : unique((path as NSString).lastPathComponent, used: &siblingNames, folder: folder)
             names[parent] = siblingNames
             let mappedParent = mapped[parent] ?? parent
             let copy = mappedParent.isEmpty ? name : mappedParent + "/" + name

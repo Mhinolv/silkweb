@@ -221,7 +221,7 @@ public enum HTMLRenderer {
         guard options.offlinePreview, !destination.hasPrefix("#"),
               URLComponents(string: destination)?.scheme == nil,
               let document = options.documentURL else { return destination }
-        return URL(string: destination, relativeTo: document)?.absoluteURL.absoluteString ?? destination
+        return PreviewResource.resolve(destination, relativeTo: document)?.absoluteString ?? destination
     }
 
     private static func titleAttribute(_ title: String?) -> String {
@@ -263,7 +263,7 @@ public enum HTMLRenderer {
               !(components.percentEncodedPath.removingPercentEncoding ?? "").contains("&") else { return false }
         if let root = options.libraryRoot, let document = options.documentURL {
             guard root.isFileURL, document.isFileURL, contained(document, root: root),
-                  let resolved = URL(string: destination, relativeTo: document)?.absoluteURL else { return false }
+                  let resolved = PreviewResource.resolve(destination, relativeTo: document) else { return false }
             return contained(resolved, root: root)
         }
         return !(components.percentEncodedPath.removingPercentEncoding ?? "").split(separator: "/").contains("..")

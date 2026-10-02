@@ -19,15 +19,16 @@ final class AssetStoreTests: XCTestCase {
         guard batch.assets.count == 4 else { return }
         XCTAssertEqual(batch.failures.count, 1)
         XCTAssertEqual(batch.assets.map { $0.url.lastPathComponent }, [name, "Ünïcode photo(#?%) 2.png", "Ünïcode photo(#?%) 3.png", "report.pdf"])
-        XCTAssertEqual(batch.assets[0].path, "../../.silkweb-assets/\(id.uuidString)/Ünïcode%20photo%28%23%3F%25%29.png")
+        XCTAssertEqual(batch.assets[0].path, "../../media/\(id.uuidString)/Ünïcode%20photo%28%23%3F%25%29.png")
         XCTAssertTrue(batch.assets[3].markdown.hasPrefix("[report.pdf]"))
         for (index, asset) in batch.assets.enumerated() {
             XCTAssertEqual(try Data(contentsOf: asset.url), Data([index == 3 ? 9 : UInt8(index)]))
             XCTAssertEqual(document.deletingLastPathComponent().appendingPathComponent(try XCTUnwrap(asset.path.removingPercentEncoding)).standardizedFileURL, asset.url)
         }
         let scanned = try await LibraryScanner.scan(root: root)
+        XCTAssertTrue(MediaDirectory.isMarked(root.appendingPathComponent("media")))
         XCTAssertEqual(scanned.documents.count, 1)
-        XCTAssertFalse(scanned.folders.contains { $0.relativePath.contains(".silkweb-assets") })
+        XCTAssertFalse(scanned.folders.contains { $0.relativePath.contains("media") })
         XCTAssertEqual(try String(contentsOf: document, encoding: .utf8), "old text")
         let changed = LibraryChangeSet(changes: [.init(id: id, oldPath: "A/B/old.md", newPath: "moved.md", isFolder: false)])
         let rewritten = MarkdownDestinations.rewrite(batch.assets[0].markdown, source: "A/B/old.md", changes: changed)
@@ -59,8 +60,8 @@ final class AssetStoreTests: XCTestCase {
         XCTAssertTrue(empty.assets.isEmpty)
         let outside = await store.add([.init(name: "x", isImage: true, data: Data())], root: root, document: root.deletingLastPathComponent().appendingPathComponent("outside.md"), id: UUID())
         XCTAssertEqual(outside.failures.count, 1)
-        try FileManager.default.removeItem(at: root.appendingPathComponent(".silkweb-assets"))
-        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent(".silkweb-assets"), withDestinationURL: root)
+        try FileManager.default.removeItem(at: root.appendingPathComponent("media"))
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("media"), withDestinationURL: root)
         let link = await store.add([.init(name: "x", isImage: true, data: Data())], root: root, document: document, id: UUID())
         XCTAssertEqual(link.failures.count, 1)
     }

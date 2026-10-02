@@ -555,7 +555,7 @@ extension LibraryMutations {
     private func moveInventory() throws -> (managed: Set<String>, linkTargets: Set<String>) {
         var managed = Set<String>()
         var linkTargets = Set<String>()
-        var pending = [(url: root, path: "")]
+        var pending = [(url: root, path: "", assets: false)]
         let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .isHiddenKey]
         while let parent = pending.popLast() {
             for url in try FileManager.default.contentsOfDirectory(at: parent.url, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles]) {
@@ -565,8 +565,9 @@ extension LibraryMutations {
                 // Assets and symlinks remain available for link canonicalization
                 // and diagnostics, but are excluded from managed-item staleness.
                 linkTargets.insert(path)
-                if LibraryScanner.isManagedItem(url, values: values) { managed.insert(path) }
-                if values.isDirectory == true, values.isSymbolicLink != true { pending.append((url, path)) }
+                let assets = parent.assets || (values.isDirectory == true && MediaDirectory.isMarked(url))
+                if !assets, LibraryScanner.isManagedItem(url, values: values) { managed.insert(path) }
+                if values.isDirectory == true, values.isSymbolicLink != true { pending.append((url, path, assets)) }
             }
         }
         return (managed, linkTargets)

@@ -6,6 +6,7 @@ public enum LibraryScanner {
     static func isManagedItem(_ url: URL, values: URLResourceValues) -> Bool {
         guard values.isSymbolicLink != true, values.isHidden != true,
               !url.lastPathComponent.hasPrefix(".") else { return false }
+        if values.isDirectory == true, MediaDirectory.isMarked(url) { return false }
         return values.isDirectory == true || (values.isRegularFile == true
             && ["md", "markdown"].contains(url.pathExtension.lowercased()))
     }

@@ -21,11 +21,14 @@ struct SnapshotScenario {
     var scrollToEnd = false
     var legacyScroller = false
     var resizeSidebar = false
+    var mediaMigration: String? = nil
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
     static let image = "Snapshot Fixtures/Image Fixture.md"
     static let initial: [SnapshotScenario] = [
         .init(name: "library-overview"),
+        .init(name: "media-migration-progress", document: image, mediaMigration: "progress"),
+        .init(name: "media-migration-failure", document: image, mediaMigration: "failure"),
         .init(name: "sidebar-resized", folder: "Coffee", resizeSidebar: true),
         .init(name: "sidebar-folder-rename", folder: "Coffee", rename: true),
         .init(name: "folder-selected", folder: "Coffee/Brewing Guides"),
@@ -251,6 +254,12 @@ final class SnapshotHarness {
             await workspace.waitForNavigation()
             // Exercise the existing multi-selection placeholder with tabs retained.
             workspace.activeTabID = nil
+        }
+        if let migration = scenario.mediaMigration {
+            workspace.mediaBannerVisible = true
+            workspace.mediaDirectoryName = "media"
+            if migration == "progress" { workspace.mediaProgress = ("media", 12, 40) }
+            else { workspace.mediaFailures = [.init(name: "kettle.png", reason: "The file is locked.")] }
         }
         workspace.preview.mode = scenario.mode
         workspace.preview.showsOutline = scenario.outline

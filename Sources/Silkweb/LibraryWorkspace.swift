@@ -49,6 +49,11 @@ final class LibraryWorkspace {
     var snapshot: LibrarySnapshot?
     var session = LibrarySession()
     var loading = false
+    var mediaProgress: (name: String, done: Int, total: Int)?
+    var mediaFailures: [AssetFailure] = []
+    var mediaDirectoryName = "media"
+    var mediaMigrationRunning = false
+    var mediaBannerVisible = false
     var loadingCount: Int?
     var error: String?
     var errorTitle = "Can’t Open Library"
@@ -59,6 +64,7 @@ final class LibraryWorkspace {
     var focusColumn = 0
     private var scope: URL?
     private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private var mediaRetryTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     private var canSaveSession = true
     @ObservationIgnored var itemPathsByID: [UUID: String] = [:]
@@ -185,6 +191,9 @@ final class LibraryWorkspace {
         saveTask?.cancel()
         loadTask = Task {
             await previousLoad?.value
+            mediaRetryTask?.cancel()
+            await mediaRetryTask?.value
+            mediaRetryTask = nil
             guard !Task.isCancelled else { return }
             await navigationTask?.value
             guard !mutating else { return }
@@ -207,6 +216,9 @@ final class LibraryWorkspace {
             root = url
             snapshot = nil
             error = nil
+            mediaProgress = nil
+            mediaFailures = []
+            mediaBannerVisible = false
             loading = true
             loadingCount = nil
             do {
@@ -254,6 +266,8 @@ final class LibraryWorkspace {
                 let location = await Task.detached(priority: .utility) { LibraryLocation.saving(url) }.value
                 guard !Task.isCancelled else { return }
                 persistLocation(location)
+                loading = false
+                await migrateMedia()
             } catch {
                 guard !Task.isCancelled else { return }
                 let cocoa = error as NSError
@@ -275,9 +289,78 @@ final class LibraryWorkspace {
         }
     }
 
+    func retryMediaMigration() {
+        mediaRetryTask = Task { await migrateMedia() }
+    }
+
+    func migrateMedia() async {
+        guard !mediaMigrationRunning, let root, let snapshot, !snapshot.isReadOnly,
+              FileManager.default.fileExists(atPath: root.appendingPathComponent(".silkweb-assets").path) else { return }
+        mediaMigrationRunning = true
+        mediaFailures = []
+        mediaBannerVisible = false
+        let delay = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, self.root == root, self.mediaMigrationRunning else { return }
+            self.mediaBannerVisible = true
+        }
+        defer { delay.cancel(); mediaMigrationRunning = false; mediaProgress = nil }
+        let result = await AssetStore.shared.migrate(root: root, documents: snapshot.documents.map(\.relativePath), progress: { [weak self] name, done, total in
+            Task { @MainActor in
+                guard let self, self.root == root, self.mediaMigrationRunning else { return }
+                self.mediaDirectoryName = name
+                self.mediaProgress = (name, done, total)
+            }
+        }, beforeRewrite: { [weak self] in
+            guard let self else { return false }
+            return await self.beginMediaRewrite(root: root)
+        }, afterRewrite: { [weak self] in
+            await self?.finishMediaRewrite(root: root)
+        })
+        guard self.root == root, !Task.isCancelled else { return }
+        mediaDirectoryName = result.directoryName
+        mediaFailures = result.failures
+        mediaBannerVisible = !result.failures.isEmpty
+        if mediaBannerVisible {
+            NSAccessibility.post(element: NSApplication.shared, notification: .announcementRequested,
+                                 userInfo: [.announcement: "Some images couldn’t be moved to the “\(mediaDirectoryName)” folder.",
+                                            .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+        }
+        if let updated = try? await LibraryScanner.scan(root: root, previousSnapshot: snapshot) { install(updated) }
+    }
+
+    private func beginMediaRewrite(root: URL) async -> Bool {
+        // An insert already copying on the asset executor must publish its text
+        // before we disable editing and flush. The executor can resume inserts
+        // while it awaits this callback.
+        while preview.editor?.assetHandler.busy == true {
+            do { try await Task.sleep(for: .milliseconds(10)) } catch { return false }
+            guard self.root == root, !mutating else { return false }
+        }
+        await navigationTask?.value
+        guard self.root == root, !mutating, !Task.isCancelled else { return false }
+        mutating = true
+        for editor in allEditors { editor.loading = true }
+        guard await flushEditors() else {
+            for editor in allEditors { editor.loading = false }
+            mutating = false
+            return false
+        }
+        return true
+    }
+
+    private func finishMediaRewrite(root: URL) async {
+        guard self.root == root else { return }
+        for editor in allEditors {
+            if let url = editor.url { await editor.followRename(to: url) }
+            editor.loading = false
+        }
+        mutating = false
+    }
+
     func reconcileFinderChanges() async {
-        guard !loading, !mutating, !reconciling, let root, let old = snapshot else {
-            if mutating || reconciling { watcher?.notifyChange() }
+        guard !loading, !mutating, !mediaMigrationRunning, !reconciling, let root, let old = snapshot else {
+            if mutating || mediaMigrationRunning || reconciling { watcher?.notifyChange() }
             return
         }
         reconciling = true

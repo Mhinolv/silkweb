@@ -4,6 +4,14 @@ import Foundation
 public enum PreviewResource {
     public static let scheme = "silkweb-preview"
 
+    /// Keep existing escapes intact when a readable Markdown path mixes Unicode
+    /// and percent-encoded punctuation. Foundation otherwise escapes '%' again.
+    public static func resolve(_ destination: String, relativeTo document: URL) -> URL? {
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~:/?#[]@!$&'()*+,;=%")
+        guard let encoded = destination.addingPercentEncoding(withAllowedCharacters: allowed) else { return nil }
+        return URL(string: encoded, relativeTo: document)?.absoluteURL
+    }
+
     public static func assetURL(for file: URL, root: URL) -> URL? {
         guard file.isFileURL, root.isFileURL, HTMLRenderer.contained(file, root: root) else { return nil }
         let base = root.standardizedFileURL.resolvingSymlinksInPath().path

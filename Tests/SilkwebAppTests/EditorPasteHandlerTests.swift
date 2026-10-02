@@ -65,8 +65,8 @@ final class EditorPasteHandlerTests: XCTestCase {
             XCTAssertEqual(session.text, text.string)
             XCTAssertTrue(text.string.hasPrefix("before\n!["))
             let id = try XCTUnwrap(workspace.snapshot?.documents.first { $0.relativePath == "restored.md" }?.id)
-            XCTAssertTrue(text.string.contains(".silkweb-assets/\(id.uuidString)/"))
-            let directory = root.appendingPathComponent(".silkweb-assets/\(id.uuidString)")
+            XCTAssertTrue(text.string.contains("media/\(id.uuidString)/"))
+            let directory = root.appendingPathComponent("media/\(id.uuidString)")
             XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
             for width: CGFloat in [0, 1, 80, 320, 1200, 4096] {
                 scroll.setFrameSize(NSSize(width: width, height: 200))
@@ -147,7 +147,7 @@ final class EditorPasteHandlerTests: XCTestCase {
             try await finish(text.assetHandler)
             XCTAssertNil(session.assetMessage)
             let inserted = text.string
-            XCTAssertTrue(inserted.hasPrefix("before\n![image](.silkweb-assets/"))
+            XCTAssertTrue(inserted.hasPrefix("before\n![image](media/"))
             XCTAssertEqual((inserted as NSString).substring(with: text.selectedRange()), "image")
             XCTAssertEqual(delegate.manager.undoActionName, "Insert Image")
             delegate.manager.undo()
@@ -163,7 +163,7 @@ final class EditorPasteHandlerTests: XCTestCase {
                 XCTAssertEqual(text.string, inserted)
             }
         }
-        let directory = root.appendingPathComponent(".silkweb-assets/\(id.uuidString)")
+        let directory = root.appendingPathComponent("media/\(id.uuidString)")
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 2)
         let file = root.appendingPathComponent("report.pdf")
         try Data([1, 2]).write(to: file)
@@ -172,7 +172,7 @@ final class EditorPasteHandlerTests: XCTestCase {
         text.assetHandler.readContent = { _ in EditorPasteContent(fileURLs: [file]) }
         XCTAssertTrue(text.readSelection(from: board, type: .fileURL))
         try await finish(text.assetHandler)
-        XCTAssertTrue(text.string.hasPrefix("[report.pdf](.silkweb-assets/"))
+        XCTAssertTrue(text.string.hasPrefix("[report.pdf](media/"))
         XCTAssertEqual(delegate.manager.undoActionName, "Insert Attachment")
         delegate.manager.undo()
         XCTAssertEqual(text.string, "")
