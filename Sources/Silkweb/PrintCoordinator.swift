@@ -10,7 +10,9 @@ final class PrintCoordinator: NSObject, WKNavigationDelegate {
         return resources.url(forResource: "print", withExtension: "css")
             .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
     }()
-    static let offlineRules = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^(data:|about:blank$)"},"action":{"type":"ignore-previous-rules"}}]"#
+    // Content blockers support a restricted regex syntax: keep scheme exceptions
+    // separate rather than using unsupported groups or alternation.
+    static let offlineRules = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^data:"},"action":{"type":"ignore-previous-rules"}},{"trigger":{"url-filter":"^about:blank$"},"action":{"type":"ignore-previous-rules"}}]"#
     let web: WKWebView
     private var completion: CheckedContinuation<Void, Error>?
     private var timeout: Task<Void, Never>?

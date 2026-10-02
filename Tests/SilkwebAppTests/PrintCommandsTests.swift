@@ -5,6 +5,20 @@ import SilkwebCore
 @testable import Silkweb
 
 final class PrintCommandsTests: XCTestCase {
+    /// Compiles the production rules without loading a page or starting a print job.
+    /// Unlike the PDF smoke test, this regression must also run in the sandbox.
+    @MainActor func testOfflinePrintRulesCompile() async throws {
+        let identifier = "Silkweb.OfflinePrint.Test.\(UUID().uuidString)"
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = WKContentRuleListStore(url: root)!
+        let rules = try await store.compileContentRuleList(
+            forIdentifier: identifier, encodedContentRuleList: PrintCoordinator.offlineRules)
+        XCTAssertNotNil(rules)
+        try await store.removeContentRuleList(forIdentifier: identifier)
+    }
+
     @MainActor func testAvailabilityAndPrintPreflight() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
