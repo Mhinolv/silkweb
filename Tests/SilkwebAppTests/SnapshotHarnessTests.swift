@@ -4,6 +4,47 @@ import XCTest
 
 final class SnapshotHarnessTests: XCTestCase {
     @MainActor
+    func testWebKitAvailabilityDetection() {
+        for policy in [-1, NSApplication.ActivationPolicy.prohibited.rawValue,
+                       NSApplication.ActivationPolicy.accessory.rawValue,
+                       NSApplication.ActivationPolicy.regular.rawValue] {
+            for override in [nil, "", "0", "1"] as [String?] {
+                for marker in [nil, "seatbelt"] as [String?] {
+                    var environment: [String: String] = [:]
+                    environment["SILKWEB_SNAPSHOT_NO_WEBKIT"] = override
+                    environment["CODEX_SANDBOX"] = marker
+                    XCTAssertEqual(SnapshotHarness.isWebKitUnavailable(environment: environment, activationPolicy: policy),
+                                   policy == -1 || override == "1" || marker != nil)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func testWebKitScenariosWithoutVendorSandboxMarker() async throws {
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: output) }
+        // Model QA's host with no CODEX_SANDBOX. An explicit override also makes
+        // this regression test deterministic on registered, outside-sandbox hosts.
+        let harness = SnapshotHarness(environment: ["SILKWEB_SNAPSHOT_NO_WEBKIT": "1"])
+        let manifest = try await harness.run(output: output, names: ["preview-mode", "split-mode"])
+        XCTAssertEqual(manifest.captures.count, 4)
+        for capture in manifest.captures {
+            XCTAssertEqual(capture.status, "unavailable in this environment", capture.details.joined(separator: ", "))
+            let file = try XCTUnwrap(capture.file)
+            let bitmap = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: output.appendingPathComponent(file))))
+            let scale = try XCTUnwrap(capture.backingScale)
+            XCTAssertEqual(bitmap.pixelsWide, Int(1400 * scale))
+            XCTAssertEqual(bitmap.pixelsHigh, Int(900 * scale))
+        }
+        if NSApp.activationPolicy().rawValue == -1 {
+            let automatic = try await SnapshotHarness(environment: [:]).run(output: output, names: ["preview-mode", "split-mode"])
+            XCTAssertEqual(automatic.captures.map(\.status), Array(repeating: "unavailable in this environment", count: 4))
+            XCTAssertTrue(automatic.captures.allSatisfy { $0.file != nil })
+        }
+    }
+
+    @MainActor
     func testRequestedScenarios() async throws {
         guard let directory = ProcessInfo.processInfo.environment["SILKWEB_SNAPSHOT_OUTPUT"] else {
             throw XCTSkip("Run scripts/snapshot.sh to generate the QA batch")

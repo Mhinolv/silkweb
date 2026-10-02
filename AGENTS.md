@@ -33,6 +33,10 @@ Do **not** open or read the product owner's personal MWeb library/notes content 
   in the agent sandbox. Run outside the sandbox to capture WebKit via `takeSnapshot`; failures
   produce a nonzero exit and manifest diagnostics. This captures current behavior, including
   existing UI defects; it does not apply fixes or use golden baselines.
+  WebKit is disabled automatically for Codex sandbox markers or an unregistered host (policy
+  `-1` after requesting prohibited activation), including agent hosts without Codex markers.
+  Set `SILKWEB_SNAPSHOT_NO_WEBKIT=1` to explicitly capture native panes only in other restricted
+  environments; preview/split captures receive the same unavailable status.
   The sandbox denies LaunchServices registration: AppKit may report policy `-1` despite the
   prohibited request. This unregistered XCTest host is allowed only inside the sandbox and
   noted in the manifest; outside it, the harness requires `.prohibited`.

@@ -71,16 +71,27 @@ final class SnapshotHarness {
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     let size: NSSize
     let timeout: TimeInterval
-    let webKitUnavailable: Bool
+    private let environment: [String: String]
+    var webKitUnavailable: Bool {
+        Self.isWebKitUnavailable(environment: environment, activationPolicy: NSApp.activationPolicy().rawValue)
+    }
+
+    static func isWebKitUnavailable(environment: [String: String], activationPolicy: Int) -> Bool {
+        // LaunchServices denial identifies unregistered sandbox hosts even when the
+        // runner supplies no vendor-specific environment marker. Check after requesting
+        // prohibited activation, before waiting for any WebKit navigation.
+        environment["SILKWEB_SNAPSHOT_NO_WEBKIT"] == "1" ||
+            environment["CODEX_SANDBOX"] != nil || activationPolicy == -1
+    }
     var activationIsSafe: Bool {
         NSApp.activationPolicy() == .prohibited || (webKitUnavailable && NSApp.activationPolicy().rawValue == -1)
     }
 
     init(size: NSSize = NSSize(width: 1400, height: 900), timeout: TimeInterval = 12,
-         webKitUnavailable: Bool = ProcessInfo.processInfo.environment["CODEX_SANDBOX"] != nil) {
+         environment: [String: String] = ProcessInfo.processInfo.environment) {
         self.size = size
         self.timeout = timeout
-        self.webKitUnavailable = webKitUnavailable
+        self.environment = environment
     }
 
     func run(output: URL, names: [String] = []) async throws -> SnapshotManifest {
@@ -270,7 +281,7 @@ final class SnapshotHarness {
             if scenario.mode != .editor {
                 if webKitUnavailable {
                     capture.status = "unavailable in this environment"
-                    capture.details.append("WebKit content processes are unavailable in the agent sandbox; PNG contains the real native panes only.")
+                    capture.details.append("WebKit capture is disabled by the environment or unavailable in this unregistered host; PNG contains the real native panes only.")
                 } else {
                     try await wait("preview didFinish") {
                         guard let web = workspace.preview.webView,
