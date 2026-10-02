@@ -48,6 +48,9 @@ struct FormatCommands: Commands {
                         .disabled(!target.enabled)
                 }
             }
+            Button("Insert Table…") { target.editor?.showTableInsertSheet() }
+                .keyboardShortcut("t", modifiers: [.control, .command])
+                .disabled(!target.enabled)
         }
     }
     @ViewBuilder private func items(_ group: [FormatItem]) -> some View {
@@ -101,6 +104,10 @@ extension PlainMarkdownTextView {
                 destination.addItem(entry)
             }
         }
+        let table = NSMenuItem(title: "Insert Table…", action: #selector(showTableInsertSheet(_:)), keyEquivalent: "t")
+        table.keyEquivalentModifierMask = [.control, .command]
+        table.target = self
+        formatMenu.addItem(table)
         let parent = NSMenuItem(title: "Format", action: nil, keyEquivalent: "")
         parent.submenu = formatMenu
         menu.addItem(.separator())
@@ -109,7 +116,7 @@ extension PlainMarkdownTextView {
     }
 
     override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        if menuItem.action == #selector(performFormat(_:)) { return window?.firstResponder === self && isEditable && !hasMarkedText() }
+        if menuItem.action == #selector(performFormat(_:)) || menuItem.action == #selector(showTableInsertSheet(_:)) { return window?.firstResponder === self && isEditable && !hasMarkedText() }
         return super.validateMenuItem(menuItem)
     }
 }

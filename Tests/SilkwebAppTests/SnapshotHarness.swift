@@ -23,11 +23,17 @@ struct SnapshotScenario {
     var legacyScroller = false
     var resizeSidebar = false
     var mediaMigration: String? = nil
+    var tableInsert: String? = nil
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
     static let image = "Snapshot Fixtures/Image Fixture.md"
     static let initial: [SnapshotScenario] = [
         .init(name: "library-overview"),
+        .init(name: "table-insert-default", tableInsert: "default"),
+        .init(name: "table-insert-maximum", tableInsert: "maximum"),
+        .init(name: "table-insert-invalid", tableInsert: "invalid"),
+        .init(name: "table-insert-left", tableInsert: "left"),
+        .init(name: "table-insert-right", tableInsert: "right"),
         .init(name: "media-migration-progress", document: image, mediaMigration: "progress"),
         .init(name: "media-migration-failure", document: image, mediaMigration: "failure"),
         .init(name: "sidebar-resized", folder: "Coffee", resizeSidebar: true),
@@ -334,7 +340,18 @@ final class SnapshotHarness {
                     recoveredMetadataURL: snapshot.recoveredMetadataURL, isReadOnly: snapshot.isReadOnly))
             } else { workspace.install(snapshot) }
             try await bounded("scenario configuration") { try await self.configure(scenario, workspace: workspace) }
-            let controller = NSHostingController(rootView: AnyView(LibraryWorkspaceView(workspace: workspace)
+            let content: AnyView
+            if let state = scenario.tableInsert {
+                let form = TableInsertForm(options: state == "maximum" ? TableOptions(columns: 20, rows: 100, alignment: .center) : TableOptions())
+                if state == "invalid" { form.columns = "abc" }
+                if state == "left" { form.alignment = .left; form.columns = "1"; form.rows = "1" }
+                if state == "right" { form.alignment = .right }
+                // Host the production sheet itself; never present or order a sheet window.
+                content = AnyView(TableInsertSheet(form: form, cancel: {}, insert: { _ in })
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity))
+            } else { content = AnyView(LibraryWorkspaceView(workspace: workspace)) }
+            let controller = NSHostingController(rootView: AnyView(content
                 .environment(\.colorScheme, dark ? .dark : .light)))
             controller.sizingOptions = []
             host = controller
