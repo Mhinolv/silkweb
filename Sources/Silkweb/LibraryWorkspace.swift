@@ -380,6 +380,9 @@ final class LibraryWorkspace {
                 let destination = scanned.documents.first { $0.id == id }.map { root.appendingPathComponent($0.relativePath) }
                 await editor.reconcileExternalChange(movedTo: destination)
             }
+            for tab in tabs {
+                tab.textView?.inlineImages.schedule()
+            }
             // Derived index/cache writes also reach the watcher. A no-op scan must
             // not invalidate the entire workspace and restart search presentation.
             guard old.folders != scanned.folders || old.documents != scanned.documents

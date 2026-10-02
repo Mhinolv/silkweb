@@ -1,4 +1,5 @@
 import AppKit
+import Quartz
 import SwiftUI
 import SilkwebCore
 
@@ -99,6 +100,8 @@ struct MarkdownTextView: NSViewRepresentable {
         text.textContainer?.heightTracksTextView = false
         text.textContainer?.lineFragmentPadding = 0
         scroll.documentView = text
+        text.inlineImages.editor = text
+        text.layoutManager?.delegate = text.inlineImages
         text.styler.editor = text
         text.textStorage?.delegate = text.styler
         scroll.contentView.postsFrameChangedNotifications = true
@@ -125,6 +128,7 @@ struct MarkdownTextView: NSViewRepresentable {
             coordinator.url = session.url
             if replacingBuffer { text.string = session.text }
             text.styler.reload()
+            text.inlineImages.schedule()
             if replacingBuffer { text.undoManager?.removeAllActions() }
             let count = (text.string as NSString).length
             text.setSelectedRange(NSRange(location: min(selection.location, count), length: min(selection.length, max(0, count - selection.location))))
@@ -150,6 +154,7 @@ struct MarkdownTextView: NSViewRepresentable {
     static func reload(_ text: PlainMarkdownTextView, in scroll: NSScrollView, value: String, selection: NSRange, position: NSPoint) {
         text.string = value
         text.styler.reload()
+        text.inlineImages.schedule()
         text.undoManager?.removeAllActions()
         let count = (value as NSString).length
         let location = min(selection.location, count)
@@ -182,6 +187,7 @@ struct MarkdownTextView: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView else { return }
             session.selection = textView.selectedRange()
+            (textView as? PlainMarkdownTextView)?.inlineImages.refreshSelection()
             session.caretLocation = session.selection.location
             session.scroll = textView.enclosingScrollView?.contentView.bounds.origin ?? .zero
         }
@@ -194,6 +200,7 @@ final class PlainMarkdownTextView: NSTextView {
     var style = EditorStyle()
     weak var session: DocumentSession?
     let styler = MarkdownStyler()
+    let inlineImages = InlineImageLayout()
     lazy var assetHandler: EditorPasteHandler = {
         let handler = EditorPasteHandler()
         handler.editor = self
@@ -203,6 +210,19 @@ final class PlainMarkdownTextView: NSTextView {
     func configureAssetInsertion(session: DocumentSession, workspace: LibraryWorkspace) {
         self.session = session
         assetHandler.workspace = workspace
+        inlineImages.configure(root: workspace.root, document: session.url)
+    }
+    weak var quickLookImage: InlineImageView?
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { quickLookImage != nil }
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        panel.dataSource = quickLookImage
+        panel.delegate = quickLookImage
+    }
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        panel.dataSource = nil
+        panel.delegate = nil
+        quickLookImage = nil
+        window?.makeFirstResponder(self)
     }
     var viewportObserver: NSObjectProtocol?
     deinit {
@@ -223,6 +243,10 @@ final class PlainMarkdownTextView: NSTextView {
             guard let self, !self.hasMarkedText(), let container = self.textContainer else { return }
             self.layoutManager?.ensureLayout(for: container)
             self.sizeToFit()
+            self.inlineImages.positionViews()
+            if let bottom = self.inlineImages.imageViews.map({ $0.frame.maxY + 10 + self.textContainerInset.height }).max(), bottom > self.frame.height {
+                self.setFrameSize(NSSize(width: self.frame.width, height: bottom))
+            }
             if self.needsEndMarginAfterEdit {
                 self.needsEndMarginAfterEdit = false
                 if self.selectedRange() == NSRange(location: self.textStorage?.length ?? 0, length: 0) {
@@ -271,6 +295,7 @@ final class PlainMarkdownTextView: NSTextView {
         }
         let minimum = NSSize(width: 0, height: viewport.height)
         if minSize != minimum { minSize = minimum }
+        inlineImages.refit()
     }
 
     override func viewDidMoveToWindow() {
@@ -318,6 +343,7 @@ final class PlainMarkdownTextView: NSTextView {
         if !hasMarkedText() {
             needsEndMarginAfterEdit = true
             styler.schedule()
+            inlineImages.schedule()
         }
         FormattingTarget.shared.refresh()
     }
@@ -325,6 +351,7 @@ final class PlainMarkdownTextView: NSTextView {
         super.unmarkText()
         needsEndMarginAfterEdit = true
         styler.schedule()
+        inlineImages.schedule()
         FormattingTarget.shared.refresh()
     }
     override func insertNewline(_ sender: Any?) {

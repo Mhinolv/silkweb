@@ -39,6 +39,7 @@ struct SnapshotScenario {
         .init(name: "tabs-multi-selection", tabs: [pourOver], selectedDocuments: [pourOver, image]),
         .init(name: "editor-long-scrolled-end", document: "Snapshot Fixtures/Long Document.md", tabs: [pourOver, "Snapshot Fixtures/Long Document.md"], scrollToEnd: true, legacyScroller: true),
         .init(name: "editor-image", document: image),
+        .init(name: "editor-image-placeholders", document: "Snapshot Fixtures/Image States.md"),
         .init(name: "preview-headings", document: "Snapshot Fixtures/Preview Headings.md", mode: .preview),
         .init(name: "preview-mode", document: pourOver, mode: .preview),
         .init(name: "split-mode", document: pourOver, mode: .split),
@@ -185,6 +186,9 @@ final class SnapshotHarness {
         try bitmap.representation(using: .png, properties: [:])!.write(to: fixtures.appendingPathComponent("fixture.png"), options: .atomic)
         let imageText = "# Image Fixture\n\n![Local fixture](fixture.png)\n\n![Remote fixture](https://example.invalid/snapshot.png)\n"
         try Data(imageText.utf8).write(to: fixtures.appendingPathComponent("Image Fixture.md"), options: .atomic)
+        try Data("not an image".utf8).write(to: fixtures.appendingPathComponent("unreadable.png"))
+        let imageStates = "# Image states\n\n![Remote](https://example.invalid/snapshot.png)\n\n![Missing](missing.png)\n\n![Outside](../../outside.png)\n\n![Unreadable](unreadable.png)\n"
+        try Data(imageStates.utf8).write(to: fixtures.appendingPathComponent("Image States.md"), options: .atomic)
         let typography = "# Heading one\n\n## Heading two\n\n### Heading three\n\n#### Heading four\n\n##### Heading five\n\n###### Heading six\n\nBody: café, 日本語, 👩🏽‍💻. **Strong**, *emphasis*, ~~strike~~ and `code`.\n\n> A quote\n\n- [ ] A task with [a link](https://example.invalid)\n\n```swift\nlet source = true\n```\n"
         try Data(typography.utf8).write(to: fixtures.appendingPathComponent("Editor Typography.md"), options: .atomic)
         let previewHeadings = """
