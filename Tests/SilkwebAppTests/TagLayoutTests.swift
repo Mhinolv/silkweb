@@ -15,6 +15,57 @@ final class TagLayoutTests: XCTestCase {
         for _ in 0..<8 { view.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(20)) }
     }
 
+    @MainActor func testRoundedTokensRemainUnselectedAcrossFocusAndResize() async throws {
+        _ = NSApplication.shared
+        let host = NSHostingController(rootView: TagTokenField(names: ["coffee", "research"], suggestions: [], focusRequest: 0, enabled: true, onChange: { _ in }))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 216, height: 200), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentViewController = host
+        defer { window.contentViewController = nil }
+        try await settle(host.view)
+        let field = try XCTUnwrap(descendants(host.view).compactMap { $0 as? TagInputField }.first)
+
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            window.appearance = NSAppearance(named: appearance)
+            for count in [0, 1, 2, 20, 100] {
+                let names = (0..<count).map { "research topic \($0)" }
+                host.rootView = TagTokenField(names: names, suggestions: [], focusRequest: 0, enabled: true, onChange: { _ in })
+                for width: CGFloat in [180, 216, 400] {
+                    host.view.setFrameSize(NSSize(width: width, height: 200))
+                    try await settle(host.view)
+                    XCTAssertNil(field.currentEditor(), "Loading and resizing must not focus or select the tokens")
+                    XCTAssertEqual(field.tokenStyle, .rounded)
+                    XCTAssertEqual((field.cell as? NSTokenFieldCell)?.tokenStyle, .rounded)
+                    XCTAssertFalse(try XCTUnwrap(field.cell).isHighlighted)
+                    let value = field.attributedStringValue
+                    var tokenCount = 0
+                    value.enumerateAttribute(.attachment, in: NSRange(location: 0, length: value.length)) { attachment, _, _ in
+                        guard let attachment = attachment as? NSTextAttachment else { return }
+                        tokenCount += 1
+                        XCTAssertEqual((attachment.attachmentCell as? NSCell)?.isHighlighted, false,
+                                       "Check the actual native attachments, not just the field's configured style")
+                    }
+                    XCTAssertEqual(tokenCount, count)
+                }
+                // Keyboard focus goes through selectText; AppKit selects all AFTER
+                // textDidBeginEditing, so that callback alone cannot place the caret.
+                field.selectText(nil)
+                let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
+                XCTAssertEqual(editor.selectedRange(), NSRange(location: (editor.string as NSString).length, length: 0),
+                               "Focusing must put the caret after the tokens without selecting them")
+                XCTAssertTrue(window.makeFirstResponder(nil))
+                try await settle(host.view)
+                XCTAssertNil(field.currentEditor())
+                XCTAssertEqual(field.objectValue as? [String], names)
+            }
+        }
+        // Exercise teardown and reattachment as the Info tab is hidden and shown.
+        window.contentViewController = nil
+        window.contentViewController = host
+        try await settle(host.view)
+        XCTAssertNil(field.currentEditor())
+        XCTAssertEqual(field.tokenStyle, .rounded)
+    }
+
     @MainActor func testTokenFieldWrapsGrowsAndScrollsOnlyVertically() async throws {
         _ = NSApplication.shared
         let host = NSHostingController(rootView: TagTokenField(names: ["draft"], suggestions: [], focusRequest: 0, enabled: true, onChange: { _ in }))

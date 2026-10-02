@@ -293,6 +293,7 @@ final class TagTokenContainer: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         field.cell = WrappingTagCell(textCell: "")
+        // AppKit's rounded tokens have an accent-tinted fill even when unselected.
         field.tokenStyle = .rounded
         field.font = .systemFont(ofSize: 13)
         field.isEditable = true
@@ -380,6 +381,14 @@ final class TagInputField: NSTokenField {
     let completionPanel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     override var objectValue: Any? { didSet { contentChanged() } }
     func contentChanged() { container?.contentChanged() }
+    override func selectText(_ sender: Any?) {
+        super.selectText(sender)
+        // AppKit selects all after textDidBeginEditing. Restore the insertion
+        // point here too so keyboard focus leaves the native tokens unselected.
+        if let editor = currentEditor() as? NSTextView {
+            editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+        }
+    }
     override func textDidBeginEditing(_ notification: Notification) {
         super.textDidBeginEditing(notification)
         if let editor = currentEditor() as? NSTextView { editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0)) }
