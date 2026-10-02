@@ -5,6 +5,120 @@ import SilkwebCore
 
 final class LibrarySplitViewTests: XCTestCase {
     @MainActor
+    func testRealSidebarKeyEquivalentFromEveryColumn() async throws {
+        try await exerciseSidebarKeyEquivalent(requiresKeyWindow: true)
+    }
+
+    @MainActor
+    func testOffscreenMainMenuSidebarKeyEquivalentFromEveryColumn() async throws {
+        try await exerciseSidebarKeyEquivalent(requiresKeyWindow: false)
+    }
+
+    @MainActor
+    private func exerciseSidebarKeyEquivalent(requiresKeyWindow: Bool) async throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let name = "Silkweb.SidebarKeys." + UUID().uuidString
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root); clearAutosave(name) }
+        try Data("# Keyboard shortcut\n\nKeep the editor text intact.".utf8).write(to: root.appendingPathComponent("Note.md"))
+        let workspace = LibraryWorkspace(columnAutosaveName: name)
+        workspace.canSaveWindowSession = false
+        workspace.root = root
+        workspace.install(try await LibraryScanner.scan(root: root))
+        let opened = await workspace.openTab(try XCTUnwrap(workspace.snapshot?.documents.first), pinned: true)
+        XCTAssertTrue(opened)
+        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: name)
+        let window = SidebarKeyWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+                                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
+        let previousMenu = NSApp.mainMenu
+        // Install an actual main/View menu, including AppKit's responder-chain
+        // sidebar action. Do not invoke a workspace closure instead of dispatching keys.
+        let mainMenu = NSMenu(title: "Silkweb")
+        let viewMenu = NSMenu(title: "View")
+        let viewItem = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
+        viewItem.submenu = viewMenu
+        mainMenu.addItem(viewItem)
+        let sidebarItem = NSMenuItem(title: "Hide Sidebars", action: #selector(NSSplitViewController.toggleSidebar(_:)), keyEquivalent: "s")
+        sidebarItem.keyEquivalentModifierMask = [.control, .command]
+        viewMenu.addItem(sidebarItem)
+        NSApp.mainMenu = mainMenu
+        window.makeKey() // Never order a window on screen.
+        defer { NSApp.mainMenu = previousMenu; window.contentViewController = nil; window.close() }
+        func settle() async throws {
+            controller.view.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(250))
+            controller.view.layoutSubtreeIfNeeded()
+        }
+        func descendants(_ view: NSView) -> [NSView] {
+            [view] + view.subviews.flatMap { descendants($0) }
+        }
+        try await settle()
+        if requiresKeyWindow, !window.isKeyWindow {
+            throw XCTSkip("Unordered XCTest window cannot become key in this environment; native menu dispatch is covered separately")
+        }
+        let sidebar = try XCTUnwrap(descendants(controller.navigationController.view).compactMap { $0 as? SidebarOutlineView }.first)
+        let list = try XCTUnwrap(descendants(controller.navigationController.view).compactMap { $0 as? DocumentTableView }.first)
+        let editor = try XCTUnwrap(workspace.preview.editor)
+        let source = editor.string
+        for (column, responder) in [sidebar as NSView, list as NSView, editor as NSView].enumerated() {
+            workspace.setSidebarsHidden(false)
+            try await settle()
+            XCTAssertTrue(window.makeFirstResponder(responder))
+            XCTAssertTrue(window.firstResponder === responder)
+            let saved = widths(controller)
+            // An unregistered sandbox host has no key window for target=nil
+            // resolution. Exercise the real native action on the split owning
+            // this column, rather than substituting a workspace closure.
+            if !requiresKeyWindow {
+                sidebarItem.target = column < 2 ? controller.navigationController : controller
+            }
+            for hidden in [true, false] {
+                viewMenu.update()
+                XCTAssertEqual(sidebarItem.title, hidden ? "Hide Sidebars" : "Show Sidebars")
+                XCTAssertTrue(sidebarItem.isEnabled)
+                let request = workspace.sidebarToggleRequest
+                let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+                    modifierFlags: [.control, .command], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, characters: "s",
+                    charactersIgnoringModifiers: "s", isARepeat: false, keyCode: 1))
+                // Use the native window key-equivalent path first, then normal
+                // application dispatch (which consults the installed main menu).
+                if !window.performKeyEquivalent(with: event) {
+                    if requiresKeyWindow { NSApp.sendEvent(event) }
+                    else { _ = mainMenu.performKeyEquivalent(with: event) }
+                }
+                try await settle()
+                XCTAssertEqual(workspace.sidebarToggleRequest, request + 1, "one key produces exactly one workspace toggle")
+                XCTAssertEqual(controller.navigationItem.isCollapsed, hidden, "column \(column): both library columns must toggle")
+                XCTAssertEqual(workspace.sidebarsHidden, hidden, "column \(column): persisted state must follow the key")
+                if hidden {
+                    XCTAssertTrue(window.firstResponder === editor)
+                    XCTAssertEqual(controller.splitView.arrangedSubviews[1].frame.width, controller.view.bounds.width, accuracy: 2)
+                } else {
+                    XCTAssertFalse(controller.sidebarItem.isCollapsed)
+                    for (actual, expected) in zip(widths(controller), saved) { XCTAssertEqual(actual, expected, accuracy: 1) }
+                }
+            }
+        }
+        XCTAssertEqual(editor.string, source)
+        XCTAssertFalse(window.isVisible)
+        XCTAssertEqual(viewMenu.items.filter { $0.action == #selector(NSSplitViewController.toggleSidebar(_:)) }.count, 1)
+        // Native validation must agree at both responder-chain entry points,
+        // including an empty window and a window still loading its library.
+        workspace.snapshot = nil
+        for loading in [false, true] {
+            workspace.loading = loading
+            for split in [controller as NSSplitViewController, controller.navigationController] {
+                XCTAssertEqual(split.validateUserInterfaceItem(sidebarItem), loading)
+                XCTAssertEqual(sidebarItem.title, "Hide Sidebars")
+            }
+        }
+    }
+
+    @MainActor
     private func layout(_ controller: LibrarySplitViewController, width: CGFloat = 1200, height: CGFloat = 760) {
         controller.view.setFrameSize(NSSize(width: width, height: height))
         controller.view.layoutSubtreeIfNeeded()
@@ -314,4 +428,8 @@ final class LibrarySplitViewTests: XCTestCase {
         container.addSubview(controller.view)
         layout(controller)
     }
+}
+
+private final class SidebarKeyWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
 }

@@ -19,7 +19,7 @@ struct LibrarySplitView: NSViewControllerRepresentable {
 final class LibrarySplitViewController: NSSplitViewController {
     private static let baseConstrainsSplitPosition = NSSplitViewController.instancesRespond(
         to: #selector(NSSplitViewDelegate.splitView(_:constrainSplitPosition:ofSubviewAt:)))
-    let navigationController = NSSplitViewController()
+    let navigationController: NSSplitViewController
     private let workspace: LibraryWorkspace
     private var lastSidebarToggleRequest: Int
     private var lastFocusRequest: Int
@@ -29,10 +29,13 @@ final class LibrarySplitViewController: NSSplitViewController {
     var sidebarItem: NSSplitViewItem { navigationController.splitViewItems[0] }
 
     init(workspace: LibraryWorkspace, autosaveName: String = "Silkweb.LibraryColumns") {
+        let navigationController = LibraryNavigationSplitViewController()
+        self.navigationController = navigationController
         self.workspace = workspace
         lastSidebarToggleRequest = workspace.sidebarToggleRequest
         lastFocusRequest = workspace.focusRequest
         super.init(nibName: nil, bundle: nil)
+        navigationController.libraryController = self
 
         let sidebar = NSSplitViewItem(sidebarWithViewController: Self.host(LibrarySidebarPane(workspace: workspace)))
         sidebar.minimumThickness = 180
@@ -91,6 +94,27 @@ final class LibrarySplitViewController: NSSplitViewController {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    // AppKit can send this action to either nested split before SwiftUI's
+    // command closure runs. Never let its default implementation hide only folders.
+    override func toggleSidebar(_ sender: Any?) {
+        workspace.toggleSidebars()
+    }
+
+    override func responds(to selector: Selector!) -> Bool {
+        // NSSplitViewController hides this action from target resolution when
+        // it has no direct sidebar item; ours lives in the nested navigation split.
+        if selector == #selector(toggleSidebar(_:)) { return true }
+        return super.responds(to: selector)
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(toggleSidebar(_:)) {
+            (item as? NSMenuItem)?.title = workspace.sidebarsTitle
+            return workspace.snapshot != nil || workspace.loading
+        }
+        return super.validateUserInterfaceItem(item)
+    }
 
     override func splitView(_ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
         // This optional delegate method has no base implementation on some macOS
@@ -152,6 +176,21 @@ final class LibrarySplitViewController: NSSplitViewController {
             lastFocusRequest = workspace.focusRequest
             if workspace.focusColumn < 2 { applySidebars(animated: true) }
         }
+    }
+}
+
+private final class LibraryNavigationSplitViewController: NSSplitViewController {
+    weak var libraryController: LibrarySplitViewController?
+
+    override func toggleSidebar(_ sender: Any?) {
+        libraryController?.toggleSidebar(sender)
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(toggleSidebar(_:)) {
+            return libraryController?.validateUserInterfaceItem(item) ?? false
+        }
+        return super.validateUserInterfaceItem(item)
     }
 }
 
