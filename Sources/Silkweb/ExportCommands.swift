@@ -9,6 +9,8 @@ struct ExportMenu: View {
         Menu("Export") {
             Button("HTML…") { workspace.exportHTML() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
+            Button("PDF…") { workspace.printDocument(exportPDF: true) }
+                .keyboardShortcut("p", modifiers: [.command, .option]).disabled(!workspace.canPrint)
         }.disabled(!workspace.canExport)
     }
 }
@@ -16,19 +18,19 @@ struct ExportMenu: View {
 @MainActor enum ExportCommands {
     static let directoryKey = "Silkweb.Export.Directory"
 
-    static func missingImageAlert(_ result: HTMLExport.Result) -> NSAlert {
+    static func missingImageAlert(_ result: HTMLExport.Result, printing: Bool = false) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = result.warningTitle
-        alert.informativeText = result.warningDetail
-        alert.addButton(withTitle: "Export Anyway")
+        alert.informativeText = printing ? result.warningDetail.replacingOccurrences(of: "The exported file", with: "The printed document") : result.warningDetail
+        alert.addButton(withTitle: printing ? "Print Anyway" : "Export Anyway")
         alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
         return alert
     }
 
-    static func savePanel(name: String, defaults: UserDefaults) -> NSSavePanel {
+    static func savePanel(name: String, defaults: UserDefaults, pdf: Bool = false) -> NSSavePanel {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.html]
-        panel.nameFieldStringValue = name + ".html"
+        panel.allowedContentTypes = pdf ? [.pdf] : [.html]
+        panel.nameFieldStringValue = name + (pdf ? ".pdf" : ".html")
         panel.prompt = "Export"
         panel.canCreateDirectories = true
         panel.directoryURL = defaults.string(forKey: directoryKey).map { URL(fileURLWithPath: $0, isDirectory: true) }
@@ -44,11 +46,11 @@ extension LibraryWorkspace {
     }
 
     /// Capture the flushed buffer before any destination or warning panel is presented.
-    func prepareHTMLExport(path: String? = nil) async throws -> HTMLExport.Result? {
+    func prepareHTMLExport(path: String? = nil, printOutput: Bool = false) async throws -> HTMLExport.Result? {
         await waitForNavigation()
         guard !loading, !mutating, !editor.loading, session.selectedDocuments.count <= 1, let root else { return nil }
         let destination = path.map { root.appendingPathComponent($0) }
-            ?? selectedDocument.map { root.appendingPathComponent($0.relativePath) } ?? editor.url
+            ?? (printOutput ? editor.url : selectedDocument.map { root.appendingPathComponent($0.relativePath) } ?? editor.url)
         guard let destination else { return nil }
         let buffer = allEditors.first { $0.url == destination }
         if let buffer, !(await buffer.flush()) {
@@ -60,7 +62,8 @@ extension LibraryWorkspace {
             let markdown = try text ?? String(contentsOf: destination, encoding: .utf8)
             return HTMLExport.prepare(markdown: markdown, title: destination.deletingPathExtension().lastPathComponent,
                                       documentURL: destination, libraryRoot: root,
-                                      stylesheet: PreviewCoordinator.stylesheet, language: language)
+                                      stylesheet: printOutput ? PrintCoordinator.stylesheet : PreviewCoordinator.stylesheet, language: language,
+                                      printOutput: printOutput)
         }.value
     }
 

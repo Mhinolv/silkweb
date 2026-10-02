@@ -21,9 +21,10 @@ public enum HTMLExport {
 
     public static func prepare(markdown: String, title: String, documentURL: URL, libraryRoot: URL,
                                stylesheet: String, language: String = "en",
-                               lineBreaks: HTMLRenderer.LineBreaks = .standard) -> Result {
+                               lineBreaks: HTMLRenderer.LineBreaks = .standard, printOutput: Bool = false) -> Result {
         let document = MarkdownParser.parse(markdown)
         var options = HTMLRenderer.Options(lineBreaks: lineBreaks, libraryRoot: libraryRoot, documentURL: documentURL)
+        options.printOutput = printOutput
         var sources: [String: String] = [:]
         var missing: [String] = []
         var seen: Set<String> = []
@@ -72,7 +73,7 @@ public enum HTMLExport {
         <meta charset="utf-8"><meta name="viewport" content="width=device-width">
         <meta name="generator" content="Silkweb">
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'none'">
-        <title>\(HTMLRenderer.escape(title))</title><style>\(portableStylesheet(stylesheet))</style>
+        <title>\(HTMLRenderer.escape(title))</title><style>\(printOutput ? stylesheet : portableStylesheet(stylesheet))</style>
         </head><body>\(fragment)</body></html>
         """
         return Result(html: html, missingAssets: missing)

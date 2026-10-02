@@ -43,6 +43,7 @@ final class LibraryWorkspace {
     var dragIdentity = UUID()
     var rename: LibraryRename?
     var exporting = false
+    @ObservationIgnored let printInfo = PrintCoordinator.defaultPrintInfo()
     var mutating = false
     var revision = 0
     var mutationError: String?

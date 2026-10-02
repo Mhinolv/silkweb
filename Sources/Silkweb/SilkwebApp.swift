@@ -79,6 +79,7 @@ struct SilkwebApp: App {
                 Button("Editor") { workspace.focus(2) }.keyboardShortcut("3", modifiers: [.command, .option])
             }
         }
+        .commands { PrintCommands(workspace: workspace) }
     }
 }
 

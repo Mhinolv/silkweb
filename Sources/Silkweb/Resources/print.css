@@ -1,0 +1,32 @@
+/* Original print layout. Screen and print media share a light page. */
+:root { color-scheme: light; }
+@page { margin: 18mm 16mm; }
+body { margin: 0; font: 11pt/1.5 -apple-system, BlinkMacSystemFont, sans-serif; color: #000; background: #fff; }
+.sw-doc { width: 100%; max-width: none; padding: 0; overflow-wrap: anywhere; }
+.sw-doc > :first-child { margin-top: 0; }
+h1,h2,h3,h4,h5,h6 { color: #000; font-weight: 600; line-height: 1.25; break-after: avoid; }
+h1 { font-size: 2em; margin: 1.25em 0 .5em; padding-bottom: .25em; border-bottom: .5pt solid #aaa; break-before: auto; }
+h2 { font-size: 1.5em; margin: 1.5em 0 .5em; break-before: auto; }
+h3 { font-size: 1.25em; margin: 1.4em 0 .4em; }
+h4 { font-size: 1.125em; margin: 1.4em 0 .4em; }
+h5 { font-size: 1em; margin: 1.5em 0 .25em; font-weight: 700; }
+h6 { font-size: .9375em; margin: 1.5em 0 .25em; font-weight: 700; }
+:is(h1,h2,h3,h4,h5,h6) + :is(h2,h3,h4,h5,h6) { margin-top: .35em; }
+p { orphans: 3; widows: 3; }
+a { color: #000; text-decoration: underline; }
+code { font-family: ui-monospace, Menlo, monospace; font-size: 9pt; }
+pre { padding: 8pt; background: #eee; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; break-inside: auto; }
+pre code { white-space: inherit; }
+pre.sw-short-code { break-inside: avoid; }
+blockquote { border-left: 2pt solid #aaa; padding-left: 1em; margin-left: 0; }
+.sw-table-wrap { overflow: visible; }
+table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 9.5pt; }
+th,td { border: .5pt solid #aaa; padding: 4pt 6pt; overflow-wrap: anywhere; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+.sw-align-left { text-align: left; } .sw-align-center { text-align: center; } .sw-align-right { text-align: right; }
+img { max-width: 100%; height: auto; max-height: 230mm; object-fit: contain; break-inside: avoid; }
+.sw-task { list-style: none; }
+.sw-missing-image,.sw-remote-image { border: .5pt dashed #aaa; padding: 4pt; }
+.sw-toc { border-left: 2pt solid #aaa; padding: 8pt; } .sw-toc::before { content: 'Contents'; font-weight: 600; }
+.sw-footnotes { font-size: 9pt; }

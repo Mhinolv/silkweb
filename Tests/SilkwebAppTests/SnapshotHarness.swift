@@ -27,6 +27,7 @@ struct SnapshotScenario {
     var mediaMigration: String? = nil
     var tableInsert: String? = nil
     var exportWarning = false
+    var printWarning = false
     var focusOutline = false
     /// Draw the editor caret (normally hidden in captures) right after this source text.
     var visibleCaret: String? = nil
@@ -36,6 +37,7 @@ struct SnapshotScenario {
     static let initial: [SnapshotScenario] = [
         .init(name: "library-overview"),
         .init(name: "export-missing-images", exportWarning: true),
+        .init(name: "print-missing-images", printWarning: true),
         .init(name: "tags-sidebar-collapsed", tagState: "collapsed"),
         .init(name: "tags-sidebar-expanded", tagState: "expanded"),
         .init(name: "tags-sidebar-empty", tagState: "zero"),
@@ -403,10 +405,10 @@ final class SnapshotHarness {
             } else { workspace.install(snapshot) }
             try await bounded("scenario configuration") { try await self.configure(scenario, workspace: workspace) }
             let content: AnyView
-            if scenario.exportWarning {
+            if scenario.exportWarning || scenario.printWarning {
                 let result = HTMLExport.prepare(markdown: (1...8).map { "![Image \($0)](missing-\($0).png)" }.joined(separator: "\n\n"),
                     title: "Document", documentURL: snapshot.rootURL.appendingPathComponent("Document.md"), libraryRoot: snapshot.rootURL, stylesheet: "")
-                content = AnyView(ExportAlertSnapshot(alert: ExportCommands.missingImageAlert(result)))
+                content = AnyView(ExportAlertSnapshot(alert: ExportCommands.missingImageAlert(result, printing: scenario.printWarning)))
             } else if let state = scenario.tableInsert {
                 let form = TableInsertForm(options: state == "maximum" ? TableOptions(columns: 20, rows: 100, alignment: .center) : TableOptions())
                 if state == "invalid" { form.columns = "abc" }

@@ -12,6 +12,8 @@ public enum HTMLRenderer {
         public var offlinePreview: Bool
         /// Export sources prepared off-main; absent entries become descriptive placeholders.
         public var exportImages: [String: String]? = nil
+        /// Print uses durable task glyphs and keeps short code blocks together.
+        public var printOutput = false
 
         public init(lineBreaks: LineBreaks = .standard, libraryRoot: URL? = nil, documentURL: URL? = nil, offlinePreview: Bool = false) {
             self.lineBreaks = lineBreaks
@@ -72,7 +74,10 @@ public enum HTMLRenderer {
                 let name = (language ?? "").split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
                 let sanitized = name.filter { $0.isASCII && ($0.isLetter || $0.isNumber || "_+-".contains($0)) }
                 let attribute = sanitized.isEmpty ? "" : " class=\"language-\(sanitized)\""
-                return "<pre><code\(attribute)>" + escape(text) + "</code></pre>\n"
+                let keepsTogether = options.printOutput && text.split(separator: "\n", omittingEmptySubsequences: false).count
+                    - (text.hasSuffix("\n") ? 1 : 0) < 15
+                let blockClass = keepsTogether ? " class=\"sw-short-code\"" : ""
+                return "<pre\(blockClass)><code\(attribute)>" + escape(text) + "</code></pre>\n"
             case .quote(let children):
                 return "<blockquote>\n" + blocks(children, options: options, depth: depth + 1, context: &context) + "</blockquote>\n"
             case .list(let start, let items):
@@ -91,7 +96,7 @@ public enum HTMLRenderer {
                 return "<\(tag)\(attribute)\(taskClass)>\n" + content + "</\(tag)>\n"
             case .thematicBreak: return "<hr>\n"
             case .taskItem(let checked, let children):
-                let checkbox = "<input type=\"checkbox\" disabled" + (checked ? " checked" : "") + "> "
+                let checkbox = options.printOutput ? (checked ? "☑ " : "☐ ") : "<input type=\"checkbox\" disabled" + (checked ? " checked" : "") + "> "
                 var content = children
                 var first = ""
                 if case .paragraph(let text) = content.first {
