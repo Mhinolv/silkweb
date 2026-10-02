@@ -135,6 +135,13 @@ struct DocumentTable: NSViewRepresentable {
             add("Rename…", #selector(rename(_:)), enabled: workspace.canMutate)
             add("Move To…", #selector(move(_:)), enabled: workspace.canMutate)
             add("Reveal in Finder", #selector(reveal(_:)))
+            let export = NSMenuItem(title: "Export", action: nil, keyEquivalent: "")
+            let exportMenu = NSMenu()
+            exportMenu.autoenablesItems = false
+            let html = NSMenuItem(title: "HTML…", action: #selector(exportHTML(_:)), keyEquivalent: "")
+            html.target = self; html.representedObject = path
+            html.isEnabled = workspace.canExport && workspace.documentDragPaths(path).count == 1
+            exportMenu.addItem(html); export.submenu = exportMenu; menu.addItem(export)
             menu.addItem(.separator())
             let tagsItem = NSMenuItem(title: "Tags", action: nil, keyEquivalent: "")
             let submenu = NSMenu()
@@ -179,6 +186,7 @@ struct DocumentTable: NSViewRepresentable {
             guard let path = sender.representedObject as? String else { return }
             workspace.requestMove(workspace.documentDragPaths(path))
         }
+        @objc private func exportHTML(_ sender: NSMenuItem) { workspace.exportHTML(path: sender.representedObject as? String) }
         @objc private func reveal(_ sender: NSMenuItem) { workspace.reveal(sender.representedObject as? String) }
         @objc private func trash(_ sender: NSMenuItem) {
             guard let path = sender.representedObject as? String else { return }

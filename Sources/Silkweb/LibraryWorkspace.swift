@@ -41,6 +41,7 @@ final class LibraryWorkspace {
     var recentMoveFolders: [String] = []
     var dragIdentity = UUID()
     var rename: LibraryRename?
+    var exporting = false
     var mutating = false
     var revision = 0
     var mutationError: String?

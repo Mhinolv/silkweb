@@ -26,6 +26,7 @@ struct SnapshotScenario {
     var resizeSidebar = false
     var mediaMigration: String? = nil
     var tableInsert: String? = nil
+    var exportWarning = false
     var focusOutline = false
     /// Draw the editor caret (normally hidden in captures) right after this source text.
     var visibleCaret: String? = nil
@@ -34,6 +35,7 @@ struct SnapshotScenario {
     static let image = "Snapshot Fixtures/Image Fixture.md"
     static let initial: [SnapshotScenario] = [
         .init(name: "library-overview"),
+        .init(name: "export-missing-images", exportWarning: true),
         .init(name: "tags-sidebar-collapsed", tagState: "collapsed"),
         .init(name: "tags-sidebar-expanded", tagState: "expanded"),
         .init(name: "tags-info-many", document: pourOver, tagState: "many"),
@@ -379,7 +381,11 @@ final class SnapshotHarness {
             } else { workspace.install(snapshot) }
             try await bounded("scenario configuration") { try await self.configure(scenario, workspace: workspace) }
             let content: AnyView
-            if let state = scenario.tableInsert {
+            if scenario.exportWarning {
+                let result = HTMLExport.prepare(markdown: (1...8).map { "![Image \($0)](missing-\($0).png)" }.joined(separator: "\n\n"),
+                    title: "Document", documentURL: snapshot.rootURL.appendingPathComponent("Document.md"), libraryRoot: snapshot.rootURL, stylesheet: "")
+                content = AnyView(ExportAlertSnapshot(alert: ExportCommands.missingImageAlert(result)))
+            } else if let state = scenario.tableInsert {
                 let form = TableInsertForm(options: state == "maximum" ? TableOptions(columns: 20, rows: 100, alignment: .center) : TableOptions())
                 if state == "invalid" { form.columns = "abc" }
                 if state == "left" { form.alignment = .left; form.columns = "1"; form.rows = "1" }
@@ -630,4 +636,26 @@ final class SnapshotHarness {
     }
 
     static func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+}
+
+/// Captures the production NSAlert hierarchy without presenting its window.
+@MainActor private struct ExportAlertSnapshot: NSViewRepresentable {
+    let alert: NSAlert
+    func makeNSView(context: Context) -> NSView {
+        let container = NSView()
+        alert.layout()
+        if let content = alert.window.contentView {
+            content.removeFromSuperview()
+            content.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(content)
+            NSLayoutConstraint.activate([
+                content.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+                content.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                content.widthAnchor.constraint(equalToConstant: content.frame.width),
+                content.heightAnchor.constraint(equalToConstant: content.frame.height)
+            ])
+        }
+        return container
+    }
+    func updateNSView(_ view: NSView, context: Context) {}
 }

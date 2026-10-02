@@ -10,6 +10,8 @@ public enum HTMLRenderer {
         public var libraryRoot: URL?
         public var documentURL: URL?
         public var offlinePreview: Bool
+        /// Export sources prepared off-main; absent entries become descriptive placeholders.
+        public var exportImages: [String: String]? = nil
 
         public init(lineBreaks: LineBreaks = .standard, libraryRoot: URL? = nil, documentURL: URL? = nil, offlinePreview: Bool = false) {
             self.lineBreaks = lineBreaks
@@ -39,7 +41,7 @@ public enum HTMLRenderer {
         var referenceCounts: [String: Int] = [:]
     }
 
-    private static func escape(_ text: String) -> String {
+    static func escape(_ text: String) -> String {
         var result = ""
         for character in text {
             switch character {
@@ -149,6 +151,17 @@ public enum HTMLRenderer {
                 }
                 return "<a href=\"" + escape(localDestination(destination, options: options)) + "\"" + titleAttribute(title) + ">" + content + "</a>"
             case .image(let alt, let destination, let title):
+                if let images = options.exportImages {
+                    if let source = images[destination] {
+                        return "<img src=\"" + escape(source) + "\" alt=\"" + escape(alt) + "\"" + titleAttribute(title) + ">"
+                    }
+                    let description = "Image not included: " + escape(alt)
+                    let scheme = URLComponents(string: destination)?.scheme?.lowercased()
+                    if (scheme == "http" || scheme == "https"), allowed(destination, image: true, options: options) {
+                        return "<span class=\"sw-remote-image\"><a href=\"" + escape(destination) + "\">" + description + "</a></span>"
+                    }
+                    return "<span class=\"sw-missing-image\">" + description + "</span>"
+                }
                 guard allowed(destination, image: true, options: options) else {
                     if options.offlinePreview {
                         return "<span class=\"sw-missing-image\">Image outside library: " + escape(alt) + "</span>"
@@ -228,7 +241,7 @@ public enum HTMLRenderer {
         title.map { " title=\"" + escape($0) + "\"" } ?? ""
     }
 
-    private static func allowed(_ destination: String, image: Bool, options: Options) -> Bool {
+    static func allowed(_ destination: String, image: Bool, options: Options) -> Bool {
         // Reject controls, backslashes and malformed encodings before URL interpretation.
         guard !destination.contains("\\"),
               !destination.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),

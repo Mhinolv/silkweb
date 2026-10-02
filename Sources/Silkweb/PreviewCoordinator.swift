@@ -47,7 +47,7 @@ final class PreviewCoordinator {
     @ObservationIgnored var scrollRatio = 0.0
     @ObservationIgnored var pendingAnchor: String?
 
-    nonisolated private static let stylesheet: String = {
+    nonisolated static let stylesheet: String = {
         // SwiftPM's generated accessor searches beside the executable. A bundled Mac app
         // keeps its resources under Contents/Resources, so check that location first.
         let packaged = Bundle.main.resourceURL?.appendingPathComponent("Silkweb_Silkweb.bundle")

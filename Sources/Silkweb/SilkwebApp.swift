@@ -28,6 +28,8 @@ struct SilkwebApp: App {
                 Button("Reveal in Finder") { workspace.reveal() }
                     .keyboardShortcut("r", modifiers: [.command, .option]).disabled(workspace.snapshot == nil)
                 Divider()
+                ExportMenu(workspace: workspace)
+                Divider()
                 Button("Open Folder in Place…") { workspace.chooseFolder() }
                     .keyboardShortcut("o")
                 Button("Open in New Tab") { workspace.openSelectionInNewTab() }
