@@ -5,9 +5,25 @@ import SilkwebCore
 /// Owns cancellable work for both search surfaces; the index actor owns all disk IO.
 @MainActor @Observable
 final class LibrarySearch {
-    var text = ""
+    var text = "" {
+        didSet { if text.isEmpty { completed = nil } }
+    }
     var folderScope: UUID?
     var results: [SearchResult] = []
+    var isSearching = false
+    var isQuickSearching = false
+    var resultText = ""
+    var quickResultText = ""
+    private var completed: SearchRequestIdentity?
+    private var quickCompleted: SearchRequestIdentity?
+    @ObservationIgnored private var request: UUID?
+    @ObservationIgnored private var quickRequest: UUID?
+    #if DEBUG
+    @ObservationIgnored private(set) var queryCount = 0
+    @ObservationIgnored var resultsBodyCount = 0
+    #endif
+    var hasPendingQuery: Bool { completed?.text != text || completed?.scope != folderScope }
+    var quickHasPendingQuery: Bool { quickCompleted?.text != quickText }
     var quickText = ""
     var quickResults: [SearchResult] = []
     var showsQuickOpen = false
@@ -39,6 +55,8 @@ final class LibrarySearch {
     func reset() {
         buildTask?.cancel()
         stateTask?.cancel()
+        completed = nil; quickCompleted = nil; request = nil; quickRequest = nil
+        isSearching = false; isQuickSearching = false
         root = nil
         index = nil
         text = ""; quickText = ""; results = []; quickResults = []
@@ -51,6 +69,7 @@ final class LibrarySearch {
         if root != snapshot.rootURL {
             buildTask?.cancel()
             stateTask?.cancel()
+            completed = nil; quickCompleted = nil
             root = snapshot.rootURL
             index = SearchIndex(root: snapshot.rootURL)
             text = ""; quickText = ""; results = []; quickResults = []
@@ -60,8 +79,7 @@ final class LibrarySearch {
             stateTask = Task { [weak self] in
                 for await state in await index.states() {
                     guard !Task.isCancelled, let self else { return }
-                    self.state = state
-                    self.revision += 1
+                    if self.state != state { self.state = state }
                 }
             }
         }
@@ -69,10 +87,10 @@ final class LibrarySearch {
         guard let index else { return }
         buildTask = Task { [weak self] in
             do {
-                try await index.reconcile(snapshot)
+                let changed = try await index.reconcile(snapshot)
                 guard !Task.isCancelled else { return }
                 self?.error = nil
-                self?.revision += 1
+                if changed { self?.revision += 1 }
             } catch is CancellationError { } catch {
                 self?.error = "Search is unavailable: \(error.localizedDescription)"
             }
@@ -82,28 +100,65 @@ final class LibrarySearch {
     func waitForIndex() async { await buildTask?.value }
 
     func query(quick: Bool) async {
-        guard let index else { return }
+        guard !Task.isCancelled, let index else { return }
         let queryText = quick ? quickText : text
-        let scope = folderScope
+        let scope = quick ? nil : folderScope
+        let identity = SearchRequestIdentity(text: queryText, scope: scope, revision: revision)
+        guard identity != (quick ? quickCompleted : completed) else { return }
+        let token = UUID()
+        if quick { quickRequest = token } else { request = token }
+        // Keep old rows and count during debounce. Only slow queries show progress.
+        let progress = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(450)) } catch { return }
+            guard let self else { return }
+            if quick, self.quickRequest == token { self.isQuickSearching = true }
+            if !quick, self.request == token { self.isSearching = true }
+        }
+        defer {
+            progress.cancel()
+            if quick, quickRequest == token { isQuickSearching = false }
+            if !quick, request == token { isSearching = false }
+        }
         do {
             try await Task.sleep(for: .milliseconds(150))
+            #if DEBUG
+            queryCount += 1
+            #endif
             let hits = quick && queryText.isEmpty ? try await index.recentResults() : try await index.query(SearchQuery(queryText,
-                scope: quick ? .library : scope.map { .folder($0, includeSubfolders: true) } ?? .library,
+                scope: scope.map { .folder($0, includeSubfolders: true) } ?? .library,
                 mode: quick ? .quickOpen : .library, limit: quick ? 12 : Int.max))
             try Task.checkCancellation()
-            guard self.index === index, queryText == (quick ? quickText : text), quick || scope == folderScope else { return }
-            if quick { quickResults = hits } else { results = hits }
-            NSAccessibility.post(element: NSApp.keyWindow as Any, notification: .announcementRequested,
-                                 userInfo: [.announcement: "\(hits.count) results", .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+            guard self.index === index, queryText == (quick ? quickText : text),
+                  quick || scope == folderScope, identity.revision == revision else { return }
+            let previous = quick ? quickCompleted : completed
+            let countChanged = hits.count != (quick ? quickResults.count : results.count)
+            if quick {
+                if quickResults != hits { quickResults = hits }
+                if quickResultText != queryText { quickResultText = queryText }
+                quickCompleted = identity
+            } else {
+                if results != hits { results = hits }
+                if resultText != queryText { resultText = queryText }
+                completed = identity
+            }
+            if countChanged || previous?.text != queryText {
+                NSAccessibility.post(element: NSApp.keyWindow as Any, notification: .announcementRequested,
+                                     userInfo: [.announcement: Self.resultCount(hits.count), .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+            }
         } catch is CancellationError { } catch {
             self.error = "Search is unavailable: \(error.localizedDescription)"
         }
+    }
+
+    static func resultCount(_ count: Int) -> String {
+        "\(count.formatted()) \(count == 1 ? "result" : "results")"
     }
 
     func toggleQuickOpen() {
         if showsQuickOpen { dismissQuickOpen(); return }
         previousWindow = NSApp.keyWindow
         previousResponder = previousWindow?.firstResponder
+        quickCompleted = nil
         quickText = ""
         quickResults = []
         showsQuickOpen = true

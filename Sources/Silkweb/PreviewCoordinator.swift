@@ -26,6 +26,9 @@ final class PreviewCoordinator {
     @ObservationIgnored private var loadingDocument: URL?
     @ObservationIgnored private var finishedDocument: URL?
     @ObservationIgnored private var input: RenderInput?
+    #if DEBUG
+    @ObservationIgnored private(set) var renderCount = 0
+    #endif
 
     private struct RenderInput: Equatable {
         let text: String
@@ -75,6 +78,9 @@ final class PreviewCoordinator {
         if next.html { beginLoading(document: document) } else { endLoading() }
         task = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            #if DEBUG
+            self?.renderCount += 1
+            #endif
             let result = await Task.detached(priority: .userInitiated) {
                 let parsed = MarkdownParser.parse(text)
                 guard next.html else { return (parsed.headings, "") }

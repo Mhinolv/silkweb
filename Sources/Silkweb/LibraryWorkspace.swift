@@ -297,6 +297,11 @@ final class LibraryWorkspace {
                 let destination = scanned.documents.first { $0.id == id }.map { root.appendingPathComponent($0.relativePath) }
                 await editor.reconcileExternalChange(movedTo: destination)
             }
+            // Derived index/cache writes also reach the watcher. A no-op scan must
+            // not invalidate the entire workspace and restart search presentation.
+            guard old.folders != scanned.folders || old.documents != scanned.documents
+                || old.metadata != scanned.metadata || old.isReadOnly != scanned.isReadOnly
+                || old.recoveredMetadataURL != scanned.recoveredMetadataURL else { return }
             // Finder batches are installed without row animations.
             var transaction = Transaction()
             transaction.disablesAnimations = true

@@ -3,7 +3,7 @@ import Foundation
 /// One per library. Consumers reconcile each scanner snapshot and call update after a
 /// successful save. Disk IO and queries never execute on the main actor.
 public actor SearchIndex {
-    private struct Record: Codable, Sendable {
+    private struct Record: Codable, Equatable, Sendable {
         var id: UUID
         var folderID: UUID
         var path: String
@@ -70,12 +70,15 @@ public actor SearchIndex {
 
     /// Reuses scan dates and identities, without enumerating or stat-ing every file again.
     /// Superseded reconciliations stop before installing any stale body.
-    public func reconcile(_ snapshot: LibrarySnapshot) async throws {
+    @discardableResult
+    public func reconcile(_ snapshot: LibrarySnapshot) async throws -> Bool {
         guard snapshot.rootURL.standardizedFileURL == root else { throw LibraryError.invalidRoot }
         generation += 1
         let token = generation
         let initialMutation = mutationSerial
         if !loaded { try load(); loaded = true }
+        let previousRecords = entries.mapValues(\.record)
+        let previousFolders = folders
         folders = Dictionary(uniqueKeysWithValues: snapshot.folders.map { ($0.id, $0) })
         let live = Set(snapshot.documents.map(\.id))
         entries = entries.filter { live.contains($0.key) }
@@ -96,6 +99,8 @@ public actor SearchIndex {
                 entries[document.id] = entry
             }
         }
+        // A cache write feeds FSEvents. Unchanged scans must neither write nor publish.
+        if changed.isEmpty, previousRecords == entries.mapValues(\.record), previousFolders == folders { return false }
         publish(.building(indexed: entries.count, total: snapshot.documents.count))
         var lastProgress = Date()
         for document in changed {
@@ -120,9 +125,11 @@ public actor SearchIndex {
         guard token == generation else { throw CancellationError() }
         try Task.checkCancellation()
         // A derived cache failure must not prevent searching a read-only library.
-        if !snapshot.isReadOnly { try? saveCache() }
+        let recordsChanged = previousRecords != entries.mapValues(\.record)
+        if recordsChanged, !snapshot.isReadOnly { try? saveCache() }
         mutations = mutations.filter { live.contains($0.key) }
         publish(.ready)
+        return recordsChanged || previousFolders != folders
     }
 
     /// Pass the refreshed scan-time document after save. An in-flight rebuild cannot overwrite it.

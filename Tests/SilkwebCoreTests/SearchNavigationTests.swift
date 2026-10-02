@@ -2,6 +2,19 @@ import XCTest
 @testable import SilkwebCore
 
 final class SearchNavigationTests: XCTestCase {
+    func testSelectionSurvivesReorderingAndFallsBackOnlyWhenMissing() {
+        let hits = (0..<3).map { number in
+            SearchResult(id: UUID(), displayName: "Hit \(number)", folderPathComponents: [],
+                         modified: nil, matchKind: .title, snippet: "coffee", matchRanges: [])
+        }
+        for selected in hits {
+            XCTAssertEqual(SearchNavigation.selection(selected.id, in: Array(hits.reversed())), selected.id)
+        }
+        XCTAssertEqual(SearchNavigation.selection(nil, in: hits), hits.first?.id)
+        XCTAssertEqual(SearchNavigation.selection(UUID(), in: hits), hits.first?.id)
+        XCTAssertNil(SearchNavigation.selection(hits.first?.id, in: []))
+    }
+
     func testSelectionSweep() {
         for count in [0, 1, 2, 12, 10000, Int.max] {
             for current in [nil, -1, 0, count - 1, count] {

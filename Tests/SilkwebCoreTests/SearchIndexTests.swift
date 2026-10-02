@@ -16,6 +16,29 @@ final class SearchIndexTests: XCTestCase {
         try body.write(to: file, atomically: true, encoding: .utf8)
     }
 
+    func testUnchangedReconcileDoesNotRewriteCache() async throws {
+        try note("Coffee.md", "coffee")
+        let index = SearchIndex(root: root)
+        let snapshot = try await LibraryScanner.scan(root: root)
+        let initial = try await index.reconcile(snapshot)
+        XCTAssertTrue(initial)
+        let cache = root.appendingPathComponent(".silkweb/search-index.json")
+        let before = try FileManager.default.attributesOfItem(atPath: cache.path)
+        for _ in 0..<5 {
+            let changed = try await index.reconcile(LibraryScanner.scan(root: root, previousSnapshot: snapshot))
+            XCTAssertFalse(changed)
+        }
+        let after = try FileManager.default.attributesOfItem(atPath: cache.path)
+        XCTAssertEqual(before[.systemFileNumber] as? NSNumber, after[.systemFileNumber] as? NSNumber)
+        XCTAssertEqual(before[.modificationDate] as? Date, after[.modificationDate] as? Date)
+        try note("Tea.md", "tea")
+        let added = try await index.reconcile(LibraryScanner.scan(root: root, previousSnapshot: snapshot))
+        XCTAssertTrue(added)
+        try FileManager.default.removeItem(at: root.appendingPathComponent("Tea.md"))
+        let removed = try await index.reconcile(LibraryScanner.scan(root: root, previousSnapshot: snapshot))
+        XCTAssertTrue(removed)
+    }
+
     func testRankingLiteralMatchingAndSnippets() async throws {
         for name in ["Café", "Cafe society", "My cafe", "Decafeinated", "Body"] {
             try note(name + ".md", name == "Body" ? String(repeating: "intro ", count: 20) + "# **café** `tea` " + String(repeating: "tail ", count: 40) : "tea")

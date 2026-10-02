@@ -108,11 +108,12 @@ struct MarkdownTextView: NSViewRepresentable {
         } else if text.string != session.text, !text.hasMarkedText() {
             Self.reload(text, in: scroll, value: session.text, selection: session.selection, position: session.scroll)
         }
-        text.isEditable = active && !session.readOnly && !session.loading && !text.assetHandler.busy
+        let editable = active && !session.readOnly && !session.loading && !text.assetHandler.busy
+        if text.isEditable != editable { text.isEditable = editable; text.needsDisplay = true }
         if active, FormattingTarget.shared.editor === text { FormattingTarget.shared.refresh() }
         text.setAccessibilityLabel("Document text, \(session.name)")
+        text.setAccessibilityPlaceholderValue(text.isEditable ? "Start writing…" : nil)
         if active { text.window?.isDocumentEdited = workspace.allEditors.contains { $0.state.isDirty } }
-        text.needsDisplay = true
         if coordinator.focusRequest != workspace.focusRequest {
             coordinator.focusRequest = workspace.focusRequest
             if active, workspace.focusColumn == 2 { text.window?.makeFirstResponder(text) }
@@ -279,14 +280,44 @@ final class PlainMarkdownTextView: NSTextView {
             moveFocus?(event.modifierFlags.contains(.shift))
         } else { super.keyDown(with: event) }
     }
+    #if DEBUG
+    private(set) var fullDrawCount = 0
+    #endif
+
     override func draw(_ dirtyRect: NSRect) {
+        #if DEBUG
+        if dirtyRect.width > 10 && dirtyRect.height > 30 { fullDrawCount += 1 }
+        #endif
         super.draw(dirtyRect)
-        if string.isEmpty && isEditable {
-            ("Start writing…" as NSString).draw(at: textContainerOrigin, withAttributes: [
-                .font: font ?? NSFont.systemFont(ofSize: style.fontSize), .foregroundColor: NSColor.tertiaryLabelColor
-            ])
+    }
+
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        drawPlaceholder()
+    }
+
+    override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+        super.drawInsertionPoint(in: rect, color: color, turnedOn: flag)
+        // NSTextView clears the caret directly, without calling draw(_:).
+        // Restore the placeholder under that narrow strip when the caret turns off.
+        if !flag, string.isEmpty, isEditable {
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(rect: rect).addClip()
+            drawBackground(in: rect)
+            NSGraphicsContext.restoreGraphicsState()
         }
     }
+
+    private func drawPlaceholder() {
+        guard string.isEmpty, isEditable else { return }
+        var attributes = typingAttributes
+        attributes[.foregroundColor] = NSColor.tertiaryLabelColor
+        let value = NSAttributedString(string: "Start writing…", attributes: attributes)
+        value.draw(with: NSRect(origin: textContainerOrigin,
+                                size: NSSize(width: textContainer?.containerSize.width ?? 720, height: 100)),
+                   options: [.usesLineFragmentOrigin])
+    }
+
 }
 
 struct EditorBanner: View {

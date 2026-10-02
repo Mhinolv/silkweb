@@ -10,6 +10,9 @@ struct SearchView<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
+        #if DEBUG
+        let _ = { search.resultsBodyCount += 1 }()
+        #endif
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -39,9 +42,12 @@ struct SearchView<Content: View>: View {
                                 Text("“\(folder.name)”").tag(Optional(folder.id))
                             }
                         }.pickerStyle(.segmented).padding(.horizontal, 8).padding(.bottom, 8)
-                        Text("\(search.results.count.formatted()) results")
+                        HStack(spacing: 4) {
+                            if search.isSearching { ProgressView().controlSize(.small) }
+                            Text(LibrarySearch.resultCount(search.results.count))
+                        }
                             .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 8)
-                        if search.results.isEmpty {
+                        if search.results.isEmpty && !search.hasPendingQuery {
                             ContentUnavailableView.search(text: search.text)
                             if search.folderScope != nil {
                                 Button("Search All Documents") { search.folderScope = nil }.padding(.bottom, 8)
@@ -52,7 +58,7 @@ struct SearchView<Content: View>: View {
                                     selected = result.id
                                     openSelected()
                                 } label: {
-                                    SearchResultRow(result: result, query: search.text)
+                                    SearchResultRow(result: result, query: search.resultText)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         .contentShape(Rectangle())
                                 }
@@ -78,7 +84,8 @@ struct SearchView<Content: View>: View {
             if new.isEmpty { search.results = [] }
         }
         .onChange(of: workspace.session.selectedFolder) { search.folderScope = workspace.selectedFolder?.id }
-        .onChange(of: search.results) { selected = search.results.first?.id }
+        .onChange(of: search.results) { selected = SearchNavigation.selection(selected, in: search.results) }
+        .onChange(of: search.resultText) { selected = search.results.first?.id }
         .onExitCommand { search.text = ""; search.results = [] }
         .task(id: SearchRequestIdentity(text: search.text, scope: search.folderScope, revision: search.revision)) {
             if !search.text.isEmpty { await search.query(quick: false) }
