@@ -32,12 +32,31 @@ final class MarkdownExtensionsTests: XCTestCase {
                 XCTAssertEqual(html.contains("<table>"), pipes || columns > 1)
             }
         }
-        for delimiter in ["| -- | --- |", "| --- |", "| :-x | --- |", "| : | --- |"] {
+        for delimiter in ["| | --- |", "| --- |", "| :-x | --- |", "| : | --- |", "| :: | --- |"] {
             XCTAssertFalse(HTMLRenderer.render("| A | B |\n" + delimiter).contains("<table>"))
         }
         XCTAssertTrue(HTMLRenderer.render("Before\nA | B\n--- | ---\nx | y").contains("<p>Before</p>\n<div"))
         XCTAssertTrue(HTMLRenderer.render("```\n| A |\n| --- |\n``` ").contains("<pre><code>"))
         XCTAssertFalse(HTMLRenderer.render("```\n| A |\n| --- |\n```").contains("<table>"))
+    }
+
+    func testShortTableDelimiters() {
+        for delimiter in ["|:-:|-:|", "|:--|--:|", "|--|--|", "-|-"] {
+            let html = HTMLRenderer.render("a|b\n\(delimiter)\n1|2")
+            XCTAssertTrue(html.contains("<div class=\"sw-table-wrap\"><table>"), delimiter)
+            XCTAssertTrue(html.contains("<tbody>"), delimiter)
+        }
+        for dashCount in [1, 2, 3, 256] {
+            let dashes = String(repeating: "-", count: dashCount)
+            for (delimiter, alignment) in [(dashes, nil), (":" + dashes, "left"),
+                                          (dashes + ":", "right"), (":" + dashes + ":", "center")] {
+                let html = HTMLRenderer.render("| A | B |\n|\(delimiter)|\(delimiter)|\n| a\\|b | `x\\|y` |")
+                let attribute = alignment.map { " class=\"sw-align-\($0)\"" } ?? ""
+                XCTAssertTrue(html.contains("<th\(attribute)>A</th>"), delimiter)
+                XCTAssertTrue(html.contains("<td\(attribute)>a|b</td>"), delimiter)
+                XCTAssertTrue(html.contains("<td\(attribute)><code>x|y</code></td>"), delimiter)
+            }
+        }
     }
 
     func testTaskStatesMixedAndNestedLists() {

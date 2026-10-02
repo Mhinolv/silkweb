@@ -87,7 +87,7 @@ public enum MarkdownExtensions {
             let right = dashes.last == ":"
             if left { dashes = dashes.dropFirst() }
             if right, !dashes.isEmpty { dashes = dashes.dropLast() }
-            guard dashes.count >= 3, dashes.allSatisfy({ $0 == "-" }) else { return nil }
+            guard !dashes.isEmpty, dashes.allSatisfy({ $0 == "-" }) else { return nil }
             result.append(left && right ? .center : right ? .right : left ? .left : nil)
         }
         return result
