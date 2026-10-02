@@ -42,7 +42,7 @@ final class LibrarySearchTests: XCTestCase {
             pasteboard.clearContents()
             if let previousFind { pasteboard.setString(previousFind, forType: .string) }
         }
-        let editorHost = NSHostingView(rootView: MarkdownTextView(session: workspace.editor, workspace: workspace))
+        let editorHost = NSHostingView(rootView: TabEditorContent(workspace: workspace))
         editorHost.sizingOptions = []
         let editorWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 560), styleMask: [.titled], backing: .buffered, defer: false)
         editorWindow.contentView = editorHost

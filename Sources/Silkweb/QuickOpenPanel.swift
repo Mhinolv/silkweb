@@ -36,6 +36,10 @@ struct QuickOpenPanel: View {
                 TextField("Open a document by name", text: $search.quickText)
                     .font(.title3).textFieldStyle(.plain).focused($fieldFocused)
                     .onSubmit { openSelected() }
+                    .onKeyPress(.return, phases: .down) { event in
+                        guard event.modifiers.contains(.command) else { return .ignored }
+                        openSelected(pinned: true); return .handled
+                    }
                     .onKeyPress(.upArrow) { move(-1); return .handled }
                     .onKeyPress(.downArrow) { move(1); return .handled }
             }.padding(16)
@@ -79,8 +83,8 @@ struct QuickOpenPanel: View {
         selected = SearchNavigation.nextIndex(current: current, count: results.count, delta: delta).map { results[$0].id }
     }
 
-    private func openSelected() {
+    private func openSelected(pinned: Bool = false) {
         guard let result = workspace.search.quickResults.first(where: { $0.id == selected }) ?? workspace.search.quickResults.first else { return }
-        Task { await workspace.openSearchResult(result) }
+        Task { await workspace.openSearchResult(result, pinned: pinned) }
     }
 }

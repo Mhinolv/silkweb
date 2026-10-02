@@ -190,11 +190,10 @@ extension LibraryWorkspace {
         mutating = true
         Task {
             await waitForNavigation()
+            let editor = editor
             editor.loading = true
             defer { editor.loading = false; mutating = false }
-            guard await editor.flush() else { return }
-            let oldURL = editor.url
-            let position = (editor.selection, editor.scroll)
+            guard await flushEditors() else { return }
             do {
                 let engine = try LibraryMutations(root: root)
                 var plan = try await preflightMove(engine, paths: paths, destination: destination)
@@ -229,20 +228,13 @@ extension LibraryWorkspace {
                     alert.addButton(withTitle: "Move Anyway"); alert.addButton(withTitle: "Cancel")
                     guard await moveAlert(alert) else { return }
                 }
-                guard await editor.open(nil, readOnly: false) else { return }
                 let changes = try await commitMove(plan, using: engine)
                 libraryUndo.append(.move(plan.reversed))
                 if let movedFolder = changes.changes.first(where: \.isFolder) { session.selectedFolder = movedFolder.newPath }
                 session.expandedFolders.insert(destination)
                 recentMoveFolders.removeAll { $0 == destination }; recentMoveFolders.insert(destination, at: 0)
                 recentMoveFolders = Array(recentMoveFolders.prefix(3))
-                if let oldURL {
-                    let oldPath = String(oldURL.path.dropFirst(root.path.count + 1))
-                    _ = await editor.open(root.appendingPathComponent(changes.remapping(oldPath)), readOnly: false)
-                    (editor.selection, editor.scroll) = position
-                }
             } catch {
-                if editor.url == nil { _ = await editor.open(oldURL, readOnly: false); (editor.selection, editor.scroll) = position }
                 mutationFailure(error, title: "The items couldn’t be moved.")
                 if let failure = error as? LibraryMutationError, case .rollbackFailed = failure {
                     // The recovery suggestion identifies the preserved items.

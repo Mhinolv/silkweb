@@ -2,29 +2,30 @@ import AppKit
 import SwiftUI
 
 @MainActor final class EditorApplicationDelegate: NSObject, NSApplicationDelegate {
-    weak var session: DocumentSession?
+    weak var workspace: LibraryWorkspace?
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let session else { return .terminateNow }
-        Task { sender.reply(toApplicationShouldTerminate: await session.prepareToExit()) }
+        guard let workspace else { return .terminateNow }
+        Task { sender.reply(toApplicationShouldTerminate: await workspace.prepareToExit()) }
         return .terminateLater
     }
     func applicationDidResignActive(_ notification: Notification) {
-        Task { await session?.flush() }
+        Task { await workspace?.flushEditors() }
     }
 }
 
 struct EditorWindowLifecycle: NSViewRepresentable {
-    let session: DocumentSession
-    func makeCoordinator() -> Coordinator { Coordinator(session: session) }
+    let workspace: LibraryWorkspace
+    func makeCoordinator() -> Coordinator { Coordinator(workspace: workspace) }
     func makeNSView(context: Context) -> WindowProbe {
         let probe = WindowProbe()
         probe.attached = { [weak coordinator = context.coordinator] window in
             coordinator?.attach(window)
         }
+        context.coordinator.installTabKeys()
         return probe
     }
     func updateNSView(_ view: WindowProbe, context: Context) {
-        view.window?.isDocumentEdited = session.state.isDirty
+        view.window?.isDocumentEdited = workspace.allEditors.contains { $0.state.isDirty }
     }
     final class WindowProbe: NSView {
         var attached: ((NSWindow) -> Void)?
@@ -34,12 +35,38 @@ struct EditorWindowLifecycle: NSViewRepresentable {
         }
     }
     @MainActor final class Coordinator: NSObject, NSWindowDelegate {
-        let session: DocumentSession
+        let workspace: LibraryWorkspace
         weak var previousDelegate: NSWindowDelegate?
+        private var keyMonitor: Any?
+        deinit { if let keyMonitor { NSEvent.removeMonitor(keyMonitor) } }
+        func installTabKeys() {
+            guard keyMonitor == nil else { return }
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                let handled = MainActor.assumeIsolated {
+                    guard let self, event.window?.delegate === self else { return false }
+                    return self.handleTabKey(event)
+                }
+                return handled ? nil : event
+            }
+        }
+        func handleTabKey(_ event: NSEvent) -> Bool {
+            let modifiers = event.modifierFlags.intersection([.control, .command, .option, .shift])
+            if event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift], !workspace.tabs.isEmpty {
+                workspace.cycleTab(modifiers.contains(.shift) ? -1 : 1)
+                return true
+            }
+            // Handle before the standard window Close command or text view sees the key.
+            if event.charactersIgnoringModifiers == "w", modifiers == .command, let id = workspace.activeTabID {
+                Task { await workspace.closeTab(id) }
+                return true
+            }
+            return false
+        }
         var allowingClose = false
         var checkingClose = false
-        init(session: DocumentSession) { self.session = session }
+        init(workspace: LibraryWorkspace) { self.workspace = workspace }
         func attach(_ window: NSWindow) {
+            window.tabbingMode = .disallowed
             if window.delegate !== self {
                 previousDelegate = window.delegate
                 window.delegate = self
@@ -47,7 +74,7 @@ struct EditorWindowLifecycle: NSViewRepresentable {
         }
         func windowWillClose(_ notification: Notification) {
             previousDelegate?.windowWillClose?(notification)
-            Task { await session.didCloseWindow() }
+            Task { await workspace.didCloseWindow() }
         }
         override func responds(to selector: Selector!) -> Bool {
             super.responds(to: selector) || previousDelegate?.responds(to: selector) == true
@@ -58,7 +85,7 @@ struct EditorWindowLifecycle: NSViewRepresentable {
             guard !checkingClose else { return false }
             checkingClose = true
             Task {
-                let permitted = await session.prepareToExit()
+                let permitted = await workspace.prepareToExit()
                 checkingClose = false
                 if permitted { allowingClose = true; sender.performClose(nil); allowingClose = false }
             }

@@ -79,7 +79,7 @@ final class LibraryCommandsTests: XCTestCase {
     }
 
     @MainActor
-    func testFailedSaveAbortsRenameAndNavigation() async throws {
+    func testFailedSaveAbortsRenameButSelectionKeepsBuffer() async throws {
         let (root, workspace) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }
         workspace.session.selectedFolder = "Writing"
@@ -97,8 +97,9 @@ final class LibraryCommandsTests: XCTestCase {
         XCTAssertNotNil(workspace.editor.banner)
         workspace.selectDocuments([])
         await workspace.waitForNavigation()
-        XCTAssertEqual(workspace.session.selectedDocuments, ["Writing/Plan.markdown"])
-        XCTAssertGreaterThan(workspace.editor.refusedNavigation, 0)
+        XCTAssertTrue(workspace.session.selectedDocuments.isEmpty)
+        XCTAssertEqual(workspace.editor.url, url)
+        XCTAssertEqual(workspace.editor.text, "Unsaved buffer")
     }
 
     @MainActor

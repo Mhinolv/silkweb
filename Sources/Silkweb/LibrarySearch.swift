@@ -122,11 +122,11 @@ final class LibrarySearch {
 }
 
 extension LibraryWorkspace {
-    func openSearchResult(_ result: SearchResult, findText: String? = nil) async {
+    func openSearchResult(_ result: SearchResult, findText: String? = nil, pinned: Bool = false) async {
         guard let snapshot, let document = snapshot.documents.first(where: { $0.id == result.id }) else { return }
         let url = snapshot.rootURL.appendingPathComponent(document.relativePath)
         let folder = snapshot.folders.first { $0.id == document.folderID }?.relativePath
-        navigate(folder: folder, documents: [document.relativePath])
+        navigate(folder: folder, documents: [document.relativePath], pinned: pinned)
         await waitForNavigation()
         guard editor.url == url, session.selectedDocuments == [document.relativePath] else { return }
         search.dismissQuickOpen(restoreFocus: false)

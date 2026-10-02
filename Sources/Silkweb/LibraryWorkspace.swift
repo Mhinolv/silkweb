@@ -4,7 +4,14 @@ import SilkwebCore
 
 @MainActor @Observable
 final class LibraryWorkspace {
-    let editor = DocumentSession()
+    let emptyEditor = DocumentSession()
+    var tabs: [DocumentTab] = []
+    var activeTabID: UUID?
+    var editor: DocumentSession { tabs.first { $0.id == activeTabID }?.editor ?? emptyEditor }
+    var canSaveWindowSession = true
+    var restoringTabs = false
+    @ObservationIgnored var closingTabIDs: Set<UUID> = []
+    @ObservationIgnored var recoveryDirectory: URL?
     let search = LibrarySearch()
     let preview: PreviewCoordinator
     @ObservationIgnored private let defaults: UserDefaults
@@ -185,7 +192,9 @@ final class LibraryWorkspace {
             recentMoveFolders = []
             dragIdentity = UUID()
             rename = nil
-            guard await editor.open(nil, readOnly: false) else { return }
+            guard await flushEditors() else { return }
+            if let snapshot { await saveSessionNow(root: snapshot.rootURL) }
+            await didCloseWindow()
             search.reset()
             watcher?.stop()
             watcher = nil
@@ -214,6 +223,12 @@ final class LibraryWorkspace {
                 guard !Task.isCancelled else { return }
                 install(scanned)
                 session = restored
+                var windowSession: WindowSessionMetadata?
+                canSaveWindowSession = true
+                do { windowSession = try await WindowSessionMetadata.load(root: url) }
+                catch LibraryError.unsupportedMetadataVersion { canSaveWindowSession = false }
+                catch { /* Stale tab state never interrupts opening a library. */ }
+                if let windowSession { await restoreTabs(windowSession) }
                 if let path = session.selectedFolder, !scanned.folders.contains(where: { $0.relativePath == path }) {
                     session.selectedFolder = ""
                 }
@@ -225,7 +240,14 @@ final class LibraryWorkspace {
                     session.selectedFolder = nil
                     session.selectedDocuments = Set(scanned.documents.filter { scanned.rootURL.appendingPathComponent($0.relativePath) == draft.documentURL }.map(\.relativePath))
                 }
-                _ = await editor.open(recoveryURL ?? selectedDocument.map { scanned.rootURL.appendingPathComponent($0.relativePath) }, readOnly: scanned.isReadOnly)
+                if let recoveryURL, let document = scanned.documents.first(where: { scanned.rootURL.appendingPathComponent($0.relativePath) == recoveryURL }) {
+                    _ = await openTab(document, pinned: true)
+                } else if windowSession == nil, let document = selectedDocument {
+                    _ = await openTab(document)
+                }
+                if let id = activeTabID, let document = scanned.documents.first(where: { $0.id == id }) {
+                    session.selectedDocuments = [document.relativePath]
+                }
                 watcher = LibraryWatcher(root: url) { [weak self] in await self?.reconcileFinderChanges() }
                 let location = await Task.detached(priority: .utility) { LibraryLocation.saving(url) }.value
                 guard !Task.isCancelled else { return }
@@ -266,7 +288,8 @@ final class LibraryWorkspace {
                 return
             }
             await navigationTask?.value
-            if let url = editor.url {
+            for editor in allEditors {
+                guard let url = editor.url else { continue }
                 let path = String(url.path.dropFirst(root.path.count + 1))
                 let id = old.metadata.IDsByPath[path]
                 let destination = scanned.documents.first { $0.id == id }.map { root.appendingPathComponent($0.relativePath) }
@@ -283,7 +306,7 @@ final class LibraryWorkspace {
         } catch {
             guard !Task.isCancelled, self.root == root, !loading else { return }
             if !FileManager.default.fileExists(atPath: root.path) {
-                await editor.libraryDisappeared()
+                for editor in allEditors { await editor.libraryDisappeared() }
                 errorTitle = "Library Not Found"
                 errorSymbol = "externaldrive.badge.questionmark"
                 self.error = "Silkweb can’t find “\(root.lastPathComponent)”. It may have been moved, renamed, or be on a disconnected drive."
@@ -297,7 +320,9 @@ final class LibraryWorkspace {
 
     func resumeEditor() async {
         guard editor.url == nil, let snapshot else { return }
-        _ = await editor.open(selectedDocument.map { snapshot.rootURL.appendingPathComponent($0.relativePath) }, readOnly: snapshot.isReadOnly)
+        if let saved = try? await WindowSessionMetadata.load(root: snapshot.rootURL) {
+            await restoreTabs(saved)
+        } else if let document = selectedDocument { _ = await openTab(document) }
     }
 
     func waitForNavigation() async { await navigationTask?.value }
@@ -315,38 +340,52 @@ final class LibraryWorkspace {
         navigate(folder: path, documents: [])
     }
 
-    func navigate(folder: String?, documents: Set<String>) {
+    func navigate(folder: String?, documents: Set<String>, pinned: Bool = false) {
         guard !loading, !mutating else { return }
         let previous = navigationTask
         navigationTask = Task {
             await previous?.value
-            let destination = documents.count == 1 ? documents.first.flatMap { path in
-                snapshot?.documents.first(where: { $0.relativePath == path }).map { snapshot!.rootURL.appendingPathComponent($0.relativePath) }
+            let document = documents.count == 1 ? documents.first.flatMap { path in
+                snapshot?.documents.first(where: { $0.relativePath == path })
             } : nil
-            guard await editor.open(destination, readOnly: snapshot?.isReadOnly == true) else { return }
+            if let document { guard await openTab(document, pinned: pinned) else { return } }
             session.selectedFolder = folder
             session.selectedDocuments = documents
             if let path = documents.count == 1 ? documents.first : nil,
                let id = snapshot?.metadata.IDsByPath[path], let index = search.index {
                 try? await index.recordOpened(id, persist: snapshot?.isReadOnly == false)
             }
+            persistSession()
         }
     }
 
     func persistSession() {
         saveTask?.cancel()
-        guard let snapshot, !snapshot.isReadOnly, canSaveSession else { return }
+        guard !loading, !restoringTabs, let snapshot, !snapshot.isReadOnly, canSaveSession else { return }
         let session = session
+        let window = windowMetadata()
+        let saveWindow = canSaveWindowSession
         saveTask = Task {
             do {
                 try await Task.sleep(for: .milliseconds(250))
                 try Task.checkCancellation()
                 try await session.save(root: snapshot.rootURL)
+                if saveWindow { try await window.save(root: snapshot.rootURL) }
             } catch is CancellationError { } catch {
                 // Navigation persistence must never interrupt reading or modify document text.
                 NSLog("Silkweb could not save navigation: %@", error.localizedDescription)
             }
         }
+    }
+
+    func saveSessionNow(root: URL? = nil) async {
+        saveTask?.cancel()
+        await saveTask?.value
+        guard let snapshot, !snapshot.isReadOnly, canSaveSession else { return }
+        do {
+            try await session.save(root: root ?? snapshot.rootURL)
+            if canSaveWindowSession { try await windowMetadata().save(root: root ?? snapshot.rootURL) }
+        } catch { NSLog("Silkweb could not save navigation: %@", error.localizedDescription) }
     }
 
     func focus(_ column: Int) {
@@ -399,6 +438,7 @@ struct LibraryWorkspaceView: View {
         .sheet(item: $workspace.moveRequest) { request in MovePicker(workspace: workspace, request: request) }
         .task { workspace.restore(); await workspace.resumeEditor() }
         .onChange(of: workspace.session) { workspace.persistSession() }
+        .onChange(of: workspace.preview.mode) { workspace.persistSession() }
         .onChange(of: workspace.editor.state) { old, new in
             if old.isDirty, new == .clean { Task { await workspace.refreshSavedDocumentDates() } }
         }

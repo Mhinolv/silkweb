@@ -21,7 +21,7 @@ final class DocumentPanesController: NSSplitViewController {
         super.init(nibName: nil, bundle: nil)
         splitView.isVertical = true
         splitView.dividerStyle = .thin
-        let editor = NSHostingController(rootView: MarkdownTextView(session: workspace.editor, workspace: workspace))
+        let editor = NSHostingController(rootView: TabEditorContent(workspace: workspace))
         let preview = NSHostingController(rootView: PreviewView(workspace: workspace))
         editor.sizingOptions = []; preview.sizingOptions = []
         for controller in [editor as NSViewController, preview as NSViewController] {
@@ -84,5 +84,23 @@ final class DocumentPanesController: NSSplitViewController {
         let ratio = splitView.arrangedSubviews[0].frame.width / width
         guard ratio > 0 && ratio < 1 else { return }
         workspace.preview.defaults.set(ratio, forKey: "Silkweb.Detail.SplitRatio")
+    }
+}
+
+/// Stable SwiftUI identities keep each native editor and its undo stack alive across activation.
+struct TabEditorContent: View {
+    let workspace: LibraryWorkspace
+    var body: some View {
+        ZStack {
+            if workspace.tabs.isEmpty {
+                MarkdownTextView(session: workspace.editor, workspace: workspace)
+            }
+            ForEach(workspace.tabs) { tab in
+                MarkdownTextView(session: tab.editor, workspace: workspace)
+                    .opacity(workspace.activeTabID == tab.id ? 1 : 0)
+                    .allowsHitTesting(workspace.activeTabID == tab.id)
+                    .accessibilityHidden(workspace.activeTabID != tab.id)
+            }
+        }
     }
 }

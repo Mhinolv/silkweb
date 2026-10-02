@@ -1,0 +1,198 @@
+import AppKit
+import SwiftUI
+import XCTest
+import SilkwebCore
+@testable import Silkweb
+
+final class DocumentTabsTests: XCTestCase {
+    @MainActor private func fixture() async throws -> LibraryWorkspace {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        for name in ["A", "B", "C", "D"] { try Data(name.utf8).write(to: root.appendingPathComponent(name + ".md")) }
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "SilkwebTabs-\(UUID().uuidString)"))
+        let workspace = LibraryWorkspace(defaults: defaults)
+        workspace.root = root
+        workspace.recoveryDirectory = root.appendingPathComponent(".recovery")
+        workspace.install(try await LibraryScanner.scan(root: root))
+        return workspace
+    }
+    @MainActor private func select(_ name: String, in workspace: LibraryWorkspace, pinned: Bool = false) async {
+        workspace.navigate(folder: "", documents: [name + ".md"], pinned: pinned)
+        await workspace.waitForNavigation()
+    }
+
+    @MainActor func testPreviewPinReplaceReorderCloseSubsetsAndCycling() async throws {
+        let workspace = try await fixture()
+        defer { try? FileManager.default.removeItem(at: workspace.root!) }
+        await select("A", in: workspace)
+        let a = try XCTUnwrap(workspace.tabs.first)
+        XCTAssertTrue(a.isPreview)
+        a.editor.edit("A edited")
+        XCTAssertFalse(a.isPreview)
+        await select("B", in: workspace)
+        let b = try XCTUnwrap(workspace.tabs.last)
+        await select("C", in: workspace)
+        XCTAssertEqual(workspace.tabs.map { $0.editor.name }, ["A", "C"])
+        XCTAssertNil(b.editor.url)
+        await select("A", in: workspace)
+        XCTAssertTrue(workspace.editor === a.editor)
+        XCTAssertEqual(workspace.editor.text, "A edited")
+        workspace.editor.selection = NSRange(location: 3, length: 2)
+        workspace.editor.scroll = NSPoint(x: 0, y: 100)
+        await select("D", in: workspace, pinned: true)
+        XCTAssertEqual(workspace.tabs.map { $0.editor.name }, ["A", "D", "C"])
+        let d = try XCTUnwrap(workspace.tabs.first { $0.editor.name == "D" })
+        workspace.reorderTab(d.id, to: 0)
+        XCTAssertEqual(workspace.tabs.map { $0.editor.name }, ["D", "A", "C"])
+        workspace.activateTab(a.id)
+        workspace.moveActiveTab(-1)
+        XCTAssertEqual(workspace.tabs.first?.id, a.id)
+        workspace.moveActiveTab(1)
+        XCTAssertEqual(workspace.tabs[1].id, a.id)
+        workspace.cycleTab(1)
+        XCTAssertEqual(workspace.editor.name, "C")
+        workspace.cycleTab(1)
+        XCTAssertEqual(workspace.editor.name, "D")
+        workspace.cycleTab(-1)
+        XCTAssertEqual(workspace.editor.name, "C")
+        await workspace.closeTabs(otherThan: a.id, toRight: true)
+        XCTAssertEqual(workspace.tabs.map { $0.editor.name }, ["D", "A"])
+        await workspace.closeTabs(otherThan: a.id)
+        XCTAssertEqual(workspace.tabs.map { $0.editor.name }, ["A"])
+        XCTAssertEqual(workspace.editor.selection, NSRange(location: 3, length: 2))
+        XCTAssertEqual(workspace.editor.scroll.y, 100)
+        let closed = await workspace.closeTab(a.id)
+        XCTAssertTrue(closed)
+        XCTAssertTrue(workspace.tabs.isEmpty)
+        XCTAssertEqual(try String(contentsOf: workspace.root!.appendingPathComponent("A.md"), encoding: .utf8), "A edited")
+    }
+
+    @MainActor func testFailedCloseRetainsInactiveBufferAndAllTabsFlush() async throws {
+        let workspace = try await fixture()
+        defer { try? FileManager.default.removeItem(at: workspace.root!) }
+        await select("A", in: workspace, pinned: true)
+        let a = try XCTUnwrap(workspace.tabs.first)
+        // Conflict is a deterministic save failure, with no OS permission assumptions.
+        a.editor.edit("mine")
+        try Data("external".utf8).write(to: a.editor.url!, options: .atomic)
+        await a.editor.reconcileExternalChange()
+        await select("B", in: workspace, pinned: true)
+        XCTAssertEqual(workspace.editor.name, "B")
+        workspace.editor.edit("B changed")
+        let closed = await workspace.closeTab(a.id)
+        XCTAssertFalse(closed)
+        XCTAssertEqual(workspace.activeTabID, a.id)
+        XCTAssertEqual(a.editor.text, "mine")
+        XCTAssertTrue(a.editor.externalConflict)
+        XCTAssertEqual(workspace.tabs.count, 2)
+        await a.editor.resolveConflict(keepMine: true)
+        let exited = await workspace.prepareToExit()
+        XCTAssertTrue(exited)
+        XCTAssertEqual(try String(contentsOf: workspace.root!.appendingPathComponent("A.md"), encoding: .utf8), "mine")
+        XCTAssertEqual(try String(contentsOf: workspace.root!.appendingPathComponent("B.md"), encoding: .utf8), "B changed")
+    }
+
+    @MainActor func testRestoreAndInactiveRenameAndFinderMove() async throws {
+        let workspace = try await fixture()
+        defer { try? FileManager.default.removeItem(at: workspace.root!) }
+        await select("A", in: workspace, pinned: true)
+        let a = try XCTUnwrap(workspace.tabs.first)
+        await select("B", in: workspace)
+        let b = try XCTUnwrap(workspace.tabs.last)
+        let engine = try LibraryMutations(root: workspace.root!)
+        let changes = try await engine.rename("A.md", to: "Renamed.md")
+        try await workspace.refresh(changes)
+        XCTAssertEqual(a.editor.name, "Renamed")
+        XCTAssertEqual(a.editor.text, "A")
+        let moved = workspace.root!.appendingPathComponent("Finder.md")
+        try FileManager.default.moveItem(at: a.editor.url!, to: moved)
+        await workspace.reconcileFinderChanges()
+        XCTAssertEqual(a.editor.url, moved)
+        a.editor.selection = NSRange(location: 1, length: 0)
+        workspace.preview.mode = .split
+        await workspace.saveSessionNow()
+        let loaded = try await WindowSessionMetadata.load(root: workspace.root!)
+        let saved = try XCTUnwrap(loaded)
+        await workspace.didCloseWindow()
+        await workspace.restoreTabs(saved)
+        XCTAssertEqual(workspace.tabs.map { $0.editor.name }, ["Finder", "B"])
+        XCTAssertEqual(workspace.activeTabID, b.id)
+        XCTAssertTrue(workspace.tabs.last!.isPreview)
+        XCTAssertEqual(workspace.tabs.first!.editor.selection.location, 1)
+        XCTAssertEqual(workspace.preview.mode, .split)
+        try FileManager.default.removeItem(at: moved)
+        let rescanned = try await LibraryScanner.scan(root: workspace.root!)
+        XCTAssertEqual(saved.resolving(in: rescanned).tabs.map(\.documentID), [b.id])
+    }
+
+    @MainActor func testOffscreenTabsAndEditorLifecycleResizeSweep() async throws {
+        let workspace = try await fixture()
+        defer { try? FileManager.default.removeItem(at: workspace.root!) }
+        await select("A", in: workspace, pinned: true)
+        await select("B", in: workspace)
+        let bar = EditorTabBarView(workspace: workspace)
+        let panes = DocumentPanesController(workspace: workspace)
+        _ = panes.view
+        let probe = EditorWindowLifecycle.WindowProbe()
+        let coordinator = EditorWindowLifecycle.Coordinator(workspace: workspace)
+        // An unshown window exercises attachment and delegation without launching the app.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 560), styleMask: [.titled, .closable], backing: .buffered, defer: true)
+        probe.attached = { coordinator.attach($0) }
+        window.contentView = probe
+        probe.viewDidMoveToWindow()
+        XCTAssertTrue(window.delegate === coordinator)
+        XCTAssertEqual(window.tabbingMode, .disallowed)
+        let content = panes.view
+        content.frame = probe.bounds
+        content.autoresizingMask = [.width, .height]
+        probe.addSubview(content)
+        content.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(workspace.tabs.compactMap(\.textView).count, 2)
+        let active = workspace.activeTabID
+        let next = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .control,
+            timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "\t",
+            charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
+        XCTAssertTrue(coordinator.handleTabKey(next))
+        XCTAssertNotEqual(workspace.activeTabID, active)
+        let previous = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.control, .shift],
+            timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "\t",
+            charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
+        XCTAssertTrue(coordinator.handleTabKey(previous))
+        XCTAssertEqual(workspace.activeTabID, active)
+        for mode in DocumentViewMode.allCases {
+            workspace.preview.mode = mode
+            panes.updateMode()
+            for width in [0.0, 1, 110, 600, 4096] {
+                bar.setFrameSize(NSSize(width: width, height: 28))
+                bar.layoutSubtreeIfNeeded()
+                panes.view.setFrameSize(NSSize(width: width, height: 560))
+                panes.view.layoutSubtreeIfNeeded()
+                probe.setFrameSize(NSSize(width: width, height: 560))
+                probe.viewDidMoveToWindow()
+                for button in bar.buttons {
+                    button.layoutSubtreeIfNeeded()
+                    XCTAssertGreaterThanOrEqual(button.frame.width, 110)
+                    XCTAssertLessThanOrEqual(button.frame.width, 220)
+                }
+            }
+        }
+        XCTAssertEqual(bar.accessibilityRole(), .tabGroup)
+        XCTAssertEqual(bar.buttons.count, 2)
+        XCTAssertEqual(bar.buttons.first?.accessibilityRole(), .radioButton)
+        // Production editors have independent undo managers, including while offscreen.
+        let one = MarkdownTextView.makeEditorScrollView(style: EditorStyle()).documentView as! PlainMarkdownTextView
+        let two = MarkdownTextView.makeEditorScrollView(style: EditorStyle()).documentView as! PlainMarkdownTextView
+        let firstDelegate = MarkdownTextView.Coordinator(session: DocumentSession())
+        let secondDelegate = MarkdownTextView.Coordinator(session: DocumentSession())
+        one.delegate = firstDelegate; two.delegate = secondDelegate
+        XCTAssertNotNil(one.undoManager)
+        XCTAssertFalse(one.undoManager === two.undoManager)
+        for text in ["", "👩🏽‍💻", String(repeating: "line\n", count: 1000)] {
+            one.string = text
+            for width in [1.0, 600, 4096] { one.setFrameSize(NSSize(width: width, height: 500)); one.viewDidMoveToWindow() }
+            XCTAssertEqual(one.string, text)
+        }
+        window.delegate = nil
+    }
+}

@@ -153,7 +153,8 @@ final class DocumentRowClickView: NSView, NSDraggingSource {
             selected: workspace.session.selectedDocuments, anchor: pointerState?.anchor,
             extendRange: down.modifierFlags.contains(.shift), toggle: down.modifierFlags.contains(.command))
         if !down.modifierFlags.contains(.shift) { pointerState?.anchor = path }
-        workspace.selectDocuments(selection)
+        if down.clickCount == 2, !hasModifiers { workspace.openSelectionInNewTab(path) }
+        else { workspace.selectDocuments(selection) }
         if pointerState?.timing.click(path: path, timestamp: down.timestamp, clickCount: down.clickCount,
                         wasSingleSelected: wasSingleSelected, isSingleSelected: selection == [path],
                         hasModifiers: hasModifiers) == true {

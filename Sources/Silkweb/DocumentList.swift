@@ -101,6 +101,7 @@ struct DocumentDetail: View {
     @State private var isNarrow = true
     var body: some View {
         VStack(spacing: 0) {
+            if workspace.tabs.count >= 2 { EditorTabBar(workspace: workspace).frame(height: 28) }
             if workspace.snapshot?.isReadOnly == true {
                 Label("This library is read-only. Documents can be viewed, but changes can’t be saved.", systemImage: "lock")
                     .font(.callout).frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)

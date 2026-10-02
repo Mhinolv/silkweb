@@ -78,15 +78,15 @@ extension LibraryWorkspace {
     /// The injected service is also used by offscreen tests of the real save gate.
     func performTrash(_ plan: DeletionPlan, using service: TrashService? = nil) async {
         mutating = true
+        let editor = editor
         editor.loading = true
         defer { editor.loading = false; mutating = false }
-        guard await editor.flush() else {
+        guard await flushEditors() else {
             mutationErrorTitle = "“\(editor.name)” couldn’t be saved, so nothing was moved to the Trash."
             mutationError = "Your changes are still open in Silkweb."
             mutationRevealURLs = []
             return
         }
-        let oldURL = editor.url
         let pane = focusColumn
         let oldRows = documents.map(\.relativePath)
         do {
@@ -96,9 +96,12 @@ extension LibraryWorkspace {
             if !result.items.isEmpty { libraryUndo.append(.trash(result.items)) }
             let removed = Set(result.items.map(\.originalPath))
             func gone(_ path: String) -> Bool { removed.contains { path == $0 || path.hasPrefix($0 + "/") } }
-            if let oldURL, gone(String(oldURL.path.dropFirst(plan.root.path.count + 1))) {
-                _ = await editor.open(nil, readOnly: false)
+            for tab in tabs where tab.editor.url.map({ gone(String($0.path.dropFirst(plan.root.path.count + 1))) }) == true {
+                await tab.editor.didCloseWindow()
             }
+            tabs.removeAll { $0.editor.url == nil }
+            if !tabs.contains(where: { $0.id == activeTabID }) { activeTabID = tabs.first?.id }
+            if tabs.isEmpty { _ = await editor.open(nil, readOnly: false) }
             if let selected = session.selectedFolder, gone(selected) {
                 let parent = (selected as NSString).deletingLastPathComponent
                 let siblings = snapshot?.folders.filter { ($0.relativePath as NSString).deletingLastPathComponent == parent && !$0.relativePath.isEmpty }
@@ -113,9 +116,8 @@ extension LibraryWorkspace {
             }
             try await refresh(LibraryChangeSet(changes: []))
             session.selectedDocuments.formIntersection(Set(documents.map(\.relativePath)))
-            if editor.url == nil {
-                _ = await editor.open(selectedDocument.map { plan.root.appendingPathComponent($0.relativePath) }, readOnly: false)
-            }
+            if self.editor.url == nil, let document = selectedDocument { _ = await openTab(document) }
+            persistSession()
             if !result.items.isEmpty {
                 focus(pane)
                 NSAccessibility.post(element: NSApp.mainWindow ?? NSApplication.shared, notification: .announcementRequested,

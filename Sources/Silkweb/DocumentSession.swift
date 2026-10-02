@@ -5,6 +5,7 @@ import SilkwebCore
 /// Owns the visible buffer. Actor work is ordered so a flush includes every edit.
 @MainActor @Observable
 final class DocumentSession {
+    @ObservationIgnored var didEdit: (() -> Void)?
     var text = ""
     var url: URL?
     var state: DocumentSaveState = .clean
@@ -211,6 +212,7 @@ final class DocumentSession {
 
     func edit(_ value: String) {
         guard !readOnly, !loading, let url else { return }
+        didEdit?()
         text = value
         if externalDeleted { wasDirtyBeforeDelete = true }
         if !externalConflict && !externalDeleted { state = .dirty }
@@ -246,9 +248,10 @@ final class DocumentSession {
     }
 
     func followRename(to destination: URL) async {
-        let position = (selection, scroll)
-        _ = await open(destination, readOnly: readOnly)
-        (selection, scroll) = position
+        let wasLoading = loading
+        loading = false
+        await reconcileExternalChange(movedTo: destination)
+        loading = wasLoading
     }
 
     func keepRecovery() {
@@ -289,8 +292,9 @@ final class DocumentSession {
     }
 
     func prepareToExit() async -> Bool {
+        let wasLoading = loading
         loading = true
-        defer { loading = false }
+        defer { loading = wasLoading }
         if await flush() { return true }
         do { try await coordinator.preserveUnsavedDrafts() }
         catch { self.error = "Recovery draft couldn’t be saved: \(error.localizedDescription)"; announce(); return false }

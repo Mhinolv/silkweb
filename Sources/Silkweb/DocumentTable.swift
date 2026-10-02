@@ -130,7 +130,7 @@ struct DocumentTable: NSViewRepresentable {
                 item.target = self; item.representedObject = path; item.isEnabled = enabled
                 menu.addItem(item)
             }
-            add("Open in New Tab", nil, enabled: false)
+            add("Open in New Tab", #selector(openTab(_:)), enabled: !workspace.loading && !workspace.mutating)
             menu.addItem(.separator())
             add("Rename…", #selector(rename(_:)), enabled: workspace.canMutate)
             add("Move To…", #selector(move(_:)), enabled: workspace.canMutate)
@@ -140,6 +140,9 @@ struct DocumentTable: NSViewRepresentable {
             return menu
         }
 
+        @objc private func openTab(_ sender: NSMenuItem) {
+            workspace.openSelectionInNewTab(sender.representedObject as? String)
+        }
         @objc private func rename(_ sender: NSMenuItem) {
             guard let path = sender.representedObject as? String else { return }
             workspace.beginRename(LibraryRename(path: path, isFolder: false))

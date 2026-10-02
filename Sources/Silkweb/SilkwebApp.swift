@@ -9,8 +9,8 @@ struct SilkwebApp: App {
     var body: some Scene {
         Window("Silkweb", id: "library") {
             LibraryWorkspaceView(workspace: workspace)
-                .background(EditorWindowLifecycle(session: workspace.editor))
-                .onAppear { appDelegate.session = workspace.editor }
+                .background(EditorWindowLifecycle(workspace: workspace))
+                .onAppear { appDelegate.workspace = workspace }
         }
         .defaultSize(width: 1200, height: 760)
         .commands {
@@ -30,6 +30,8 @@ struct SilkwebApp: App {
                 Divider()
                 Button("Open Folder in Place…") { workspace.chooseFolder() }
                     .keyboardShortcut("o")
+                Button("Open in New Tab") { workspace.openSelectionInNewTab() }
+                    .keyboardShortcut("t").disabled(workspace.snapshot == nil || workspace.mutating || (workspace.selectedDocument == nil && workspace.editor.url == nil))
                 Button("Quick Open…") { workspace.search.toggleQuickOpen() }
                     .keyboardShortcut("o", modifiers: [.command, .shift]).disabled(workspace.snapshot == nil)
                 Button("Import Folder Copy…") { workspace.chooseImportFolder() }
@@ -37,10 +39,7 @@ struct SilkwebApp: App {
                 Button("New Library…") { workspace.newLibrary() }
                     .keyboardShortcut("n", modifiers: [.command, .option])
             }
-            CommandGroup(replacing: .saveItem) {
-                Button("Save") { Task { await workspace.editor.save() } }
-                    .keyboardShortcut("s").disabled(workspace.editor.url == nil || workspace.editor.readOnly)
-            }
+            TabCommands(workspace: workspace)
             CommandGroup(replacing: .undoRedo) {
                 Button(workspace.usesTextUndo ? (NSApp.keyWindow?.firstResponder as? NSTextView)?.undoManager?.undoMenuItemTitle ?? "Undo" : workspace.libraryUndo.last?.title ?? "Undo") {
                     if workspace.usesTextUndo { NSApp.sendAction(Selector(("undo:")), to: nil, from: nil) }
@@ -77,5 +76,42 @@ struct SilkwebApp: App {
                 Button("Editor") { workspace.focus(2) }.keyboardShortcut("3", modifiers: [.command, .option])
             }
         }
+    }
+}
+
+struct TabCommands: Commands {
+    let workspace: LibraryWorkspace
+    var body: some Commands {
+            CommandGroup(after: .windowArrangement) {
+                Button("Show Next Tab") { workspace.cycleTab(1) }
+                    .keyboardShortcut("]", modifiers: [.command, .shift]).disabled(workspace.tabs.isEmpty)
+                Button("Show Previous Tab") { workspace.cycleTab(-1) }
+                    .keyboardShortcut("[", modifiers: [.command, .shift]).disabled(workspace.tabs.isEmpty)
+                Button("Keep Open") {
+                    if let id = workspace.activeTabID { workspace.keepTab(id) }
+                }.disabled(workspace.tabs.first { $0.id == workspace.activeTabID }?.isPreview != true)
+                Button("Reveal in Library") {
+                    if let id = workspace.activeTabID { workspace.search.text = ""; workspace.activateTab(id) }
+                }.disabled(workspace.tabs.isEmpty)
+                Button("Move Tab Left") { workspace.moveActiveTab(-1) }.disabled(workspace.tabs.count < 2)
+                Button("Move Tab Right") { workspace.moveActiveTab(1) }.disabled(workspace.tabs.count < 2)
+                Button("Close Other Tabs") {
+                    if let id = workspace.activeTabID { Task { await workspace.closeTabs(otherThan: id) } }
+                }.keyboardShortcut("w", modifiers: [.command, .option]).disabled(workspace.tabs.count < 2)
+                Button("Close Tabs to the Right") {
+                    if let id = workspace.activeTabID { Task { await workspace.closeTabs(otherThan: id, toRight: true) } }
+                }.disabled(workspace.tabs.last?.id == workspace.activeTabID)
+            }
+            CommandGroup(replacing: .saveItem) {
+                Button(workspace.tabs.isEmpty ? "Close Window" : "Close Tab") {
+                    if let id = workspace.activeTabID { Task { await workspace.closeTab(id) } }
+                    else { NSApp.keyWindow?.performClose(nil) }
+                }.keyboardShortcut("w")
+                Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
+                    .keyboardShortcut("w", modifiers: [.command, .shift])
+                Divider()
+                Button("Save") { Task { await workspace.editor.save() } }
+                    .keyboardShortcut("s").disabled(workspace.editor.url == nil || workspace.editor.readOnly)
+            }
     }
 }

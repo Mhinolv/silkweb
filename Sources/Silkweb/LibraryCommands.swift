@@ -43,8 +43,9 @@ extension LibraryWorkspace {
         Task {
             await waitForNavigation()
             defer { mutating = false }
+            let editor = editor
             editor.loading = true
-            guard await editor.flush() else { editor.loading = false; return }
+            guard await flushEditors() else { editor.loading = false; return }
             defer { editor.loading = false }
             do {
                 let engine = try LibraryMutations(root: root)
@@ -56,7 +57,9 @@ extension LibraryWorkspace {
                 session.expandedFolders.insert(target)
                 session.selectedFolder = folder ? change.newPath : target
                 session.selectedDocuments = folder ? [] : [change.newPath]
-                _ = await editor.open(folder ? nil : root.appendingPathComponent(change.newPath), readOnly: false)
+                if !folder, let document = snapshot?.documents.first(where: { $0.relativePath == change.newPath }) {
+                    _ = await openTab(document, pinned: true)
+                }
                 rename = LibraryRename(path: change.newPath, isFolder: folder, focusEditor: !folder)
                 focus(folder ? 0 : 1)
             } catch { mutationFailure(error) }
@@ -102,8 +105,9 @@ extension LibraryWorkspace {
         Task {
             await waitForNavigation()
             defer { mutating = false }
+            let editor = editor
             editor.loading = true
-            guard await editor.flush() else { editor.loading = false; rename = nil; return }
+            guard await flushEditors() else { editor.loading = false; rename = nil; return }
             defer { editor.loading = false }
             do {
                 let engine = try LibraryMutations(root: root)
@@ -131,7 +135,8 @@ extension LibraryWorkspace {
         let scanned = try await LibraryScanner.scan(root: root)
         install(scanned)
         session = session.applying(changes)
-        if let url = editor.url {
+        for editor in allEditors {
+            guard let url = editor.url else { continue }
             let old = String(url.path.dropFirst(root.path.count + 1))
             let new = changes.remapping(old)
             if old != new { await editor.followRename(to: root.appendingPathComponent(new)) }
@@ -178,9 +183,10 @@ extension LibraryWorkspace {
         mutating = true
         Task {
             await waitForNavigation()
+            let editor = editor
             editor.loading = true
             defer { editor.loading = false; mutating = false }
-            guard await editor.flush() else { return }
+            guard await flushEditors() else { return }
             do {
                 let engine = try LibraryMutations(root: root)
                 switch last {
@@ -194,19 +200,8 @@ extension LibraryWorkspace {
                     reportTrashFailures(result.failures, reveal: remaining.map(\.trashURL), restoring: true)
                     return
                 case .move(let plan):
-                    let oldURL = editor.url
-                    let position = (editor.selection, editor.scroll)
-                    guard await editor.open(nil, readOnly: false) else { return }
-                    do {
-                        let changes = try await commitMove(plan, using: engine)
-                        if let oldURL {
-                            let oldPath = String(oldURL.path.dropFirst(root.path.count + 1))
-                            _ = await editor.open(root.appendingPathComponent(changes.remapping(oldPath)), readOnly: false)
-                            (editor.selection, editor.scroll) = position
-                        }
-                    } catch {
-                        _ = await editor.open(oldURL, readOnly: false)
-                        (editor.selection, editor.scroll) = position
+                    do { _ = try await commitMove(plan, using: engine) }
+                    catch {
                         mutationFailure(error, title: "The move can’t be undone because items have changed since.")
                         return
                     }

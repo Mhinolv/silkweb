@@ -89,14 +89,17 @@ struct MarkdownTextView: NSViewRepresentable {
         guard let text = scroll.documentView as? PlainMarkdownTextView else { return }
         let coordinator = context.coordinator
         text.configureAssetInsertion(session: session, workspace: workspace)
-        workspace.preview.editor = text
+        let active = workspace.editor === session
+        workspace.tabs.first { $0.editor === session }?.textView = text
+        if active { workspace.preview.editor = text }
         if coordinator.url != session.url {
             let selection = session.selection
             let position = session.scroll
+            let replacingBuffer = coordinator.url == nil || text.string != session.text
             coordinator.url = session.url
-            text.string = session.text
+            if replacingBuffer { text.string = session.text }
             text.styler.reload()
-            text.undoManager?.removeAllActions()
+            if replacingBuffer { text.undoManager?.removeAllActions() }
             let count = (text.string as NSString).length
             text.setSelectedRange(NSRange(location: min(selection.location, count), length: min(selection.length, max(0, count - selection.location))))
             text.layoutEditor()
@@ -105,14 +108,14 @@ struct MarkdownTextView: NSViewRepresentable {
         } else if text.string != session.text, !text.hasMarkedText() {
             Self.reload(text, in: scroll, value: session.text, selection: session.selection, position: session.scroll)
         }
-        text.isEditable = !session.readOnly && !session.loading && !text.assetHandler.busy
-        if FormattingTarget.shared.editor === text { FormattingTarget.shared.refresh() }
+        text.isEditable = active && !session.readOnly && !session.loading && !text.assetHandler.busy
+        if active, FormattingTarget.shared.editor === text { FormattingTarget.shared.refresh() }
         text.setAccessibilityLabel("Document text, \(session.name)")
-        text.window?.isDocumentEdited = session.state.isDirty
+        if active { text.window?.isDocumentEdited = workspace.allEditors.contains { $0.state.isDirty } }
         text.needsDisplay = true
         if coordinator.focusRequest != workspace.focusRequest {
             coordinator.focusRequest = workspace.focusRequest
-            if workspace.focusColumn == 2 { text.window?.makeFirstResponder(text) }
+            if active, workspace.focusColumn == 2 { text.window?.makeFirstResponder(text) }
         }
     }
 
@@ -138,6 +141,9 @@ struct MarkdownTextView: NSViewRepresentable {
         var url: URL?
         var focusRequest = 0
         init(session: DocumentSession) { self.session = session }
+        func undoManager(for view: NSTextView) -> UndoManager? {
+            (view as? PlainMarkdownTextView)?.documentUndoManager
+        }
         func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
             !session.loading && !session.readOnly
         }
@@ -157,6 +163,7 @@ struct MarkdownTextView: NSViewRepresentable {
 
 /// The stock text view supplies Unicode, IME, undo and accessibility navigation.
 final class PlainMarkdownTextView: NSTextView {
+    let documentUndoManager = UndoManager()
     var style = EditorStyle()
     weak var session: DocumentSession?
     let styler = MarkdownStyler()
@@ -312,7 +319,7 @@ struct EditorBanner: View {
                         await workspace?.reconcileFinderChanges()
                         if !session.externalDeleted, let url = session.url { workspace?.showDocument(url) }
                     } }
-                    Button("Close") { Task { await session.closeDeleted() } }
+                    Button("Close") { Task { await session.closeDeleted(); workspace?.removeClosedTabs() } }
                 } else if session.recovered {
                     Button("Keep Recovered Text") { session.keepRecovery() }
                     Button("Discard Recovered Text") { session.discardRecovery() }
