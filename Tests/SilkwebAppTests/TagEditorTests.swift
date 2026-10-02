@@ -157,7 +157,7 @@ final class TagEditorTests: XCTestCase {
         for _ in 0..<10 { await Task.yield() }
         FolderSidebar.update(scroll, coordinator: coordinator, snapshot: snapshot)
         XCTAssertEqual(workspace.session.selectedTagID, tag.id)
-        XCTAssertEqual(outline.selectedRow, -1)
+        XCTAssertTrue(outline.item(atRow: outline.selectedRow) as? FolderSidebar.Item === coordinator.itemsByTag[tag.id])
         for width in [180.0, 220.0, 320.0] {
             scroll.setFrameSize(NSSize(width: width, height: 600))
             scroll.layoutSubtreeIfNeeded()

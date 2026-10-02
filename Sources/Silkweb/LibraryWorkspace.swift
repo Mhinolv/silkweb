@@ -77,6 +77,7 @@ final class LibraryWorkspace {
     var root: URL?
     var sidebarToggleRequest = 0
     var sidebarsHidden = false
+    var tagsExpanded = true
     var libraryColumnCollapsed = false
     @ObservationIgnored weak var librarySplitController: LibrarySplitViewController?
     var sidebarsTitle: String { sidebarsHidden || libraryColumnCollapsed ? "Show Sidebars" : "Hide Sidebars" }
@@ -239,6 +240,7 @@ final class LibraryWorkspace {
             scope?.stopAccessingSecurityScopedResource()
             scope = usesSecurityScope && url.startAccessingSecurityScopedResource() ? url : nil
             root = url
+            tagsExpanded = true
             snapshot = nil
             error = nil
             mediaProgress = nil

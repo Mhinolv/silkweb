@@ -97,61 +97,6 @@ extension LibraryWorkspace {
     }
 }
 
-struct TagSidebar: View {
-    @Bindable var workspace: LibraryWorkspace
-    @State private var renameError: String?
-    @FocusState private var renameFocused: Bool
-    private func commitRename(_ tag: LibraryTag) {
-        guard TagEditor.normalize(workspace.tagRenameName) != nil else {
-            renameError = "Use 1–64 characters without commas."
-            NSSound.beep()
-            return
-        }
-        workspace.renameTag(tag, to: workspace.tagRenameName)
-        workspace.tagRenameID = nil
-        renameError = nil
-    }
-    var body: some View {
-        if !workspace.tags.isEmpty {
-            Text("TAGS").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(workspace.tags) { tag in
-                        HStack(spacing: 6) {
-                            Image(systemName: "tag").foregroundStyle(.secondary)
-                            if workspace.tagRenameID == tag.id {
-                                TextField(tag.name, text: $workspace.tagRenameName).focused($renameFocused)
-                                    .onSubmit { commitRename(tag) }
-                                    .onExitCommand { workspace.tagRenameID = nil; renameError = nil }
-                                    .onChange(of: renameFocused) { if !renameFocused, workspace.tagRenameID == tag.id { commitRename(tag) } }
-                                    .popover(isPresented: Binding(get: { renameError != nil && workspace.tagRenameID == tag.id }, set: { if !$0 { renameError = nil } }), arrowEdge: .bottom) {
-                                        Text(renameError ?? "").foregroundStyle(.red).padding(12)
-                                    }
-                            } else {
-                                Button { workspace.selectTag(tag.id) } label: {
-                                    HStack(spacing: 0) {
-                                        Text(tag.name).lineLimit(1)
-                                        Text(" (\(workspace.tagCounts[tag.id] ?? 0))")
-                                            .foregroundStyle(.secondary).monospacedDigit().fixedSize()
-                                    }.frame(maxWidth: .infinity, alignment: .leading)
-                                }.buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.horizontal, 16).frame(height: 24)
-                        .background(workspace.session.selectedTagID == tag.id ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor) : .clear)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("\(tag.name), tag, \(workspace.tagCounts[tag.id] ?? 0) documents")
-                        .contextMenu {
-                            Button("Rename Tag…") { workspace.tagRenameName = tag.name; workspace.tagRenameID = tag.id; renameFocused = true }.disabled(!workspace.canMutate)
-                            Button("Delete Tag…", role: .destructive) { workspace.deleteTag(tag) }.disabled(!workspace.canMutate)
-                        }
-                    }
-                }
-            }.frame(maxHeight: 180)
-        }
-    }
-}
-
 struct TagFilterBar: View {
     let workspace: LibraryWorkspace
     var body: some View {
@@ -205,8 +150,9 @@ struct TagTokenField: NSViewRepresentable {
     let enabled: Bool
     let onChange: ([String]) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(onChange: onChange) }
-    func makeNSView(context: Context) -> NSTokenField {
-        let field = TagInputField()
+    func makeNSView(context: Context) -> TagTokenContainer {
+        let container = TagTokenContainer()
+        let field = container.field
         field.placeholderString = "Add tags"
         field.tokenizingCharacterSet = CharacterSet(charactersIn: ",\t\n")
         field.completionDelay = 0.1
@@ -214,9 +160,15 @@ struct TagTokenField: NSViewRepresentable {
         field.target = context.coordinator
         field.action = #selector(Coordinator.commit(_:))
         field.setAccessibilityLabel("Tags")
-        return field
+        return container
     }
-    func updateNSView(_ field: NSTokenField, context: Context) {
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: TagTokenContainer, context: Context) -> CGSize? {
+        let proposedWidth = proposal.width ?? 216
+        let width = proposedWidth.isFinite ? proposedWidth : 216
+        return CGSize(width: width, height: nsView.measuredHeight(width: width))
+    }
+    func updateNSView(_ container: TagTokenContainer, context: Context) {
+        let field = container.field
         context.coordinator.onChange = onChange
         context.coordinator.suggestions = suggestions
         // Preserve uncommitted input when unrelated workspace state updates the bridge.
@@ -224,11 +176,10 @@ struct TagTokenField: NSViewRepresentable {
             if (field.objectValue as? [String] ?? []) != names { field.objectValue = names }
             context.coordinator.presentedNames = names
         }
+        container.needsLayout = true
         field.isEnabled = enabled
-        if let field = field as? TagInputField {
-            field.requestedFocus = focusRequest
-            field.focusIfNeeded()
-        }
+        field.requestedFocus = focusRequest
+        field.focusIfNeeded()
     }
     final class Coordinator: NSObject, NSTokenFieldDelegate {
         var onChange: ([String]) -> Void
@@ -268,7 +219,13 @@ struct TagTokenField: NSViewRepresentable {
             validating = false
             commit(field)
         }
-        @objc func commit(_ field: NSTokenField) { onChange(field.objectValue as? [String] ?? []) }
+        @objc func commit(_ field: NSTokenField) {
+            (field as? TagInputField)?.contentChanged()
+            onChange(field.objectValue as? [String] ?? [])
+        }
+        func controlTextDidChange(_ notification: Notification) {
+            (notification.object as? TagInputField)?.contentChanged()
+        }
         func controlTextDidEndEditing(_ notification: Notification) {
             if let field = notification.object as? NSTokenField { commit(field) }
         }
@@ -291,8 +248,111 @@ struct TagTokenField: NSViewRepresentable {
     }
 }
 
+private final class WrappingTagCell: NSTokenFieldCell {
+    override func drawingRect(forBounds rect: NSRect) -> NSRect { rect }
+}
+
+/// The bezel belongs to the viewport so it never scrolls away with the tokens.
+final class TagTokenContainer: NSView {
+    let field = TagInputField()
+    let scroll = NSScrollView()
+    private var visibleHeight: CGFloat = 28
+    override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        field.cell = WrappingTagCell(textCell: "")
+        field.font = .systemFont(ofSize: 13)
+        field.isEditable = true
+        field.isSelectable = true
+        field.isBezeled = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.cell?.wraps = true
+        field.cell?.isScrollable = false
+        field.cell?.usesSingleLineMode = false
+        field.cell?.lineBreakMode = .byWordWrapping
+        scroll.borderType = .bezelBorder
+        scroll.hasHorizontalScroller = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .legacy
+        scroll.drawsBackground = false
+        scroll.documentView = field
+        addSubview(scroll)
+        focusRingType = .exterior
+        field.container = self
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func measuredHeight(width: CGFloat) -> CGFloat {
+        let height = contentHeight(width: width)
+        return min(108, 28 + ceil(max(0, height - 28) / 20) * 20)
+    }
+    private func contentHeight(width: CGFloat) -> CGFloat {
+        guard width > 4, let cell = field.cell else { return 28 }
+        // Native token-cell measurement includes wrapping and token attachment widths.
+        var measured = cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: width - 4, height: 10_000)).height + 4
+        if measured > 108 {
+            let scrollerWidth = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+            measured = cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: max(1, width - 4 - scrollerWidth), height: 10_000)).height + 4
+        }
+        if let editor = field.currentEditor() as? NSTextView, let manager = editor.layoutManager, let container = editor.textContainer {
+            manager.ensureLayout(for: container)
+            return max(28, measured, manager.usedRect(for: container).height + 4)
+        }
+        return max(28, measured)
+    }
+    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: visibleHeight) }
+    override func layout() {
+        super.layout()
+        let height = contentHeight(width: bounds.width)
+        let next = min(108, 28 + ceil(max(0, height - 28) / 20) * 20)
+        if visibleHeight != next {
+            visibleHeight = next
+            invalidateIntrinsicContentSize()
+        }
+        scroll.frame = bounds
+        field.frame = NSRect(x: 0, y: 0, width: scroll.contentSize.width, height: max(scroll.contentSize.height, height - 4))
+        // Adding/removing the vertical scroller changes the clip width during tiling.
+        scroll.tile()
+        field.setFrameSize(NSSize(width: scroll.contentSize.width, height: field.frame.height))
+        if let editor = field.currentEditor() as? NSTextView {
+            editor.isHorizontallyResizable = false
+            editor.textContainer?.widthTracksTextView = true
+            editor.textContainer?.containerSize.width = field.bounds.width
+        }
+    }
+    func contentChanged() {
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+        if let editor = field.currentEditor() as? NSTextView {
+            editor.scrollRangeToVisible(editor.selectedRange())
+        } else {
+            field.scrollToVisible(NSRect(x: 0, y: max(0, field.bounds.height - 20), width: 1, height: 20))
+        }
+        needsDisplay = true
+        noteFocusRingMaskChanged()
+    }
+    override var focusRingMaskBounds: NSRect { bounds }
+    override func drawFocusRingMask() {
+        if field.currentEditor() != nil { NSBezierPath(roundedRect: bounds, xRadius: 4, yRadius: 4).fill() }
+    }
+}
+
 /// Requests issued before SwiftUI attaches the field are fulfilled once it has a window.
 final class TagInputField: NSTokenField {
+    weak var container: TagTokenContainer?
+    override var objectValue: Any? { didSet { contentChanged() } }
+    func contentChanged() { container?.contentChanged() }
+    override func textDidBeginEditing(_ notification: Notification) {
+        super.textDidBeginEditing(notification)
+        contentChanged()
+    }
+    override func textDidEndEditing(_ notification: Notification) {
+        super.textDidEndEditing(notification)
+        contentChanged()
+    }
     var requestedFocus = 0
     private(set) var fulfilledFocus = 0
     override func viewDidMoveToWindow() {

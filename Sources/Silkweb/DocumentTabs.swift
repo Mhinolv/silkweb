@@ -173,6 +173,7 @@ extension LibraryWorkspace {
         value.selectedFolderID = snapshot?.folders.first { $0.relativePath == session.selectedFolder }?.id
         value.viewMode = preview.mode.rawValue
         value.sidebarsHidden = sidebarsHidden
+        value.tagsExpanded = tagsExpanded
         value.tabs = tabs.map { tab in
             var item = DocumentTabMetadata(documentID: tab.id,
                 relativePath: tab.editor.url.map { String($0.path.dropFirst((root?.path.count ?? 0) + 1)) } ?? "",
@@ -191,6 +192,7 @@ extension LibraryWorkspace {
         defer { restoringTabs = false }
         let resolved = value.resolving(in: snapshot)
         sidebarsHidden = resolved.sidebarsHidden
+        tagsExpanded = resolved.tagsExpanded || session.selectedTagID != nil
         librarySplitController?.applySidebars(animated: false)
         for item in resolved.tabs {
             guard let document = snapshot.documents.first(where: { $0.id == item.documentID }) else { continue }

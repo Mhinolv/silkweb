@@ -31,10 +31,13 @@ LIBRARY
      ▸ [folder]     Projects (8)
      ▾ [folder]     Writing (3)
           [folder]  Drafts (0)
-TAGS                                    ← section hidden until a tag exists (1.21)
-  [tag]             research (9)
+▾ [tag]             Tags (2)          ← sibling of library root; hidden until a tag exists (1.21)
+    [tag]           draft (3)
+    [tag]           research (9)
 ```
 - Sidebar counts are inline after the name: a space and the direct count in parentheses, `secondaryLabelColor`, same font as the title with monospaced digits, `(0)` shown. The name truncates first; the count never clips. No trailing count column.
+- Tags scroll in the same tree after the library root’s last visible descendant. The group count is distinct tags; child counts are documents. The group is a keyboard focus stop without changing document scope. Disclosure, double-click, and arrow keys expand/collapse; window session saves expansion (default expanded, selected tags reveal their group). Tag rows support inline rename and delete, but no drag/drop.
+- Info tags word-wrap at the column width minus 24 pt, grow from 28 to 108 pt in 20 pt line increments, then scroll vertically only. One bezel and focus ring surround the visible frame; following rows retain 16 pt spacing.
 - Sidebar is an `NSOutlineView` bridge (source-list style). SwiftUI `OutlineGroup` can't do spring-loading, inline rename, or lazy expansion at 1k folders. Document list may be SwiftUI `List` or `NSTableView`, whichever handles 10k rows smoothly. Both support multi-selection.
 
 ## 4. Visual tokens (system only)

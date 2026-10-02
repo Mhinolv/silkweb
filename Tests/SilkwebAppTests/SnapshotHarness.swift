@@ -34,6 +34,9 @@ struct SnapshotScenario {
     static let image = "Snapshot Fixtures/Image Fixture.md"
     static let initial: [SnapshotScenario] = [
         .init(name: "library-overview"),
+        .init(name: "tags-sidebar-collapsed", tagState: "collapsed"),
+        .init(name: "tags-sidebar-expanded", tagState: "expanded"),
+        .init(name: "tags-info-many", document: pourOver, tagState: "many"),
         .init(name: "tags-info", document: pourOver, tagState: "info"),
         .init(name: "tags-info-empty", tagState: "empty"),
         .init(name: "tags-multi-selection", tagState: "multi", selectedDocuments: [pourOver, image]),
@@ -315,12 +318,14 @@ final class SnapshotHarness {
         workspace.preview.showsOutline = scenario.outline
         if let state = scenario.tagState, let snapshot = workspace.snapshot {
             let ids = Set(snapshot.documents.filter { [SnapshotScenario.pourOver, SnapshotScenario.image].contains($0.relativePath) }.map(\.id))
-            _ = try await TagStore.update(root: snapshot.rootURL) { TagEditor.edit(["research", "draft"], documents: ids, metadata: $0) }
+            let names = state == "many" ? (1...20).map { "research topic \($0)" } : ["research", "draft"]
+            _ = try await TagStore.update(root: snapshot.rootURL) { TagEditor.edit(names, documents: ids, metadata: $0) }
+            workspace.tagsExpanded = state != "collapsed"
             workspace.install(try await LibraryScanner.scan(root: snapshot.rootURL))
             if state == "rename", let tag = workspace.tags.first { workspace.tagRenameID = tag.id; workspace.tagRenameName = tag.name }
             if state == "filter" { workspace.tagFilters = Set(workspace.tags.map(\.id)) }
             if state == "selected", let id = workspace.tags.first?.id { workspace.session.selectedTagID = id; workspace.session.selectedFolder = nil }
-            if ["info", "empty", "multi"].contains(state) { workspace.inspectorInfo = true; workspace.preview.showsOutline = true }
+            if ["info", "empty", "multi", "many"].contains(state) { workspace.inspectorInfo = true; workspace.preview.showsOutline = true }
         }
         if let query = scenario.quickQuery { workspace.search.toggleQuickOpen(); workspace.search.quickText = query }
         if let query = scenario.searchQuery { workspace.search.text = query }

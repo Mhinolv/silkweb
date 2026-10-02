@@ -163,7 +163,6 @@ private struct LibrarySidebarPane: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text("LIBRARY").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 12)
                 FolderSidebar(snapshot: snapshot, workspace: workspace)
-                TagSidebar(workspace: workspace)
                 Menu {
                     Button("New Folder") { workspace.create(folder: true) }
                     Button("New Document") { workspace.create(folder: false) }

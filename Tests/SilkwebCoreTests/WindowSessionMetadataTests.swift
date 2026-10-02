@@ -8,7 +8,19 @@ final class WindowSessionMetadataTests: XCTestCase {
                 let json = "{\"formatVersion\":\(version)\(flag)}"
                 let value = try JSONDecoder().decode(WindowSessionMetadata.self, from: Data(json.utf8))
                 XCTAssertEqual(value.sidebarsHidden, flag.contains(":true"))
-                XCTAssertEqual(value.formatVersion, 2)
+                XCTAssertEqual(value.formatVersion, 3)
+                XCTAssertEqual(try JSONDecoder().decode(WindowSessionMetadata.self, from: JSONEncoder().encode(value)), value)
+            }
+        }
+    }
+
+    func testTagsExpansionVersionAndTolerantDecodeSweep() throws {
+        for version in [1, 2, 3] {
+            for flag in ["", ",\"tagsExpanded\":true", ",\"tagsExpanded\":false", ",\"tagsExpanded\":null", ",\"tagsExpanded\":\"bad\""] {
+                let json = "{\"formatVersion\":\(version)\(flag)}"
+                let value = try JSONDecoder().decode(WindowSessionMetadata.self, from: Data(json.utf8))
+                XCTAssertEqual(value.tagsExpanded, !flag.contains(":false"))
+                XCTAssertEqual(value.formatVersion, 3)
                 XCTAssertEqual(try JSONDecoder().decode(WindowSessionMetadata.self, from: JSONEncoder().encode(value)), value)
             }
         }
@@ -94,7 +106,7 @@ final class WindowSessionMetadataTests: XCTestCase {
         let value = try JSONDecoder().decode(WindowSessionMetadata.self, from: Data(json.utf8))
         var tab = DocumentTabMetadata(documentID: id, relativePath: "Notes/A.md", isPreview: true)
         tab.selectionLocation = 7; tab.selectionLength = 2; tab.scrollY = 120
-        XCTAssertEqual(value.formatVersion, 2)
+        XCTAssertEqual(value.formatVersion, 3)
         XCTAssertEqual(value.tabs, [tab])
         XCTAssertEqual(value.activeDocumentID, id)
         XCTAssertEqual(value.selectedFolderID, folder)

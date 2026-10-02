@@ -10,6 +10,8 @@ struct FolderSidebar: NSViewRepresentable {
     final class Item: NSObject {
         let folder: LibraryFolder?
         let title: String
+        var tag: LibraryTag?
+        var isTagsGroup = false
         var children: [Item] = []
         init(folder: LibraryFolder?, title: String) { self.folder = folder; self.title = title }
     }
@@ -26,7 +28,10 @@ struct FolderSidebar: NSViewRepresentable {
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         let outline = SidebarOutlineView()
-        outline.renameSelected = { workspace.focusColumn = 0; workspace.beginRename() }
+        outline.renameSelected = { [weak coordinator] in coordinator?.renameSelection() }
+        outline.toggleDisclosure = { [weak coordinator] row in coordinator?.toggleDisclosure(at: row) ?? false }
+        outline.toggleGroup = { [weak coordinator] in coordinator?.toggleSelectedGroup() ?? false }
+        outline.tagArrow = { [weak coordinator] key in coordinator?.navigateTags(key) ?? false }
         outline.didFocus = { workspace.focusColumn = 0 }
         outline.contextMenu = { [weak coordinator = coordinator] event in coordinator?.menu(event) }
         outline.moveFocus = { backwards in workspace.focus(backwards ? 2 : 1) }
@@ -68,7 +73,11 @@ struct FolderSidebar: NSViewRepresentable {
             if coordinator.configure(snapshot) { coordinator.restore() }
             else { coordinator.updateVisibleCounts() }
         }
-        if workspace.session.selectedTagID != nil, coordinator.outline?.selectedRow != -1 {
+        if coordinator.selectedTagID != workspace.session.selectedTagID || coordinator.tagsExpanded != workspace.tagsExpanded {
+            coordinator.restore()
+        }
+        if coordinator.tagRenameID != workspace.tagRenameID {
+            coordinator.tagRenameID = workspace.tagRenameID
             coordinator.restore()
         }
         if coordinator.rename != workspace.rename {
@@ -88,6 +97,13 @@ struct FolderSidebar: NSViewRepresentable {
         var roots: [Item] = []
         var itemsByPath: [String: Item] = [:]
         var rootURL: URL?
+        var tagsGroup: Item?
+        var itemsByTag: [UUID: Item] = [:]
+        var tagsExpanded = true
+        var selectedTagID: UUID?
+        var tagRenameID: UUID?
+        private var tags: [LibraryTag] = []
+        private var tagCounts: [UUID: Int] = [:]
         private var folders: [LibraryFolder] = []
         private var counts: [UUID: FolderDocumentCount] = [:]
         private var totalCount = 0
@@ -118,7 +134,9 @@ struct FolderSidebar: NSViewRepresentable {
         func configure(_ snapshot: LibrarySnapshot) -> Bool {
             counts = snapshot.presentation.counts
             totalCount = snapshot.documents.count
-            guard rootURL != snapshot.rootURL || folders != snapshot.folders else { return false }
+            tagCounts = workspace.tagCounts
+            guard rootURL != snapshot.rootURL || folders != snapshot.folders || tags != workspace.tags else { return false }
+            tags = workspace.tags
             rootURL = snapshot.rootURL
             folders = snapshot.folders
             itemsByPath = [:]
@@ -135,6 +153,20 @@ struct FolderSidebar: NSViewRepresentable {
                 item.children = (snapshot.presentation.children[folder.id] ?? []).compactMap { byID[$0.id] }
                 if folder.parentID == nil { roots.append(item) }
             }
+            itemsByTag = [:]
+            tagsGroup = nil
+            if !tags.isEmpty {
+                let group = Item(folder: nil, title: "Tags")
+                group.isTagsGroup = true
+                group.children = tags.map { tag in
+                    let item = Item(folder: nil, title: tag.name)
+                    item.tag = tag
+                    itemsByTag[tag.id] = item
+                    return item
+                }
+                tagsGroup = group
+                roots.append(group)
+            }
             return true
         }
 
@@ -148,6 +180,13 @@ struct FolderSidebar: NSViewRepresentable {
             }
         }
         private func applyCount(to cell: SidebarFolderCell, item: Item) {
+            if item.isTagsGroup || item.tag != nil {
+                let count = item.tag.map { tagCounts[$0.id] ?? 0 } ?? tags.count
+                cell.countBadge.stringValue = FolderDocumentCount(direct: count, recursive: count).inlineSuffix
+                cell.setAccessibilityValue("\(count) \(item.isTagsGroup ? "tags" : "documents")")
+                cell.toolTip = nil
+                return
+            }
             let count = item.folder.flatMap { counts[$0.id] } ?? FolderDocumentCount(direct: totalCount, recursive: totalCount)
             cell.countBadge.stringValue = count.inlineSuffix
             cell.setAccessibilityValue(count.accessibilityValue)
@@ -161,7 +200,14 @@ struct FolderSidebar: NSViewRepresentable {
             for path in workspace.session.expandedFolders.sorted(by: { $0.count < $1.count }) {
                 if let item = itemsByPath[path] { outline.expandItem(item) }
             }
-            let item = workspace.session.selectedTagID == nil ? (workspace.session.selectedFolder.flatMap { itemsByPath[$0] } ?? roots.first) : nil
+            selectedTagID = workspace.session.selectedTagID
+            if let group = tagsGroup {
+                if workspace.session.selectedTagID != nil { workspace.tagsExpanded = true }
+                if workspace.tagsExpanded { outline.expandItem(group) }
+            }
+            tagsExpanded = workspace.tagsExpanded
+            let item = workspace.session.selectedTagID.flatMap { itemsByTag[$0] }
+                ?? (workspace.session.selectedFolder.flatMap { itemsByPath[$0] } ?? roots.first)
             if let item {
                 var parent = outline.parent(forItem: item)
                 while let ancestor = parent {
@@ -255,20 +301,45 @@ struct FolderSidebar: NSViewRepresentable {
                 }
                 cell.renameField = field
             }
+            if let tag = item.tag, workspace.tagRenameID == tag.id {
+                let field = RenameNameField(name: workspace.tagRenameName)
+                field.validate = { TagEditor.normalize($0) == nil ? "Use 1–64 characters without commas." : nil }
+                field.finish = { [weak workspace] value in
+                    if let value { workspace?.renameTag(tag, to: value) }
+                    workspace?.tagRenameID = nil
+                }
+                field.translatesAutoresizingMaskIntoConstraints = false
+                cell.addSubview(field)
+                if let text = cell.textField {
+                    text.isHidden = true
+                    NSLayoutConstraint.activate([
+                        field.leadingAnchor.constraint(equalTo: text.leadingAnchor),
+                        field.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+                        field.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                        field.heightAnchor.constraint(equalToConstant: 22)
+                    ])
+                }
+                cell.renameField = field
+            }
             cell.textField?.stringValue = item.title
-            let symbol = item.folder.map { $0.parentID == nil ? "books.vertical" : "folder" } ?? "doc.on.doc"
+            let symbol = item.tag != nil || item.isTagsGroup ? "tag" : item.folder.map { $0.parentID == nil ? "books.vertical" : "folder" } ?? "doc.on.doc"
             cell.imageView?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
             cell.configureCluster(unreadable: item.folder?.isUnreadable == true, renaming: cell.renameField != nil)
             let label = item.folder.map { "\(item.title), \($0.parentID == nil ? "library" : "folder")" } ?? item.title
+            cell.imageView?.contentTintColor = .secondaryLabelColor
             cell.setAccessibilityElement(true)
             cell.setAccessibilityLabel(item.folder?.isUnreadable == true ? "\(label), unreadable, permission denied" : label)
+            if item.isTagsGroup { cell.setAccessibilityLabel("Tags") }
+            if let tag = item.tag { cell.setAccessibilityLabel("\(tag.name), tag, \(tagCounts[tag.id] ?? 0) documents") }
             applyCount(to: cell, item: item)
             return cell
         }
         func menu(_ event: NSEvent) -> NSMenu? {
             guard let outline else { return nil }
             let row = outline.row(at: outline.convert(event.locationInWindow, from: nil))
-            guard let item = outline.item(atRow: row) as? Item, let folder = item.folder else { return nil }
+            guard let item = outline.item(atRow: row) as? Item else { return nil }
+            if let tag = item.tag { return tagMenu(tag) }
+            guard let folder = item.folder else { return nil }
             let menu = NSMenu()
             menu.autoenablesItems = false
             for (title, action) in [("New Document", #selector(newDocument(_:))), ("New Folder", #selector(newFolder(_:)))] {
@@ -290,6 +361,60 @@ struct FolderSidebar: NSViewRepresentable {
             trash.isEnabled = workspace.canMutate && !folder.relativePath.isEmpty
             return menu
         }
+        func tagMenu(_ tag: LibraryTag) -> NSMenu {
+            let menu = NSMenu()
+            menu.autoenablesItems = false
+            for (title, action) in [("Rename Tag…", #selector(renameTag(_:))), ("Delete Tag…", #selector(deleteTag(_:)))] {
+                let entry = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+                entry.target = self; entry.representedObject = tag; entry.isEnabled = workspace.canMutate
+            }
+            return menu
+        }
+        @objc private func renameTag(_ sender: NSMenuItem) {
+            guard let tag = sender.representedObject as? LibraryTag else { return }
+            workspace.tagRenameName = tag.name; workspace.tagRenameID = tag.id
+        }
+        @objc private func deleteTag(_ sender: NSMenuItem) {
+            if let tag = sender.representedObject as? LibraryTag { workspace.deleteTag(tag) }
+        }
+        func renameSelection() {
+            guard let outline, let item = outline.item(atRow: outline.selectedRow) as? Item else { return }
+            workspace.focusColumn = 0
+            if let tag = item.tag {
+                guard workspace.canMutate else { return }
+                workspace.tagRenameName = tag.name; workspace.tagRenameID = tag.id
+            } else if !item.isTagsGroup { workspace.beginRename() }
+        }
+        private func setGroupExpanded(_ expanded: Bool) {
+            guard let outline, let group = tagsGroup else { return }
+            let target = restoring || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? outline : outline.animator()
+            if expanded { target.expandItem(group) } else { target.collapseItem(group) }
+        }
+        func toggleDisclosure(at row: Int) -> Bool {
+            guard let outline, let group = tagsGroup, outline.item(atRow: row) as? Item === group else { return false }
+            setGroupExpanded(!outline.isItemExpanded(group))
+            return true
+        }
+        func toggleSelectedGroup() -> Bool {
+            guard let outline, let group = tagsGroup, outline.item(atRow: outline.selectedRow) as? Item === group else { return false }
+            setGroupExpanded(!outline.isItemExpanded(group))
+            return true
+        }
+        func navigateTags(_ key: UInt16) -> Bool {
+            guard let outline, let item = outline.item(atRow: outline.selectedRow) as? Item, let group = tagsGroup else { return false }
+            if item.isTagsGroup {
+                if key == 123 { setGroupExpanded(false) }
+                else if !outline.isItemExpanded(group) { setGroupExpanded(true) }
+                else { return false }
+                return true
+            }
+            if key == 123, item.tag != nil {
+                outline.selectRowIndexes(IndexSet(integer: outline.row(forItem: group)), byExtendingSelection: false)
+                return true
+            }
+            return false
+        }
+
         @objc private func newDocument(_ sender: NSMenuItem) { workspace.create(folder: false, parent: sender.representedObject as? String) }
         @objc private func newFolder(_ sender: NSMenuItem) { workspace.create(folder: true, parent: sender.representedObject as? String) }
         @objc private func renameFolder(_ sender: NSMenuItem) {
@@ -385,7 +510,9 @@ struct FolderSidebar: NSViewRepresentable {
 
         func outlineViewSelectionDidChange(_ notification: Notification) {
             guard !restoring, let outline, let item = outline.item(atRow: outline.selectedRow) as? Item else { return }
-            workspace.selectFolder(item.folder?.relativePath)
+            if item.isTagsGroup { return }
+            if let tag = item.tag { workspace.selectTag(tag.id) }
+            else { workspace.selectFolder(item.folder?.relativePath) }
             Task {
                 // Wait for the guarded switch; restore the row if saving refused it.
                 await workspace.waitForNavigation()
@@ -395,7 +522,14 @@ struct FolderSidebar: NSViewRepresentable {
         func outlineViewItemDidExpand(_ notification: Notification) { expansion(notification, expanded: true) }
         func outlineViewItemDidCollapse(_ notification: Notification) { expansion(notification, expanded: false) }
         private func expansion(_ notification: Notification, expanded: Bool) {
-            guard !restoring, let item = notification.userInfo?["NSObject"] as? Item, let path = item.folder?.relativePath else { return }
+            guard !restoring, let item = notification.userInfo?["NSObject"] as? Item else { return }
+            if item.isTagsGroup {
+                workspace.tagsExpanded = expanded
+                tagsExpanded = expanded
+                workspace.persistSession()
+                return
+            }
+            guard let path = item.folder?.relativePath else { return }
             if hovered != nil {
                 if expanded, !springExpanded.contains(where: { $0 === item }) { springExpanded.append(item) }
                 return
@@ -439,6 +573,9 @@ final class SidebarFolderCell: NSTableCellView {
 
 /// Arrow navigation and type-selection remain AppKit's native outline behavior.
 final class SidebarOutlineView: NSOutlineView {
+    var toggleDisclosure: ((Int) -> Bool)?
+    var toggleGroup: (() -> Bool)?
+    var tagArrow: ((UInt16) -> Bool)?
     var moveFocus: ((Bool) -> Void)?
     var renameSelected: (() -> Void)?
     var didFocus: (() -> Void)?
@@ -455,8 +592,11 @@ final class SidebarOutlineView: NSOutlineView {
     override func menu(for event: NSEvent) -> NSMenu? { contextMenu?(event) }
     override func mouseDown(with event: NSEvent) {
         let clicked = row(at: convert(event.locationInWindow, from: nil))
+        if clicked >= 0, frameOfOutlineCell(atRow: clicked).contains(convert(event.locationInWindow, from: nil)),
+           toggleDisclosure?(clicked) == true { return }
         let wasSelected = clicked == selectedRow
         super.mouseDown(with: event)
+        if event.clickCount == 2, toggleGroup?() == true { return }
         if wasSelected, let lastClick, lastClick.0 == clicked, (0.5...1.5).contains(event.timestamp - lastClick.1) {
             renameSelected?()
         }
@@ -476,7 +616,9 @@ final class SidebarOutlineView: NSOutlineView {
         return super.draggingUpdated(sender)
     }
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 49, expandHovered?() == true {
+        if (event.keyCode == 123 || event.keyCode == 124), tagArrow?(event.keyCode) == true {
+            return
+        } else if event.keyCode == 49, expandHovered?() == true {
             return
         } else if event.keyCode == 36 || event.keyCode == 76 {
             renameSelected?()
