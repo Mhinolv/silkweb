@@ -74,10 +74,16 @@ Put anything testable in `SilkwebCore` and cover it with XCTest. The app target 
 - No expensive work per keystroke on the main thread (debounce preview rendering, saving, indexing).
 
 ## GUI Regression Rule
-QA cannot launch the app, so a crash in AppKit/SwiftUI view code is invisible to the pipeline. Any ticket that
-adds or changes an AppKit view subclass, layout override (`setFrameSize`, `layout`, `viewDidMoveToWindow`,
-`updateNSView`) or other view-lifecycle code must add an offscreen test in `Tests/SilkwebAppTests/`
-(`@testable import Silkweb`) that builds the real view and exercises the lifecycle (load content, resize sweep).
+QA cannot launch the app or deliver real mouse events, and WebKit does not run inside the agent sandbox. Therefore:
+- Any ticket that adds or changes an AppKit view subclass, layout override (`setFrameSize`, `layout`,
+  `viewDidMoveToWindow`, `updateNSView`) or other view-lifecycle code must add an offscreen test in
+  `Tests/SilkwebAppTests/` (`@testable import Silkweb`) that builds the REAL view hierarchy and exercises the
+  lifecycle (load content, resize sweep, mode/tab switches).
+- A regression test for a reported bug must FAIL on the pre-fix code and pass with the fix. The Orchestrator
+  verifies this; a test that also passes on the broken build does not prove the fix (happened with 1.34, 1.48).
+- UI changes are checked visually: `run_qa.sh` captures `./scripts/snapshot.sh` PNGs outside the sandbox before
+  QA, and QA must open the relevant light/dark PNGs. Add a snapshot scenario for every new UI state.
+- Interaction feel (drag, caret movement, live resize) still needs a product-owner check before closing.
 
 ## Team Roadmap Workflow (multi-agent)
 
