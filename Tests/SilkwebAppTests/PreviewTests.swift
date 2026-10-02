@@ -7,11 +7,75 @@ import SilkwebCore
 
 final class PreviewTests: XCTestCase {
     @MainActor
+    func testSchemeHandlerServesMemoryAndContainedAssetsAndCancels() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("space # 日本語.png")
+        let bytes = Data([1, 2, 3, 4])
+        try bytes.write(to: file)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("escape"), withDestinationURL: root.deletingLastPathComponent())
+        let web = PreviewView.makeWebView()
+        let handler = try XCTUnwrap(web.configuration.urlSchemeHandler(forURLScheme: PreviewResource.scheme) as? PreviewSchemeHandler)
+        handler.root = root
+        handler.page = URL(string: "silkweb-preview://page/test")!
+        handler.html = Data("<h1>Memory page</h1>".utf8)
+        let page = RecordingSchemeTask(url: try XCTUnwrap(handler.page))
+        let image = RecordingSchemeTask(url: try XCTUnwrap(PreviewResource.assetURL(for: file, root: root)))
+        for task in [page, image] { handler.webView(web, start: task) }
+        let deadline = Date().addingTimeInterval(2)
+        while !page.finished || !image.finished {
+            if Date() >= deadline { XCTFail("Scheme handler did not finish"); return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(page.data, handler.html)
+        XCTAssertEqual(page.response?.mimeType, "text/html")
+        XCTAssertEqual(image.data, bytes)
+        XCTAssertEqual(image.response?.mimeType, "image/png")
+        for value in ["https://example.invalid/image.png", "file:///etc/passwd", "silkweb-preview://asset/../outside.png", "silkweb-preview://asset/escape/outside.png", "silkweb-preview://page/old", "silkweb-preview://asset/missing.png"] {
+            let task = RecordingSchemeTask(url: try XCTUnwrap(URL(string: value)))
+            handler.webView(web, start: task)
+            try await Task.sleep(for: .milliseconds(30))
+            XCTAssertNotNil(task.error, value)
+            XCTAssertNil(task.response, value)
+            XCTAssertTrue(task.data.isEmpty, value)
+        }
+        let cancelled = RecordingSchemeTask(url: try XCTUnwrap(handler.page))
+        handler.webView(web, start: cancelled)
+        handler.webView(web, stop: cancelled)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(cancelled.finished)
+        XCTAssertNil(cancelled.error)
+        XCTAssertNil(cancelled.response)
+    }
+
+    @MainActor
+    func testInitialLoadingDelayAndRetryKeepsFailureUntilSuccess() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.LoadingPreview." + UUID().uuidString))
+        let preview = PreviewCoordinator(defaults: defaults)
+        let document = URL(fileURLWithPath: "/tmp/preview-tests/note.md")
+        preview.mode = .preview
+        preview.error = "Test failure"
+        preview.beginLoading(document: document)
+        XCTAssertFalse(preview.isLoading)
+        XCTAssertEqual(preview.error, "Test failure")
+        try await Task.sleep(for: .milliseconds(450))
+        XCTAssertTrue(preview.isLoading)
+        preview.didFinish(document: document)
+        XCTAssertFalse(preview.isLoading)
+        XCTAssertNil(preview.error)
+        preview.beginLoading(document: document)
+        try await Task.sleep(for: .milliseconds(450))
+        XCTAssertFalse(preview.isLoading, "Typing reloads must not show a spinner")
+    }
+
+    @MainActor
     func testDebounceLatestResultModesAndOutlineNavigation() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.PreviewTests." + UUID().uuidString))
         let preview = PreviewCoordinator(defaults: defaults)
         let document = URL(fileURLWithPath: "/tmp/preview-tests/note.md")
         let root = document.deletingLastPathComponent()
+        preview.mode = .split
         preview.schedule(text: "# Obsolete", document: document, root: root)
         preview.schedule(text: "# Latest\n## Child", document: document, root: root)
         try await Task.sleep(for: .milliseconds(500))
@@ -42,61 +106,106 @@ final class PreviewTests: XCTestCase {
     @MainActor
     func testOffscreenPreviewLoadsLocalImageAndNavigatesAnchor() async throws {
         _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
+        if SnapshotHarness.isWebKitUnavailable(environment: ProcessInfo.processInfo.environment, activationPolicy: NSApp.activationPolicy().rawValue) {
+            throw XCTSkip("Real WebKit DOM/image regression requires an unsandboxed registered offscreen host; WebKit is unavailable in this sandbox.")
+        }
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.WebTests." + UUID().uuidString))
         let workspace = LibraryWorkspace(defaults: defaults)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("img"), withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 4, pixelsHigh: 4, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 16, bitsPerPixel: 32))
+        for x in 0..<4 { for y in 0..<4 { bitmap.setColor(.systemBlue, atX: x, y: y) } }
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: root.appendingPathComponent("img/p.png"))
         let document = root.appendingPathComponent("note.md")
-        // A one-pixel GIF exercises real file access without any external resource.
-        let gif = Data(base64Encoded: "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")!
-        try gif.write(to: root.appendingPathComponent("image.gif"))
+        let source = "# Title\n\nA paragraph.\n\n| A | B |\n| --- | --- |\n| one | two |\n\n![p](img/p.png)\n![remote](https://example.invalid/image.png)\n" + String(repeating: "paragraph\n\n", count: 100) + "## End"
+        try Data(source.utf8).write(to: document)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
         workspace.root = root
         workspace.editor.url = document
-        let source = "# Title\n![local](image.gif)\n![remote](https://example.invalid/image.png)\n" + String(repeating: "paragraph\n\n", count: 100) + "## End"
+        workspace.preview.mode = .preview
         workspace.preview.schedule(text: source, document: document, root: root)
-        try await Task.sleep(for: .milliseconds(500))
-        let web = PreviewView.makeWebView()
-        web.setFrameSize(NSSize(width: 600, height: 400))
-        let coordinator = PreviewView.Coordinator(workspace: workspace)
-        coordinator.web = web
-        web.navigationDelegate = coordinator
-        workspace.preview.webView = web
-        coordinator.load()
+        let host = NSHostingController(rootView: PreviewPane(workspace: workspace))
+        host.sizingOptions = []
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = host
+        defer { window.contentViewController = nil; window.close() }
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let deadline = Date().addingTimeInterval(10)
+        var web: WKWebView?
+        while Date() < deadline {
+            host.view.layoutSubtreeIfNeeded()
+            web = descendants(host.view).compactMap { $0 as? WKWebView }.first
+            if let coordinator = web?.navigationDelegate as? PreviewView.Coordinator,
+               coordinator.completedPage != nil || coordinator.navigationError != nil { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let loaded = try XCTUnwrap(web)
+        let coordinator = try XCTUnwrap(loaded.navigationDelegate as? PreviewView.Coordinator)
+        XCTAssertNotNil(coordinator.completedPage, "Timed out waiting for real preview didFinish (10 seconds)")
+        XCTAssertNil(coordinator.navigationError)
+        XCTAssertNil(workspace.preview.error)
+        let value = try await loaded.evaluateJavaScript("({title: document.querySelector('h1')?.textContent, paragraph: document.querySelector('p')?.textContent, table: !!document.querySelector('table'), complete: document.images[0]?.complete, width: document.images[0]?.naturalWidth, count: document.images.length, remote: Array.from(document.images).some(i => i.src.startsWith('https:')), placeholder: document.querySelector('.sw-remote-image')?.textContent})")
+        let result = try XCTUnwrap(value as? [String: Any])
+        XCTAssertEqual(result["title"] as? String, "Title")
+        XCTAssertEqual(result["paragraph"] as? String, "A paragraph.")
+        XCTAssertEqual(result["table"] as? Bool, true)
+        XCTAssertEqual(result["complete"] as? Bool, true)
+        XCTAssertEqual(result["width"] as? Int, 4)
+        XCTAssertEqual(result["count"] as? Int, 1)
+        XCTAssertEqual(result["remote"] as? Bool, false)
+        XCTAssertEqual(result["placeholder"] as? String, "Remote image not loaded: remote")
         for width: CGFloat in [0, 1, 280, 600, 4096] {
             for height: CGFloat in [0, 1, 400, 2160] {
-                web.setFrameSize(NSSize(width: width, height: height))
-                web.layoutSubtreeIfNeeded()
-                XCTAssertTrue(web.frame.width.isFinite && web.frame.height.isFinite)
+                loaded.setFrameSize(NSSize(width: width, height: height))
+                loaded.layoutSubtreeIfNeeded()
+                XCTAssertTrue(loaded.frame.width.isFinite && loaded.frame.height.isFinite)
             }
         }
-        web.setFrameSize(NSSize(width: 600, height: 400))
-        for _ in 0..<50 {
-            if coordinator.completedPage != nil || coordinator.navigationError != nil { break }
-            try await Task.sleep(for: .milliseconds(100))
-        }
-        XCTAssertTrue(coordinator.ready)
-        if coordinator.completedPage == nil, ProcessInfo.processInfo.environment["CODEX_SANDBOX_NETWORK_DISABLED"] == "1" {
-            // This repository's managed test host denies WebKit mach-bootstrap extensions.
-            // Require a compiled rule list before skipping unavailable content-process work.
-            guard coordinator.ready else { XCTFail(workspace.preview.error ?? "Offline rules did not compile"); return }
-            throw XCTSkip("Offscreen WebKit did not finish loading in the managed sandbox; DOM/image/anchor assertions require a WebKit-capable host.")
-        }
-        XCTAssertNil(workspace.preview.error)
-        let loaded = try XCTUnwrap(web.url)
-        XCTAssertEqual(loaded, coordinator.page)
-        let value: Any?
-        do { value = try await web.callAsyncJavaScript("return { count: document.images.length, width: document.images[0]?.naturalWidth, title: document.querySelector('h1')?.textContent };", arguments: [:], in: nil, contentWorld: .defaultClient) }
-        catch let failure as NSError where failure.domain == WKError.errorDomain && failure.code == WKError.webContentProcessTerminated.rawValue {
-            throw XCTSkip("Managed sandbox terminated WebKit's offscreen content process.")
-        }
-        let result = try XCTUnwrap(value as? [String: Any])
-        XCTAssertEqual(result["count"] as? Int, 1)
-        XCTAssertEqual(result["width"] as? Int, 1)
-        XCTAssertEqual(result["title"] as? String, "Title")
+        loaded.setFrameSize(NSSize(width: 600, height: 400))
         workspace.preview.scrollPreview(to: "end")
-        let anchor = try await web.callAsyncJavaScript("return document.getElementById('end').getBoundingClientRect().top;", arguments: [:], in: nil, contentWorld: .defaultClient)
+        try await Task.sleep(for: .milliseconds(700))
+        let anchor = try await loaded.evaluateJavaScript("document.getElementById('end').getBoundingClientRect().top")
         XCTAssertLessThan(try XCTUnwrap(anchor as? Double), 401)
+        XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: root.path)), ["img", "note.md"])
+    }
+
+    @MainActor
+    func testHiddenPreviewAndIdenticalInputDoNotRender() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.IdlePreview." + UUID().uuidString))
+        let preview = PreviewCoordinator(defaults: defaults)
+        let document = URL(fileURLWithPath: "/tmp/preview-tests/note.md")
+        preview.mode = .editor
+        preview.schedule(text: "# Hidden", document: document, root: document.deletingLastPathComponent())
+        try await Task.sleep(for: .milliseconds(450))
+        XCTAssertTrue(preview.html.isEmpty)
+        XCTAssertTrue(preview.headings.isEmpty)
+        XCTAssertFalse(preview.isLoading)
+        preview.showsOutline = true
+        preview.schedule(text: "# Outline", document: document, root: document.deletingLastPathComponent())
+        try await Task.sleep(for: .milliseconds(450))
+        XCTAssertEqual(preview.headings.map(\.text), ["Outline"])
+        XCTAssertTrue(preview.html.isEmpty)
+        preview.mode = .split
+        preview.schedule(text: "# Visible", document: document, root: document.deletingLastPathComponent())
+        try await Task.sleep(for: .milliseconds(450))
+        let html = preview.html
+        XCTAssertTrue(html.contains("Visible"))
+        preview.didFinish(document: document)
+        for _ in 0..<10 { preview.schedule(text: "# Visible", document: document, root: document.deletingLastPathComponent()) }
+        try await Task.sleep(for: .milliseconds(450))
+        XCTAssertEqual(preview.html, html)
+        XCTAssertFalse(preview.isLoading)
+        preview.schedule(text: "# Cancelled", document: document, root: document.deletingLastPathComponent())
+        preview.mode = .editor
+        preview.schedule(text: "# Cancelled", document: document, root: document.deletingLastPathComponent())
+        try await Task.sleep(for: .milliseconds(450))
+        XCTAssertEqual(preview.html, "") // outline-only work never publishes preview HTML
     }
 
     @MainActor
@@ -155,4 +264,18 @@ final class PreviewTests: XCTestCase {
         controller.view.layoutSubtreeIfNeeded()
         XCTAssertEqual(editor.string, source)
     }
+}
+
+private final class RecordingSchemeTask: NSObject, WKURLSchemeTask {
+    let request: URLRequest
+    var response: URLResponse?
+    var data = Data()
+    var error: Error?
+    var finished = false
+
+    init(url: URL) { request = URLRequest(url: url) }
+    func didReceive(_ response: URLResponse) { self.response = response }
+    func didReceive(_ data: Data) { self.data.append(data) }
+    func didFinish() { finished = true }
+    func didFailWithError(_ error: Error) { self.error = error }
 }

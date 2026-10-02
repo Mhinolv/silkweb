@@ -22,7 +22,7 @@ final class DocumentPanesController: NSSplitViewController {
         splitView.isVertical = true
         splitView.dividerStyle = .thin
         let editor = NSHostingController(rootView: TabEditorContent(workspace: workspace))
-        let preview = NSHostingController(rootView: PreviewView(workspace: workspace))
+        let preview = NSHostingController(rootView: PreviewPane(workspace: workspace))
         editor.sizingOptions = []; preview.sizingOptions = []
         for controller in [editor as NSViewController, preview as NSViewController] {
             let item = NSSplitViewItem(viewController: controller)

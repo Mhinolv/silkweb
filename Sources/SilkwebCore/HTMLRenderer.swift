@@ -144,18 +144,33 @@ public enum HTMLRenderer {
             case .link(let label, let destination, let title):
                 let content = inlines(label, options: options, depth: depth + 1, context: &context)
                 guard allowed(destination, image: false, options: options) else {
-                    return "<span class=\"sw-blocked-link\" title=\"Link not opened: this kind of link isn’t allowed.\">" + content + "</span>"
+                    let interaction = options.offlinePreview ? " role=\"link\" tabindex=\"0\"" : ""
+                    return "<span class=\"sw-blocked-link\"" + interaction + " title=\"Link not opened: this kind of link isn’t allowed.\">" + content + "</span>"
                 }
                 return "<a href=\"" + escape(localDestination(destination, options: options)) + "\"" + titleAttribute(title) + ">" + content + "</a>"
             case .image(let alt, let destination, let title):
                 guard allowed(destination, image: true, options: options) else {
+                    if options.offlinePreview {
+                        return "<span class=\"sw-missing-image\">Image outside library: " + escape(alt) + "</span>"
+                    }
                     return "<span class=\"sw-blocked-link\" title=\"Link not opened: this kind of link isn’t allowed.\">" + escape(alt) + "</span>"
                 }
                 let scheme = URLComponents(string: destination)?.scheme?.lowercased()
                 if options.offlinePreview, scheme == "http" || scheme == "https" || scheme == "data" {
                     return "<span class=\"sw-remote-image\">Remote image not loaded: " + escape(alt) + "</span>"
                 }
-                let image = "<img src=\"" + escape(localDestination(destination, options: options)) + "\" alt=\"" + escape(alt) + "\"" + titleAttribute(title) + ">"
+                var source = localDestination(destination, options: options)
+                if options.offlinePreview, let root = options.libraryRoot,
+                   let url = URL(string: source), url.isFileURL {
+                    guard FileManager.default.fileExists(atPath: url.path) else {
+                        return "<span class=\"sw-missing-image\">Missing image: " + escape(destination) + "</span>"
+                    }
+                    guard let asset = PreviewResource.assetURL(for: url, root: root) else {
+                        return "<span class=\"sw-missing-image\">Image outside library: " + escape(alt) + "</span>"
+                    }
+                    source = asset.absoluteString
+                }
+                let image = "<img src=\"" + escape(source) + "\" alt=\"" + escape(alt) + "\"" + titleAttribute(title) + ">"
                 return scheme == "http" || scheme == "https"
                     ? "<span class=\"sw-remote-image\">" + image + "</span>" : image
             }
@@ -270,7 +285,7 @@ public enum HTMLRenderer {
         return resolved.path
     }
 
-    private static func contained(_ url: URL, root: URL) -> Bool {
+    static func contained(_ url: URL, root: URL) -> Bool {
         guard let base = resolvedPath(root), let path = resolvedPath(url) else { return false }
         return path == base || path.hasPrefix(base == "/" ? "/" : base + "/")
     }

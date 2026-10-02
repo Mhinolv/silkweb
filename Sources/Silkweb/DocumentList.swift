@@ -116,7 +116,6 @@ struct DocumentDetail: View {
                         .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12)
                         .frame(height: 24).background(.bar)
                 }
-                if let error = workspace.preview.error { Text(error).font(.callout).foregroundStyle(.secondary).padding(8) }
             } else if workspace.session.selectedDocuments.count > 1 {
                 ContentUnavailableView("\(workspace.session.selectedDocuments.count) Documents Selected", systemImage: "doc.on.doc")
             } else {
@@ -133,7 +132,10 @@ struct DocumentDetail: View {
             isNarrow = narrow
             if narrow, workspace.preview.mode == .split { workspace.preview.showsOutline = false }
         }
+        .onChange(of: workspace.preview.showsOutline) { render() }
+        .onChange(of: workspace.root) { render() }
         .onChange(of: workspace.preview.mode) {
+            render()
             if isNarrow, workspace.preview.mode == .split { workspace.preview.showsOutline = false }
         }
     }

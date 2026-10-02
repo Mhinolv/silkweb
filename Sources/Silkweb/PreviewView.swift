@@ -23,6 +23,14 @@ struct PreviewView: NSViewRepresentable {
           window.webkit.messageHandlers.position.postMessage({anchor: current?.id || '', ratio: scrollY / extent});
         }
         addEventListener('scroll', () => { clearTimeout(timer); timer = setTimeout(report, 250); });
+        function blockedLink(event) {
+          if (event.target.closest?.('.sw-blocked-link[role="link"]')) {
+            event.preventDefault();
+            window.webkit.messageHandlers.position.postMessage({blockedLink: true});
+          }
+        }
+        addEventListener('click', blockedLink);
+        addEventListener('keydown', event => { if (event.key === 'Enter') blockedLink(event); });
         report();
         """
         web.configuration.userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient))
@@ -32,6 +40,7 @@ struct PreviewView: NSViewRepresentable {
     static func makeWebView() -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        configuration.setURLSchemeHandler(PreviewSchemeHandler(), forURLScheme: PreviewResource.scheme)
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         let web = WKWebView(frame: .zero, configuration: configuration)
@@ -46,6 +55,7 @@ struct PreviewView: NSViewRepresentable {
         web.stopLoading()
         web.configuration.userContentController.removeScriptMessageHandler(forName: "position", contentWorld: .defaultClient)
         coordinator.loadTask?.cancel()
+        coordinator.workspace.preview.endLoading()
     }
 
     @MainActor final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
@@ -53,64 +63,70 @@ struct PreviewView: NSViewRepresentable {
         weak var web: WKWebView?
         var lastHTML = ""
         var requestedDocument: URL?
+        var requestedRoot: URL?
+        var navigation: WKNavigation?
         var page: URL?
         var document: URL?
-        var pageFiles: [URL] = []
         var completedPage: URL?
         var navigationError: NSError?
-        var directory = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebPreview-" + UUID().uuidString)
         var loadTask: Task<Void, Never>?
         var ready = false
         var restoring = false
         var restoreAnchor = ""
         var restoreRatio = 0.0
         init(workspace: LibraryWorkspace) { self.workspace = workspace }
-        deinit { try? FileManager.default.removeItem(at: directory) }
+        var retry = -1
 
         func load() {
             let preview = workspace.preview
+            guard preview.mode != .editor else {
+                loadTask?.cancel()
+                web?.stopLoading()
+                lastHTML = ""
+                preview.endLoading()
+                return
+            }
             guard !preview.html.isEmpty, let root = workspace.root,
                   let document = preview.renderedURL, document == workspace.editor.url,
-                  preview.html != lastHTML || document != requestedDocument else { return }
+                  preview.html != lastHTML || document != requestedDocument || root != requestedRoot || retry != preview.retry else { return }
+            retry = preview.retry
+            preview.beginLoading(document: document)
             requestedDocument = document
+            requestedRoot = root
             lastHTML = preview.html
             let html = preview.html
             loadTask?.cancel()
             loadTask = Task { [weak self] in
                 guard let self, let web = self.web else { return }
                 do {
-                    let directory = self.directory
-                    try await Task.detached {
-                        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                    }.value
                     if !self.ready {
-                        let rules = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^file:"},"action":{"type":"ignore-previous-rules"}}]"#
-                        let list = try await WKContentRuleListStore(url: self.directory).compileContentRuleList(forIdentifier: "Silkweb.OfflinePreview.v1", encodedContentRuleList: rules)
-                        guard !Task.isCancelled else { return }
+                        let rules = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^silkweb-preview:"},"action":{"type":"ignore-previous-rules"}}]"#
+                        let list = try await WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "Silkweb.OfflinePreview.v2", encodedContentRuleList: rules)
+                        guard !Task.isCancelled, preview.mode != .editor else { return }
                         if let list { web.configuration.userContentController.add(list) }
                         self.ready = true
                     }
-                    let file = self.directory.appendingPathComponent(UUID().uuidString + ".html")
-                    try await Task.detached {
-                        try Data(html.utf8).write(to: file, options: .atomic)
-                    }.value
-                    guard !Task.isCancelled else { return }
+                    guard !Task.isCancelled, preview.mode != .editor,
+                          let handler = web.configuration.urlSchemeHandler(forURLScheme: PreviewResource.scheme) as? PreviewSchemeHandler else { return }
+                    let page = URL(string: "silkweb-preview://page/" + UUID().uuidString)!
+                    handler.page = page
+                    handler.html = Data(html.utf8)
+                    handler.root = root
                     self.restoreAnchor = preview.pendingAnchor ?? preview.scrollAnchor ?? ""
                     self.restoreRatio = preview.scrollRatio
                     self.restoring = true
-                    self.pageFiles.append(file)
                     self.completedPage = nil
                     self.navigationError = nil
-                    self.page = file
+                    self.page = page
                     self.document = document
-                    web.loadFileURL(file, allowingReadAccessTo: root)
-                    preview.error = nil
-                } catch { if !Task.isCancelled { preview.error = "Preview couldn’t load: \(error.localizedDescription)" } }
+                    self.navigation = web.load(URLRequest(url: page))
+                } catch { if !Task.isCancelled { self.failed(error) } }
             }
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard !restoring, document == workspace.editor.url, message.frameInfo.isMainFrame, let values = message.body as? [String: Any] else { return }
+            if values["blockedLink"] as? Bool == true { NSSound.beep(); return }
             updatePosition(values)
         }
 
@@ -125,8 +141,9 @@ struct PreviewView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             let preview = workspace.preview
-            guard document == workspace.editor.url, webView.url == page else { return }
+            guard navigation === self.navigation, document == workspace.editor.url, webView.url == page else { return }
             completedPage = page
+            preview.didFinish(document: document)
             let anchor = preview.pendingAnchor ?? restoreAnchor
             preview.pendingAnchor = nil
             webView.callAsyncJavaScript("""
@@ -140,17 +157,15 @@ struct PreviewView: NSViewRepresentable {
                     self?.restoring = false
                     if case .success(let value) = result, let values = value as? [String: Any] { self?.updatePosition(values) }
                 }
-            // Each reload has its own URL; remove old files only after WebKit finishes.
-            let oldFiles = pageFiles.filter { $0 != page }
-            pageFiles.removeAll { $0 != page }
-            Task.detached { for file in oldFiles { try? FileManager.default.removeItem(at: file) } }
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            guard navigation === self.navigation else { return }
             failed(error)
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            guard navigation === self.navigation else { return }
             failed(error)
         }
 
@@ -158,7 +173,14 @@ struct PreviewView: NSViewRepresentable {
             let failure = error as NSError
             guard failure.code != NSURLErrorCancelled else { return }
             navigationError = failure
-            workspace.preview.error = "Preview couldn’t load: \(failure.localizedDescription)"
+            workspace.preview.endLoading()
+            if workspace.preview.error != failure.localizedDescription, let web {
+                NSAccessibility.post(element: web, notification: .announcementRequested, userInfo: [
+                    .announcement: "Preview couldn’t load. " + failure.localizedDescription,
+                    .priority: NSAccessibilityPriorityLevel.medium.rawValue
+                ])
+            }
+            workspace.preview.error = failure.localizedDescription
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
@@ -174,10 +196,41 @@ struct PreviewView: NSViewRepresentable {
             case .document(let url):
                 let path = String(url.path.dropFirst(root.path.count + 1))
                 if workspace.snapshot?.documents.contains(where: { $0.relativePath == path }) == true { workspace.showDocument(url) }
+                else { NSSound.beep() }
             case .browser(let url): NSWorkspace.shared.open(url)
-            case .blocked: break
+            case .blocked: NSSound.beep()
             }
             decisionHandler(.cancel)
         }
+    }
+}
+
+/// Loading and error feedback belongs to the preview half of the split view.
+struct PreviewPane: View {
+    let workspace: LibraryWorkspace
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let reason = workspace.preview.error {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Preview couldn’t load.").font(.callout)
+                        Text(reason).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Try Again") { workspace.preview.retry += 1 }
+                }
+                .controlSize(.small)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                .background(.bar)
+            }
+            PreviewView(workspace: workspace)
+                .overlay {
+                    if workspace.preview.isLoading { ProgressView().controlSize(.small) }
+                }
+        }
+        .background(Color(nsColor: .textBackgroundColor))
     }
 }

@@ -20,6 +20,20 @@ final class PreviewCoordinator {
     var html = ""
     var renderedURL: URL?
     var error: String?
+    var isLoading = false
+    var retry = 0
+    @ObservationIgnored private var loadingTask: Task<Void, Never>?
+    @ObservationIgnored private var loadingDocument: URL?
+    @ObservationIgnored private var finishedDocument: URL?
+    @ObservationIgnored private var input: RenderInput?
+
+    private struct RenderInput: Equatable {
+        let text: String
+        let document: URL?
+        let root: URL?
+        let html: Bool
+        let outline: Bool
+    }
     @ObservationIgnored weak var editor: PlainMarkdownTextView?
     @ObservationIgnored weak var webView: WKWebView?
     @ObservationIgnored let defaults: UserDefaults
@@ -50,17 +64,23 @@ final class PreviewCoordinator {
     func toggleSplit() { mode = mode == .split ? .editor : .split }
 
     func schedule(text: String, document: URL?, root: URL?) {
+        let next = RenderInput(text: text, document: document, root: root, html: mode != .editor, outline: showsOutline)
+        guard next != input else { return }
+        input = next
         revision += 1
         let request = revision
         task?.cancel()
         if document != renderedURL { headings = []; html = ""; scrollAnchor = nil; scrollRatio = 0; pendingAnchor = nil }
+        guard next.html || next.outline else { endLoading(); return }
+        if next.html { beginLoading(document: document) } else { endLoading() }
         task = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             let result = await Task.detached(priority: .userInitiated) {
                 let parsed = MarkdownParser.parse(text)
+                guard next.html else { return (parsed.headings, "") }
                 let fragment = HTMLRenderer.render(parsed, options: .init(libraryRoot: root, documentURL: document, offlinePreview: true))
                 let css = Self.stylesheet
-                let page = "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src file:; style-src 'unsafe-inline'; script-src 'none'\"><style>" + css + "</style></head><body>" + fragment + "</body></html>"
+                let page = "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src silkweb-preview:; style-src 'unsafe-inline'; script-src 'none'\"><style>" + css + "</style></head><body>" + fragment + "</body></html>"
                 return (parsed.headings, page)
             }.value
             guard !Task.isCancelled, let self, request == self.revision else { return }
@@ -68,6 +88,31 @@ final class PreviewCoordinator {
             self.renderedURL = document
             self.html = result.1
         }
+    }
+
+    func beginLoading(document: URL?) {
+        guard mode != .editor, document != finishedDocument, document != loadingDocument else { return }
+        loadingTask?.cancel()
+        loadingDocument = document
+        isLoading = false
+        loadingTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+            guard let self, self.mode != .editor, self.loadingDocument == document else { return }
+            self.isLoading = true
+        }
+    }
+
+    func endLoading() {
+        loadingTask?.cancel()
+        loadingTask = nil
+        loadingDocument = nil
+        if isLoading { isLoading = false }
+    }
+
+    func didFinish(document: URL?) {
+        finishedDocument = document
+        endLoading()
+        error = nil
     }
 
     func currentHeading(caret: Int) -> String? {
@@ -94,6 +139,6 @@ final class PreviewCoordinator {
 
     func scrollPreview(to anchor: String) {
         if webView?.isLoading == false { pendingAnchor = nil }
-        webView?.callAsyncJavaScript("document.getElementById(anchor)?.scrollIntoView();", arguments: ["anchor": anchor], in: nil, in: .defaultClient) { _ in }
+        webView?.callAsyncJavaScript("document.getElementById(anchor)?.scrollIntoView({behavior: reduceMotion ? 'instant' : 'smooth'});", arguments: ["anchor": anchor, "reduceMotion": NSWorkspace.shared.accessibilityDisplayShouldReduceMotion], in: nil, in: .defaultClient) { _ in }
     }
 }

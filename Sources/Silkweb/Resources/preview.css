@@ -11,7 +11,7 @@ blockquote { border-left: 3px solid -apple-system-separator; padding-left: 1em; 
 .sw-table-wrap { overflow-x: auto; } table { border-collapse: collapse; }
 th,td { border: 1px solid -apple-system-separator; padding: 6px 12px; } th { font-weight: 600; background: color-mix(in srgb, -apple-system-label 8%, transparent); }
 .sw-align-left { text-align: left; } .sw-align-center { text-align: center; } .sw-align-right { text-align: right; }
-img { max-width: 100%; } .sw-remote-image { display: inline-block; border: 1px dashed -apple-system-separator; padding: 8px; color: -apple-system-secondary-label; }
+img { max-width: 100%; } .sw-remote-image, .sw-missing-image { display: inline-block; border: 1px dashed -apple-system-separator; padding: 8px; color: -apple-system-secondary-label; }
 .sw-raw-html { font-family: ui-monospace, monospace; color: -apple-system-tertiary-label; } .sw-blocked-link { color: -apple-system-secondary-label; text-decoration: underline dotted; }
 .sw-task { list-style: none; } .sw-task input { accent-color: -apple-system-control-accent; }
 .sw-toc { border-left: 3px solid -apple-system-separator; padding: 12px 16px; } .sw-toc::before { content: 'Contents'; font-weight: 600; } .sw-footnotes { font-size: .9em; }
