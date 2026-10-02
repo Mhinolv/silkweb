@@ -34,6 +34,73 @@ final class WindowSessionMetadataTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(WindowSessionMetadata.self, from: Data("{\"formatVersion\":999}".utf8)))
     }
 
+    func testLossyTabDecodeAndActiveFallbackSweep() throws {
+        let first = UUID(), last = UUID(), dropped = UUID(), folder = UUID()
+        let invalid = ["{}", "null", "42", "[]", "\"tab\"",
+                       "{\"documentID\":\"invalid\"}",
+                       "{\"documentID\":\"\(dropped)\",\"isPreview\":1}",
+                       "{\"documentID\":\"\(dropped)\",\"selectionLocation\":\"bad\"}"]
+        let valid = ["{\"documentID\":\"\(first)\",\"relativePath\":\"A.md\"}",
+                     "{\"documentID\":\"\(last)\",\"relativePath\":\"B.md\",\"isPreview\":true}"]
+        for mode in ["editor", "split", "preview"] {
+            for bad in invalid {
+                for position in 0...2 {
+                    var entries = valid
+                    entries.insert(bad, at: position)
+                    for active in ["\"\(last)\"", "\"\(dropped)\"", "\"invalid\"", "42", "null"] {
+                        let json = """
+                        {"tabs":[\(entries.joined(separator: ","))],"activeDocumentID":\(active),
+                         "selectedFolderID":"\(folder)","selectedFolder":"Notes","viewMode":"\(mode)"}
+                        """
+                        let value = try JSONDecoder().decode(WindowSessionMetadata.self, from: Data(json.utf8))
+                        XCTAssertEqual(value.tabs.map(\.documentID), [first, last])
+                        XCTAssertEqual(value.tabs.map(\.isPreview), [false, true])
+                        XCTAssertEqual(value.activeDocumentID, active == "\"\(last)\"" ? last : first)
+                        XCTAssertEqual(value.selectedFolderID, folder)
+                        XCTAssertEqual(value.selectedFolder, "Notes")
+                        XCTAssertEqual(value.viewMode, mode)
+                    }
+                }
+            }
+        }
+        for entries in ["", invalid.joined(separator: ",")] {
+            let value = try JSONDecoder().decode(WindowSessionMetadata.self,
+                from: Data("{\"tabs\":[\(entries)],\"activeDocumentID\":\"\(dropped)\"}".utf8))
+            XCTAssertTrue(value.tabs.isEmpty)
+            XCTAssertNil(value.activeDocumentID)
+        }
+    }
+
+    func testVersionOneFixtureStillRestoresUnchanged() throws {
+        let id = UUID(), folder = UUID()
+        // Literal schema from before lossy decoding (not encoded by the new implementation).
+        let json = """
+        {"formatVersion":1,"tabs":[{"documentID":"\(id)","relativePath":"Notes/A.md",
+         "isPreview":true,"selectionLocation":7,"selectionLength":2,"scrollY":120}],
+         "activeDocumentID":"\(id)","selectedFolderID":"\(folder)","selectedFolder":"Notes","viewMode":"split"}
+        """
+        let value = try JSONDecoder().decode(WindowSessionMetadata.self, from: Data(json.utf8))
+        var tab = DocumentTabMetadata(documentID: id, relativePath: "Notes/A.md", isPreview: true)
+        tab.selectionLocation = 7; tab.selectionLength = 2; tab.scrollY = 120
+        XCTAssertEqual(value.formatVersion, 1)
+        XCTAssertEqual(value.tabs, [tab])
+        XCTAssertEqual(value.activeDocumentID, id)
+        XCTAssertEqual(value.selectedFolderID, folder)
+        XCTAssertEqual(value.selectedFolder, "Notes")
+        XCTAssertEqual(value.viewMode, "split")
+    }
+
+    func testMalformedOptionalSessionFieldsUseDefaults() throws {
+        for json in ["{\"tabs\":42}", "{\"tabs\":null}",
+                     "{\"formatVersion\":\"bad\",\"selectedFolderID\":\"bad\",\"selectedFolder\":42,\"viewMode\":false}"] {
+            let value = try JSONDecoder().decode(WindowSessionMetadata.self, from: Data(json.utf8))
+            XCTAssertTrue(value.tabs.isEmpty)
+            XCTAssertNil(value.activeDocumentID)
+            XCTAssertNil(value.selectedFolderID)
+            XCTAssertEqual(value.viewMode, "editor")
+        }
+    }
+
     func testDiskRoundTripMissingDocumentsStableIDRebindAndOldSession() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)

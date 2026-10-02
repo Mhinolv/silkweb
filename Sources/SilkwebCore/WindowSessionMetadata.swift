@@ -15,13 +15,22 @@ public struct WindowSessionMetadata: Codable, Equatable, Sendable {
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        formatVersion = try values.decodeIfPresent(Int.self, forKey: .formatVersion) ?? 1
+        formatVersion = (try? values.decodeIfPresent(Int.self, forKey: .formatVersion)) ?? 1
         guard formatVersion == 1 else { throw LibraryError.unsupportedMetadataVersion(formatVersion) }
-        tabs = try values.decodeIfPresent([DocumentTabMetadata].self, forKey: .tabs) ?? []
-        activeDocumentID = try values.decodeIfPresent(UUID.self, forKey: .activeDocumentID)
-        selectedFolderID = try values.decodeIfPresent(UUID.self, forKey: .selectedFolderID)
-        selectedFolder = values.contains(.selectedFolder) ? try values.decodeIfPresent(String.self, forKey: .selectedFolder) : ""
-        viewMode = try values.decodeIfPresent(String.self, forKey: .viewMode) ?? "editor"
+        if var entries = try? values.nestedUnkeyedContainer(forKey: .tabs) {
+            while !entries.isAtEnd {
+                // Advance before decoding: one invalid value must not discard later tabs.
+                let entry = try entries.superDecoder()
+                if let tab = try? DocumentTabMetadata(from: entry) { tabs.append(tab) }
+            }
+        }
+        activeDocumentID = try? values.decodeIfPresent(UUID.self, forKey: .activeDocumentID)
+        if !tabs.contains(where: { $0.documentID == activeDocumentID }) {
+            activeDocumentID = tabs.first?.documentID
+        }
+        selectedFolderID = try? values.decodeIfPresent(UUID.self, forKey: .selectedFolderID)
+        selectedFolder = values.contains(.selectedFolder) ? (try? values.decodeIfPresent(String.self, forKey: .selectedFolder)) : ""
+        viewMode = (try? values.decodeIfPresent(String.self, forKey: .viewMode)) ?? "editor"
     }
 
     public func encode(to encoder: Encoder) throws {

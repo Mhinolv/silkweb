@@ -202,5 +202,10 @@ extension LibraryWorkspace {
         session.selectedFolder = resolved.selectedFolder
         preview.mode = DocumentViewMode(rawValue: resolved.viewMode) ?? .editor
         if let id = resolved.activeDocumentID { activateTab(id, syncSelection: false) }
+        if tabs.isEmpty {
+            activeTabID = nil
+            session.selectedDocuments = []
+            preview.editor = nil
+        }
     }
 }

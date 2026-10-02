@@ -125,6 +125,49 @@ final class DocumentTabsTests: XCTestCase {
         XCTAssertEqual(saved.resolving(in: rescanned).tabs.map(\.documentID), [b.id])
     }
 
+    @MainActor func testEmptyRestoredTabsClearStaleListSelection() async throws {
+        let workspace = try await fixture()
+        defer { try? FileManager.default.removeItem(at: workspace.root!) }
+        // A stale navigation selection can survive independently of the window session.
+        workspace.session.selectedDocuments = ["A.md", "B.md"]
+        await workspace.restoreTabs(WindowSessionMetadata())
+        XCTAssertTrue(workspace.tabs.isEmpty)
+        XCTAssertNil(workspace.activeTabID)
+        XCTAssertNil(workspace.editor.url)
+        XCTAssertTrue(workspace.session.selectedDocuments.isEmpty)
+    }
+
+    @MainActor func testInvalidSessionFilesNeverBlockLibraryOpen() async throws {
+        for json in ["{", "null", "{\"tabs\":[{},null,42],\"activeDocumentID\":\"invalid\"}",
+                     "{\"tabs\":false,\"selectedFolderID\":\"invalid\",\"viewMode\":42}"] {
+            let workspace = try await fixture()
+            let root = try XCTUnwrap(workspace.root)
+            defer { try? FileManager.default.removeItem(at: root) }
+            workspace.root = nil // Open as a fresh launch, without saving over the fixture.
+            workspace.snapshot = nil
+            let directory = root.appendingPathComponent(".silkweb")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try Data(json.utf8).write(to: directory.appendingPathComponent("window-session.json"))
+            var navigation = LibrarySession()
+            navigation.selectedDocuments = ["A.md"]
+            try await navigation.save(root: root)
+            workspace.open(root)
+            for _ in 0..<500 {
+                if workspace.error != nil || (!workspace.loading && workspace.snapshot != nil) { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertFalse(workspace.loading)
+            XCTAssertNil(workspace.error)
+            XCTAssertEqual(workspace.snapshot?.documents.count, 4)
+            if json.contains("tabs") {
+                XCTAssertTrue(workspace.tabs.isEmpty)
+                XCTAssertNil(workspace.editor.url)
+                XCTAssertTrue(workspace.session.selectedDocuments.isEmpty)
+            }
+            await workspace.didCloseWindow()
+        }
+    }
+
     @MainActor func testSingleTabDetailVisibilityAndStableContentOrigin() async throws {
         _ = NSApplication.shared
         let workspace = try await fixture()
