@@ -28,7 +28,7 @@ actor InlineImageLoader {
     private var images: [URL: Cached] = [:]
     private var paragraphs: [String: [InlineImages.Reference]] = [:]
 
-    func load(text: String, document: URL, root: URL, column: Double, viewport: Double, scale: Double, headersOnly: Bool = false) -> [InlineImageParagraph] {
+    func load(text: String, document: URL, root: URL, column: Double, viewport: Double, scale: Double, headersOnly: Bool = false) async -> [InlineImageParagraph] {
         var result: [InlineImageParagraph] = []
         let source = text as NSString
         var offset = 0
@@ -51,7 +51,8 @@ actor InlineImageLoader {
             let references = paragraphs[line] ?? InlineImages.paragraph(line)
             paragraphs[line] = references
             guard !references.isEmpty else { continue }
-            let contents = references.map { reference -> InlineImageContent in
+            var contents: [InlineImageContent] = []
+            for reference in references {
                 var url: URL?
                 var message: String?
                 var size = NSSize(width: min(column, 280), height: 28)
@@ -81,12 +82,8 @@ actor InlineImageLoader {
                             size = NSSize(width: fitted.width, height: fitted.height)
                             let pixels = max(1, Int(max(fitted.width, fitted.height) * scale))
                             if !headersOnly, cached == nil || Double(pixels) > Double(cached!.pixels) * 1.25 {
-                                let source = imageSource ?? CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
-                                let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
-                                    kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: true,
-                                    kCGImageSourceThumbnailMaxPixelSize: pixels]
-                                if let source, let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
-                                    cached = Cached(modified: values?.contentModificationDate, bytes: values?.fileSize, pixels: pixels, size: naturalSize, bitmap: image)
+                                if let thumbnail = await ImageThumbnailCache.shared.load(file, pixels: pixels) {
+                                    cached = Cached(modified: values?.contentModificationDate, bytes: values?.fileSize, pixels: pixels, size: thumbnail.naturalSize, bitmap: thumbnail.bitmap)
                                     images[file] = cached
                                 } else { cached = nil; message = "Can’t display image"; size = NSSize(width: min(column, 280), height: 28) }
                             }
@@ -94,7 +91,7 @@ actor InlineImageLoader {
                         }
                     }
                 }
-                return InlineImageContent(reference: reference, url: url, size: size, naturalSize: naturalSize, bitmap: bitmap, message: message)
+                contents.append(InlineImageContent(reference: reference, url: url, size: size, naturalSize: naturalSize, bitmap: bitmap, message: message))
             }
             result.append(InlineImageParagraph(range: range, contents: contents))
         }

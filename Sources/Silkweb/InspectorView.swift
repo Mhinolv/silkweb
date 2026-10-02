@@ -16,19 +16,23 @@ struct InspectorView: View {
         let resume: Date
     }
     var body: some View {
-        let current = preview.currentHeading(caret: workspace.editor.caretLocation)
+        let current = preview.currentItem(caret: workspace.editor.caretLocation)
         let shallowest = preview.headings.map(\.level).min() ?? 1
+        let items = preview.outlineItems.isEmpty ? OutlineItem.parse("", headings: preview.headings) : preview.outlineItems
+        let imageCount = items.count - preview.headings.count
+        let summary = [(preview.headings.count, CountPresentation.Unit.heading), (imageCount, .image)]
+            .filter { $0.0 > 0 }.map { CountPresentation.label($0.0, unit: $0.1) }.joined(separator: " · ")
         return PinnedColumn {
             Text("Outline").font(.headline).columnLayoutAnchor("outline-title")
                 .padding(12).accessibilityIdentifier("outline-title")
-            if !preview.headings.isEmpty {
-                Text(CountPresentation.label(preview.headings.count, unit: .heading))
+            if !items.isEmpty {
+                Text(summary)
                     .font(.caption).monospacedDigit().foregroundStyle(.secondary)
                     .padding(.horizontal, 12).frame(height: 28)
             }
             Divider()
         } content: {
-            if preview.headings.isEmpty {
+            if items.isEmpty {
                 ColumnEmptyState {
                     ContentUnavailableView("No Headings", systemImage: "list.bullet.indent", description: Text("Start a line with # to add a heading."))
                 }
@@ -36,15 +40,23 @@ struct InspectorView: View {
                 ScrollViewReader { proxy in
                     List(selection: $selectedHeading) {
                         Section("Headings") {
-                            ForEach(preview.headings, id: \.id) { heading in
+                            ForEach(items) { item in
                                 Button {
-                                    selectedHeading = heading.id
-                                    preview.navigate(heading)
+                                    selectedHeading = item.id
+                                    preview.navigate(item)
                                 } label: {
-                                    row(heading, current: current == heading.id, shallowest: shallowest)
+                                    Group {
+                                        switch item.content {
+                                        case .heading(let heading): row(heading, current: current == item.id, shallowest: shallowest)
+                                        case .image:
+                                            OutlineImageRow(item: item, document: preview.renderedURL, root: workspace.root,
+                                                indent: item.indent(shallowest: shallowest), current: current == item.id,
+                                                selected: outlineFocused && selectedHeading == item.id)
+                                        }
+                                    }
                                         .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain).tag(heading.id).id(heading.id)
+                                .buttonStyle(.plain).tag(item.id).id(item.id)
                                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                             }
                         }
@@ -75,8 +87,8 @@ struct InspectorView: View {
                         manualScrollUntil = .distantPast
                     }
                     .onKeyPress(.return) {
-                        guard let heading = preview.headings.first(where: { $0.id == selectedHeading }) else { return .ignored }
-                        preview.navigate(heading)
+                        guard let item = items.first(where: { $0.id == selectedHeading }) else { return .ignored }
+                        preview.navigate(item)
                         return .handled
                     }
                     .accessibilityLabel("Heading outline")

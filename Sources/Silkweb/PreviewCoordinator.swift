@@ -16,6 +16,7 @@ final class PreviewCoordinator {
     var lastWritingMode: DocumentViewMode = .editor
     var showsOutline: Bool { didSet { defaults.set(showsOutline, forKey: "Silkweb.Detail.Outline") } }
     var headings: [MarkdownHeading] = []
+    var outlineItems: [OutlineItem] = []
     var visibleHeading: String?
     var html = ""
     var renderedURL: URL?
@@ -73,7 +74,7 @@ final class PreviewCoordinator {
         revision += 1
         let request = revision
         task?.cancel()
-        if document != renderedURL { headings = []; html = ""; scrollAnchor = nil; scrollRatio = 0; pendingAnchor = nil }
+        if document != renderedURL { headings = []; outlineItems = []; html = ""; scrollAnchor = nil; scrollRatio = 0; pendingAnchor = nil }
         guard next.html || next.outline else { endLoading(); return }
         if next.html { beginLoading(document: document) } else { endLoading() }
         task = Task { [weak self] in
@@ -83,14 +84,16 @@ final class PreviewCoordinator {
             #endif
             let result = await Task.detached(priority: .userInitiated) {
                 let parsed = MarkdownParser.parse(text)
-                guard next.html else { return (parsed.headings, "") }
+                let items = OutlineItem.parse(text, headings: parsed.headings)
+                guard next.html else { return (parsed.headings, "", items) }
                 let fragment = HTMLRenderer.render(parsed, options: .init(libraryRoot: root, documentURL: document, offlinePreview: true))
                 let css = Self.stylesheet
                 let page = "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src silkweb-preview:; style-src 'unsafe-inline'; script-src 'none'\"><style>" + css + "</style></head><body>" + fragment + "</body></html>"
-                return (parsed.headings, page)
+                return (parsed.headings, page, items)
             }.value
             guard !Task.isCancelled, let self, request == self.revision else { return }
             self.headings = result.0
+            self.outlineItems = result.2
             self.renderedURL = document
             self.html = result.1
         }
@@ -126,11 +129,28 @@ final class PreviewCoordinator {
         return headings.last { $0.sourceRange.location != NSNotFound && $0.sourceRange.location <= caret }?.id
     }
 
+    func currentItem(caret: Int) -> String? {
+        if mode == .preview { return visibleHeading }
+        if let image = outlineItems.first(where: {
+            if case .image = $0.content { return NSLocationInRange(caret, $0.sourceRange) }
+            return false
+        }) { return image.id }
+        return currentHeading(caret: caret)
+    }
+
+    func navigate(_ item: OutlineItem) {
+        navigate(id: item.id, range: item.sourceRange)
+    }
+
     func navigate(_ heading: MarkdownHeading) {
-        pendingAnchor = heading.id
-        if mode != .editor { scrollPreview(to: heading.id) }
-        guard let editor, heading.sourceRange.location != NSNotFound else { return }
-        let location = min(heading.sourceRange.location, editor.string.utf16.count)
+        navigate(id: heading.id, range: heading.sourceRange)
+    }
+
+    private func navigate(id: String, range: NSRange) {
+        pendingAnchor = id
+        if mode != .editor { scrollPreview(to: id) }
+        guard let editor, range.location != NSNotFound else { return }
+        let location = min(range.location, editor.string.utf16.count)
         editor.setSelectedRange(NSRange(location: location, length: 0))
         editor.scrollRangeToVisible(NSRange(location: location, length: 0))
         if let layout = editor.layoutManager, editor.textContainer != nil,

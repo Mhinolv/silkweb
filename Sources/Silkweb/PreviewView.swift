@@ -17,7 +17,7 @@ struct PreviewView: NSViewRepresentable {
         let script = """
         let timer;
         function report() {
-          const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6'));
+          const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6,[id^=outline_image_]'));
           const current = headings.filter(h => h.getBoundingClientRect().top <= 40).pop();
           const extent = Math.max(1, document.documentElement.scrollHeight - innerHeight);
           window.webkit.messageHandlers.position.postMessage({anchor: current?.id || '', ratio: scrollY / extent});
@@ -146,14 +146,26 @@ struct PreviewView: NSViewRepresentable {
             preview.didFinish(document: document)
             let anchor = preview.pendingAnchor ?? restoreAnchor
             preview.pendingAnchor = nil
+            let images: [[String: Any]] = preview.outlineItems.compactMap { item in
+                guard case .image = item.content else { return nil }
+                return ["id": item.id, "line": item.sourceLine ?? "", "direct": item.isInlineImage]
+            }
             webView.callAsyncJavaScript("""
+                // Attach display-only anchors to the existing DOM. Reference images
+                // unsupported by the renderer still navigate to their source paragraph.
+                const rendered = Array.from(document.querySelectorAll('img,.sw-missing-image,.sw-remote-image:not(:has(img))'));
+                let index = 0;
+                for (const image of images) {
+                  const node = image.direct ? rendered[index++] : Array.from(document.querySelectorAll('p,li')).find(p => p.textContent.includes(image.line));
+                  if (node) node.id = image.id;
+                }
                 const heading = document.getElementById(anchor);
                 if (heading) heading.scrollIntoView();
                 else scrollTo(0, ratio * Math.max(0, document.documentElement.scrollHeight - innerHeight));
-                const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6'));
+                const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6,[id^=outline_image_]'));
                 const current = headings.filter(h => h.getBoundingClientRect().top <= 40).pop();
                 return {anchor: current?.id || '', ratio: scrollY / Math.max(1, document.documentElement.scrollHeight - innerHeight)};
-                """, arguments: ["anchor": anchor, "ratio": restoreRatio], in: nil, in: .defaultClient) { [weak self] result in
+                """, arguments: ["anchor": anchor, "ratio": restoreRatio, "images": images], in: nil, in: .defaultClient) { [weak self] result in
                     self?.restoring = false
                     if case .success(let value) = result, let values = value as? [String: Any] { self?.updatePosition(values) }
                 }

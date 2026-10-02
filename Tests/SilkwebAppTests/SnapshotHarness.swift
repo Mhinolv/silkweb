@@ -13,6 +13,7 @@ struct SnapshotScenario {
     var mode: DocumentViewMode = .editor
     var outline = false
     var caretHeading: String? = nil
+    var caretImage: String? = nil
     var rename = false
     var quickQuery: String? = nil
     var searchQuery: String? = nil
@@ -44,6 +45,10 @@ struct SnapshotScenario {
         .init(name: "preview-mode", document: pourOver, mode: .preview),
         .init(name: "split-mode", document: pourOver, mode: .split),
         .init(name: "inspector-outline", document: pourOver, outline: true),
+        .init(name: "outline-images-split", document: "Snapshot Fixtures/Outline Images.md", mode: .split, outline: true, caretImage: "![Portrait]"),
+        .init(name: "outline-images-only", document: "Snapshot Fixtures/Images Only.md", outline: true),
+        .init(name: "outline-image-states", document: "Snapshot Fixtures/Image States.md", outline: true),
+        .init(name: "outline-images", document: "Snapshot Fixtures/Outline Images.md", outline: true, caretImage: "![Portrait]"),
         .init(name: "outline-hierarchy", document: "Snapshot Fixtures/Outline Hierarchy.md", outline: true, caretHeading: "Grind size"),
         .init(name: "rename-active", document: pourOver, rename: true),
         .init(name: "quick-open", quickQuery: "brew"),
@@ -184,6 +189,17 @@ final class SnapshotHarness {
             }
         }
         try bitmap.representation(using: .png, properties: [:])!.write(to: fixtures.appendingPathComponent("fixture.png"), options: .atomic)
+        for (name, width, height) in [("portrait.png", 80, 240), ("transparent.png", 120, 80)] {
+            let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+            for y in 0..<height { for x in 0..<width {
+                rep.setColor(NSColor(calibratedRed: 0.2, green: 0.6, blue: 0.8, alpha: name == "transparent.png" && x < width / 2 ? 0 : 1), atX: x, y: y)
+            } }
+            try rep.representation(using: .png, properties: [:])!.write(to: fixtures.appendingPathComponent(name))
+        }
+        try Data("![Landscape](fixture.png)\n![Remote](https://example.invalid/image.png)\n".utf8).write(to: fixtures.appendingPathComponent("Images Only.md"))
+        let outlineImages = "![Landscape](fixture.png)\n# Journey\n## Places\n![Portrait](portrait.png)\n### Detail\n![Transparent](transparent.png)\n## Other\n![Missing](missing.png)\n![Remote](https://example.invalid/image.png)\n"
+        try Data(outlineImages.utf8).write(to: fixtures.appendingPathComponent("Outline Images.md"))
         let imageText = "# Image Fixture\n\n![Local fixture](fixture.png)\n\n![Remote fixture](https://example.invalid/snapshot.png)\n"
         try Data(imageText.utf8).write(to: fixtures.appendingPathComponent("Image Fixture.md"), options: .atomic)
         try Data("not an image".utf8).write(to: fixtures.appendingPathComponent("unreadable.png"))
@@ -361,6 +377,12 @@ final class SnapshotHarness {
                     try await wait("outline parsing") { workspace.preview.headings == expected }
                 }
             }
+            if let marker = scenario.caretImage, let editor = workspace.preview.editor {
+                let range = (editor.string as NSString).range(of: marker)
+                editor.setSelectedRange(NSRange(location: range.location, length: 0))
+                workspace.editor.caretLocation = range.location
+                try await Task.sleep(for: .milliseconds(400))
+            }
             if let text = scenario.caretHeading {
                 guard let heading = workspace.preview.headings.first(where: { $0.text == text }),
                       let editor = workspace.preview.editor else { throw SnapshotFailure.error("Missing caret heading") }
@@ -402,6 +424,27 @@ final class SnapshotHarness {
                     if let error = workspace.preview.error { throw SnapshotFailure.error(error) }
                     if let error = (workspace.preview.webView?.navigationDelegate as? PreviewView.Coordinator)?.navigationError {
                         throw SnapshotFailure.error(error.localizedDescription)
+                    }
+                    if let marker = scenario.caretImage, let web = workspace.preview.webView {
+                        try await wait("preview image anchors") { (web.navigationDelegate as? PreviewView.Coordinator)?.restoring == false }
+                        let location = (workspace.editor.text as NSString).range(of: marker).location
+                        guard let item = workspace.preview.outlineItems.first(where: { $0.sourceRange.location == location }) else {
+                            throw SnapshotFailure.error("Missing outline image navigation target")
+                        }
+                        workspace.preview.navigate(item)
+                        // Await the actual WebKit scroll; outside-sandbox QA exercises
+                        // the same production navigation used by an outline row click.
+                        let deadline = Date().addingTimeInterval(3)
+                        var visible = false
+                        repeat {
+                            let result: Any? = try await bounded("preview image navigation") {
+                                try await web.callAsyncJavaScript("const image = document.getElementById(anchor); if (!image) return false; const rect = image.getBoundingClientRect(); return rect.top >= -1 && rect.top < innerHeight;",
+                                    arguments: ["anchor": item.id], in: nil, contentWorld: .defaultClient)
+                            }
+                            visible = result as? Bool == true
+                            if !visible { try await Task.sleep(for: .milliseconds(50)) }
+                        } while !visible && Date() < deadline
+                        guard visible else { throw SnapshotFailure.error("Outline click did not reveal preview image") }
                     }
                 }
             }
