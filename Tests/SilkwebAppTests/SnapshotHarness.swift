@@ -12,6 +12,7 @@ struct SnapshotScenario {
     var document: String? = nil
     var mode: DocumentViewMode = .editor
     var outline = false
+    var caretHeading: String? = nil
     var rename = false
     var quickQuery: String? = nil
     var searchQuery: String? = nil
@@ -27,6 +28,7 @@ struct SnapshotScenario {
         .init(name: "preview-mode", document: pourOver, mode: .preview),
         .init(name: "split-mode", document: pourOver, mode: .split),
         .init(name: "inspector-outline", document: pourOver, outline: true),
+        .init(name: "outline-hierarchy", document: "Snapshot Fixtures/Outline Hierarchy.md", outline: true, caretHeading: "Grind size"),
         .init(name: "rename-active", document: pourOver, rename: true),
         .init(name: "quick-open", quickQuery: "brew"),
         .init(name: "search-results", searchQuery: "coffee"),
@@ -165,6 +167,26 @@ final class SnapshotHarness {
         try bitmap.representation(using: .png, properties: [:])!.write(to: fixtures.appendingPathComponent("fixture.png"), options: .atomic)
         let imageText = "# Image Fixture\n\n![Local fixture](fixture.png)\n\n![Remote fixture](https://example.invalid/snapshot.png)\n"
         try Data(imageText.utf8).write(to: fixtures.appendingPathComponent("Image Fixture.md"), options: .atomic)
+        let hierarchy = """
+        # Pour-Over in Five Steps
+
+        ## Equipment and a deliberately long heading ending with the essential tools
+
+        ### Grind size
+
+        Adjust the grind before brewing.
+
+        #### Water temperature
+
+        ##### Notes
+
+        ###### Footnote
+
+        ## Technique
+
+        # Another brew
+        """
+        try Data(hierarchy.utf8).write(to: fixtures.appendingPathComponent("Outline Hierarchy.md"), options: .atomic)
         try Data().write(to: fixtures.appendingPathComponent("Empty Document.md"), options: .atomic)
         // Exercise the app's real invalid-UTF8 read-only banner without permission tricks.
         try Data(Array("# Read Only\n\nThis fixture opens read-only.\n".utf8) + [0xFF]).write(to: fixtures.appendingPathComponent("Read Only.md"), options: .atomic)
@@ -266,6 +288,12 @@ final class SnapshotHarness {
                     Self.descendants(controller.view).compactMap { $0 as? PlainMarkdownTextView }.contains { $0.string == workspace.editor.text }
                 }
                 if scenario.outline { try await wait("outline parsing") { !workspace.preview.headings.isEmpty } }
+            }
+            if let text = scenario.caretHeading {
+                guard let heading = workspace.preview.headings.first(where: { $0.text == text }),
+                      let editor = workspace.preview.editor else { throw SnapshotFailure.error("Missing caret heading") }
+                editor.setSelectedRange(NSRange(location: heading.sourceRange.location, length: 0))
+                workspace.editor.caretLocation = heading.sourceRange.location
             }
             controller.view.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(300))
