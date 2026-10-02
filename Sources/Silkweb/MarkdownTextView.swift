@@ -67,6 +67,7 @@ struct MarkdownTextView: NSViewRepresentable {
         text.backgroundColor = .textBackgroundColor
         text.insertionPointColor = .controlAccentColor
         text.isVerticallyResizable = true
+        text.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         text.isHorizontallyResizable = false
         text.autoresizingMask = [.width]
         text.textContainer?.widthTracksTextView = false
@@ -179,8 +180,26 @@ final class PlainMarkdownTextView: NSTextView {
         assetHandler.workspace = workspace
     }
     var viewportObserver: NSObjectProtocol?
-    deinit { if let viewportObserver { NotificationCenter.default.removeObserver(viewportObserver) } }
+    deinit {
+        if let viewportObserver { NotificationCenter.default.removeObserver(viewportObserver) }
+        contentSizingTask?.cancel()
+    }
     private var isLayingOutEditor = false
+    private var contentSizingTask: Task<Void, Never>?
+
+    /// TextKit's viewport layout alone leaves the document frame sized to a partial
+    /// layout. Coalesce loads, restyling and width changes before fitting the full text.
+    /// This never runs in a scroll/gesture callback or on every keystroke.
+    func scheduleContentSizing() {
+        contentSizingTask?.cancel()
+        contentSizingTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            guard let self, !self.hasMarkedText(), let container = self.textContainer else { return }
+            self.layoutManager?.ensureLayout(for: container)
+            self.sizeToFit()
+            if let scroll = self.enclosingScrollView { scroll.reflectScrolledClipView(scroll.contentView) }
+        }
+    }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
@@ -199,9 +218,13 @@ final class PlainMarkdownTextView: NSTextView {
         let containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         if let container = textContainer, container.containerSize != containerSize {
             container.containerSize = containerSize
+            scheduleContentSizing()
         }
         let inset = NSSize(width: max(style.horizontalInset, (viewport.width - width) / 2), height: style.topInset)
-        if textContainerInset != inset { textContainerInset = inset }
+        if textContainerInset != inset {
+            textContainerInset = inset
+            scheduleContentSizing()
+        }
         var contentInsets = scroll.contentInsets
         contentInsets.bottom = viewport.height / 2
         if scroll.contentInsets.bottom != contentInsets.bottom { scroll.contentInsets = contentInsets }

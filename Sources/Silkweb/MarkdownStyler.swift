@@ -94,6 +94,7 @@ import SilkwebCore
             if position > NSMaxRange(pending), stable { break }
         } while true
         storage.endEditing()
+        editor.scheduleContentSizing()
         if undoRegistration { editor.undoManager?.enableUndoRegistration() }
         editor.typingAttributes = defaults
         lastStyledRange = NSRange(location: styledStart, length: position - styledStart)

@@ -17,6 +17,7 @@ struct SnapshotScenario {
     var quickQuery: String? = nil
     var searchQuery: String? = nil
     var tabs: [String] = []
+    var scrollToEnd = false
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
     static let image = "Snapshot Fixtures/Image Fixture.md"
@@ -24,6 +25,7 @@ struct SnapshotScenario {
         .init(name: "library-overview"),
         .init(name: "folder-selected", folder: "Coffee/Brewing Guides"),
         .init(name: "editor-document", document: pourOver),
+        .init(name: "editor-long-scrolled-end", document: "Snapshot Fixtures/Long Document.md", tabs: [pourOver, "Snapshot Fixtures/Long Document.md"], scrollToEnd: true),
         .init(name: "editor-image", document: image),
         .init(name: "preview-mode", document: pourOver, mode: .preview),
         .init(name: "split-mode", document: pourOver, mode: .split),
@@ -187,6 +189,7 @@ final class SnapshotHarness {
         # Another brew
         """
         try Data(hierarchy.utf8).write(to: fixtures.appendingPathComponent("Outline Hierarchy.md"), options: .atomic)
+        try Data(LongEditorFixture.document.utf8).write(to: fixtures.appendingPathComponent("Long Document.md"), options: .atomic)
         try Data().write(to: fixtures.appendingPathComponent("Empty Document.md"), options: .atomic)
         // Exercise the app's real invalid-UTF8 read-only banner without permission tricks.
         try Data(Array("# Read Only\n\nThis fixture opens read-only.\n".utf8) + [0xFF]).write(to: fixtures.appendingPathComponent("Read Only.md"), options: .atomic)
@@ -305,6 +308,11 @@ final class SnapshotHarness {
                     }
                 }
                 controller.view.layoutSubtreeIfNeeded()
+            }
+            if scenario.scrollToEnd, let editor = workspace.preview.editor {
+                editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))
+                editor.scrollToEndOfDocument(nil)
+                editor.scrollRangeToVisible(editor.selectedRange())
             }
             if scenario.mode != .editor {
                 if webKitUnavailable {
