@@ -105,8 +105,14 @@ struct DocumentDetail: View {
                     .padding(.horizontal, 12).background(.bar)
             }
             EditorBanner(session: workspace.editor, workspace: workspace)
+            AssetErrorBanner(session: workspace.editor)
             if workspace.editor.url != nil {
                 DocumentPanes(workspace: workspace)
+                if let progress = workspace.editor.assetProgress {
+                    HStack { Text(progress); Spacer() }
+                        .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12)
+                        .frame(height: 24).background(.bar)
+                }
                 if let error = workspace.preview.error { Text(error).font(.callout).foregroundStyle(.secondary).padding(8) }
             } else if workspace.session.selectedDocuments.count > 1 {
                 ContentUnavailableView("\(workspace.session.selectedDocuments.count) Documents Selected", systemImage: "doc.on.doc")

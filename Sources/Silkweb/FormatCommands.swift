@@ -42,6 +42,11 @@ struct FormatCommands: Commands {
                 if index > 0 { Divider() }
                 if index == 2 { Menu("Heading") { items(group) } }
                 else { items(group) }
+                if index == 1 {
+                    Button("Image…") { target.editor?.assetHandler.chooseImages() }
+                        .keyboardShortcut("i", modifiers: [.control, .command])
+                        .disabled(!target.enabled)
+                }
             }
         }
     }

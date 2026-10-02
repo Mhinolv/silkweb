@@ -9,9 +9,9 @@ public enum MarkdownDestinations {
         public let unsupported: [String]
     }
 
-    private static let pattern = #"!?\[[^\]\n]*\]\((<[^>\n]*>|[^\s()]+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\)|^ {0,3}\[(?!\^)[^\]\n]+\]:\s*(<[^>\n]*>|[^\s()]+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*$"#
+    private static let pattern = #"!?\[(?:\\.|[^\]\\\n])*\]\((<[^>\n]*>|[^\s()]+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\)|^ {0,3}\[(?!\^)[^\]\n]+\]:\s*(<[^>\n]*>|[^\s()]+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*$"#
     private static let regex = try! NSRegularExpression(pattern: pattern)
-    private static let candidates = try! NSRegularExpression(pattern: #"!?\[[^\]\n]*\]\([^\n]*?(?:\)|$)|^ {0,3}\[(?!\^)[^\]\n]+\]:[^\n]*|!?\[\[[^\]\n]+\]\]|<[^>\n]+(?:href|src)\s*=[^>\n]*>"#, options: .caseInsensitive)
+    private static let candidates = try! NSRegularExpression(pattern: #"!?\[(?:\\.|[^\]\\\n])*\]\([^\n]*?(?:\)|$)|^ {0,3}\[(?!\^)[^\]\n]+\]:[^\n]*|!?\[\[[^\]\n]+\]\]|<[^>\n]+(?:href|src)\s*=[^>\n]*>"#, options: .caseInsensitive)
     private static let delimiters = try! NSRegularExpression(pattern: #"\]\("#)
     private static let code = try! NSRegularExpression(pattern: #"(`+).*?\1"#)
 

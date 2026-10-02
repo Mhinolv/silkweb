@@ -11,6 +11,9 @@ final class DocumentSession {
     var readOnly = false
     var recovered = false
     var error: String?
+    var assetMessage: String?
+    var assetFailures: [AssetFailure] = []
+    var assetProgress: String?
     var loading = false
     var refusedNavigation = 0
     var diskText: String?
@@ -45,6 +48,9 @@ final class DocumentSession {
     func configure(root: URL, recoveryDirectory: URL? = nil) async {
         observation?.cancel()
         libraryRoot = root
+        assetMessage = nil
+        assetFailures = []
+        assetProgress = nil
         diskText = nil
         conflictCopy = nil
         coordinator = SaveCoordinator(store: DocumentStore(root: root), recoveryDirectory: recoveryDirectory)
@@ -65,6 +71,9 @@ final class DocumentSession {
         }
         observation?.cancel()
         url = destination
+        assetMessage = nil
+        assetFailures = []
+        assetProgress = nil
         diskText = nil
         conflictCopy = nil
         text = ""

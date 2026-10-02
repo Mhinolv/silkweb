@@ -45,6 +45,7 @@ struct MarkdownTextView: NSViewRepresentable {
         text.style = style
         text.isRichText = false
         text.importsGraphics = false
+        text.registerForDraggedTypes([.fileURL])
         text.allowsUndo = true
         text.usesFindBar = true
         text.isContinuousSpellCheckingEnabled = true
@@ -86,6 +87,10 @@ struct MarkdownTextView: NSViewRepresentable {
         guard let text = scroll.documentView as? PlainMarkdownTextView else { return }
         let coordinator = context.coordinator
         text.session = session
+        if coordinator.url != session.url || text.assetHandler.root != workspace.root {
+            text.assetHandler.root = workspace.root
+            text.assetHandler.documentID = workspace.snapshot?.documents.first { workspace.root?.appendingPathComponent($0.relativePath) == session.url }?.id
+        }
         workspace.preview.editor = text
         if coordinator.url != session.url {
             let selection = session.selection
@@ -102,7 +107,7 @@ struct MarkdownTextView: NSViewRepresentable {
         } else if text.string != session.text, !text.hasMarkedText() {
             Self.reload(text, in: scroll, value: session.text, selection: session.selection, position: session.scroll)
         }
-        text.isEditable = !session.readOnly && !session.loading
+        text.isEditable = !session.readOnly && !session.loading && !text.assetHandler.busy
         if FormattingTarget.shared.editor === text { FormattingTarget.shared.refresh() }
         text.setAccessibilityLabel("Document text, \(session.name)")
         text.window?.isDocumentEdited = session.state.isDirty
@@ -157,6 +162,11 @@ final class PlainMarkdownTextView: NSTextView {
     var style = EditorStyle()
     weak var session: DocumentSession?
     let styler = MarkdownStyler()
+    lazy var assetHandler: EditorPasteHandler = {
+        let handler = EditorPasteHandler()
+        handler.editor = self
+        return handler
+    }()
     var moveFocus: ((Bool) -> Void)?
     var viewportObserver: NSObjectProtocol?
     deinit { if let viewportObserver { NotificationCenter.default.removeObserver(viewportObserver) } }
@@ -194,7 +204,23 @@ final class PlainMarkdownTextView: NSTextView {
         layoutEditor()
     }
 
-    override func paste(_ sender: Any?) { pasteAsPlainText(sender) }
+    override func paste(_ sender: Any?) { assetHandler.paste(from: .general) }
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        super.readablePasteboardTypes + [.fileURL]
+    }
+    override var acceptableDragTypes: [NSPasteboard.PasteboardType] {
+        super.acceptableDragTypes + [.fileURL]
+    }
+    override func readSelection(from pasteboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        let files = assetHandler.files(from: pasteboard)
+        if !files.isEmpty { return assetHandler.add(files) }
+        return super.readSelection(from: pasteboard, type: type)
+    }
+    override func readSelection(from pasteboard: NSPasteboard) -> Bool {
+        let files = assetHandler.files(from: pasteboard)
+        if !files.isEmpty { return assetHandler.add(files) }
+        return super.readSelection(from: pasteboard)
+    }
     override func pasteAsRichText(_ sender: Any?) { pasteAsPlainText(sender) }
     override func pasteAsPlainText(_ sender: Any?) {
         guard isEditable, let value = NSPasteboard.general.string(forType: .string) else { return }
