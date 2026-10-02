@@ -93,7 +93,7 @@ Before adding any shortcut, check it against this table. 1.25 audits the final m
 | View | Editor ↔ Preview toggle | ⌘R | 1.18 |
 | View | Split Editor and Preview | ⌘4 | 1.18 |
 | View | Show Outline / Show Document Info | ⌘7 / ⌘8 | 1.18 / 1.21 |
-| View | Toggle Sidebar / Toolbar / Full Screen | ⌃⌘S / ⌥⌘T / ⌃⌘F (system) | 1.4 |
+| View | Hide/Show Sidebars (folders + document list together) / Toolbar / Full Screen | ⌃⌘S / ⌥⌘T / ⌃⌘F (system) | 1.4 |
 | View | Show Status Bar | ⌘/ | 1.25 |
 | View | Sort By ▸ Name / Date Modified / Date Created | ⌃⌥⌘1 / ⌃⌥⌘2 / ⌃⌥⌘3 | 1.9 |
 | View | Include Subfolders | — (menu checkbox) | 1.9 |

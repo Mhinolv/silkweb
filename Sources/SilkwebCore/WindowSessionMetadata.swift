@@ -2,21 +2,24 @@ import Foundation
 
 /// Rebuildable window state, separate from the older library navigation format.
 public struct WindowSessionMetadata: Codable, Equatable, Sendable {
-    public var formatVersion = 1
+    public var formatVersion = 2
     public var tabs: [DocumentTabMetadata] = []
     public var activeDocumentID: UUID?
     public var selectedFolderID: UUID?
     public var selectedFolder: String? = ""
     public var viewMode = "editor"
+    public var sidebarsHidden = false
 
     public init() {}
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, tabs, activeDocumentID, selectedFolderID, selectedFolder, viewMode
+        case formatVersion, tabs, activeDocumentID, selectedFolderID, selectedFolder, viewMode, sidebarsHidden
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         formatVersion = (try? values.decodeIfPresent(Int.self, forKey: .formatVersion)) ?? 1
-        guard formatVersion == 1 else { throw LibraryError.unsupportedMetadataVersion(formatVersion) }
+        guard (1...2).contains(formatVersion) else { throw LibraryError.unsupportedMetadataVersion(formatVersion) }
+        formatVersion = 2
+        sidebarsHidden = (try? values.decodeIfPresent(Bool.self, forKey: .sidebarsHidden)) ?? false
         if var entries = try? values.nestedUnkeyedContainer(forKey: .tabs) {
             while !entries.isAtEnd {
                 // Advance before decoding: one invalid value must not discard later tabs.
@@ -41,6 +44,7 @@ public struct WindowSessionMetadata: Codable, Equatable, Sendable {
         try values.encodeIfPresent(selectedFolderID, forKey: .selectedFolderID)
         try values.encode(selectedFolder, forKey: .selectedFolder)
         try values.encode(viewMode, forKey: .viewMode)
+        try values.encode(sidebarsHidden, forKey: .sidebarsHidden)
     }
 
     /// Resolve IDs before paths: a moved file must not bind to a replacement at its old path.

@@ -2,6 +2,18 @@ import XCTest
 @testable import SilkwebCore
 
 final class WindowSessionMetadataTests: XCTestCase {
+    func testSidebarsVisibilityBackwardCompatibility() throws {
+        for version in [1, 2] {
+            for flag in ["", ",\"sidebarsHidden\":false", ",\"sidebarsHidden\":true", ",\"sidebarsHidden\":null", ",\"sidebarsHidden\":\"bad\""] {
+                let json = "{\"formatVersion\":\(version)\(flag)}"
+                let value = try JSONDecoder().decode(WindowSessionMetadata.self, from: Data(json.utf8))
+                XCTAssertEqual(value.sidebarsHidden, flag.contains(":true"))
+                XCTAssertEqual(value.formatVersion, 2)
+                XCTAssertEqual(try JSONDecoder().decode(WindowSessionMetadata.self, from: JSONEncoder().encode(value)), value)
+            }
+        }
+    }
+
     func testDefaultsAndPositionModeSweep() throws {
         XCTAssertEqual(try JSONDecoder().decode(WindowSessionMetadata.self, from: Data("{}".utf8)), WindowSessionMetadata())
         let id = UUID()
@@ -82,7 +94,7 @@ final class WindowSessionMetadataTests: XCTestCase {
         let value = try JSONDecoder().decode(WindowSessionMetadata.self, from: Data(json.utf8))
         var tab = DocumentTabMetadata(documentID: id, relativePath: "Notes/A.md", isPreview: true)
         tab.selectionLocation = 7; tab.selectionLength = 2; tab.scrollY = 120
-        XCTAssertEqual(value.formatVersion, 1)
+        XCTAssertEqual(value.formatVersion, 2)
         XCTAssertEqual(value.tabs, [tab])
         XCTAssertEqual(value.activeDocumentID, id)
         XCTAssertEqual(value.selectedFolderID, folder)

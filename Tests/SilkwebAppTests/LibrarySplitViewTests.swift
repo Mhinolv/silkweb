@@ -62,12 +62,17 @@ final class LibrarySplitViewTests: XCTestCase {
         for column in 0...2 {
             NSAnimationContext.beginGrouping()
             NSAnimationContext.current.duration = 0
-            workspace.sidebarToggleRequest += 1
+            workspace.toggleSidebars()
             restored.updateRequests()
             NSAnimationContext.endGrouping()
             layout(restored)
-            XCTAssertTrue(restored.sidebarItem.isCollapsed)
-            workspace.focus(column)
+            XCTAssertTrue(restored.navigationItem.isCollapsed)
+            if column == 2 {
+                workspace.focus(column)
+                restored.updateRequests()
+                XCTAssertTrue(restored.navigationItem.isCollapsed)
+                workspace.toggleSidebars()
+            } else { workspace.focus(column) }
             restored.updateRequests()
             layout(restored)
             XCTAssertFalse(restored.sidebarItem.isCollapsed)
@@ -88,6 +93,134 @@ final class LibrarySplitViewTests: XCTestCase {
         workspace.loading = false
         await Task.yield()
         layout(restored)
+    }
+
+    @MainActor
+    func testBothSidebarsToggleInRealHierarchyWithLongDocument() async throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let name = "Silkweb.Sidebars." + UUID().uuidString
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root); clearAutosave(name) }
+        try LongEditorFixture.document.write(to: root.appendingPathComponent("Long.md"), atomically: true, encoding: .utf8)
+        let workspace = LibraryWorkspace(columnAutosaveName: name)
+        workspace.root = root
+        workspace.install(try await LibraryScanner.scan(root: root))
+        let opened = await workspace.openTab(try XCTUnwrap(workspace.snapshot?.documents.first), pinned: true)
+        XCTAssertTrue(opened)
+        workspace.preview.showsOutline = true
+        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: name)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
+        defer { window.contentViewController = nil; window.close() }
+        func settle() async throws {
+            controller.updateRequests()
+            controller.view.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(350))
+            controller.view.layoutSubtreeIfNeeded()
+        }
+        try await settle()
+        controller.splitView.setPosition(640 + controller.navigationController.splitView.dividerThickness, ofDividerAt: 0)
+        controller.navigationController.splitView.setPosition(260, ofDividerAt: 0)
+        try await settle()
+        let saved = widths(controller)
+        let editor = try XCTUnwrap(workspace.preview.editor)
+        let inspectorWidth = controller.splitView.arrangedSubviews[1].frame.width - (editor.enclosingScrollView?.frame.width ?? 0)
+        XCTAssertGreaterThan(inspectorWidth, 150)
+        let selection = NSRange(location: 100, length: 0)
+        editor.setSelectedRange(selection)
+        let focusField = NSTextField(frame: NSRect(x: 0, y: 0, width: 80, height: 20))
+        controller.navigationController.view.addSubview(focusField)
+        window.makeFirstResponder(focusField)
+        workspace.toggleSidebars()
+        try await settle()
+        // On the pre-fix implementation the document list remains on screen.
+        XCTAssertTrue(controller.splitViewItems[0].isCollapsed)
+        XCTAssertEqual(controller.splitView.arrangedSubviews[1].frame.width, controller.view.bounds.width, accuracy: 2)
+        XCTAssertTrue(window.firstResponder === editor)
+        XCTAssertEqual(editor.selectedRange(), selection)
+        XCTAssertTrue(workspace.preview.showsOutline)
+        XCTAssertEqual(try XCTUnwrap(editor.enclosingScrollView).frame.width, controller.view.bounds.width - inspectorWidth, accuracy: 2)
+        workspace.toggleSidebars()
+        try await settle()
+        for (actual, expected) in zip(widths(controller), saved) { XCTAssertEqual(actual, expected, accuracy: 1) }
+        let scroll = try XCTUnwrap(editor.enclosingScrollView)
+        scroll.scrollerStyle = .legacy
+        scroll.autohidesScrollers = false
+        editor.setSelectedRange(NSRange(location: 0, length: 0))
+        let end = editor.string.utf16.count
+        for _ in 0...end {
+            let previous = editor.selectedRange().location
+            editor.moveDown(nil)
+            if editor.selectedRange().location == previous || editor.selectedRange().location == end { break }
+        }
+        XCTAssertEqual(editor.selectedRange().location, end, "caret reaches text beyond the former scroll cap")
+        editor.scrollRangeToVisible(editor.selectedRange())
+        XCTAssertGreaterThan(scroll.documentVisibleRect.maxY, 10000)
+        XCTAssertEqual(try XCTUnwrap(scroll.verticalScroller).frame.height, scroll.bounds.height, accuracy: 1)
+        workspace.toggleSidebars()
+        try await settle()
+        for width: CGFloat in [1, 420, 900, 1400, 4096] {
+            window.setContentSize(NSSize(width: width, height: 900))
+            for mode in [DocumentViewMode.editor, .split, .preview] {
+                workspace.preview.mode = mode
+                try await settle()
+                XCTAssertTrue(controller.splitViewItems[0].isCollapsed)
+                XCTAssertEqual(workspace.preview.mode, mode)
+                XCTAssertTrue(widths(controller).allSatisfy { $0.isFinite && $0 >= 0 })
+                XCTAssertEqual(controller.splitView.arrangedSubviews[1].frame.width, controller.view.bounds.width, accuracy: 2)
+                if mode != .preview {
+                    let text = try XCTUnwrap(workspace.preview.editor)
+                    let scroll = try XCTUnwrap(text.enclosingScrollView)
+                    let manager = try XCTUnwrap(text.layoutManager)
+                    let container = try XCTUnwrap(text.textContainer)
+                    manager.ensureLayout(for: container)
+                    XCTAssertGreaterThanOrEqual(text.frame.height, manager.usedRect(for: container).maxY + text.textContainerOrigin.y)
+                    text.setSelectedRange(NSRange(location: text.string.utf16.count, length: 0))
+                    text.scrollRangeToVisible(text.selectedRange())
+                    XCTAssertGreaterThan(scroll.documentVisibleRect.maxY, 10000)
+                }
+            }
+        }
+        window.setContentSize(NSSize(width: 1400, height: 900))
+        workspace.preview.mode = .editor
+        workspace.focus(2)
+        try await settle()
+        XCTAssertTrue(workspace.sidebarsHidden)
+        for column in [0, 1] {
+            workspace.focus(column)
+            try await settle()
+            XCTAssertFalse(controller.splitViewItems[0].isCollapsed)
+            XCTAssertFalse(controller.sidebarItem.isCollapsed)
+            workspace.toggleSidebars()
+            try await settle()
+        }
+        workspace.toggleSidebars()
+        try await settle()
+        controller.sidebarItem.isCollapsed = true
+        try await settle()
+        workspace.toggleSidebars()
+        try await settle()
+        XCTAssertFalse(controller.splitViewItems[0].isCollapsed)
+        XCTAssertFalse(controller.sidebarItem.isCollapsed)
+        workspace.toggleSidebars()
+        try await settle()
+        await workspace.saveSessionNow()
+        let loadedSession = try await WindowSessionMetadata.load(root: root)
+        let savedSession = try XCTUnwrap(loadedSession)
+        XCTAssertTrue(savedSession.sidebarsHidden)
+        let restoredWorkspace = LibraryWorkspace(columnAutosaveName: name)
+        restoredWorkspace.root = root
+        restoredWorkspace.install(try await LibraryScanner.scan(root: root))
+        await restoredWorkspace.restoreTabs(savedSession)
+        let restored = LibrarySplitViewController(workspace: restoredWorkspace, autosaveName: name)
+        layout(restored, width: 1400, height: 900)
+        restored.updateRequests()
+        layout(restored, width: 1400, height: 900)
+        XCTAssertTrue(restored.splitViewItems[0].isCollapsed)
+        XCTAssertFalse(window.isVisible)
     }
 
     @MainActor

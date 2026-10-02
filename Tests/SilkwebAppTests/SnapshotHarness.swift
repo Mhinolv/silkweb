@@ -12,6 +12,7 @@ struct SnapshotScenario {
     var document: String? = nil
     var mode: DocumentViewMode = .editor
     var outline = false
+    var sidebarsHidden = false
     var caretHeading: String? = nil
     var caretImage: String? = nil
     var rename = false
@@ -32,6 +33,7 @@ struct SnapshotScenario {
     static let image = "Snapshot Fixtures/Image Fixture.md"
     static let initial: [SnapshotScenario] = [
         .init(name: "library-overview"),
+        .init(name: "sidebars-collapsed", document: pourOver, sidebarsHidden: true),
         .init(name: "table-insert-default", tableInsert: "default"),
         .init(name: "table-insert-maximum", tableInsert: "maximum"),
         .init(name: "table-insert-invalid", tableInsert: "invalid"),
@@ -387,6 +389,11 @@ final class SnapshotHarness {
                         try await Task.sleep(for: .milliseconds(50))
                     }
                 }
+            }
+            if scenario.sidebarsHidden {
+                workspace.setSidebarsHidden(true)
+                controller.view.layoutSubtreeIfNeeded()
+                try await wait("sidebars collapse") { workspace.librarySplitController?.navigationItem.isCollapsed == true }
             }
             if scenario.rename {
                 guard let path = scenario.document ?? scenario.folder else { throw SnapshotFailure.error("Rename scenario needs an item") }

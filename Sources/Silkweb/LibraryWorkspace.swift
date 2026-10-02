@@ -60,6 +60,10 @@ final class LibraryWorkspace {
     var errorSymbol = "exclamationmark.triangle"
     var root: URL?
     var sidebarToggleRequest = 0
+    var sidebarsHidden = false
+    var libraryColumnCollapsed = false
+    @ObservationIgnored weak var librarySplitController: LibrarySplitViewController?
+    var sidebarsTitle: String { sidebarsHidden || libraryColumnCollapsed ? "Show Sidebars" : "Hide Sidebars" }
     var focusRequest = 0
     var focusColumn = 0
     private var scope: URL?
@@ -481,7 +485,19 @@ final class LibraryWorkspace {
         } catch { NSLog("Silkweb could not save navigation: %@", error.localizedDescription) }
     }
 
+    func setSidebarsHidden(_ hidden: Bool) {
+        sidebarsHidden = hidden
+        sidebarToggleRequest += 1
+        librarySplitController?.updateRequests()
+        persistSession()
+    }
+
+    func toggleSidebars() {
+        setSidebarsHidden(!(sidebarsHidden || libraryColumnCollapsed))
+    }
+
     func focus(_ column: Int) {
+        if column < 2 { setSidebarsHidden(false) }
         if column == 2, preview.mode == .preview { preview.mode = preview.lastWritingMode }
         focusColumn = column
         focusRequest += 1
@@ -549,8 +565,9 @@ struct LibraryWorkspaceView: View {
                 Button("Show Outline", systemImage: "list.bullet.indent") { workspace.preview.showsOutline.toggle() }.help("Show Outline")
             }
             ToolbarItem(placement: .navigation) {
-                Button("Toggle Sidebar", systemImage: "sidebar.left") { workspace.sidebarToggleRequest += 1 }
-                    .help("Toggle Sidebar")
+                Button(workspace.sidebarsTitle, systemImage: "sidebar.left") { workspace.toggleSidebars() }
+                    .help(workspace.sidebarsTitle)
+                    .accessibilityLabel(workspace.sidebarsTitle)
             }
             ToolbarItem(placement: .navigation) {
                 Button("New Document", systemImage: "square.and.pencil") { workspace.create(folder: false) }

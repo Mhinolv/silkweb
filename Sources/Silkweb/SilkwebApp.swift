@@ -56,7 +56,7 @@ struct SilkwebApp: App {
             TextEditingCommands()
             FormatCommands()
             CommandGroup(replacing: .sidebar) {
-                Button("Toggle Sidebar") { workspace.sidebarToggleRequest += 1 }
+                Button(workspace.sidebarsTitle) { workspace.toggleSidebars() }
                     .keyboardShortcut("s", modifiers: [.control, .command])
                     .disabled(workspace.snapshot == nil && !workspace.loading)
             }
