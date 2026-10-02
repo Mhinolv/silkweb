@@ -14,10 +14,12 @@ final class LibraryWorkspace {
     @ObservationIgnored var recoveryDirectory: URL?
     let search = LibrarySearch()
     let preview: PreviewCoordinator
+    let columnAutosaveName: String
     @ObservationIgnored private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, columnAutosaveName: String = "Silkweb.LibraryColumns") {
         self.defaults = defaults
+        self.columnAutosaveName = columnAutosaveName
         preview = PreviewCoordinator(defaults: defaults)
     }
     var libraryUndo: [LibraryUndo] = []

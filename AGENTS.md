@@ -25,7 +25,22 @@ Do **not** open or read the product owner's personal MWeb library/notes content 
 ## Build & Test
 - Build (also bundles `build/Silkweb.app`): `./scripts/build.sh`
 - Unit tests: `./scripts/build.sh test`
-- Both work inside the agents' sandbox (caches are kept under `.build/`). Always use these scripts,
+- Offscreen UI PNGs: `./scripts/snapshot.sh <out-dir> [scenario ...]` (all scenarios by default).
+  This runs an XCTest host with activation prohibited and windows never ordered on screen; it does
+  not launch Silkweb. Captures are 1400×900 points at the host's backing scale, in light and dark.
+  `manifest.json` records pixel dimensions, scale, status and timeout/error details per capture.
+  Preview/split PNGs contain native panes only and are marked `unavailable in this environment`
+  in the agent sandbox. Run outside the sandbox to capture WebKit via `takeSnapshot`; failures
+  produce a nonzero exit and manifest diagnostics. This captures current behavior, including
+  existing UI defects; it does not apply fixes or use golden baselines.
+  The sandbox denies LaunchServices registration: AppKit may report policy `-1` despite the
+  prohibited request. This unregistered XCTest host is allowed only inside the sandbox and
+  noted in the manifest; outside it, the harness requires `.prohibited`.
+  To add a scenario, append a `SnapshotScenario` configuration in
+  `Tests/SilkwebAppTests/SnapshotHarness.swift`; extend its state driver for new interactions.
+  The harness copies `Test_Library` into disposable temporary directories and generates local
+  and remote image references, an empty document, and a read-only encoding fixture there.
+- Build and unit tests work inside the agents' sandbox (caches are kept under `.build/`). Always use these scripts,
   never bare `swift build`.
 
 ## Architecture Map

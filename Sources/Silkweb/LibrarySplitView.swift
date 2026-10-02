@@ -7,7 +7,7 @@ struct LibrarySplitView: NSViewControllerRepresentable {
     let workspace: LibraryWorkspace
 
     func makeNSViewController(context: Context) -> LibrarySplitViewController {
-        LibrarySplitViewController(workspace: workspace)
+        LibrarySplitViewController(workspace: workspace, autosaveName: workspace.columnAutosaveName)
     }
 
     func updateNSViewController(_ controller: LibrarySplitViewController, context: Context) {
