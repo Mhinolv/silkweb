@@ -2,6 +2,19 @@ import XCTest
 @testable import SilkwebCore
 
 final class PreviewTests: XCTestCase {
+    func testEveryHeadingLevelKeepsSemanticTagAndAnchor() {
+        let source = (1...6).map { String(repeating: "#", count: $0) + " Level \($0)" }.joined(separator: "\n")
+        for breaks in HTMLRenderer.LineBreaks.allCases {
+            for offline in [false, true] {
+                let html = HTMLRenderer.render(source, options: .init(lineBreaks: breaks, offlinePreview: offline))
+                XCTAssertTrue(html.contains("<article class=\"sw-doc\">"))
+                for level in 1...6 {
+                    XCTAssertTrue(html.contains("<h\(level) id=\"level-\(level)\">Level \(level)</h\(level)>"), html)
+                }
+            }
+        }
+    }
+
     func testOfflineAssetAndLinkSweep() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root.appendingPathComponent("notes"), withIntermediateDirectories: true)

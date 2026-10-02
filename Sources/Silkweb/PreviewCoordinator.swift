@@ -52,7 +52,7 @@ final class PreviewCoordinator {
         let packaged = Bundle.main.resourceURL?.appendingPathComponent("Silkweb_Silkweb.bundle")
         let resources = packaged.flatMap { Bundle(url: $0) } ?? Bundle.module
         guard let url = resources.url(forResource: "preview", withExtension: "css") else { return "" }
-        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        return HeadingPalette.previewCSS + "\n" + ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
     }()
 
     init(defaults: UserDefaults = .standard) {

@@ -114,16 +114,36 @@ import SilkwebCore
     }
 }
 
-// Original editor-only accent; all other editor colors remain semantic.
+// Original heading palette shared by the editor and preview; other colors remain semantic.
+enum HeadingPalette {
+    static let light = 0x2A6A86
+    static let dark = 0x86BCD6
+    static let highContrastLight = 0x1F5570
+    static let highContrastDark = 0xA6D3E6
+
+    static func color(dark: Bool, highContrast: Bool) -> NSColor {
+        let rgb = highContrast ? (dark ? highContrastDark : highContrastLight) : (dark ? self.dark : light)
+        return NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255,
+                       green: CGFloat((rgb >> 8) & 255) / 255,
+                       blue: CGFloat(rgb & 255) / 255, alpha: 1)
+    }
+
+    static func hex(_ rgb: Int) -> String { String(format: "#%06X", rgb) }
+
+    static let previewCSS = """
+    :root { --sw-heading: \(hex(light)); }
+    @media (prefers-color-scheme: dark) { :root { --sw-heading: \(hex(dark)); } }
+    @media (prefers-contrast: more) { :root { --sw-heading: \(hex(highContrastLight)); } }
+    @media (prefers-color-scheme: dark) and (prefers-contrast: more) { :root { --sw-heading: \(hex(highContrastDark)); } }
+    """
+}
+
 extension NSColor {
     static let editorHeading = NSColor(name: "SilkwebEditorHeading") { appearance in
         let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         let contrast = appearance.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua,
                                                    .accessibilityHighContrastDarkAqua])
         let highContrast = contrast == .accessibilityHighContrastAqua || contrast == .accessibilityHighContrastDarkAqua
-        let rgb: (CGFloat, CGFloat, CGFloat) = highContrast
-            ? (dark ? (166, 211, 230) : (31, 85, 112))
-            : (dark ? (134, 188, 214) : (42, 106, 134))
-        return NSColor(srgbRed: rgb.0 / 255, green: rgb.1 / 255, blue: rgb.2 / 255, alpha: 1)
+        return HeadingPalette.color(dark: dark, highContrast: highContrast)
     }
 }

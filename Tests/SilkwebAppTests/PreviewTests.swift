@@ -7,6 +7,47 @@ import SilkwebCore
 
 final class PreviewTests: XCTestCase {
     @MainActor
+    func testPreviewPaletteMatchesEditorInEveryAppearanceAndStylesheetIsInjected() async throws {
+        let variants: [(NSAppearance.Name, Int)] = [
+            (.aqua, HeadingPalette.light), (.darkAqua, HeadingPalette.dark),
+            (.accessibilityHighContrastAqua, HeadingPalette.highContrastLight),
+            (.accessibilityHighContrastDarkAqua, HeadingPalette.highContrastDark)
+        ]
+        for (name, rgb) in variants {
+            let dark = name == .darkAqua || name == .accessibilityHighContrastDarkAqua
+            let highContrast = name == .accessibilityHighContrastAqua || name == .accessibilityHighContrastDarkAqua
+            // AppKit normalizes named accessibility appearances while Increase Contrast
+            // is off. Exercise the provider's four palette variants directly as well.
+            let color = try XCTUnwrap(HeadingPalette.color(dark: dark, highContrast: highContrast).usingColorSpace(.sRGB))
+            XCTAssertEqual(Int((color.redComponent * 255).rounded()), (rgb >> 16) & 255)
+            XCTAssertEqual(Int((color.greenComponent * 255).rounded()), (rgb >> 8) & 255)
+            XCTAssertEqual(Int((color.blueComponent * 255).rounded()), rgb & 255)
+            let appearance = try XCTUnwrap(NSAppearance(named: name))
+            if appearance.name == name {
+                appearance.performAsCurrentDrawingAppearance {
+                    XCTAssertEqual(NSColor.editorHeading.usingColorSpace(.sRGB), color)
+                }
+            }
+        }
+        XCTAssertEqual(HeadingPalette.previewCSS, """
+        :root { --sw-heading: #2A6A86; }
+        @media (prefers-color-scheme: dark) { :root { --sw-heading: #86BCD6; } }
+        @media (prefers-contrast: more) { :root { --sw-heading: #1F5570; } }
+        @media (prefers-color-scheme: dark) and (prefers-contrast: more) { :root { --sw-heading: #A6D3E6; } }
+        """)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.PreviewPalette." + UUID().uuidString))
+        let preview = PreviewCoordinator(defaults: defaults)
+        preview.mode = .preview
+        preview.schedule(text: "# Title\n###### Subtitle", document: nil, root: nil)
+        let deadline = Date().addingTimeInterval(3)
+        while preview.html.isEmpty && Date() < deadline { try await Task.sleep(for: .milliseconds(25)) }
+        XCTAssertTrue(preview.html.contains("<style>" + HeadingPalette.previewCSS))
+        XCTAssertTrue(preview.html.contains("padding: 16px 40px 80px"), "Bundled stylesheet must load")
+        XCTAssertTrue(preview.html.contains("h6 { font-size: .9375em"))
+        XCTAssertTrue(preview.html.contains("border-bottom: 1px solid -apple-system-separator"))
+    }
+
+    @MainActor
     func testSchemeHandlerServesMemoryAndContainedAssetsAndCancels() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -122,7 +163,7 @@ final class PreviewTests: XCTestCase {
         for x in 0..<4 { for y in 0..<4 { bitmap.setColor(.systemBlue, atX: x, y: y) } }
         try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: root.appendingPathComponent("img/p.png"))
         let document = root.appendingPathComponent("note.md")
-        let source = "# Title\n\nA paragraph.\n\n| A | B |\n| --- | --- |\n| one | two |\n\n![p](img/p.png)\n![remote](https://example.invalid/image.png)\n" + String(repeating: "paragraph\n\n", count: 100) + "## End"
+        let source = "# Title\n###### Subtitle\n\n## Level two\n### Level three\n#### Level four\n##### Level five\n\nA paragraph.\n\n| A | B |\n| --- | --- |\n| one | two |\n\n![p](img/p.png)\n![remote](https://example.invalid/image.png)\n" + String(repeating: "paragraph\n\n", count: 100) + "## End"
         try Data(source.utf8).write(to: document)
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
         workspace.root = root
@@ -160,6 +201,44 @@ final class PreviewTests: XCTestCase {
         XCTAssertEqual(result["count"] as? Int, 1)
         XCTAssertEqual(result["remote"] as? Bool, false)
         XCTAssertEqual(result["placeholder"] as? String, "Remote image not loaded: remote")
+        for name in [NSAppearance.Name.aqua, .darkAqua] {
+            window.appearance = try XCTUnwrap(NSAppearance(named: name))
+            try await Task.sleep(for: .milliseconds(100))
+            let styles = try await loaded.evaluateJavaScript("""
+            (() => {
+              const article = document.querySelector('.sw-doc');
+              const headings = [1,2,3,4,5,6].map(n => document.querySelector('h' + n));
+              const title = headings[0], subtitle = headings[5];
+              const style = getComputedStyle(title);
+              return {sizes: headings.map(h => parseFloat(getComputedStyle(h).fontSize)),
+                weights: headings.slice(4).map(h => getComputedStyle(h).fontWeight),
+                body: getComputedStyle(document.body).fontSize,
+                top: title.getBoundingClientRect().top, border: style.borderBottomWidth,
+                padding: style.paddingBottom, width: title.getBoundingClientRect().width,
+                column: article.clientWidth - 80,
+                gap: subtitle.getBoundingClientRect().top - title.getBoundingClientRect().bottom,
+                color: style.color, allTinted: headings.every(h => getComputedStyle(h).color === style.color),
+                dark: matchMedia('(prefers-color-scheme: dark)').matches,
+                contrast: matchMedia('(prefers-contrast: more)').matches};
+            })()
+            """)
+            let computed = try XCTUnwrap(styles as? [String: Any])
+            XCTAssertEqual(computed["sizes"] as? [Double], [32, 24, 20, 18, 16, 15])
+            XCTAssertEqual(computed["weights"] as? [String], ["700", "700"])
+            XCTAssertEqual(computed["body"] as? String, "16px")
+            XCTAssertEqual(computed["top"] as? Double, 16)
+            XCTAssertEqual(computed["border"] as? String, "1px")
+            XCTAssertEqual(computed["padding"] as? String, "8px")
+            XCTAssertEqual(computed["width"] as? Double, computed["column"] as? Double)
+            XCTAssertEqual(computed["gap"] as? Double, 16)
+            XCTAssertEqual(computed["allTinted"] as? Bool, true)
+            let dark = name == .darkAqua
+            XCTAssertEqual(computed["dark"] as? Bool, dark)
+            let contrast = computed["contrast"] as? Bool == true
+            let rgb = contrast ? (dark ? HeadingPalette.highContrastDark : HeadingPalette.highContrastLight)
+                               : (dark ? HeadingPalette.dark : HeadingPalette.light)
+            XCTAssertEqual(computed["color"] as? String, "rgb(\((rgb >> 16) & 255), \((rgb >> 8) & 255), \(rgb & 255))")
+        }
         for width: CGFloat in [0, 1, 280, 600, 4096] {
             for height: CGFloat in [0, 1, 400, 2160] {
                 loaded.setFrameSize(NSSize(width: width, height: height))

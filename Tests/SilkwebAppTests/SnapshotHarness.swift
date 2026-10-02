@@ -34,6 +34,7 @@ struct SnapshotScenario {
         .init(name: "editor-document", document: "Snapshot Fixtures/Editor Typography.md"),
         .init(name: "editor-long-scrolled-end", document: "Snapshot Fixtures/Long Document.md", tabs: [pourOver, "Snapshot Fixtures/Long Document.md"], scrollToEnd: true, legacyScroller: true),
         .init(name: "editor-image", document: image),
+        .init(name: "preview-headings", document: "Snapshot Fixtures/Preview Headings.md", mode: .preview),
         .init(name: "preview-mode", document: pourOver, mode: .preview),
         .init(name: "split-mode", document: pourOver, mode: .split),
         .init(name: "inspector-outline", document: pourOver, outline: true),
@@ -181,6 +182,21 @@ final class SnapshotHarness {
         try Data(imageText.utf8).write(to: fixtures.appendingPathComponent("Image Fixture.md"), options: .atomic)
         let typography = "# Heading one\n\n## Heading two\n\n### Heading three\n\n#### Heading four\n\n##### Heading five\n\n###### Heading six\n\nBody: café, 日本語, 👩🏽‍💻. **Strong**, *emphasis*, ~~strike~~ and `code`.\n\n> A quote\n\n- [ ] A task with [a link](https://example.invalid)\n\n```swift\nlet source = true\n```\n"
         try Data(typography.utf8).write(to: fixtures.appendingPathComponent("Editor Typography.md"), options: .atomic)
+        let previewHeadings = """
+        # Settling In
+        ###### Jamestown, PA
+
+        Body text at the default preview size.
+
+        ## Heading two
+        ### Heading three
+        #### Heading four
+        ##### Heading five
+        ###### Heading six
+
+        A final paragraph beneath the complete heading scale.
+        """
+        try Data(previewHeadings.utf8).write(to: fixtures.appendingPathComponent("Preview Headings.md"), options: .atomic)
         let hierarchy = """
         # Pour-Over in Five Steps
 
