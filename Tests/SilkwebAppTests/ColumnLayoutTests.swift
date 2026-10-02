@@ -101,30 +101,56 @@ final class ColumnLayoutTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let workspace = LibraryWorkspace(defaults: defaults)
         let frames = Frames()
-        // Measure against the entire pane, not the intrinsic empty stack height.
-        let host = NSHostingView(rootView: measured(InspectorView(workspace: workspace)
-            .frame(maxWidth: .infinity, maxHeight: .infinity), frames: frames))
-        host.sizingOptions = []
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 560),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        workspace.preview.showsOutline = true
+        let columns = LibrarySplitViewController(workspace: workspace, autosaveName: suite)
+        columns.splitView.autosaveName = nil
+        columns.navigationController.splitView.autosaveName = nil
+        // Keep the production native columns and DocumentDetail's SwiftUI inspector.
+        // Only the overlay reads geometry; it imposes no frame on InspectorView.
+        let detail = NSHostingController(rootView: measured(DocumentDetail(workspace: workspace), frames: frames))
+        detail.sizingOptions = []
+        let original = columns.splitViewItems[1]
+        columns.removeSplitViewItem(original)
+        let item = NSSplitViewItem(viewController: detail)
+        item.minimumThickness = 420
+        item.holdingPriority = NSLayoutConstraint.Priority(240)
+        columns.addSplitViewItem(item)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.contentView = host
-        defer { window.contentView = nil; window.close() }
-        for size in [NSSize(width: 200, height: 300), NSSize(width: 240, height: 560), NSSize(width: 320, height: 900)] {
-            host.setFrameSize(size)
+        window.contentViewController = columns
+        defer { window.contentViewController = nil; window.close() }
+        var emptyStates: [(Frames, CGRect)] = []
+        for size in [NSSize(width: 1400, height: 900), NSSize(width: 1200, height: 560), NSSize(width: 1600, height: 1100)] {
+            window.setContentSize(size)
+            columns.splitView.setPosition(520, ofDividerAt: 0)
+            columns.navigationController.splitView.setPosition(220, ofDividerAt: 0)
             for mode in DocumentViewMode.allCases {
                 workspace.preview.mode = mode
+                workspace.preview.showsOutline = true
                 workspace.preview.headings = MarkdownParser.parse("# Title\n## Child").headings
-                try await settle(host)
+                try await settle(columns.view)
                 let populated = try frame("outline-title", in: frames)
+                print("Outline populated \(size) \(mode): \(populated)")
                 XCTAssertEqual(populated.minY, 12, accuracy: 4)
                 workspace.preview.headings = MarkdownParser.parse("").headings
-                try await settle(host)
+                try await settle(columns.view)
                 let empty = try frame("outline-title", in: frames)
+                print("Outline empty \(size) \(mode): \(empty)")
                 XCTAssertEqual(empty.minY, populated.minY, accuracy: 4)
                 XCTAssertEqual(empty.minY, 12, accuracy: 4)
-                try assertEmptyBodyIsCenteredBelowChrome(frames, chrome: empty)
+                let captured = Frames()
+                captured.values = frames.values
+                emptyStates.append((captured, empty))
+                workspace.preview.headings = MarkdownParser.parse("# Title\n## Child").headings
+                try await settle(columns.view)
+                XCTAssertEqual(try frame("outline-title", in: frames).minY, populated.minY, accuracy: 4)
             }
+        }
+        // Check every title transition first: missing new empty-state anchors on
+        // historical source must never mask the actual header geometry result.
+        for (captured, title) in emptyStates {
+            try assertEmptyBodyIsCenteredBelowChrome(captured, chrome: title)
         }
         XCTAssertFalse(window.isVisible)
     }
