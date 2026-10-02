@@ -30,6 +30,8 @@ struct SilkwebApp: App {
                 Divider()
                 Button("Open Folder in Place…") { workspace.chooseFolder() }
                     .keyboardShortcut("o")
+                Button("Quick Open…") { workspace.search.toggleQuickOpen() }
+                    .keyboardShortcut("o", modifiers: [.command, .shift]).disabled(workspace.snapshot == nil)
                 Button("Import Folder Copy…") { workspace.chooseImportFolder() }
                     .keyboardShortcut("i", modifiers: [.command, .shift]).disabled(!workspace.canMutate)
                 Button("New Library…") { workspace.newLibrary() }

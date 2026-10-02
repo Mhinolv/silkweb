@@ -6,17 +6,20 @@ struct FindMenu: View {
 
     var body: some View {
         Menu("Find") {
-            Button("Find…") { workspace.find(.showFindInterface) }.keyboardShortcut("f")
+            Button("Find…") { workspace.find(.showFindInterface) }.keyboardShortcut("f").disabled(!workspace.canFind)
             Button("Find and Replace…") { workspace.find(.showReplaceInterface) }
                 .keyboardShortcut("f", modifiers: [.command, .option])
-                .disabled(workspace.editor.readOnly)
-            Button("Find Next") { workspace.find(.nextMatch) }.keyboardShortcut("g")
+                .disabled(!workspace.canFind || workspace.editor.readOnly)
+            Button("Find Next") { workspace.find(.nextMatch) }.keyboardShortcut("g").disabled(!workspace.canFind)
             Button("Find Previous") { workspace.find(.previousMatch) }
-                .keyboardShortcut("g", modifiers: [.command, .shift])
-            Button("Use Selection for Find") { workspace.find(.setSearchString) }.keyboardShortcut("e")
-            Button("Jump to Selection") { workspace.jumpToSelection() }.keyboardShortcut("j")
+                .keyboardShortcut("g", modifiers: [.command, .shift]).disabled(!workspace.canFind)
+            Button("Use Selection for Find") { workspace.find(.setSearchString) }.keyboardShortcut("e").disabled(!workspace.canFind)
+            Button("Jump to Selection") { workspace.jumpToSelection() }.keyboardShortcut("j").disabled(!workspace.canFind)
+            Divider()
+            Button("Search Library…") { workspace.search.focusRequest += 1 }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .disabled(workspace.snapshot == nil)
         }
-        .disabled(!workspace.canFind)
     }
 }
 

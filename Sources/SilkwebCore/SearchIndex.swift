@@ -139,13 +139,23 @@ public actor SearchIndex {
         recents.opened[id] = nil
     }
 
-    public func recordOpened(_ id: UUID, at date: Date = Date()) throws {
+    public func recordOpened(_ id: UUID, at date: Date = Date(), persist: Bool = true) throws {
         recents.opened[id] = date
         // Bound persisted navigation history, independently of the derived cache.
         if recents.opened.count > 200 {
             recents.opened = Dictionary(uniqueKeysWithValues: recents.opened.sorted { $0.value > $1.value }.prefix(200).map { ($0.key, $0.value) })
         }
-        try write(recents, name: "search-recents.json")
+        if persist { try write(recents, name: "search-recents.json") }
+    }
+
+    /// Only documents actually opened, ranked by their persisted open time.
+    public func recentResults(limit: Int = 12) async throws -> [SearchResult] {
+        let recentEntries = entries.values.filter { recents.opened[$0.record.id] != nil }
+        let folders = folders, opened = recents.opened
+        let worker = Task.detached(priority: .userInitiated) {
+            try Self.search(SearchQuery("", mode: .quickOpen, limit: limit), entries: recentEntries, folders: folders, opened: opened)
+        }
+        return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
     }
 
     public func query(_ query: SearchQuery) async throws -> [SearchResult] {

@@ -5,6 +5,7 @@ import SilkwebCore
 @MainActor @Observable
 final class LibraryWorkspace {
     let editor = DocumentSession()
+    let search = LibrarySearch()
     let preview: PreviewCoordinator
     @ObservationIgnored private let defaults: UserDefaults
 
@@ -28,6 +29,7 @@ final class LibraryWorkspace {
 
     func install(_ snapshot: LibrarySnapshot) {
         self.snapshot = snapshot
+        search.install(snapshot)
         itemPathsByID = Dictionary(uniqueKeysWithValues: snapshot.metadata.IDsByPath.map { ($0.value, $0.key) })
         documentCache = nil
         presentationRevision += 1
@@ -104,7 +106,7 @@ final class LibraryWorkspace {
         snapshot?.folders.first { $0.relativePath == session.selectedFolder }?.name ?? "All Documents"
     }
     var subtitle: String {
-        "\(documents.count.formatted()) documents" + (includesSubfolders ? " (with subfolders)" : "")
+        search.text.isEmpty ? "\(documents.count.formatted()) documents" + (includesSubfolders ? " (with subfolders)" : "") : "\(search.results.count.formatted()) results"
     }
 
     func restore() {
@@ -184,6 +186,7 @@ final class LibraryWorkspace {
             dragIdentity = UUID()
             rename = nil
             guard await editor.open(nil, readOnly: false) else { return }
+            search.reset()
             watcher?.stop()
             watcher = nil
             await editor.configure(root: url)
@@ -312,7 +315,7 @@ final class LibraryWorkspace {
         navigate(folder: path, documents: [])
     }
 
-    private func navigate(folder: String?, documents: Set<String>) {
+    func navigate(folder: String?, documents: Set<String>) {
         guard !loading, !mutating else { return }
         let previous = navigationTask
         navigationTask = Task {
@@ -323,6 +326,10 @@ final class LibraryWorkspace {
             guard await editor.open(destination, readOnly: snapshot?.isReadOnly == true) else { return }
             session.selectedFolder = folder
             session.selectedDocuments = documents
+            if let path = documents.count == 1 ? documents.first : nil,
+               let id = snapshot?.metadata.IDsByPath[path], let index = search.index {
+                try? await index.recordOpened(id, persist: snapshot?.isReadOnly == false)
+            }
         }
     }
 
@@ -370,6 +377,11 @@ struct LibraryWorkspaceView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 560)
+        .overlay {
+            if workspace.search.showsQuickOpen {
+                QuickOpenPanel(workspace: workspace)
+            }
+        }
         .alert(workspace.mutationErrorTitle, isPresented: Binding(get: { workspace.mutationError != nil }, set: { if !$0 { workspace.mutationError = nil } })) {
             if !workspace.mutationRevealURLs.isEmpty {
                 Button(workspace.mutationRevealTitle) {
