@@ -25,6 +25,8 @@ struct SnapshotScenario {
     var mediaMigration: String? = nil
     var tableInsert: String? = nil
     var focusOutline = false
+    /// Draw the editor caret (normally hidden in captures) right after this source text.
+    var visibleCaret: String? = nil
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
     static let image = "Snapshot Fixtures/Image Fixture.md"
@@ -43,7 +45,7 @@ struct SnapshotScenario {
         .init(name: "empty-folder", folder: "Snapshot Fixtures/Empty Folder"),
         .init(name: "outline-empty", document: "Snapshot Fixtures/Empty Document.md", outline: true),
         .init(name: "search-empty", searchQuery: "silkweb-no-matches-fixture"),
-        .init(name: "editor-document", document: "Snapshot Fixtures/Editor Typography.md", tabs: ["Snapshot Fixtures/Editor Typography.md"]),
+        .init(name: "editor-document", document: "Snapshot Fixtures/Editor Typography.md", tabs: ["Snapshot Fixtures/Editor Typography.md"], visibleCaret: "Body:"),
         .init(name: "tabs-multi-selection", tabs: [pourOver], selectedDocuments: [pourOver, image]),
         .init(name: "editor-long-scrolled-end", document: "Snapshot Fixtures/Long Document.md", tabs: [pourOver, "Snapshot Fixtures/Long Document.md"], scrollToEnd: true, legacyScroller: true),
         .init(name: "editor-image", document: image),
@@ -495,7 +497,7 @@ final class SnapshotHarness {
                 guard let view = window.contentView?.superview else { throw SnapshotFailure.error("Window frame view is missing") }
                 view.layoutSubtreeIfNeeded()
                 // Hide ordinary editor carets; preserve the rename field's selected base name.
-                for editor in Self.descendants(view).compactMap({ $0 as? PlainMarkdownTextView }) {
+                for editor in Self.descendants(view).compactMap({ $0 as? PlainMarkdownTextView }) where scenario.visibleCaret == nil {
                     editor.insertionPointColor = .clear
                 }
                 if scenario.name == "empty-document", let editor = workspace.preview.editor { window.makeFirstResponder(editor) }
@@ -505,6 +507,35 @@ final class SnapshotHarness {
                 guard !window.isVisible, activationIsSafe else { throw SnapshotFailure.error("Offscreen invariant violated") }
                 guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw SnapshotFailure.error("Cannot allocate window bitmap") }
                 appearance.performAsCurrentDrawingAppearance { view.cacheDisplay(in: view.bounds, to: bitmap) }
+                // AppKit paints no caret in a window that is not key, and an offscreen window
+                // never is. Paint the production caret rect (textHeightInsertionRect) in the
+                // production insertionPointColor instead; EditorCaretTests cover the
+                // drawInsertionPoint path itself.
+                if let marker = scenario.visibleCaret, let editor = workspace.preview.editor {
+                    let found = (editor.string as NSString).range(of: marker)
+                    guard found.location != NSNotFound else { throw SnapshotFailure.error("Missing caret text") }
+                    editor.setSelectedRange(NSRange(location: NSMaxRange(found), length: 0))
+                    let caret = editor.textHeightInsertionRect(for: editor.lineFragmentCaretRect(at: NSMaxRange(found)))
+                    var caretRect = editor.convert(caret, to: view)
+                    // Bitmap rows run top-down.
+                    if !view.isFlipped { caretRect.origin.y = view.bounds.height - caretRect.maxY }
+                    let scale = CGFloat(bitmap.pixelsHigh) / view.bounds.height
+                    var color: NSColor?
+                    appearance.performAsCurrentDrawingAppearance { color = editor.insertionPointColor.usingColorSpace(.genericRGB) }
+                    guard let color else { throw SnapshotFailure.error("Cannot resolve caret color") }
+                    // NSBitmapImageRep.setColor ignores this cached-display rep, so write RGBA bytes.
+                    guard let pixels = bitmap.bitmapData, bitmap.bitsPerPixel == 32, !bitmap.isPlanar else { throw SnapshotFailure.error("Unexpected bitmap layout") }
+                    let channels = [color.redComponent, color.greenComponent, color.blueComponent, 1].map { UInt8(($0 * 255).rounded()) }
+                    for y in Int((caretRect.minY * scale).rounded())..<Int((caretRect.maxY * scale).rounded()) {
+                        for x in Int((caretRect.minX * scale).rounded())..<Int((caretRect.maxX * scale).rounded()) {
+                            for (offset, value) in channels.enumerated() { pixels[y * bitmap.bytesPerRow + x * 4 + offset] = value }
+                        }
+                    }
+                    let sample = (x: Int(caretRect.midX * scale), y: Int(caretRect.midY * scale))
+                    if bitmap.colorAt(x: sample.x, y: sample.y) != color {
+                        throw SnapshotFailure.error("Editor caret was not drawn at \(caretRect)")
+                    }
+                }
                 // cacheDisplay preserves transparent SwiftUI/material regions; provide the
                 // same semantic backdrop as the real window, behind the captured pixels.
                 guard let bitmapContext = NSGraphicsContext(bitmapImageRep: bitmap) else { throw SnapshotFailure.error("Cannot create bitmap context") }

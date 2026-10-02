@@ -91,7 +91,7 @@ struct MarkdownTextView: NSViewRepresentable {
         text.typingAttributes = [.font: text.font!, .paragraphStyle: paragraph, .foregroundColor: NSColor.labelColor]
         text.textColor = .labelColor
         text.backgroundColor = .textBackgroundColor
-        text.insertionPointColor = .controlAccentColor
+        text.insertionPointColor = .textColor
         text.isVerticallyResizable = true
         text.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         text.isHorizontallyResizable = false
@@ -392,6 +392,8 @@ final class PlainMarkdownTextView: NSTextView {
     }
 
     override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+        // Shorten before super so AppKit erases exactly the rect it drew.
+        let rect = textHeightInsertionRect(for: rect)
         super.drawInsertionPoint(in: rect, color: color, turnedOn: flag)
         // NSTextView clears the caret directly, without calling draw(_:).
         // Restore the placeholder under that narrow strip when the caret turns off.
@@ -401,6 +403,49 @@ final class PlainMarkdownTextView: NSTextView {
             drawBackground(in: rect)
             NSGraphicsContext.restoreGraphicsState()
         }
+    }
+
+    /// AppKit spans the whole line fragment, including the 1.6× leading. Keep its x and
+    /// width, but cover only the ascender and descender of the font at the caret,
+    /// standing on the text baseline. Metrics are read at draw time, never hard-coded.
+    func textHeightInsertionRect(for rect: NSRect) -> NSRect {
+        guard let layout = layoutManager, let container = textContainer else { return rect }
+        let font = typingAttributes[.font] as? NSFont ?? style.bodyFont
+        let ascent = font.ascender, descent = abs(font.descender)
+        let origin = textContainerOrigin
+        let point = NSPoint(x: rect.midX - origin.x, y: rect.midY - origin.y)
+        let extra = layout.extraLineFragmentRect
+        let baseline: CGFloat
+        if !extra.isEmpty, point.y >= extra.minY {
+            // TextKit 1 places the extra leading above the glyphs, as on body lines.
+            baseline = extra.maxY - descent + origin.y
+        } else {
+            let count = layout.numberOfGlyphs
+            guard count > 0 else { return rect }
+            // Prefer the selection's glyph (or the one before it at the end); point lookup
+            // lands on the previous line for empty lines, so use it only for other carets.
+            let source = string as NSString
+            var glyph = min(layout.glyphIndexForCharacter(at: max(0, min(selectedRange().location, source.length - 1))), count - 1)
+            var glyphs = NSRange()
+            var fragment = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: &glyphs)
+            if point.y < fragment.minY || point.y >= fragment.maxY {
+                glyph = layout.glyphIndex(for: point, in: container)
+                fragment = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: &glyphs)
+            }
+            if glyphs.length == 1, source.character(at: layout.characterIndexForGlyph(at: glyph)) == 0x0A {
+                // An empty line's newline glyph has no usable location; like the extra
+                // fragment, its leading sits above the glyph box.
+                baseline = fragment.maxY - descent + origin.y
+            } else {
+                baseline = fragment.minY + layout.location(forGlyphAt: glyph).y + origin.y
+            }
+        }
+        // Whole points (whole pixels at 1× and 2×), so erasing leaves no anti-aliased
+        // caret edges; never grow past the rect AppKit passed.
+        let top = max(ceil(rect.minY), (baseline - ascent).rounded())
+        let bottom = min(floor(rect.maxY), top + ceil(ascent + descent))
+        guard bottom > top else { return rect }
+        return NSRect(x: rect.minX, y: top, width: rect.width, height: bottom - top)
     }
 
     private func drawPlaceholder() {
