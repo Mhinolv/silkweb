@@ -7,7 +7,7 @@ public struct WritingPreferences: Codable, Equatable, Sendable {
     public var fontFamily = "Menlo"
     public var fontSize = 15.0
     public var lineHeight = 1.6
-    public var maximumWidth = 720.0
+    public var maximumWidth = 660.0
 
     public init() {}
 
@@ -21,11 +21,11 @@ public struct WritingPreferences: Codable, Equatable, Sendable {
         fontFamily = try values.decodeIfPresent(String.self, forKey: .fontFamily) ?? "Menlo"
         fontSize = try values.decodeIfPresent(Double.self, forKey: .fontSize) ?? 15
         lineHeight = try values.decodeIfPresent(Double.self, forKey: .lineHeight) ?? 1.6
-        maximumWidth = try values.decodeIfPresent(Double.self, forKey: .maximumWidth) ?? 720
+        maximumWidth = try values.decodeIfPresent(Double.self, forKey: .maximumWidth) ?? 660
         if fontFamily.isEmpty { fontFamily = "Menlo" }
         if !fontSize.isFinite || fontSize <= 0 { fontSize = 15 }
         if !lineHeight.isFinite || lineHeight <= 0 { lineHeight = 1.6 }
-        if !maximumWidth.isFinite || maximumWidth <= 0 { maximumWidth = 720 }
+        if !maximumWidth.isFinite || maximumWidth <= 0 { maximumWidth = 660 }
     }
 
     /// No payload existed before 1.47. Reading does not rewrite user settings.

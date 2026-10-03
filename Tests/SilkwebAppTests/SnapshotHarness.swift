@@ -67,6 +67,9 @@ struct SnapshotScenario {
         .init(name: "sidebar-resized", folder: "Coffee", resizeSidebar: true),
         .init(name: "sidebar-folder-rename", folder: "Coffee", rename: true),
         .init(name: "folder-selected", folder: "Coffee/Brewing Guides"),
+        // silkweb-1.62: one surface, hairlines, capsules, underline tab, status strip with “Saved” trailing.
+        .init(name: "redesign-one-surface", folder: "Coffee/Brewing Guides", document: pourOver, outline: true,
+              tabs: [pourOver, "Coffee/Why I Switched to Light Roasts.md"]),
         .init(name: "empty-folder", folder: "Snapshot Fixtures/Empty Folder"),
         .init(name: "outline-empty", document: "Snapshot Fixtures/Empty Document.md", outline: true),
         .init(name: "search-empty", searchQuery: "silkweb-no-matches-fixture"),

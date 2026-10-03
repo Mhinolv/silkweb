@@ -9,12 +9,12 @@ final class WritingPreferencesTests: XCTestCase {
             XCTAssertEqual(preferences.fontFamily, "Menlo")
             XCTAssertEqual(preferences.fontSize, 15)
             XCTAssertEqual(preferences.lineHeight, 1.6)
-            XCTAssertEqual(preferences.maximumWidth, 720)
+            XCTAssertEqual(preferences.maximumWidth, 660)
         }
         for family in ["Menlo", "Helvetica", "future-font"] {
             for size in [1.0, 15, 144] {
                 for spacing in [1.2, 1.35, 1.5, 1.6, 1.75, 2] {
-                    for width in [1.0, 720, 4096] {
+                    for width in [1.0, 660, 720, 4096] {
                         let json = "{\"fontFamily\":\"\(family)\",\"fontSize\":\(size),\"lineHeight\":\(spacing),\"maximumWidth\":\(width)}"
                         let value = try JSONDecoder().decode(WritingPreferences.self, from: Data(json.utf8))
                         XCTAssertEqual(value.fontFamily, family)

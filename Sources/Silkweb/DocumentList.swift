@@ -115,7 +115,7 @@ struct DocumentDetail: View {
     @State private var isNarrow = true
     var body: some View {
         VStack(spacing: 0) {
-            if !workspace.tabs.isEmpty { EditorTabBar(workspace: workspace).frame(height: 28) }
+            if !workspace.tabs.isEmpty { EditorTabBar(workspace: workspace).frame(height: Spacing.tabBarHeight) }
             MediaMigrationBanner(workspace: workspace)
             if workspace.snapshot?.isReadOnly == true {
                 Label("This library is read-only. Documents can be viewed, but changes can’t be saved.", systemImage: "lock")
@@ -131,6 +131,7 @@ struct DocumentDetail: View {
                         .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12)
                         .frame(height: 24).paneStrip(hairline: .top)
                 }
+                DocumentStatusBar(session: workspace.editor, readOnlyLibrary: workspace.snapshot?.isReadOnly == true)
             } else if workspace.session.selectedDocuments.count > 1 {
                 ContentUnavailableView("\(workspace.session.selectedDocuments.count) Documents Selected", systemImage: "doc.on.doc")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -160,5 +161,50 @@ struct DocumentDetail: View {
 
     private func render() {
         workspace.preview.schedule(text: workspace.editor.text, document: workspace.editor.url, root: workspace.root)
+    }
+}
+
+/// Writing metrics lead (1.25 fills `statusCounts`); save state trails. Pane surface and one hairline only.
+struct DocumentStatusBar: View {
+    let session: DocumentSession
+    let readOnlyLibrary: Bool
+
+    enum SaveLabel: String {
+        case saved = "Saved", edited = "Edited", notSaved = "Not Saved", readOnly = "Read-only"
+
+        init(state: DocumentSaveState, readOnly: Bool) {
+            if readOnly { self = .readOnly; return }
+            switch state {
+            case .clean: self = .saved
+            case .dirty, .saving: self = .edited
+            // The editor banner explains the failure or conflict.
+            case .failed, .conflict: self = .notSaved
+            }
+        }
+    }
+
+    var label: SaveLabel { SaveLabel(state: session.state, readOnly: readOnlyLibrary || session.readOnly) }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 14) {}
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("statusCounts")
+            Spacer(minLength: Spacing.medium)
+            Text(label.rawValue)
+                .font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
+                .accessibilityIdentifier("statusSaveState")
+        }
+        .padding(.horizontal, Spacing.medium)
+        .frame(height: Spacing.statusBarHeight)
+        .paneStrip(hairline: .top)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Status")
+        // Saved ⇄ Edited follows typing; announce only failures and their recovery.
+        .onChange(of: label) { old, new in
+            guard new == .notSaved || old == .notSaved else { return }
+            NSAccessibility.post(element: NSApplication.shared, notification: .announcementRequested,
+                                 userInfo: [.announcement: new.rawValue, .priority: NSAccessibilityPriorityLevel.low.rawValue])
+        }
     }
 }

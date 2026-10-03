@@ -37,7 +37,7 @@ final class EditorTabBarView: NSView {
         overflow.toolTip = "All document tabs"
         addSubview(overflow)
         indicator.wantsLayer = true
-        indicator.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        indicator.layer?.backgroundColor = NSColor.silkwebAccent.cgColor
         indicator.isHidden = true
         strip.addSubview(indicator)
         setAccessibilityElement(true)
@@ -74,14 +74,16 @@ final class EditorTabBarView: NSView {
         let available = max(0, bounds.width - 28)
         scroll.frame = NSRect(x: 0, y: 1, width: available, height: max(0, bounds.height - 1))
         overflow.frame = NSRect(x: available, y: 0, width: 28, height: bounds.height)
+        // Tabs fill the strip above the bottom hairline.
+        let height = max(0, bounds.height - 1)
         let width = min(220, max(110, available / CGFloat(max(1, buttons.count))))
-        strip.frame = NSRect(x: 0, y: 0, width: max(available, width * CGFloat(buttons.count)), height: 27)
+        strip.frame = NSRect(x: 0, y: 0, width: max(available, width * CGFloat(buttons.count)), height: height)
         for (index, button) in buttons.enumerated() {
-            button.frame = NSRect(x: CGFloat(index) * width, y: 0, width: width, height: 27)
+            button.frame = NSRect(x: CGFloat(index) * width, y: 0, width: width, height: height)
         }
         if shownActiveID != workspace.activeTabID {
             shownActiveID = workspace.activeTabID
-            buttons.first { $0.tab.id == shownActiveID }?.scrollToVisible(NSRect(x: 0, y: 0, width: width, height: 27))
+            buttons.first { $0.tab.id == shownActiveID }?.scrollToVisible(NSRect(x: 0, y: 0, width: width, height: height))
         }
     }
 
@@ -97,7 +99,7 @@ final class EditorTabBarView: NSView {
         let location = strip.convert(point, from: nil)
         let gap = min(buttons.count, max(0, Int((location.x / max(1, first.frame.width) + 0.5).rounded(.down))))
         insertionGap = gap
-        indicator.frame = NSRect(x: min(strip.bounds.width - 2, CGFloat(gap) * first.frame.width), y: 0, width: 2, height: 27)
+        indicator.frame = NSRect(x: min(strip.bounds.width - 2, CGFloat(gap) * first.frame.width), y: 0, width: 2, height: strip.bounds.height)
         indicator.isHidden = false
         strip.addSubview(indicator, positioned: .above, relativeTo: nil)
     }
@@ -144,11 +146,12 @@ final class EditorTabButton: NSView {
     func refresh() {
         let active = bar?.workspace.activeTabID == tab.id
         title.stringValue = tab.editor.name
-        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let font = NSFont.systemFont(ofSize: 12)
         title.font = tab.isPreview ? NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) : font
         title.textColor = active ? .labelColor : .secondaryLabelColor
         close.title = tab.editor.state.isDirty && !hovered ? "•" : "×"
-        close.isHidden = !active && !hovered && !tab.editor.state.isDirty
+        // × only on hover; a dirty tab keeps its • in the same slot.
+        close.isHidden = !hovered && !tab.editor.state.isDirty
         close.setAccessibilityLabel("Close \(tab.editor.name)")
         close.toolTip = "Close \(tab.editor.name)"
         toolTip = tab.isPreview ? "Preview — edit or double-click to keep this tab open" : tab.editor.name
@@ -159,12 +162,18 @@ final class EditorTabButton: NSView {
     }
     override func layout() {
         super.layout()
-        close.frame = NSRect(x: 6, y: 5, width: 16, height: 16)
-        title.frame = NSRect(x: 26, y: 5, width: max(0, bounds.width - 52), height: 18)
+        close.frame = NSRect(x: 6, y: (bounds.height - 16) / 2, width: 16, height: 16)
+        title.frame = NSRect(x: 26, y: (bounds.height - 16) / 2, width: max(0, bounds.width - 52), height: 16)
     }
+    static let underlineHeight: CGFloat = 2
     override func draw(_ dirtyRect: NSRect) {
-        // The active tab sits on the pane color; its title and the accent indicator mark it.
-        if bar?.workspace.activeTabID != tab.id, hovered { NSColor.quaternaryLabelColor.setFill(); bounds.fill() }
+        // The active tab sits on the pane color, marked by its title and a 2 pt ink underline.
+        if bar?.workspace.activeTabID == tab.id {
+            NSColor.labelColor.setFill()
+            NSRect(x: 0, y: 0, width: bounds.width, height: Self.underlineHeight).fill()
+        } else if hovered {
+            NSColor.quaternarySystemFill.setFill(); bounds.fill()
+        }
     }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

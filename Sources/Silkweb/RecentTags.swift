@@ -83,8 +83,8 @@ final class TagPillButton: NSButton {
         let selected = state != .off
         let fill: NSColor
         if selected {
-            let alpha: CGFloat = isHighlighted ? 0.7 : hovering && isEnabled ? 0.85 : state == .mixed ? 0.18 : 1
-            fill = NSColor.controlAccentColor.withAlphaComponent(alpha)
+            let alpha: CGFloat = isHighlighted ? 0.7 : hovering && isEnabled ? 0.85 : 1
+            fill = NSColor.silkwebSelection.withAlphaComponent(alpha)
         } else {
             fill = isHighlighted ? .secondarySystemFill : hovering && isEnabled ? .tertiarySystemFill : .quaternarySystemFill
         }
@@ -93,10 +93,10 @@ final class TagPillButton: NSButton {
         let capsule = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 11, yRadius: 11)
         fill.setFill(); capsule.fill()
         if state != .on {
-            (state == .mixed ? NSColor.controlAccentColor : NSColor.separatorColor).setStroke()
+            (state == .mixed ? NSColor.silkwebAccent : NSColor.separatorColor).setStroke()
             capsule.lineWidth = state == .mixed ? 1 : 0.5; capsule.stroke()
         }
-        let color: NSColor = state == .on ? .alternateSelectedControlTextColor : .labelColor
+        let color: NSColor = state == .on ? .silkwebAccent : .labelColor
         var x: CGFloat = 10
         if selected {
             let symbol = state == .on ? "checkmark" : "minus"
@@ -164,7 +164,7 @@ extension TagInputField {
     private func highlightCompletion() {
         for (index, button) in completionRows.enumerated() {
             if index == completionIndex { button.scrollToVisible(button.bounds) }
-            button.contentTintColor = index == completionIndex ? .controlAccentColor : .labelColor
+            button.contentTintColor = index == completionIndex ? .silkwebAccent : .labelColor
         }
     }
     func dismissCompletions() {

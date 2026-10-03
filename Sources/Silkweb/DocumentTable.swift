@@ -103,6 +103,10 @@ struct DocumentTable: NSViewRepresentable {
 
         func numberOfRows(in tableView: NSTableView) -> Int { documents.count }
 
+        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+            CapsuleRowView(cornerRadius: 8)
+        }
+
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             let identifier = NSUserInterfaceItemIdentifier("documentCell")
             if let host = tableView.makeView(withIdentifier: identifier, owner: self) as? NSHostingView<DocumentRow> {

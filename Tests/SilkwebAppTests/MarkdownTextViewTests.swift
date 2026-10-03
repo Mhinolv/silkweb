@@ -16,7 +16,7 @@ final class MarkdownTextViewTests: XCTestCase {
         let paragraph = "A Markdown paragraph with Unicode: café, 日本語, 👩🏽‍💻.\n\n"
         let documents = ["", "x", String(repeating: paragraph, count: 100)]
         let boundary = style.maximumWidth + 2 * style.horizontalInset
-        let widths: [CGFloat] = [0, 1, 39, 79, 80, 81, 320, boundary - 1, boundary, boundary + 1, 1200, 4096]
+        let widths: [CGFloat] = [0, 1, 39, 47, 95, 96, 97, 320, boundary - 1, boundary, boundary + 1, 1200, 4096]
         let heights: [CGFloat] = [0, 1, 24, 200, 760, 2160]
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 4096, height: 2160))
         host.addSubview(scroll)
@@ -33,9 +33,9 @@ final class MarkdownTextViewTests: XCTestCase {
                     text.layoutManager?.ensureLayout(for: container)
                     text.layoutEditor()
                     let viewport = scroll.contentSize
-                    let expectedWidth = max(1, min(style.maximumWidth, viewport.width - 80))
+                    let expectedWidth = max(1, min(style.maximumWidth, viewport.width - 2 * style.horizontalInset))
                     XCTAssertEqual(container.containerSize.width, expectedWidth, accuracy: 0.001)
-                    XCTAssertEqual(text.textContainerInset.width, max(40, (viewport.width - expectedWidth) / 2), accuracy: 0.001)
+                    XCTAssertEqual(text.textContainerInset.width, max(style.horizontalInset, (viewport.width - expectedWidth) / 2), accuracy: 0.001)
                     XCTAssertEqual(text.textContainerInset.height, 16)
                     XCTAssertEqual(scroll.contentInsets.bottom, 0, accuracy: 0.001)
                     XCTAssertEqual(text.minSize.height, viewport.height, accuracy: 0.001)

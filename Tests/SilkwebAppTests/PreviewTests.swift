@@ -42,7 +42,7 @@ final class PreviewTests: XCTestCase {
         let deadline = Date().addingTimeInterval(3)
         while preview.html.isEmpty && Date() < deadline { try await Task.sleep(for: .milliseconds(25)) }
         XCTAssertTrue(preview.html.contains("<style>" + HeadingPalette.previewCSS))
-        XCTAssertTrue(preview.html.contains("padding: 16px 40px 80px"), "Bundled stylesheet must load")
+        XCTAssertTrue(preview.html.contains("padding: 16px 48px 80px"), "Bundled stylesheet must load")
         XCTAssertTrue(preview.html.contains("h6 { font-size: .9375em"))
         XCTAssertTrue(preview.html.contains("border-bottom: 1px solid -apple-system-separator"))
     }
@@ -215,7 +215,7 @@ final class PreviewTests: XCTestCase {
                 body: getComputedStyle(document.body).fontSize,
                 top: title.getBoundingClientRect().top, border: style.borderBottomWidth,
                 padding: style.paddingBottom, width: title.getBoundingClientRect().width,
-                column: article.clientWidth - 80,
+                column: article.clientWidth - 96,
                 gap: subtitle.getBoundingClientRect().top - title.getBoundingClientRect().bottom,
                 color: style.color, allTinted: headings.every(h => getComputedStyle(h).color === style.color),
                 dark: matchMedia('(prefers-color-scheme: dark)').matches,

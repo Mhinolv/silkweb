@@ -43,7 +43,7 @@ struct FolderSidebar: NSViewRepresentable {
         outline.headerView = nil
         outline.style = .sourceList
         outline.backgroundColor = .silkwebPaneBackground
-        outline.rowHeight = 24
+        outline.rowHeight = Spacing.sidebarRowHeight
         outline.delegate = coordinator
         outline.dataSource = coordinator
         outline.registerForDraggedTypes([NSPasteboard.PasteboardType(UTType.silkwebMove.identifier)])
@@ -236,6 +236,9 @@ struct FolderSidebar: NSViewRepresentable {
         func outlineView(_ outlineView: NSOutlineView, objectValueFor tableColumn: NSTableColumn?, byItem item: Any?) -> Any? {
             (item as? Item)?.title
         }
+        func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+            CapsuleRowView(cornerRadius: 6)
+        }
         func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
             guard let item = item as? Item else { return nil }
             let identifier = NSUserInterfaceItemIdentifier("folderCell")
@@ -329,7 +332,6 @@ struct FolderSidebar: NSViewRepresentable {
             cell.imageView?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
             cell.configureCluster(unreadable: item.folder?.isUnreadable == true, renaming: cell.renameField != nil)
             let label = item.folder.map { "\(item.title), \($0.parentID == nil ? "library" : "folder")" } ?? item.title
-            cell.imageView?.contentTintColor = .secondaryLabelColor
             cell.setAccessibilityElement(true)
             cell.setAccessibilityLabel(item.folder?.isUnreadable == true ? "\(label), unreadable, permission denied" : label)
             if item.isTagsGroup { cell.setAccessibilityLabel("Tags") }
@@ -543,7 +545,7 @@ struct FolderSidebar: NSViewRepresentable {
     }
 }
 
-final class SidebarFolderCell: NSTableCellView {
+final class SidebarFolderCell: NSTableCellView, CapsuleAccessories {
     let lockBadge = NSImageView()
     let countBadge = NSTextField(labelWithString: "")
     var renameField: RenameNameField?
@@ -565,12 +567,18 @@ final class SidebarFolderCell: NSTableCellView {
         didSet { updateSecondaryColor() }
     }
 
-    private func updateSecondaryColor() {
-        let color: NSColor = backgroundStyle == .emphasized
-            ? NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.75)
+    /// Set by `CapsuleRowView`: the folder icon and `(N)` suffix tint sage on a focused capsule.
+    var capsuleFocused = false {
+        didSet { if capsuleFocused != oldValue { updateSecondaryColor() } }
+    }
+
+    func updateSecondaryColor() {
+        let color: NSColor = capsuleFocused ? .silkwebAccent
+            : backgroundStyle == .emphasized ? NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.75)
             : .secondaryLabelColor
         countBadge.textColor = color
         lockBadge.contentTintColor = color
+        imageView?.contentTintColor = color
     }
 }
 

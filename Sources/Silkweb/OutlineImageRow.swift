@@ -16,7 +16,7 @@ struct OutlineImageRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Rectangle().fill(current && !selected ? Color.accentColor : .clear).frame(width: 3)
+            Rectangle().fill(current && !selected ? Color.silkwebAccent : .clear).frame(width: 3)
             HStack(spacing: 6) {
                 ZStack {
                     Color(nsColor: .quaternarySystemFill)

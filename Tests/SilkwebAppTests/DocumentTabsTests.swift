@@ -210,7 +210,7 @@ final class DocumentTabsTests: XCTestCase {
                 workspace.preview.mode = mode
                 try await settle()
                 let singleBar = try bar().convert(try bar().bounds, to: host)
-                XCTAssertEqual(singleBar.height, 28, accuracy: 1)
+                XCTAssertEqual(singleBar.height, Spacing.tabBarHeight, accuracy: 1)
                 let singleEditor = mode == .preview ? nil : try editorFrame()
                 await select("B", in: workspace, pinned: true)
                 try await settle()

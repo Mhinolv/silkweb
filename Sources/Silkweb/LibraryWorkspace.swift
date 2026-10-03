@@ -564,6 +564,8 @@ struct LibraryWorkspaceView: View {
         }
         .frame(minWidth: 900, minHeight: 560)
         .background(Color.silkwebPaneBackground.ignoresSafeArea())
+        // Silkweb-drawn SwiftUI accents are sage; native focus rings keep the system accent.
+        .tint(.silkwebAccent)
         // Unified chrome: the toolbar shares the pane color; one titlebar hairline remains.
         .toolbarBackground(Color.silkwebPaneBackground, for: .windowToolbar)
         .toolbarBackgroundVisibility(.visible, for: .windowToolbar)

@@ -126,7 +126,7 @@ struct InspectorView: View {
                                     isFirst: heading.id == preview.headings.first?.id)
         let selected = showsSelection(heading.id)
         return HStack(spacing: 8) {
-            Rectangle().fill(current && !selected ? Color.accentColor : .clear).frame(width: 3)
+            Rectangle().fill(current && !selected ? Color.silkwebAccent : .clear).frame(width: 3)
             Text(heading.text).font(.system(size: style.fontSize, weight: style.isSemibold ? .semibold : .regular))
                 .foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor) :
                                     Color(nsColor: current || heading.level <= 2 ? .labelColor : .secondaryLabelColor))

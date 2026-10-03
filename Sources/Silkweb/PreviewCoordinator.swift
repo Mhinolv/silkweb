@@ -87,7 +87,7 @@ final class PreviewCoordinator {
                 let items = OutlineItem.parse(text, headings: parsed.headings)
                 guard next.html else { return (parsed.headings, "", items) }
                 let fragment = HTMLRenderer.render(parsed, options: .init(libraryRoot: root, documentURL: document, offlinePreview: true))
-                let css = Self.stylesheet
+                let css = Self.stylesheet + "\n" + SilkwebTokens.previewCSS
                 let page = "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src silkweb-preview:; style-src 'unsafe-inline'; script-src 'none'\"><style>" + css + "</style></head><body>" + fragment + "</body></html>"
                 return (parsed.headings, page, items)
             }.value
