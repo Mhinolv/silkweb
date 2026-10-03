@@ -12,7 +12,9 @@ struct FolderSidebar: NSViewRepresentable {
         let title: String
         var tag: LibraryTag?
         var isTagsGroup = false
-        var children: [Item] = []
+        var children: [Item] = [] { didSet { for child in children { child.parent = self } } }
+        /// Thread guides walk up through parents (silkweb-1.63).
+        weak var parent: Item?
         init(folder: LibraryFolder?, title: String) { self.folder = folder; self.title = title }
     }
 
@@ -44,6 +46,7 @@ struct FolderSidebar: NSViewRepresentable {
         outline.style = .sourceList
         outline.backgroundColor = .silkwebPaneBackground
         outline.rowHeight = Spacing.sidebarRowHeight
+        outline.indentationPerLevel = ThreadRowView.indentation
         outline.delegate = coordinator
         outline.dataSource = coordinator
         outline.registerForDraggedTypes([NSPasteboard.PasteboardType(UTType.silkwebMove.identifier)])
@@ -87,6 +90,7 @@ struct FolderSidebar: NSViewRepresentable {
             coordinator.rename = workspace.rename
             coordinator.restore()
         }
+        coordinator.updateCurrentNode()
         if coordinator.lastFocusRequest != workspace.focusRequest {
             coordinator.lastFocusRequest = workspace.focusRequest
             if workspace.focusColumn == 0, workspace.rename == nil {
@@ -118,6 +122,8 @@ struct FolderSidebar: NSViewRepresentable {
         var hovered: Item?
         var springTask: Task<Void, Never>?
         var springExpanded: [Item] = []
+        /// The scope the list shows; its row carries the coral node.
+        private(set) var currentItem: Item?
         private var hoverMonitor: Any?
         private var dragCache: (name: NSPasteboard.Name, count: Int, revision: Int, library: UUID, paths: [String]?)?
 
@@ -186,14 +192,50 @@ struct FolderSidebar: NSViewRepresentable {
             if item.isTagsGroup || item.tag != nil {
                 let count = item.tag.map { tagCounts[$0.id] ?? 0 } ?? tags.count
                 cell.countBadge.stringValue = FolderDocumentCount(direct: count, recursive: count).inlineSuffix
-                cell.setAccessibilityValue("\(count) \(item.isTagsGroup ? "tags" : "documents")")
+                cell.setAccessibilityValue("\(count) \(item.isTagsGroup ? "tags" : "documents")" + currentSuffix(item))
                 cell.toolTip = nil
                 return
             }
             let count = item.folder.flatMap { counts[$0.id] } ?? FolderDocumentCount(direct: totalCount, recursive: totalCount)
             cell.countBadge.stringValue = count.inlineSuffix
-            cell.setAccessibilityValue(count.accessibilityValue)
+            cell.setAccessibilityValue(count.accessibilityValue + currentSuffix(item))
             cell.toolTip = item.folder?.isUnreadable == true ? "You don't have permission to view this folder." : count.tooltip
+        }
+
+        private func currentSuffix(_ item: Item) -> String { item === currentItem ? ", current folder" : "" }
+
+        /// The list's scope: a selected tag, else the selected folder, else All Documents.
+        func scopeItem() -> Item? {
+            workspace.session.selectedTagID.flatMap { itemsByTag[$0] }
+                ?? (workspace.session.selectedFolder.flatMap { itemsByPath[$0] } ?? roots.first)
+        }
+
+        /// Moves the coral node by redrawing only the old and new rows.
+        func updateCurrentNode() {
+            let next = scopeItem()
+            guard next !== currentItem else { return }
+            let previous = currentItem
+            currentItem = next
+            guard let outline else { return }
+            for item in [previous, next].compactMap({ $0 }) {
+                let row = outline.row(forItem: item)
+                guard row >= 0 else { continue }
+                (outline.rowView(atRow: row, makeIfNecessary: false) as? ThreadRowView)?.isCurrent = item === next
+                if let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarFolderCell {
+                    applyCount(to: cell, item: item)
+                }
+            }
+        }
+
+        /// O(depth): the row's level and which guides pass through it.
+        func thread(for item: Item) -> ThreadRowView.Thread {
+            var chain = [item]
+            while let parent = chain.last?.parent { chain.append(parent) }
+            chain.reverse()
+            func isLast(_ item: Item) -> Bool { (item.parent?.children ?? roots).last === item }
+            return ThreadRowView.Thread(level: chain.count - 1, isLastChild: isLast(item),
+                                        ancestorContinues: chain.dropFirst().dropLast().map { !isLast($0) },
+                                        hasChildren: item.isTagsGroup || !item.children.isEmpty)
         }
 
         func restore() {
@@ -209,8 +251,7 @@ struct FolderSidebar: NSViewRepresentable {
                 if workspace.tagsExpanded { outline.expandItem(group) }
             }
             tagsExpanded = workspace.tagsExpanded
-            let item = workspace.session.selectedTagID.flatMap { itemsByTag[$0] }
-                ?? (workspace.session.selectedFolder.flatMap { itemsByPath[$0] } ?? roots.first)
+            let item = scopeItem()
             if let item {
                 var parent = outline.parent(forItem: item)
                 while let ancestor = parent {
@@ -222,6 +263,7 @@ struct FolderSidebar: NSViewRepresentable {
             }
             if item == nil { outline.deselectAll(nil) }
             restoring = false
+            updateCurrentNode()
         }
 
         func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
@@ -237,7 +279,13 @@ struct FolderSidebar: NSViewRepresentable {
             (item as? Item)?.title
         }
         func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
-            CapsuleRowView(cornerRadius: 6)
+            ThreadRowView()
+        }
+        /// Guides are set per added row only: expand/collapse never redraws the rest of the tree.
+        func outlineView(_ outlineView: NSOutlineView, didAdd rowView: NSTableRowView, forRow row: Int) {
+            guard let rowView = rowView as? ThreadRowView, let item = outlineView.item(atRow: row) as? Item else { return }
+            rowView.thread = thread(for: item)
+            rowView.isCurrent = item === currentItem
         }
         func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
             guard let item = item as? Item else { return nil }
@@ -579,6 +627,108 @@ final class SidebarFolderCell: NSTableCellView, CapsuleAccessories {
         countBadge.textColor = color
         lockBadge.contentTintColor = color
         imageView?.contentTintColor = color
+    }
+}
+
+/// A sidebar row hanging from 1.5 pt thread guides with rounded elbows; the scope row carries the coral node
+/// (silkweb-1.63). Drawn per row after the capsule: no layers and no whole-tree pass.
+final class ThreadRowView: CapsuleRowView {
+    struct Thread: Equatable {
+        var level: Int
+        var isLastChild: Bool
+        var ancestorContinues: [Bool]
+        var hasChildren: Bool
+    }
+
+    static let indentation: CGFloat = 16
+    /// AppKit's disclosure slot width in a source list.
+    static let slotWidth: CGFloat = 13
+    static let lineWidth: CGFloat = 1.5
+
+    var thread: Thread? { didSet { if thread != oldValue { needsDisplay = true } } }
+    var isCurrent = false { didSet { if isCurrent != oldValue { needsDisplay = true } } }
+
+    init() { super.init(cornerRadius: 6) }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Measured from the real outline so guides follow AppKit's own indentation.
+    var metrics: ThreadGuides.Metrics? {
+        guard let outline = superview as? NSOutlineView, let thread else { return nil }
+        let row = outline.row(for: self)
+        guard row >= 0 else { return nil }
+        let cellX = outline.frameOfCell(atColumn: 0, row: row).minX
+        return ThreadGuides.Metrics(leadingInset: cellX - CGFloat(thread.level) * outline.indentationPerLevel - Self.slotWidth,
+                                    indentation: outline.indentationPerLevel, slotWidth: Self.slotWidth, rowHeight: bounds.height)
+    }
+
+    /// Row-local y from a distance below the top edge.
+    private func y(_ distance: CGFloat) -> CGFloat { isFlipped ? bounds.minY + distance : bounds.maxY - distance }
+
+    var threadPath: NSBezierPath? {
+        guard let thread, let metrics else { return nil }
+        let dx = -frame.minX
+        let path = NSBezierPath()
+        path.lineWidth = Self.lineWidth
+        path.lineCapStyle = .butt
+        path.lineJoinStyle = .round
+        for segment in ThreadGuides.segments(level: thread.level, isLastChild: thread.isLastChild,
+                                             ancestorContinues: thread.ancestorContinues, hasChildren: thread.hasChildren, metrics: metrics) {
+            switch segment {
+            case .rail(let x):
+                path.move(to: NSPoint(x: x + dx, y: bounds.minY))
+                path.line(to: NSPoint(x: x + dx, y: bounds.maxY))
+            case .elbow(let x, let cornerY, let radius, let endX):
+                let k = 0.5523 * radius // Quarter-circle control distance.
+                path.move(to: NSPoint(x: x + dx, y: y(0)))
+                path.line(to: NSPoint(x: x + dx, y: y(cornerY - radius)))
+                path.curve(to: NSPoint(x: x + dx + radius, y: y(cornerY)),
+                           controlPoint1: NSPoint(x: x + dx, y: y(cornerY - radius + k)),
+                           controlPoint2: NSPoint(x: x + dx + radius - k, y: y(cornerY)))
+                path.line(to: NSPoint(x: endX + dx, y: y(cornerY)))
+            }
+        }
+        return path
+    }
+
+    /// The node's centre in row coordinates, when this row is the current scope.
+    var nodeCenter: NSPoint? {
+        guard isCurrent, let thread, let metrics else { return nil }
+        let node = ThreadGuides.node(level: thread.level, metrics: metrics)
+        return NSPoint(x: node.x - frame.minX, y: y(node.y))
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        NSColor.silkwebThread.setStroke()
+        threadPath?.stroke()
+        guard let center = nodeCenter else { return }
+        let diameter: CGFloat = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 8 : 7
+        let onCapsule = (isSelected || isTargetForDropOperation) && capsuleRect.contains(center)
+        let ring: NSColor = !onCapsule ? .silkwebPaneBackground : isTargetForDropOperation ? .silkwebSelection : style.fill
+        ring.setFill()
+        let outer = diameter / 2 + 2.5
+        NSBezierPath(ovalIn: NSRect(x: center.x - outer, y: center.y - outer, width: outer * 2, height: outer * 2)).fill()
+        NSColor.silkwebCoral.setFill()
+        NSBezierPath(ovalIn: NSRect(x: center.x - diameter / 2, y: center.y - diameter / 2, width: diameter, height: diameter)).fill()
+    }
+
+    /// Drop-on target: the focused capsule with a 1.5 pt sage outline; threads still draw on top.
+    override func drawDraggingDestinationFeedback(in dirtyRect: NSRect) {
+        NSColor.silkwebSelection.setFill()
+        NSBezierPath(roundedRect: capsuleRect, xRadius: cornerRadius, yRadius: cornerRadius).fill()
+        let outline = NSBezierPath(roundedRect: capsuleRect.insetBy(dx: 0.75, dy: 0.75), xRadius: cornerRadius, yRadius: cornerRadius)
+        outline.lineWidth = 1.5
+        NSColor.silkwebAccent.setStroke()
+        outline.stroke()
+    }
+
+    override var isTargetForDropOperation: Bool { didSet { needsDisplay = true } }
+
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        if let button = subview as? NSButton, button.identifier == NSOutlineView.disclosureButtonIdentifier {
+            button.contentTintColor = .tertiaryLabelColor
+        }
     }
 }
 

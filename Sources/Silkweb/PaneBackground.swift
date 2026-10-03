@@ -143,7 +143,7 @@ struct CapsuleStyle: Equatable {
 }
 
 /// Draws the selection as a rounded capsule inset from the column edges.
-final class CapsuleRowView: NSTableRowView {
+class CapsuleRowView: NSTableRowView {
     let cornerRadius: CGFloat
 
     init(cornerRadius: CGFloat) {

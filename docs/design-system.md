@@ -35,6 +35,7 @@ LIBRARY
     [tag]           draft (3)
     [tag]           research (9)
 ```
+- Nested rows hang from 1.5 pt `SilkwebThread` guides with 6 pt rounded elbows (16 pt per level, guide = centre of the parent's chevron slot; geometry in `ThreadGuides`); leading native chevrons tinted `tertiaryLabelColor`; a 7 pt coral node (8 pt under Increase Contrast) with a 2.5 pt ring marks the scope shown in the list — exactly one in the sidebar, appended to the row's AX value as “current folder” (1.63).
 - Sidebar counts are inline after the name: a space and the direct count in parentheses, `secondaryLabelColor`, same font as the title with monospaced digits, `(0)` shown. The name truncates first; the count never clips. No trailing count column.
 - Tags scroll in the same tree after the library root’s last visible descendant. The group count is distinct tags; child counts are documents. The group is a keyboard focus stop without changing document scope. Disclosure, double-click, and arrow keys expand/collapse; window session saves expansion (default expanded, selected tags reveal their group). Tag rows support inline rename and delete, but no drag/drop.
 - Info uses native rounded applied-tag chips and a Recent pill flow (six most recently applied library tags, naturally sorted; usage-count fallback for older indexes). Pills toggle on all selected notes, with selected and mixed states and named tag undo. Recency lives only in the versioned sidecar. Empty libraries hide Recent. Caption: “Saved in Silkweb’s index, not in the file.”

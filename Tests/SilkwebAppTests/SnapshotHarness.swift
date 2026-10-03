@@ -24,6 +24,10 @@ struct SnapshotScenario {
     var scrollToEnd = false
     var legacyScroller = false
     var resizeSidebar = false
+    /// Final sidebar width after the resize sweep.
+    var sidebarWidth: CGFloat? = nil
+    /// Folders expanded in addition to the default set.
+    var expanded: Set<String> = []
     var mediaMigration: String? = nil
     var tableInsert: String? = nil
     var exportWarning = false
@@ -65,6 +69,10 @@ struct SnapshotScenario {
         .init(name: "media-migration-progress", document: image, mediaMigration: "progress"),
         .init(name: "media-migration-failure", document: image, mediaMigration: "failure"),
         .init(name: "sidebar-resized", folder: "Coffee", resizeSidebar: true),
+        // silkweb-1.63: thread guides and the coral node at both sidebar width limits.
+        .init(name: "sidebar-resized-180", folder: "Coffee", resizeSidebar: true, sidebarWidth: 180),
+        .init(name: "sidebar-resized-320", folder: "Coffee", resizeSidebar: true, sidebarWidth: 320),
+        .init(name: "redesign-thread-sidebar", folder: "Vanlife", tagState: "expanded", expanded: ["Travel", "Travel/Japan"]),
         .init(name: "sidebar-folder-rename", folder: "Coffee", rename: true),
         .init(name: "folder-selected", folder: "Coffee/Brewing Guides"),
         // silkweb-1.62: one surface, hairlines, capsules, underline tab, status strip with “Saved” trailing.
@@ -225,6 +233,12 @@ final class SnapshotHarness {
         for name in ["A very long folder name that truncates before its count", "Private folder with a very long unreadable name"] {
             try FileManager.default.createDirectory(at: root.appendingPathComponent(name), withIntermediateDirectories: true)
         }
+        // The thread scenario selects Vanlife; supply it in the copy when the owner library has none.
+        let vanlife = root.appendingPathComponent("Vanlife")
+        if !FileManager.default.fileExists(atPath: vanlife.path) {
+            try FileManager.default.createDirectory(at: vanlife, withIntermediateDirectories: true)
+            try Data("# Road Notes\n".utf8).write(to: vanlife.appendingPathComponent("Road Notes.md"), options: .atomic)
+        }
         let fixtures = root.appendingPathComponent("Snapshot Fixtures")
         try FileManager.default.createDirectory(at: fixtures, withIntermediateDirectories: true)
         let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 400, pixelsHigh: 240,
@@ -309,7 +323,7 @@ final class SnapshotHarness {
     private func configure(_ scenario: SnapshotScenario, workspace: LibraryWorkspace) async throws {
         guard let snapshot = workspace.snapshot else { throw SnapshotFailure.error("Library did not scan") }
         workspace.session = LibrarySession()
-        workspace.session.expandedFolders = ["", "Coffee", "Coffee/Brewing Guides", "Snapshot Fixtures"]
+        workspace.session.expandedFolders = Set(["", "Coffee", "Coffee/Brewing Guides", "Snapshot Fixtures"]).union(scenario.expanded)
         workspace.session.selectedFolder = scenario.folder
         if let folder = scenario.folder, !snapshot.folders.contains(where: { $0.relativePath == folder }) {
             throw SnapshotFailure.error("Missing fixture folder: \(folder)")
@@ -469,7 +483,7 @@ final class SnapshotHarness {
                 controller.view.layoutSubtreeIfNeeded()
                 columns.navigationController.splitView.setPosition(220, ofDividerAt: 0)
                 if scenario.resizeSidebar {
-                    for width: CGFloat in [180, 320, 200, 260] {
+                    for width: CGFloat in [180, 320, 200, 260] + (scenario.sidebarWidth.map { [$0] } ?? []) {
                         columns.navigationController.splitView.setPosition(width, ofDividerAt: 0)
                         controller.view.layoutSubtreeIfNeeded()
                         try await Task.sleep(for: .milliseconds(50))
