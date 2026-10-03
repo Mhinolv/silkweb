@@ -37,7 +37,7 @@ struct ConflictComparison: NSViewRepresentable {
     private var synchronizing = false
     init() {
         panes = ["Your version", "Version on disk"].map { label in
-            let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle(fontSize: 13, lineHeight: 1.2, horizontalInset: 12, topInset: 12))
+            let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle(fontSize: 13, lineHeight: 1.2, horizontalInset: 12, topInset: 12), followsSettings: false)
             let text = scroll.documentView as! NSTextView
             text.isEditable = false
             text.font = .monospacedSystemFont(ofSize: 13, weight: .regular)

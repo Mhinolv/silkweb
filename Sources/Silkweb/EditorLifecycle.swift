@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor final class EditorApplicationDelegate: NSObject, NSApplicationDelegate {
     weak var workspace: LibraryWorkspace?
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        WritingSettings.shared.flush()
         guard let workspace else { return .terminateNow }
         Task { sender.reply(toApplicationShouldTerminate: await workspace.prepareToExit()) }
         return .terminateLater

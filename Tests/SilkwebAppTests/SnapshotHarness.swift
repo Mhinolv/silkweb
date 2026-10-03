@@ -41,6 +41,8 @@ struct SnapshotScenario {
     var editImageHeading = false
     /// Marks the active tab's document unsaved just before capture (no text change, so nothing autosaves).
     var dirtyActive = false
+    /// Hosts the production Settings window content on this tab (1.24) instead of the library window.
+    var settingsTab: SettingsTab? = nil
 
     static let deepFolder = "Field Notes/Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
     static let deepDocument = deepFolder + "/Settling In at the Campground.md"
@@ -120,6 +122,10 @@ struct SnapshotScenario {
         .init(name: "tabs-open", document: image, tabs: [pourOver, image, "Snapshot Fixtures/Empty Document.md"]),
         // silkweb-1.65: compact bar, one-line breadcrumb folded at `…`, folder tabs with a coral unsaved dot.
         .init(name: "redesign-path-tabs", folder: deepFolder, document: deepDocument, tabs: [pourOver, deepDocument, image], dirtyActive: true),
+        // silkweb-1.24: Settings tabs. Appearance edits the Light set with a low-contrast Text so the warning shows.
+        .init(name: "settings-editor", settingsTab: .editor),
+        .init(name: "settings-appearance", settingsTab: .appearance),
+        .init(name: "settings-library", settingsTab: .library),
     ]
 }
 
@@ -482,6 +488,14 @@ final class SnapshotHarness {
                 content = AnyView(TableInsertSheet(form: form, cancel: {}, insert: { _ in })
                     .background(Color(nsColor: .windowBackgroundColor))
                     .frame(maxWidth: .infinity, maxHeight: .infinity))
+            } else if let tab = scenario.settingsTab {
+                // A non-live model on the disposable defaults: nothing reaches the app or the user's settings.
+                let settings = WritingSettings(defaults: defaults, live: false)
+                settings.editingDark = tab == .appearance ? false : dark
+                if tab == .appearance { settings.preferences.colors.light.text = HexColor(0xA0A0A0) }
+                content = AnyView(SettingsView(settings: settings, workspace: workspace, tab: tab)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .background(Color(nsColor: .windowBackgroundColor)))
             } else { content = AnyView(LibraryWorkspaceView(workspace: workspace)) }
             let controller = NSHostingController(rootView: AnyView(content
                 .environment(\.colorScheme, dark ? .dark : .light)))

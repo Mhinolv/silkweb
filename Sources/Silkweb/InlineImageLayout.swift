@@ -17,6 +17,17 @@ import SilkwebCore
     private var heightsByEnd: [Int: CGFloat] = [:]
     private var viewsByStart: [Int: [InlineImageView]] = [:]
     private var selectedViews: [InlineImageView] = []
+    /// Settings ▸ “Show images inline in the editor” (1.24). Off removes the views and their reserved space.
+    var enabled = true {
+        didSet {
+            guard enabled != oldValue else { return }
+            if enabled { schedule() } else {
+                generation += 1
+                task?.cancel()
+                install([])
+            }
+        }
+    }
 
     func configure(root: URL?, document: URL?) {
         guard self.root != root || self.document != document else { return }
@@ -65,6 +76,7 @@ import SilkwebCore
     }
 
     func schedule() {
+        guard enabled else { return }
         generation += 1
         let requested = generation
         task?.cancel()

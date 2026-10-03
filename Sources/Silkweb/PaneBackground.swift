@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import SilkwebCore
 
 /// Redesign tokens (silkweb-1.62). R2–R4 consume these and add no new colour values.
 /// Each colour is dynamic per appearance; Increase Contrast has its own value.
@@ -32,15 +33,31 @@ enum SilkwebTokens {
         }
     }
 
-    static func color(_ name: String, _ palette: Palette, fallback: NSColor? = nil) -> NSColor {
+    /// A user colour from Settings (1.24) for this appearance, or nil to keep the token.
+    typealias Override = @Sendable (_ colors: ColorSet, _ dark: Bool) -> HexColor?
+
+    static func color(_ name: String, _ palette: Palette, fallback: NSColor? = nil, override: Override? = nil) -> NSColor {
         NSColor(name: name) { appearance in
             let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            if let override, let custom = override(LivePreferences.shared.colors(dark: dark), dark) { return srgb(custom.rgb) }
             let contrast = appearance.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua,
                                                        .accessibilityHighContrastDarkAqua])
             let highContrast = contrast == .accessibilityHighContrastAqua || contrast == .accessibilityHighContrastDarkAqua
             return resolve(palette, dark: dark, highContrast: highContrast, fallback: fallback)
         }
     }
+
+    /// A system colour unless the user's set overrides it.
+    static func color(_ name: String, system: NSColor, override: @escaping Override) -> NSColor {
+        NSColor(name: name) { appearance in
+            let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            if let custom = override(LivePreferences.shared.colors(dark: dark), dark) { return srgb(custom.rgb) }
+            return system
+        }
+    }
+
+    /// Derived colours follow the user's Surface/Text/Accent only once one of their inputs changed.
+    static let surfaceOrText: Override = { set, dark in set.surface == nil && set.text == nil ? nil : set.hairline(dark: dark) }
 
     /// Live preview only: export and print keep their portable system colours.
     static let previewCSS = """
@@ -74,17 +91,28 @@ extension NSColor {
     /// The one background every window pane paints (silkweb-1.56): sidebar, document list, tab bar,
     /// editor, preview, Inspector, strips and banners, toolbar and empty states.
     /// #FBFBFA / #1E1F21 (1.62); the system text background under Increase Contrast. The swap point for 1.24.
-    static let silkwebPaneBackground = SilkwebTokens.color("SilkwebPaneBackground", SilkwebTokens.pane, fallback: .textBackgroundColor)
+    /// Settings ▸ Appearance ▸ Surface replaces it per appearance (1.24).
+    static let silkwebPaneBackground = SilkwebTokens.color("SilkwebPaneBackground", SilkwebTokens.pane, fallback: .textBackgroundColor,
+                                                           override: { set, _ in set.surface })
     /// Sage: Silkweb-drawn selection accents, links and tag tints. Native focus rings keep the system accent.
-    static let silkwebAccent = SilkwebTokens.color("SilkwebAccent", SilkwebTokens.accent)
-    /// Capsule fill for the focused selection in the key window.
-    static let silkwebSelection = SilkwebTokens.color("SilkwebSelection", SilkwebTokens.selection)
+    static let silkwebAccent = SilkwebTokens.color("SilkwebAccent", SilkwebTokens.accent, override: { set, _ in set.accent })
+    /// Capsule fill for the focused selection in the key window: Accent tinted over Surface once either is custom.
+    static let silkwebSelection = SilkwebTokens.color("SilkwebSelection", SilkwebTokens.selection, override: { set, dark in
+        set.surface == nil && set.accent == nil ? nil : set.selection(dark: dark)
+    })
+    /// Inactive capsule and the current-line band: Surface stepped toward Text once either is custom.
     static let silkwebSelectionInactive = SilkwebTokens.color("SilkwebSelectionInactive", SilkwebTokens.selectionInactive,
-                                                              fallback: .unemphasizedSelectedContentBackgroundColor)
-    /// Only the current-folder node and unsaved dots (R2/R4).
-    static let silkwebCoral = SilkwebTokens.color("SilkwebCoral", SilkwebTokens.coral)
-    /// Sidebar thread lines (R2).
-    static let silkwebThread = SilkwebTokens.color("SilkwebThread", SilkwebTokens.thread)
+                                                              fallback: .unemphasizedSelectedContentBackgroundColor, override: { set, dark in
+        set.surface == nil && set.text == nil ? nil : set.selectionInactive(dark: dark)
+    })
+    /// Only the current-folder node and unsaved dots (R2/R4); the user may recolour but not repurpose it.
+    static let silkwebCoral = SilkwebTokens.color("SilkwebCoral", SilkwebTokens.coral, override: { set, _ in set.coral })
+    /// Sidebar thread lines (R2); they follow the derived hairline.
+    static let silkwebThread = SilkwebTokens.color("SilkwebThread", SilkwebTokens.thread, override: SilkwebTokens.surfaceOrText)
+    /// Body text in the editor (1.24 Text slot); `labelColor` by default.
+    static let silkwebText = SilkwebTokens.color("SilkwebText", system: .labelColor, override: { set, _ in set.text })
+    /// Pane dividers and strip hairlines; `separatorColor` until Surface or Text is custom.
+    static let silkwebHairline = SilkwebTokens.color("SilkwebHairline", system: .separatorColor, override: SilkwebTokens.surfaceOrText)
 }
 
 /// Puts the window's titlebar/toolbar strip on the pane surface (silkweb-1.62): the titlebar stops drawing
@@ -115,18 +143,37 @@ struct TitlebarHairline: View {
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1 / max(1, displayScale))
+        Rectangle().fill(Color.silkwebHairline).frame(height: 1 / max(1, displayScale))
             .allowsHitTesting(false).accessibilityHidden(true)
     }
 }
 
-extension Color {
-    static let silkwebPaneBackground = Color(nsColor: .silkwebPaneBackground)
-    static let silkwebAccent = Color(nsColor: .silkwebAccent)
-    static let silkwebSelection = Color(nsColor: .silkwebSelection)
-    static let silkwebSelectionInactive = Color(nsColor: .silkwebSelectionInactive)
-    static let silkwebCoral = Color(nsColor: .silkwebCoral)
-    static let silkwebThread = Color(nsColor: .silkwebThread)
+/// Reading one of these in a SwiftUI body subscribes it to colour changes from Settings (1.24):
+/// each revision wraps the token in a newly named colour, so SwiftUI sees a new value and redraws.
+@MainActor extension Color {
+    static var silkwebPaneBackground: Color { revised(.silkwebPaneBackground) }
+    static var silkwebAccent: Color { revised(.silkwebAccent) }
+    static var silkwebSelection: Color { revised(.silkwebSelection) }
+    static var silkwebSelectionInactive: Color { revised(.silkwebSelectionInactive) }
+    static var silkwebCoral: Color { revised(.silkwebCoral) }
+    static var silkwebThread: Color { revised(.silkwebThread) }
+    static var silkwebHairline: Color { revised(.silkwebHairline) }
+
+    private static var revisions: [String: (revision: Int, color: Color)] = [:]
+
+    private static func revised(_ token: NSColor) -> Color {
+        let revision = ColorRevision.shared.value
+        let name = token.colorNameComponent
+        guard revision > 0 else { return Color(nsColor: token) }
+        if let cached = revisions[name], cached.revision == revision { return cached.color }
+        let color = Color(nsColor: NSColor(name: "\(name).\(revision)") { appearance in
+            var resolved = token
+            appearance.performAsCurrentDrawingAppearance { resolved = token.usingColorSpace(.sRGB) ?? token }
+            return resolved
+        })
+        revisions[name] = (revision, color)
+        return color
+    }
 }
 
 /// Selection capsule colours. Text stays `labelColor`: no white-on-accent anywhere.
@@ -226,7 +273,7 @@ private struct PaneStrip: ViewModifier {
         content
             .background(Color.silkwebPaneBackground)
             .overlay(alignment: edge == .top ? .top : .bottom) {
-                Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1 / max(1, displayScale))
+                Rectangle().fill(Color.silkwebHairline).frame(height: 1 / max(1, displayScale))
                     .accessibilityHidden(true)
             }
     }

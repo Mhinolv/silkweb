@@ -14,6 +14,8 @@ public enum HTMLRenderer {
         public var exportImages: [String: String]? = nil
         /// Print uses durable task glyphs and keeps short code blocks together.
         public var printOutput = false
+        /// Settings (1.24): when off, `[TOC]` stays visible as its source text.
+        public var showsTableOfContents = true
 
         public init(lineBreaks: LineBreaks = .standard, libraryRoot: URL? = nil, documentURL: URL? = nil, offlinePreview: Bool = false) {
             self.lineBreaks = lineBreaks
@@ -117,7 +119,7 @@ public enum HTMLRenderer {
                 let body = rows.map { row($0, tag: "td") }.joined()
                 return "<div class=\"sw-table-wrap\"><table>\n<thead>\n" + head
                     + "</thead>\n<tbody>\n" + body + "</tbody>\n</table></div>\n"
-            case .tableOfContents: return tableOfContents(context.headings)
+            case .tableOfContents: return options.showsTableOfContents ? tableOfContents(context.headings) : "<p>[TOC]</p>\n"
             }
         }.joined()
     }

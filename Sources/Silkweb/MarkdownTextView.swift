@@ -10,21 +10,36 @@ struct EditorStyle: Equatable {
     var maximumWidth: CGFloat
     var horizontalInset: CGFloat = Spacing.editorHorizontalInset
     var topInset: CGFloat = 16
+    var indent = WritingPreferences.Indent.fourSpaces
 
     init(fontSize: CGFloat? = nil, lineHeight: CGFloat? = nil, maximumWidth: CGFloat? = nil,
-         horizontalInset: CGFloat = Spacing.editorHorizontalInset, topInset: CGFloat = 16,
-         preferences: WritingPreferences = WritingPreferences.load()) {
+         horizontalInset: CGFloat? = nil, topInset: CGFloat = 16,
+         preferences: WritingPreferences = LivePreferences.shared.current) {
         fontFamily = preferences.fontFamily
         self.fontSize = fontSize ?? CGFloat(preferences.fontSize)
         self.lineHeight = lineHeight ?? CGFloat(preferences.lineHeight)
         self.maximumWidth = maximumWidth ?? CGFloat(preferences.maximumWidth)
-        self.horizontalInset = horizontalInset
+        self.horizontalInset = horizontalInset ?? CGFloat(preferences.horizontalInset)
         self.topInset = topInset
+        indent = preferences.indent
     }
 
-    var bodyFont: NSFont {
-        NSFont(name: fontFamily == "Menlo" ? "Menlo-Regular" : fontFamily, size: fontSize)
-            ?? .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+    var bodyFont: NSFont { Self.font(family: fontFamily, size: fontSize) }
+
+    /// Settings font choices (1.24). A missing custom family falls back to Menlo without an alert.
+    static func font(family: String, size: CGFloat) -> NSFont {
+        switch family {
+        case "Menlo": return NSFont(name: "Menlo-Regular", size: size) ?? .monospacedSystemFont(ofSize: size, weight: .regular)
+        case "Monospaced": return .monospacedSystemFont(ofSize: size, weight: .regular)
+        case "System": return .systemFont(ofSize: size)
+        case "Serif":
+            let system = NSFont.systemFont(ofSize: size)
+            return system.fontDescriptor.withDesign(.serif).flatMap { NSFont(descriptor: $0, size: size) } ?? system
+        default:
+            return NSFont(name: family, size: size)
+                ?? NSFontManager.shared.font(withFamily: family, traits: [], weight: 5, size: size)
+                ?? font(family: "Menlo", size: size)
+        }
     }
 
     var paragraphStyle: NSParagraphStyle {
@@ -32,7 +47,8 @@ struct EditorStyle: Equatable {
         paragraph.lineHeightMultiple = lineHeight
         paragraph.paragraphSpacing = 0
         paragraph.tabStops = []
-        paragraph.defaultTabInterval = 4 * (" " as NSString).size(withAttributes: [.font: bodyFont]).width
+        let spaces: CGFloat = indent == .twoSpaces ? 2 : 4
+        paragraph.defaultTabInterval = spaces * (" " as NSString).size(withAttributes: [.font: bodyFont]).width
         return paragraph
     }
 }
@@ -62,7 +78,8 @@ struct MarkdownTextView: NSViewRepresentable {
     }
 
     /// Shared construction keeps offscreen regression tests on the production editor hierarchy.
-    static func makeEditorScrollView(style: EditorStyle) -> NSScrollView {
+    /// `followsSettings` editors restyle live when Settings change; fixed-style editors (conflict sheet) never do.
+    static func makeEditorScrollView(style: EditorStyle, followsSettings: Bool = true) -> NSScrollView {
         let scroll = EditorScrollView()
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -88,8 +105,8 @@ struct MarkdownTextView: NSViewRepresentable {
         text.font = style.bodyFont
         let paragraph = style.paragraphStyle
         text.defaultParagraphStyle = paragraph
-        text.typingAttributes = [.font: text.font!, .paragraphStyle: paragraph, .foregroundColor: NSColor.labelColor]
-        text.textColor = .labelColor
+        text.typingAttributes = [.font: text.font!, .paragraphStyle: paragraph, .foregroundColor: NSColor.silkwebText]
+        text.textColor = .silkwebText
         text.backgroundColor = .silkwebPaneBackground
         text.insertionPointColor = .textColor
         text.isVerticallyResizable = true
@@ -110,6 +127,10 @@ struct MarkdownTextView: NSViewRepresentable {
         ) { [weak text] _ in
             MainActor.assumeIsolated { text?.layoutEditor() }
         }
+        if followsSettings {
+            text.applyBehaviour(LivePreferences.shared.current)
+            EditorRegistry.editors.add(text)
+        }
         text.layoutEditor()
         return scroll
     }
@@ -118,6 +139,10 @@ struct MarkdownTextView: NSViewRepresentable {
         guard let text = scroll.documentView as? PlainMarkdownTextView else { return }
         let coordinator = context.coordinator
         text.configureAssetInsertion(session: session, workspace: workspace)
+        if text.zoom != workspace.editorZoom {
+            text.zoom = workspace.editorZoom
+            text.applySettings()
+        }
         let active = workspace.editor === session
         workspace.tabs.first { $0.editor === session }?.textView = text
         if active { workspace.preview.editor = text }
@@ -199,6 +224,8 @@ final class PlainMarkdownTextView: NSTextView {
     let documentUndoManager = UndoManager()
     var style = EditorStyle()
     weak var session: DocumentSession?
+    /// The window's workspace, for its temporary zoom.
+    weak var workspace: LibraryWorkspace?
     let styler = MarkdownStyler()
     let inlineImages = InlineImageLayout()
     lazy var assetHandler: EditorPasteHandler = {
@@ -209,6 +236,7 @@ final class PlainMarkdownTextView: NSTextView {
     var moveFocus: ((Bool) -> Void)?
     func configureAssetInsertion(session: DocumentSession, workspace: LibraryWorkspace) {
         self.session = session
+        self.workspace = workspace
         assetHandler.workspace = workspace
         inlineImages.configure(root: workspace.root, document: session.url)
     }
@@ -367,7 +395,7 @@ final class PlainMarkdownTextView: NSTextView {
         let source = string as NSString
         let line = source.substring(with: source.lineRange(for: selectedRange()))
         if selectedRange().length > 0 || MarkdownEditing.listPrefix(line) != nil { format(.indent) }
-        else { insertText("    ", replacementRange: selectedRange()) }
+        else { insertText(style.indent.text, replacementRange: selectedRange()) }
     }
     override func insertBacktab(_ sender: Any?) { format(.outdent) }
     override func keyDown(with event: NSEvent) {
@@ -400,7 +428,81 @@ final class PlainMarkdownTextView: NSTextView {
 
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
+        if let band = currentLineBand(), band.intersects(rect) {
+            NSColor.silkwebSelectionInactive.setFill()
+            band.intersection(rect).fill()
+        }
         drawPlaceholder()
+    }
+
+    // MARK: Settings (silkweb-1.24)
+
+    /// Temporary View ▸ Bigger/Smaller steps for this window; never saved.
+    var zoom = 0
+    var highlightsCurrentLine = false {
+        didSet { if highlightsCurrentLine != oldValue { needsDisplay = true } }
+    }
+
+    /// Restyles attributes and layout only: the text storage, selection, scroll position and undo stack stay.
+    func applySettings(_ preferences: WritingPreferences = LivePreferences.shared.current) {
+        applyBehaviour(preferences)
+        var next = EditorStyle(topInset: style.topInset, preferences: preferences)
+        next.fontSize = CGFloat(WritingPreferences.clamp(preferences.fontSize + Double(zoom), WritingPreferences.fontSizes,
+                                                         fallback: preferences.fontSize))
+        guard next != style else { return }
+        let restyle = next.fontFamily != style.fontFamily || next.fontSize != style.fontSize
+            || next.lineHeight != style.lineHeight || next.indent != style.indent
+        let origin = enclosingScrollView?.contentView.bounds.origin
+        let selection = selectedRanges
+        style = next
+        if restyle {
+            let paragraph = style.paragraphStyle
+            defaultParagraphStyle = paragraph
+            typingAttributes = [.font: style.bodyFont, .paragraphStyle: paragraph, .foregroundColor: NSColor.silkwebText]
+            styler.reload()
+            if selectedRanges != selection { selectedRanges = selection }
+        }
+        layoutEditor()
+        scheduleContentSizing()
+        if let origin, let scroll = enclosingScrollView {
+            scroll.contentView.scroll(to: origin)
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+        needsDisplay = true
+    }
+
+    /// Settings that need no restyle.
+    func applyBehaviour(_ preferences: WritingPreferences) {
+        if isContinuousSpellCheckingEnabled != preferences.checksSpelling { isContinuousSpellCheckingEnabled = preferences.checksSpelling }
+        if isAutomaticQuoteSubstitutionEnabled != preferences.smartPunctuation { isAutomaticQuoteSubstitutionEnabled = preferences.smartPunctuation }
+        if isAutomaticDashSubstitutionEnabled != preferences.smartPunctuation { isAutomaticDashSubstitutionEnabled = preferences.smartPunctuation }
+        highlightsCurrentLine = preferences.highlightsCurrentLine
+        inlineImages.enabled = preferences.showsInlineImages
+    }
+
+    /// The caret line's full-width band when “Highlight the current line” is on; none while text is selected.
+    func currentLineBand() -> NSRect? {
+        guard highlightsCurrentLine, selectedRange().length == 0, let layout = layoutManager, textContainer != nil else { return nil }
+        let length = (string as NSString).length
+        let location = selectedRange().location
+        let fragment: NSRect
+        if location >= length, !layout.extraLineFragmentRect.isEmpty {
+            fragment = layout.extraLineFragmentRect
+        } else {
+            guard length > 0, layout.numberOfGlyphs > 0 else { return nil }
+            let glyph = layout.glyphIndexForCharacter(at: min(location, length - 1))
+            fragment = layout.lineFragmentRect(forGlyphAt: min(glyph, layout.numberOfGlyphs - 1), effectiveRange: nil)
+        }
+        guard !fragment.isEmpty else { return nil }
+        return NSRect(x: bounds.minX, y: fragment.minY + textContainerOrigin.y, width: bounds.width, height: fragment.height)
+    }
+
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        let old = highlightsCurrentLine ? currentLineBand() : nil
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        guard highlightsCurrentLine else { return }
+        if let old { setNeedsDisplay(old) }
+        if let band = currentLineBand() { setNeedsDisplay(band) }
     }
 
     override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {

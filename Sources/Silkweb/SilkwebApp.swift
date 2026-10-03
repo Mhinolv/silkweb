@@ -10,13 +10,18 @@ struct SilkwebApp: App {
         Window("Silkweb", id: "library") {
             LibraryWorkspaceView(workspace: workspace)
                 .background(EditorWindowLifecycle(workspace: workspace))
-                .onAppear { appDelegate.workspace = workspace }
+                .onAppear {
+                    appDelegate.workspace = workspace
+                    WritingSettings.shared.applyAppearance()
+                }
         }
         .defaultSize(width: 1200, height: 760)
         // One slim bar: toolbar items share the traffic-lights row (silkweb-1.65).
         .windowToolbarStyle(.unifiedCompact(showsTitle: false))
         .commands { WorkspaceCommands(workspace: workspace) }
         .commands { PrintCommands(workspace: workspace) }
+        // Silkweb ▸ Settings… ⌘, (1.24).
+        Settings { SettingsView(settings: WritingSettings.shared, workspace: workspace) }
     }
 }
 
@@ -78,6 +83,11 @@ struct WorkspaceCommands: Commands {
             Toggle("Split Editor and Preview", isOn: Binding(get: { state.previewMode == .split }, set: { workspace.preview.mode = $0 ? .split : .editor })).keyboardShortcut("4")
             Button("Show Document Info") { workspace.showInfo() }.keyboardShortcut("8")
             Toggle("Show Outline", isOn: Binding(get: { state.showsOutline }, set: { workspace.inspectorInfo = false; workspace.preview.showsOutline = $0 })).keyboardShortcut("7")
+            Divider()
+            // Temporary editor zoom for this window (1.24); Actual Size returns to the Settings size.
+            Button("Bigger") { workspace.zoomEditor(by: 1) }.keyboardShortcut("+")
+            Button("Smaller") { workspace.zoomEditor(by: -1) }.keyboardShortcut("-")
+            Button("Actual Size") { workspace.zoomEditor(by: nil) }.keyboardShortcut("0")
             Divider()
             Menu("Sort By") { DocumentSortItems(workspace: workspace, commandState: state) }
                 .disabled(!state.hasLibrary)

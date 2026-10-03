@@ -37,6 +37,8 @@ final class PreviewCoordinator {
         let root: URL?
         let html: Bool
         let outline: Bool
+        var keepsLineBreaks = false
+        var showsTableOfContents = true
     }
     @ObservationIgnored weak var editor: PlainMarkdownTextView?
     @ObservationIgnored weak var webView: WKWebView?
@@ -56,19 +58,51 @@ final class PreviewCoordinator {
         return HeadingPalette.previewCSS + "\n" + ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
     }()
 
+    @ObservationIgnored private var settingsObserver: NSObjectProtocol?
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         mode = DocumentViewMode(rawValue: defaults.string(forKey: "Silkweb.Detail.Mode") ?? "") ?? .editor
         showsOutline = defaults.bool(forKey: "Silkweb.Detail.Outline")
         let previous = DocumentViewMode(rawValue: defaults.string(forKey: "Silkweb.Detail.LastWritingMode") ?? "") ?? .editor
         lastWritingMode = mode == .preview ? (previous == .preview ? .editor : previous) : mode
+        settingsObserver = NotificationCenter.default.addObserver(forName: .writingSettingsDidChange, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.settingsDidChange() }
+        }
+    }
+
+    deinit { if let settingsObserver { NotificationCenter.default.removeObserver(settingsObserver) } }
+
+    /// The live preview's Settings block (1.24): fonts and user colours as CSS variables.
+    static func settingsStyle(_ preferences: WritingPreferences) -> String {
+        "<style id=\"sw-settings\">" + preferences.previewCSS + "</style>"
+    }
+
+    /// Fonts and colours restyle the loaded page in place (no re-parse, scroll kept); line-break and
+    /// TOC options re-render the document.
+    func settingsDidChange() {
+        let preferences = LivePreferences.shared.current
+        webView?.underPageBackgroundColor = .silkwebPaneBackground
+        if let input, input.keepsLineBreaks != preferences.keepsLineBreaks || input.showsTableOfContents != preferences.showsTableOfContents {
+            schedule(text: input.text, document: input.document, root: input.root)
+        }
+        let style = Self.settingsStyle(preferences)
+        if let start = html.range(of: "<style id=\"sw-settings\">"), let end = html.range(of: "</style>", range: start.upperBound..<html.endIndex) {
+            let updated = html.replacingCharacters(in: start.lowerBound..<end.upperBound, with: style)
+            if updated != html { html = updated }
+        }
+        webView?.callAsyncJavaScript("const style = document.getElementById('sw-settings'); if (style) style.textContent = css;",
+                                     arguments: ["css": preferences.previewCSS], in: nil, in: .defaultClient) { _ in }
     }
 
     func togglePreview() { mode = mode == .preview ? lastWritingMode : .preview }
     func toggleSplit() { mode = mode == .split ? .editor : .split }
 
     func schedule(text: String, document: URL?, root: URL?) {
-        let next = RenderInput(text: text, document: document, root: root, html: mode != .editor, outline: showsOutline)
+        let preferences = LivePreferences.shared.current
+        let next = RenderInput(text: text, document: document, root: root, html: mode != .editor, outline: showsOutline,
+                               keepsLineBreaks: preferences.keepsLineBreaks, showsTableOfContents: preferences.showsTableOfContents)
+        let settings = Self.settingsStyle(preferences)
         guard next != input else { return }
         input = next
         revision += 1
@@ -86,9 +120,11 @@ final class PreviewCoordinator {
                 let parsed = MarkdownParser.parse(text)
                 let items = OutlineItem.parse(text, headings: parsed.headings)
                 guard next.html else { return (parsed.headings, "", items) }
-                let fragment = HTMLRenderer.render(parsed, options: .init(libraryRoot: root, documentURL: document, offlinePreview: true))
+                var options = HTMLRenderer.Options(lineBreaks: next.keepsLineBreaks ? .preserve : .standard, libraryRoot: root, documentURL: document, offlinePreview: true)
+                options.showsTableOfContents = next.showsTableOfContents
+                let fragment = HTMLRenderer.render(parsed, options: options)
                 let css = Self.stylesheet + "\n" + SilkwebTokens.previewCSS
-                let page = "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src silkweb-preview:; style-src 'unsafe-inline'; script-src 'none'\"><style>" + css + "</style></head><body>" + fragment + "</body></html>"
+                let page = "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src silkweb-preview:; style-src 'unsafe-inline'; script-src 'none'\"><style>" + css + "</style>" + settings + "</head><body>" + fragment + "</body></html>"
                 return (parsed.headings, page, items)
             }.value
             guard !Task.isCancelled, let self, request == self.revision else { return }

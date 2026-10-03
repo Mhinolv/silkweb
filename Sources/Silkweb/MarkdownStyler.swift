@@ -53,7 +53,7 @@ import SilkwebCore
         let styledStart = position
         let base = editor.style.bodyFont
         let paragraph = editor.style.paragraphStyle
-        let defaults: [NSAttributedString.Key: Any] = [.font: base, .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph]
+        let defaults: [NSAttributedString.Key: Any] = [.font: base, .foregroundColor: NSColor.silkwebText, .paragraphStyle: paragraph]
         let undoRegistration = editor.undoManager?.isUndoRegistrationEnabled == true
         if undoRegistration { editor.undoManager?.disableUndoRegistration() }
         storage.beginEditing()
@@ -75,7 +75,7 @@ import SilkwebCore
                         storage.addAttributes([.font: NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask),
                                                .foregroundColor: NSColor.editorHeading], range: tokenRange)
                     case .bold, .italic:
-                        storage.addAttribute(.foregroundColor, value: NSColor.labelColor, range: tokenRange)
+                        storage.addAttribute(.foregroundColor, value: NSColor.silkwebText, range: tokenRange)
                         storage.enumerateAttribute(.font, in: tokenRange) { value, subrange, _ in
                             let font = value as? NSFont ?? base
                             let trait: NSFontTraitMask = token.kind == .bold ? .boldFontMask : .italicFontMask
@@ -140,8 +140,10 @@ enum HeadingPalette {
 }
 
 extension NSColor {
+    /// Settings ▸ Appearance ▸ Headings replaces it per appearance (1.24).
     static let editorHeading = NSColor(name: "SilkwebEditorHeading") { appearance in
         let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if let custom = LivePreferences.shared.colors(dark: dark).headings { return SilkwebTokens.srgb(custom.rgb) }
         let contrast = appearance.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua,
                                                    .accessibilityHighContrastDarkAqua])
         let highContrast = contrast == .accessibilityHighContrastAqua || contrast == .accessibilityHighContrastDarkAqua

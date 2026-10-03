@@ -94,7 +94,7 @@ final class EditorTabBarView: NSView {
         NSColor.silkwebPaneBackground.setFill()
         bounds.fill()
         // The strip draws the hairline under the tabs; this part runs under the overflow control.
-        NSColor.separatorColor.setFill()
+        NSColor.silkwebHairline.setFill()
         NSRect(x: overflow.frame.minX, y: 0, width: bounds.width - overflow.frame.minX, height: 1).fill()
     }
 
@@ -104,6 +104,8 @@ final class EditorTabBarView: NSView {
         let gap = min(buttons.count, max(0, Int((location.x / max(1, first.frame.width) + 0.5).rounded(.down))))
         insertionGap = gap
         indicator.frame = NSRect(x: min(strip.bounds.width - 2, CGFloat(gap) * first.frame.width), y: 0, width: 2, height: strip.bounds.height)
+        // Resolved when shown, so it follows the appearance and the Accent chosen in Settings.
+        effectiveAppearance.performAsCurrentDrawingAppearance { indicator.layer?.backgroundColor = NSColor.silkwebAccent.cgColor }
         indicator.isHidden = false
         strip.addSubview(indicator, positioned: .above, relativeTo: nil)
     }
@@ -121,7 +123,7 @@ final class EditorTabBarView: NSView {
 final class TabStripView: NSView {
     var activeFrame: NSRect? { didSet { if activeFrame != oldValue { needsDisplay = true } } }
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.separatorColor.setFill()
+        NSColor.silkwebHairline.setFill()
         guard let active = activeFrame else { return NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill() }
         NSRect(x: 0, y: 0, width: max(0, active.minX), height: 1).fill()
         NSRect(x: active.maxX, y: 0, width: max(0, bounds.width - active.maxX), height: 1).fill()
@@ -219,7 +221,7 @@ final class EditorTabButton: NSView {
             let contrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
             let path = outline(bounds.insetBy(dx: 0.5, dy: 0).offsetBy(dx: 0, dy: -0.5))
             path.lineWidth = 1
-            (contrast ? NSColor.labelColor.withAlphaComponent(0.4) : NSColor.separatorColor).setStroke()
+            (contrast ? NSColor.labelColor.withAlphaComponent(0.4) : NSColor.silkwebHairline).setStroke()
             path.stroke()
         } else if hovered {
             NSColor.quaternarySystemFill.setFill()

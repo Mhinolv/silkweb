@@ -10,6 +10,8 @@ final class LibraryWorkspace {
     var editor: DocumentSession { tabs.first { $0.id == activeTabID }?.editor ?? emptyEditor }
     var canSaveWindowSession = true
     var restoringTabs = false
+    /// View ▸ Bigger/Smaller (1.24): points added to the Settings editor size in this window. Never saved.
+    var editorZoom = 0
     @ObservationIgnored lazy var menuState = MenuCommandState(workspace: self)
     @ObservationIgnored var closingTabIDs: Set<UUID> = []
     @ObservationIgnored var recoveryDirectory: URL?
@@ -199,6 +201,17 @@ final class LibraryWorkspace {
         defaults.removeObject(forKey: "libraryBookmark")
     }
 
+    /// Steps of 1 pt, keeping the effective size within 10–32 pt; `nil` returns to the Settings size.
+    func zoomEditor(by step: Int?) {
+        let base = Int(LivePreferences.shared.current.fontSize.rounded())
+        let range = WritingPreferences.fontSizes
+        editorZoom = step.map { min(max(editorZoom + $0, Int(range.lowerBound) - base), Int(range.upperBound) - base) } ?? 0
+        for editor in EditorRegistry.editors.allObjects where editor.workspace === self && editor.zoom != editorZoom {
+            editor.zoom = editorZoom
+            editor.applySettings()
+        }
+    }
+
     func chooseFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -287,6 +300,8 @@ final class LibraryWorkspace {
                 do { windowSession = try await WindowSessionMetadata.load(root: url) }
                 catch LibraryError.unsupportedMetadataVersion { canSaveWindowSession = false }
                 catch { /* Stale tab state never interrupts opening a library. */ }
+                // Settings ▸ “Reopen windows and tabs from the last session” (1.24).
+                if !LivePreferences.shared.current.reopensSession { windowSession = nil }
                 if let windowSession { await restoreTabs(windowSession) }
                 if let path = session.selectedFolder, !scanned.folders.contains(where: { $0.relativePath == path }) {
                     session.selectedFolder = ""
@@ -458,7 +473,7 @@ final class LibraryWorkspace {
 
     func resumeEditor() async {
         guard editor.url == nil, let snapshot else { return }
-        if let saved = try? await WindowSessionMetadata.load(root: snapshot.rootURL) {
+        if LivePreferences.shared.current.reopensSession, let saved = try? await WindowSessionMetadata.load(root: snapshot.rootURL) {
             await restoreTabs(saved)
         } else if let document = selectedDocument { _ = await openTab(document) }
     }
