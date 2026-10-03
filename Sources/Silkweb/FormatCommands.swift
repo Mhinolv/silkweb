@@ -4,9 +4,14 @@ import SilkwebCore
 
 @MainActor @Observable final class FormattingTarget {
     static let shared = FormattingTarget()
-    weak var editor: PlainMarkdownTextView?
-    var enabled = false
-    func refresh() { enabled = editor?.isEditable == true && editor?.hasMarkedText() == false }
+    // Commands only read `enabled`; focus changes and unchanged refreshes (every
+    // keystroke/updateNSView) must not invalidate the menu bar (silkweb-1.58).
+    @ObservationIgnored weak var editor: PlainMarkdownTextView?
+    private(set) var enabled = false
+    func refresh() {
+        let next = editor?.isEditable == true && editor?.hasMarkedText() == false
+        if enabled != next { enabled = next }
+    }
 }
 
 struct FormatItem {

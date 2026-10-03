@@ -3,22 +3,23 @@ import SwiftUI
 
 struct FindMenu: View {
     let workspace: LibraryWorkspace
+    let state: MenuCommandValues
 
     var body: some View {
         Menu("Find") {
-            Button("Find…") { workspace.find(.showFindInterface) }.keyboardShortcut("f").disabled(!workspace.canFind)
+            Button("Find…") { workspace.find(.showFindInterface) }.keyboardShortcut("f").disabled(!state.canFind)
             Button("Find and Replace…") { workspace.find(.showReplaceInterface) }
                 .keyboardShortcut("f", modifiers: [.command, .option])
-                .disabled(!workspace.canFind || workspace.editor.readOnly)
-            Button("Find Next") { workspace.find(.nextMatch) }.keyboardShortcut("g").disabled(!workspace.canFind)
+                .disabled(!state.canReplace)
+            Button("Find Next") { workspace.find(.nextMatch) }.keyboardShortcut("g").disabled(!state.canFind)
             Button("Find Previous") { workspace.find(.previousMatch) }
-                .keyboardShortcut("g", modifiers: [.command, .shift]).disabled(!workspace.canFind)
-            Button("Use Selection for Find") { workspace.find(.setSearchString) }.keyboardShortcut("e").disabled(!workspace.canFind)
-            Button("Jump to Selection") { workspace.jumpToSelection() }.keyboardShortcut("j").disabled(!workspace.canFind)
+                .keyboardShortcut("g", modifiers: [.command, .shift]).disabled(!state.canFind)
+            Button("Use Selection for Find") { workspace.find(.setSearchString) }.keyboardShortcut("e").disabled(!state.canFind)
+            Button("Jump to Selection") { workspace.jumpToSelection() }.keyboardShortcut("j").disabled(!state.canFind)
             Divider()
             Button("Search Library…") { workspace.search.focusRequest += 1 }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
-                .disabled(workspace.snapshot == nil)
+                .disabled(!state.hasLibrary)
         }
     }
 }

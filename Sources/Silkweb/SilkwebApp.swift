@@ -13,73 +13,80 @@ struct SilkwebApp: App {
                 .onAppear { appDelegate.workspace = workspace }
         }
         .defaultSize(width: 1200, height: 760)
-        .commands {
-            CommandGroup(replacing: .newItem) {
-                Button("New Document") { workspace.create(folder: false) }
-                    .keyboardShortcut("n").disabled(!workspace.canMutate)
-                Button("New Folder") { workspace.create(folder: true) }
-                    .keyboardShortcut("n", modifiers: [.command, .shift]).disabled(!workspace.canMutate)
-                Button("Rename…") { workspace.beginRename() }
-                    .disabled(!workspace.canMutate || workspace.selectedItem == nil)
-                Button("Move To…") { workspace.requestMove() }
-                    .keyboardShortcut("m", modifiers: [.control, .command]).disabled(!workspace.canMutate || workspace.movePaths.isEmpty)
-                Button(workspace.trashMenuTitle) { workspace.requestTrash() }
-                    .keyboardShortcut(.delete, modifiers: .command).disabled(!workspace.canTrashSelection)
-                Button("Reveal in Finder") { workspace.reveal() }
-                    .keyboardShortcut("r", modifiers: [.command, .option]).disabled(workspace.snapshot == nil)
-                Divider()
-                ExportMenu(workspace: workspace)
-                Divider()
-                Button("Open Folder in Place…") { workspace.chooseFolder() }
-                    .keyboardShortcut("o")
-                Button("Open in New Tab") { workspace.openSelectionInNewTab() }
-                    .keyboardShortcut("t").disabled(workspace.snapshot == nil || workspace.mutating || (workspace.selectedDocument == nil && workspace.editor.url == nil))
-                Button("Quick Open…") { workspace.search.toggleQuickOpen() }
-                    .keyboardShortcut("o", modifiers: [.command, .shift]).disabled(workspace.snapshot == nil)
-                Button("Import Folder Copy…") { workspace.chooseImportFolder() }
-                    .keyboardShortcut("i", modifiers: [.command, .shift]).disabled(!workspace.canMutate)
-                Button("New Library…") { workspace.newLibrary() }
-                    .keyboardShortcut("n", modifiers: [.command, .option])
-            }
-            TabCommands(workspace: workspace)
-            CommandGroup(replacing: .undoRedo) {
-                Button(workspace.usesTextUndo ? (NSApp.keyWindow?.firstResponder as? NSTextView)?.undoManager?.undoMenuItemTitle ?? "Undo" : workspace.libraryUndo.last?.title ?? "Undo") {
-                    if workspace.usesTextUndo { NSApp.sendAction(Selector(("undo:")), to: nil, from: nil) }
-                    else { workspace.undoLibrary() }
-                }.keyboardShortcut("z").disabled(!workspace.usesTextUndo && !workspace.canUndoLibrary)
-                Button("Redo") { NSApp.sendAction(Selector(("redo:")), to: nil, from: nil) }
-                    .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!workspace.usesTextRedo)
-            }
-            CommandGroup(after: .pasteboard) {
-                Button("Paste and Match Style") { NSApp.sendAction(#selector(NSTextView.pasteAsPlainText(_:)), to: nil, from: nil) }
-                    .keyboardShortcut("v", modifiers: [.command, .option, .shift])
-                FindMenu(workspace: workspace)
-            }
-            TextEditingCommands()
-            FormatCommands()
-            CommandGroup(replacing: .sidebar) {
-                Button(workspace.sidebarsTitle) { workspace.toggleSidebars() }
-                    .keyboardShortcut("s", modifiers: [.control, .command])
-                    .disabled(workspace.snapshot == nil && !workspace.loading)
-            }
-            CommandGroup(after: .sidebar) {
-                Button(workspace.preview.mode == .preview ? "Show Editor" : "Show Preview") { workspace.preview.togglePreview() }.keyboardShortcut("r")
-                Toggle("Split Editor and Preview", isOn: Binding(get: { workspace.preview.mode == .split }, set: { workspace.preview.mode = $0 ? .split : .editor })).keyboardShortcut("4")
-                Button("Show Document Info") { workspace.showInfo() }.keyboardShortcut("8")
-                Toggle("Show Outline", isOn: Binding(get: { workspace.preview.showsOutline }, set: { workspace.inspectorInfo = false; workspace.preview.showsOutline = $0 })).keyboardShortcut("7")
-                Divider()
-                Menu("Sort By") { DocumentSortItems(workspace: workspace) }
-                    .disabled(workspace.snapshot == nil)
-                IncludeSubfoldersItem(workspace: workspace, hideForAllDocuments: false)
-            }
-            ToolbarCommands()
-            CommandMenu("Go") {
-                Button("Folders") { workspace.focus(0) }.keyboardShortcut("1", modifiers: [.command, .option])
-                Button("Documents") { workspace.focus(1) }.keyboardShortcut("2", modifiers: [.command, .option])
-                Button("Editor") { workspace.focus(2) }.keyboardShortcut("3", modifiers: [.command, .option])
-            }
-        }
+        .commands { WorkspaceCommands(workspace: workspace) }
         .commands { PrintCommands(workspace: workspace) }
+    }
+}
+
+/// Separate command observation from the window scene so idle activity can be tested offscreen.
+struct WorkspaceCommands: Commands {
+    let workspace: LibraryWorkspace
+    var body: some Commands {
+        let state = workspace.menuState.value
+        CommandGroup(replacing: .newItem) {
+            Button("New Document") { workspace.create(folder: false) }
+                .keyboardShortcut("n").disabled(!state.canMutate)
+            Button("New Folder") { workspace.create(folder: true) }
+                .keyboardShortcut("n", modifiers: [.command, .shift]).disabled(!state.canMutate)
+            Button("Rename…") { workspace.beginRename() }
+                .disabled(!state.canRename)
+            Button("Move To…") { workspace.requestMove() }
+                .keyboardShortcut("m", modifiers: [.control, .command]).disabled(!state.canMove)
+            Button(state.trashTitle) { workspace.requestTrash() }
+                .keyboardShortcut(.delete, modifiers: .command).disabled(!state.canTrash)
+            Button("Reveal in Finder") { workspace.reveal() }
+                .keyboardShortcut("r", modifiers: [.command, .option]).disabled(!state.hasLibrary)
+            Divider()
+            ExportMenu(workspace: workspace, state: state)
+            Divider()
+            Button("Open Folder in Place…") { workspace.chooseFolder() }
+                .keyboardShortcut("o")
+            Button("Open in New Tab") { workspace.openSelectionInNewTab() }
+                .keyboardShortcut("t").disabled(!state.canOpenTab)
+            Button("Quick Open…") { workspace.search.toggleQuickOpen() }
+                .keyboardShortcut("o", modifiers: [.command, .shift]).disabled(!state.hasLibrary)
+            Button("Import Folder Copy…") { workspace.chooseImportFolder() }
+                .keyboardShortcut("i", modifiers: [.command, .shift]).disabled(!state.canMutate)
+            Button("New Library…") { workspace.newLibrary() }
+                .keyboardShortcut("n", modifiers: [.command, .option])
+        }
+        TabCommands(workspace: workspace)
+        CommandGroup(replacing: .undoRedo) {
+            Button(state.undoTitle) {
+                if workspace.usesTextUndo { NSApp.sendAction(Selector(("undo:")), to: nil, from: nil) }
+                else { workspace.undoLibrary() }
+            }.keyboardShortcut("z").disabled(!state.canUndo)
+            Button("Redo") { NSApp.sendAction(Selector(("redo:")), to: nil, from: nil) }
+                .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!state.canRedo)
+        }
+        CommandGroup(after: .pasteboard) {
+            Button("Paste and Match Style") { NSApp.sendAction(#selector(NSTextView.pasteAsPlainText(_:)), to: nil, from: nil) }
+                .keyboardShortcut("v", modifiers: [.command, .option, .shift])
+            FindMenu(workspace: workspace, state: state)
+        }
+        TextEditingCommands()
+        FormatCommands()
+        CommandGroup(replacing: .sidebar) {
+            Button(state.sidebarsTitle) { workspace.toggleSidebars() }
+                .keyboardShortcut("s", modifiers: [.control, .command])
+                .disabled(!state.canToggleSidebars)
+        }
+        CommandGroup(after: .sidebar) {
+            Button(state.previewMode == .preview ? "Show Editor" : "Show Preview") { workspace.preview.togglePreview() }.keyboardShortcut("r")
+            Toggle("Split Editor and Preview", isOn: Binding(get: { state.previewMode == .split }, set: { workspace.preview.mode = $0 ? .split : .editor })).keyboardShortcut("4")
+            Button("Show Document Info") { workspace.showInfo() }.keyboardShortcut("8")
+            Toggle("Show Outline", isOn: Binding(get: { state.showsOutline }, set: { workspace.inspectorInfo = false; workspace.preview.showsOutline = $0 })).keyboardShortcut("7")
+            Divider()
+            Menu("Sort By") { DocumentSortItems(workspace: workspace, commandState: state) }
+                .disabled(!state.hasLibrary)
+            IncludeSubfoldersItem(workspace: workspace, hideForAllDocuments: false, commandState: state)
+        }
+        ToolbarCommands()
+        CommandMenu("Go") {
+            Button("Folders") { workspace.focus(0) }.keyboardShortcut("1", modifiers: [.command, .option])
+            Button("Documents") { workspace.focus(1) }.keyboardShortcut("2", modifiers: [.command, .option])
+            Button("Editor") { workspace.focus(2) }.keyboardShortcut("3", modifiers: [.command, .option])
+        }
     }
 }
 

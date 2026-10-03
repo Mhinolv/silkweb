@@ -7,9 +7,9 @@ struct PrintCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .printItem) {
             Button("Page Setup…") { workspace.pageSetup() }
-                .keyboardShortcut("p", modifiers: [.command, .shift]).disabled(!workspace.canPrint)
+                .keyboardShortcut("p", modifiers: [.command, .shift]).disabled(!workspace.menuState.value.canPrint)
             Button("Print…") { workspace.printDocument() }
-                .keyboardShortcut("p").disabled(!workspace.canPrint)
+                .keyboardShortcut("p").disabled(!workspace.menuState.value.canPrint)
         }
     }
 }

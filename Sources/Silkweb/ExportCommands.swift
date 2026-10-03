@@ -5,13 +5,14 @@ import SilkwebCore
 
 struct ExportMenu: View {
     let workspace: LibraryWorkspace
+    let state: MenuCommandValues
     var body: some View {
         Menu("Export") {
             Button("HTML…") { workspace.exportHTML() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
             Button("PDF…") { workspace.printDocument(exportPDF: true) }
-                .keyboardShortcut("p", modifiers: [.command, .option]).disabled(!workspace.canPrint)
-        }.disabled(!workspace.canExport)
+                .keyboardShortcut("p", modifiers: [.command, .option]).disabled(!state.canPrint)
+        }.disabled(!state.canExport)
     }
 }
 

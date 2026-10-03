@@ -10,6 +10,7 @@ final class LibraryWorkspace {
     var editor: DocumentSession { tabs.first { $0.id == activeTabID }?.editor ?? emptyEditor }
     var canSaveWindowSession = true
     var restoringTabs = false
+    @ObservationIgnored lazy var menuState = MenuCommandState(workspace: self)
     @ObservationIgnored var closingTabIDs: Set<UUID> = []
     @ObservationIgnored var recoveryDirectory: URL?
     let search = LibrarySearch()
