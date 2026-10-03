@@ -24,6 +24,7 @@ struct InspectorView: View {
             }.pickerStyle(.segmented).labelsHidden().columnLayoutAnchor("outline-title").padding(12)
             if workspace.inspectorInfo { DocumentInfo(workspace: workspace).frame(maxWidth: .infinity, maxHeight: .infinity) } else { outline }
         }
+        .background(Color.silkwebPaneBackground.ignoresSafeArea())
     }
     private var outline: some View {
         let current = preview.currentItem(caret: workspace.editor.caretLocation)
@@ -71,6 +72,7 @@ struct InspectorView: View {
                         }
                     }
                     .listStyle(.sidebar)
+                    .scrollContentBackground(.hidden)
                     .environment(\.defaultMinListRowHeight, 1)
                     .focused($outlineFocused)
                     .onHover { outlineHovered = $0 }

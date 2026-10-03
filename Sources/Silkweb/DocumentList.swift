@@ -16,7 +16,7 @@ struct DocumentList: View {
                         Spacer()
                         Button("Show Only This Folder") { workspace.setIncludeSubfolders(false) }.buttonStyle(.borderless)
                     }
-                    .font(.caption).monospacedDigit().padding(.horizontal, 8).frame(height: 28).background(.bar)
+                    .font(.caption).monospacedDigit().padding(.horizontal, 8).frame(height: 28).paneStrip(hairline: .bottom)
                     .accessibilityElement(children: .contain).accessibilityLabel("Including subfolders")
                 }
             } content: {
@@ -120,7 +120,7 @@ struct DocumentDetail: View {
             if workspace.snapshot?.isReadOnly == true {
                 Label("This library is read-only. Documents can be viewed, but changes can’t be saved.", systemImage: "lock")
                     .font(.callout).frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-                    .padding(.horizontal, 12).background(.bar)
+                    .padding(.horizontal, 12).paneStrip(hairline: .bottom)
             }
             EditorBanner(session: workspace.editor, workspace: workspace)
             AssetErrorBanner(session: workspace.editor)
@@ -129,7 +129,7 @@ struct DocumentDetail: View {
                 if let progress = workspace.editor.assetProgress {
                     HStack { Text(progress); Spacer() }
                         .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12)
-                        .frame(height: 24).background(.bar)
+                        .frame(height: 24).paneStrip(hairline: .top)
                 }
             } else if workspace.session.selectedDocuments.count > 1 {
                 ContentUnavailableView("\(workspace.session.selectedDocuments.count) Documents Selected", systemImage: "doc.on.doc")
@@ -140,6 +140,7 @@ struct DocumentDetail: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.silkwebPaneBackground.ignoresSafeArea())
         .inspector(isPresented: Binding(get: { workspace.preview.showsOutline }, set: { workspace.preview.showsOutline = $0 })) {
             InspectorView(workspace: workspace).inspectorColumnWidth(min: 200, ideal: 240, max: 320)
         }

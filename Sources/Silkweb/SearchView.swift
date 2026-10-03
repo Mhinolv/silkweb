@@ -85,7 +85,7 @@ struct SearchView<Content: View>: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .background(Color(nsColor: .textBackgroundColor))
+                    .background(Color.silkwebPaneBackground)
                 }
             }
         }

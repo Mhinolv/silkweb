@@ -66,7 +66,7 @@ struct MarkdownTextView: NSViewRepresentable {
         let scroll = EditorScrollView()
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
-        scroll.backgroundColor = .textBackgroundColor
+        scroll.backgroundColor = .silkwebPaneBackground
         scroll.automaticallyAdjustsContentInsets = false
         scroll.findBarPosition = .aboveContent
         let text = PlainMarkdownTextView()
@@ -90,7 +90,7 @@ struct MarkdownTextView: NSViewRepresentable {
         text.defaultParagraphStyle = paragraph
         text.typingAttributes = [.font: text.font!, .paragraphStyle: paragraph, .foregroundColor: NSColor.labelColor]
         text.textColor = .labelColor
-        text.backgroundColor = .textBackgroundColor
+        text.backgroundColor = .silkwebPaneBackground
         text.insertionPointColor = .textColor
         text.isVerticallyResizable = true
         text.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
@@ -529,7 +529,7 @@ struct EditorBanner: View {
             }
             .disabled(session.loading)
             .controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8)
-            .frame(minHeight: 36).background(.bar)
+            .frame(minHeight: 36).paneStrip(hairline: .bottom)
             .opacity(opacity)
             .sheet(isPresented: Binding(get: { session.showingComparison }, set: { session.showingComparison = $0 })) { ConflictSheet(session: session) }
             .task(id: session.refusedNavigation) {

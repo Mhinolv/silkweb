@@ -21,11 +21,13 @@ struct DocumentTable: NSViewRepresentable {
         table.allowsEmptySelection = true
         table.style = .inset
         table.intercellSpacing = .zero
+        table.backgroundColor = .silkwebPaneBackground
         table.dataSource = context.coordinator
         table.delegate = context.coordinator
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
+        scroll.backgroundColor = .silkwebPaneBackground
         scroll.documentView = table
         context.coordinator.table = table
         context.coordinator.update(documents: documents, dateReference: dateReference, makeDragProvider: makeDragProvider)

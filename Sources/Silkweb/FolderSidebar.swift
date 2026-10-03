@@ -26,7 +26,9 @@ struct FolderSidebar: NSViewRepresentable {
         let workspace = coordinator.workspace
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
+        // Paint over the sidebar item's wallpaper-tinted material (1.56).
+        scroll.drawsBackground = true
+        scroll.backgroundColor = .silkwebPaneBackground
         let outline = SidebarOutlineView()
         outline.renameSelected = { [weak coordinator] in coordinator?.renameSelection() }
         outline.toggleDisclosure = { [weak coordinator] row in coordinator?.toggleDisclosure(at: row) ?? false }
@@ -40,6 +42,7 @@ struct FolderSidebar: NSViewRepresentable {
         outline.outlineTableColumn = column
         outline.headerView = nil
         outline.style = .sourceList
+        outline.backgroundColor = .silkwebPaneBackground
         outline.rowHeight = 24
         outline.delegate = coordinator
         outline.dataSource = coordinator

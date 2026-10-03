@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import QuartzCore
+import SilkwebCore
 
 /// SwiftUI's column width hints do not control which pane absorbs a resize.
 /// AppKit owns the dividers; the hosted panes keep their existing observation and focus.
@@ -198,20 +199,28 @@ private struct LibrarySidebarPane: View {
     let workspace: LibraryWorkspace
 
     var body: some View {
-        if let snapshot = workspace.snapshot {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("LIBRARY").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 12)
-                FolderSidebar(snapshot: snapshot, workspace: workspace)
-                Menu {
-                    Button("New Folder") { workspace.create(folder: true) }
-                    Button("New Document") { workspace.create(folder: false) }
-                } label: { Image(systemName: "plus") }
-                .menuStyle(.borderlessButton).fixedSize().padding(8)
-                .accessibilityLabel("Add").help("Add")
-                .disabled(!workspace.canMutate)
+        Group {
+            if let snapshot = workspace.snapshot {
+                sidebar(snapshot)
+            } else {
+                DelayedLibraryProgress(count: workspace.loadingCount)
             }
-        } else {
-            DelayedLibraryProgress(count: workspace.loadingCount)
+        }
+        // Covers the sidebar item's full-height material, including the titlebar strip.
+        .background(Color.silkwebPaneBackground.ignoresSafeArea())
+    }
+
+    private func sidebar(_ snapshot: LibrarySnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("LIBRARY").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 12)
+            FolderSidebar(snapshot: snapshot, workspace: workspace)
+            Menu {
+                Button("New Folder") { workspace.create(folder: true) }
+                Button("New Document") { workspace.create(folder: false) }
+            } label: { Image(systemName: "plus") }
+            .menuStyle(.borderlessButton).fixedSize().padding(8)
+            .accessibilityLabel("Add").help("Add")
+            .disabled(!workspace.canMutate)
         }
     }
 }
@@ -231,5 +240,6 @@ private struct LibraryDocumentPane: View {
                 workspace.focus(press.modifiers.contains(.shift) ? 0 : 2)
                 return .handled
             }
+            .background(Color.silkwebPaneBackground.ignoresSafeArea())
     }
 }

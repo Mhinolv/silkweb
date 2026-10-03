@@ -563,6 +563,10 @@ struct LibraryWorkspaceView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 560)
+        .background(Color.silkwebPaneBackground.ignoresSafeArea())
+        // Unified chrome: the toolbar shares the pane color; one titlebar hairline remains.
+        .toolbarBackground(Color.silkwebPaneBackground, for: .windowToolbar)
+        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         .overlay {
             if workspace.search.showsQuickOpen {
                 QuickOpenPanel(workspace: workspace)

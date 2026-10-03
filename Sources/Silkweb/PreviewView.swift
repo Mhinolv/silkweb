@@ -44,7 +44,7 @@ struct PreviewView: NSViewRepresentable {
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         let web = WKWebView(frame: .zero, configuration: configuration)
-        web.underPageBackgroundColor = .textBackgroundColor
+        web.underPageBackgroundColor = .silkwebPaneBackground
         web.setValue(false, forKey: "drawsBackground")
         web.setAccessibilityLabel("Document preview")
         return web
@@ -294,13 +294,13 @@ struct PreviewPane: View {
                 .controlSize(.small)
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-                .background(.bar)
+                .paneStrip(hairline: .bottom)
             }
             PreviewView(workspace: workspace)
                 .overlay {
                     if workspace.preview.isLoading { ProgressView().controlSize(.small) }
                 }
         }
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(Color.silkwebPaneBackground)
     }
 }

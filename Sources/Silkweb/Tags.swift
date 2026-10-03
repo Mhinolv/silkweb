@@ -119,7 +119,7 @@ struct TagFilterBar: View {
                     }
                     Button("Clear") { workspace.tagFilters = [] }
                 }.font(.caption).padding(.horizontal, 8)
-            }.frame(height: 28).background(.bar)
+            }.frame(height: 28).paneStrip(hairline: .bottom)
         }
     }
 }

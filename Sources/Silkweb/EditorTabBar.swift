@@ -18,7 +18,6 @@ final class EditorTabBarView: NSView {
     let scroll = NSScrollView()
     let strip = NSView()
     let overflow = NSPopUpButton(frame: .zero, pullsDown: true)
-    private let material = NSVisualEffectView()
     private(set) var buttons: [EditorTabButton] = []
     private var insertionGap: Int?
     private let indicator = NSView()
@@ -27,10 +26,6 @@ final class EditorTabBarView: NSView {
     init(workspace: LibraryWorkspace) {
         self.workspace = workspace
         super.init(frame: .zero)
-        material.material = .headerView
-        material.blendingMode = .withinWindow
-        material.state = .followsWindowActiveState
-        addSubview(material)
         scroll.drawsBackground = false
         scroll.hasHorizontalScroller = true
         scroll.autohidesScrollers = true
@@ -76,7 +71,6 @@ final class EditorTabBarView: NSView {
 
     override func layout() {
         super.layout()
-        material.frame = bounds
         let available = max(0, bounds.width - 28)
         scroll.frame = NSRect(x: 0, y: 1, width: available, height: max(0, bounds.height - 1))
         overflow.frame = NSRect(x: available, y: 0, width: 28, height: bounds.height)
@@ -92,6 +86,8 @@ final class EditorTabBarView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        NSColor.silkwebPaneBackground.setFill()
+        bounds.fill()
         NSColor.separatorColor.setFill()
         NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
     }
@@ -167,9 +163,8 @@ final class EditorTabButton: NSView {
         title.frame = NSRect(x: 26, y: 5, width: max(0, bounds.width - 52), height: 18)
     }
     override func draw(_ dirtyRect: NSRect) {
-        if bar?.workspace.activeTabID == tab.id {
-            NSColor.controlBackgroundColor.setFill(); bounds.fill()
-        } else if hovered { NSColor.quaternaryLabelColor.setFill(); bounds.fill() }
+        // The active tab sits on the pane color; its title and the accent indicator mark it.
+        if bar?.workspace.activeTabID != tab.id, hovered { NSColor.quaternaryLabelColor.setFill(); bounds.fill() }
     }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

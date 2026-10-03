@@ -290,7 +290,7 @@ import SilkwebCore
         return NSRange(location: sourceRange.location, length: line.utf16.count)
     }
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.textBackgroundColor.setFill(); bounds.fill()
+        NSColor.silkwebPaneBackground.setFill(); bounds.fill()
         if let bitmap = content.bitmap {
             NSImage(cgImage: bitmap, size: content.size).draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         } else {

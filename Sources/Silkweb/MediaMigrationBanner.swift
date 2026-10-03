@@ -41,7 +41,7 @@ struct MediaMigrationBanner: View {
                 }
             }
             .font(.callout).controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8)
-            .frame(minHeight: 36).background(.bar)
+            .frame(minHeight: 36).paneStrip(hairline: .bottom)
         }
     }
 }
