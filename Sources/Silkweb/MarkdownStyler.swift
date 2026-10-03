@@ -12,7 +12,7 @@ import SilkwebCore
 
     func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions, range editedRange: NSRange, changeInLength delta: Int) {
         guard editedMask.contains(.editedCharacters) else { return }
-        editor?.inlineImages.sourceDidChange()
+        editor?.inlineImages.sourceDidChange(editedRange: editedRange, delta: delta)
         let oldEnd = NSMaxRange(editedRange) - delta
         var shifted: [Int: Bool] = [:]
         for (location, state) in checkpoints {

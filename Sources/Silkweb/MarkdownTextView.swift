@@ -379,6 +379,18 @@ final class PlainMarkdownTextView: NSTextView {
     private(set) var fullDrawCount = 0
     #endif
 
+    /// Inline images move in the same display pass as the reflowed text: lay out the
+    /// visible rect (as drawing would) and place overlays before anything is drawn.
+    override func viewWillDraw() {
+        if let layout = layoutManager, let container = textContainer, !inlineImages.imageViews.isEmpty {
+            var rect = visibleRect
+            rect.origin.x -= textContainerOrigin.x; rect.origin.y -= textContainerOrigin.y
+            layout.ensureLayout(forBoundingRect: rect, in: container)
+            inlineImages.positionViews()
+        }
+        super.viewWillDraw()
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         #if DEBUG
         if dirtyRect.width > 10 && dirtyRect.height > 30 { fullDrawCount += 1 }

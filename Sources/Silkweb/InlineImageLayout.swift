@@ -12,8 +12,6 @@ import SilkwebCore
     private var task: Task<Void, Never>?
     private var paragraphs: [InlineImageParagraph] = []
     private(set) var imageViews: [InlineImageView] = []
-    private var positionScheduled = false
-    private var sourceDirty = false
     private var geometry = NSSize.zero
     private var generation = 0
     private var heightsByEnd: [Int: CGFloat] = [:]
@@ -24,20 +22,46 @@ import SilkwebCore
         guard self.root != root || self.document != document else { return }
         self.root = root; self.document = document
         paragraphs = []
-        replaceViews()
-        invalidate()
+        install([])
         schedule()
     }
 
-    /// Called from text storage before TextKit lays out the edited characters.
-    /// Old paragraph offsets must never participate in positioning after an edit.
-    func sourceDidChange() {
-        sourceDirty = true
-        hideViews()
+    /// Called from text storage before TextKit lays out the edited characters. Shift
+    /// paragraph offsets (and the line heights keyed by them) like glyphs, so images move
+    /// with their lines in the same layout pass; the debounced reparse only adds new images.
+    func sourceDidChange(editedRange: NSRange, delta: Int) {
+        guard !paragraphs.isEmpty else { return }
+        let oldEnd = NSMaxRange(editedRange) - delta
+        func map(_ index: Int) -> Int {
+            if index <= editedRange.location { return index }
+            return index >= oldEnd ? index + delta : NSMaxRange(editedRange)
+        }
+        var shifted: [InlineImageParagraph] = []
+        var removed = false
+        for paragraph in paragraphs {
+            if NSMaxRange(paragraph.range) <= editedRange.location { shifted.append(paragraph); continue }
+            let start = map(paragraph.range.location), end = map(NSMaxRange(paragraph.range))
+            let views = viewsByStart[paragraph.range.location] ?? []
+            guard end > start else {
+                // The image line itself was deleted: its images go with it.
+                views.forEach { $0.removeFromSuperview() }
+                imageViews.removeAll { view in views.contains { $0 === view } }
+                removed = true
+                continue
+            }
+            let range = NSRange(location: start, length: end - start)
+            views.forEach { $0.sourceRange = range }
+            shifted.append(InlineImageParagraph(range: range, contents: paragraph.contents))
+        }
+        paragraphs = shifted
+        if removed { selectedViews.removeAll { $0.superview == nil } }
+        indexViews()
+        updateHeights()
     }
 
-    private func hideViews() {
-        for view in imageViews where !view.isHidden { view.isHidden = true }
+    private func indexViews() {
+        viewsByStart = [:]
+        for view in imageViews { viewsByStart[view.sourceRange.location, default: []].append(view) }
     }
 
     func schedule() {
@@ -68,14 +92,14 @@ import SilkwebCore
         let size = NSSize(width: editor.textContainer?.containerSize.width ?? 1,
                           height: editor.enclosingScrollView?.contentSize.height ?? 1)
         if size != geometry {
-            hideViews()
+            // Width changes (mode switch, sidebars, window) refit in place; the views move
+            // in the display pass that lays out the reflowed text. Never hidden.
             geometry = size
             for view in imageViews { view.refit(column: size.width, viewport: size.height) }
-            updateHeights()
             invalidate()
             schedule()
         }
-        schedulePosition()
+        positionViews()
     }
 
     private func install(_ updated: [InlineImageParagraph], fade: Bool = false) {
@@ -85,27 +109,45 @@ import SilkwebCore
                     && a.message == b.message && a.bitmap === b.bitmap
             }
         }
-        sourceDirty = false
-        guard !equal else { schedulePosition(); return }
+        guard !equal else { positionViews(); return }
         paragraphs = updated
-        replaceViews(fade: fade)
-        invalidate()
+        let previousHeights = heightsByEnd
+        updateViews(fade: fade)
+        updateHeights()
+        if heightsByEnd != previousHeights { invalidate() } else { positionViews() }
     }
 
-    private func replaceViews(fade: Bool = false) {
-        imageViews.forEach { $0.removeFromSuperview() }
+    /// Reuse the existing view for the same reference (in order), so a reparse, a range
+    /// shift or a sharper decode never removes and re-adds a visible image. Only new
+    /// images get a new view, hidden until its slot is known.
+    private func updateViews(fade: Bool) {
+        var pool: [String: [InlineImageView]] = [:]
+        for view in imageViews { pool[view.key, default: []].append(view) }
         imageViews = []
-        viewsByStart = [:]
-        selectedViews = []
-        guard let editor else { return }
+        guard let editor else {
+            pool.values.joined().forEach { $0.removeFromSuperview() }
+            indexViews(); selectedViews = []
+            return
+        }
         for paragraph in paragraphs {
             for content in paragraph.contents {
-                let view = InlineImageView(content: content, sourceRange: paragraph.range, editor: editor)
+                let key = InlineImageView.key(content)
+                let view: InlineImageView
+                let firstBitmap: Bool
+                if let reused = pool[key]?.first {
+                    pool[key]?.removeFirst()
+                    firstBitmap = reused.content.bitmap == nil && content.bitmap != nil
+                    reused.update(content: content, sourceRange: paragraph.range)
+                    view = reused
+                } else {
+                    view = InlineImageView(content: content, sourceRange: paragraph.range, editor: editor)
+                    editor.addSubview(view)
+                    firstBitmap = content.bitmap != nil
+                }
                 view.refit(column: geometry.width, viewport: geometry.height)
-                editor.addSubview(view)
                 imageViews.append(view)
-                viewsByStart[paragraph.range.location, default: []].append(view)
-                if fade, content.bitmap != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                // Fade once per newly decoded bitmap, never on reuse of a shown bitmap.
+                if fade, firstBitmap, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                     view.alphaValue = 0
                     NSAnimationContext.runAnimationGroup { context in
                         context.duration = 0.12
@@ -114,6 +156,9 @@ import SilkwebCore
                 }
             }
         }
+        pool.values.joined().forEach { $0.removeFromSuperview() }
+        selectedViews.removeAll { $0.superview == nil }
+        indexViews()
     }
 
     private func updateHeights() {
@@ -125,12 +170,11 @@ import SilkwebCore
     }
 
     private func invalidate() {
-        hideViews()
         updateHeights()
         guard let editor, let layout = editor.layoutManager else { return }
         layout.invalidateLayout(forCharacterRange: NSRange(location: 0, length: editor.string.utf16.count), actualCharacterRange: nil)
+        editor.needsDisplay = true
         editor.scheduleContentSizing()
-        schedulePosition()
     }
 
     func layoutManager(_ layoutManager: NSLayoutManager, shouldSetLineFragmentRect lineFragmentRect: UnsafeMutablePointer<NSRect>,
@@ -143,31 +187,36 @@ import SilkwebCore
     }
 
     func layoutManager(_ layoutManager: NSLayoutManager, didCompleteLayoutFor textContainer: NSTextContainer?, atEnd flag: Bool) {
-        hideViews()
-        schedulePosition()
+        positionViews()
     }
 
-    private func schedulePosition() {
-        guard !positionScheduled else { return }
-        positionScheduled = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.positionScheduled = false
-            self.positionViews()
-        }
-    }
-
+    /// Moves each image to its slot from geometry TextKit has already computed, in the
+    /// same pass as that layout (layout completion and the editor's viewWillDraw). Never
+    /// forces layout: an image whose line is not laid out yet lies below all laid-out
+    /// text, which covers the visible rect at display time, so it is parked there.
     func positionViews() {
-        guard !sourceDirty, let editor, let layout = editor.layoutManager, let container = editor.textContainer else { return }
-        layout.ensureLayout(for: container)
-        for paragraph in paragraphs where NSMaxRange(paragraph.range) <= editor.string.utf16.count {
-            let glyph = layout.glyphIndexForCharacter(at: NSMaxRange(paragraph.range) - 1)
-            let used = layout.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
-            var y = used.maxY + editor.textContainerOrigin.y + 6
-            for view in viewsByStart[paragraph.range.location] ?? [] {
-                let origin = NSPoint(x: editor.textContainerOrigin.x, y: y)
-                if view.frame.origin != origin { view.setFrameOrigin(origin) }
-                view.isHidden = false
+        guard let editor, let layout = editor.layoutManager, let container = editor.textContainer else { return }
+        let length = editor.string.utf16.count
+        let laid = layout.firstUnlaidCharacterIndex()
+        let origin = editor.textContainerOrigin
+        var parked: CGFloat?
+        for paragraph in paragraphs where paragraph.range.length > 0 && NSMaxRange(paragraph.range) <= length {
+            let views = viewsByStart[paragraph.range.location] ?? []
+            let end = NSMaxRange(paragraph.range) - 1
+            var y: CGFloat
+            let placed = end < laid
+            if placed {
+                let glyph = layout.glyphIndexForCharacter(at: end)
+                y = layout.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil, withoutAdditionalLayout: true).maxY + origin.y + 6
+            } else {
+                let bottom = parked ?? layout.usedRect(for: container).maxY + origin.y + 6
+                parked = bottom
+                y = max(views.first?.frame.minY ?? bottom, bottom)
+            }
+            for view in views {
+                let target = NSPoint(x: origin.x, y: y)
+                if view.frame.origin != target { view.setFrameOrigin(target) }
+                if placed, view.isHidden { view.isHidden = false }
                 y += view.frame.height + 8
             }
         }
@@ -182,9 +231,13 @@ import SilkwebCore
 }
 
 @MainActor final class InlineImageView: NSView, @preconcurrency QLPreviewPanelDataSource, @preconcurrency QLPreviewPanelDelegate {
-    let content: InlineImageContent
-    let sourceRange: NSRange
+    private(set) var content: InlineImageContent
+    var sourceRange: NSRange
     weak var editor: PlainMarkdownTextView?
+    static func key(_ content: InlineImageContent) -> String {
+        "\(content.reference.destination)\u{0}\(content.url?.path ?? "")"
+    }
+    var key: String { Self.key(content) }
     override var isFlipped: Bool { true }
     init(content: InlineImageContent, sourceRange: NSRange, editor: PlainMarkdownTextView) {
         self.content = content; self.sourceRange = sourceRange; self.editor = editor
@@ -193,14 +246,27 @@ import SilkwebCore
         identifier = NSUserInterfaceItemIdentifier("inline-image")
         registerForDraggedTypes([.fileURL])
         wantsLayer = true
-        layer?.cornerRadius = content.message == nil ? 4 : 6
         layer?.masksToBounds = true
         setAccessibilityElement(true)
+        applyContent()
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// A sharper decode or changed file updates this view in place (no remove/re-add).
+    func update(content: InlineImageContent, sourceRange: NSRange) {
+        self.sourceRange = sourceRange
+        guard content.bitmap !== self.content.bitmap || content.message != self.content.message || content.reference != self.content.reference
+                || content.naturalSize != self.content.naturalSize || content.size != self.content.size else { return }
+        self.content = content
+        applyContent()
+        needsDisplay = true
+    }
+    private func applyContent() {
+        layer?.cornerRadius = content.message == nil ? 4 : 6
         setAccessibilityRole(content.message == nil ? .image : .staticText)
         setAccessibilityLabel(content.message ?? (content.reference.alt.isEmpty ? "Image, \(content.url?.lastPathComponent ?? "")" : content.reference.alt))
         setAccessibilityHelp(content.message == nil ? "Double-click to open in Quick Look" : "Select image source line")
     }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func refit(column: CGFloat, viewport: CGFloat) {
         let size: NSSize
