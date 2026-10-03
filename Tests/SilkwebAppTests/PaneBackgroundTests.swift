@@ -209,6 +209,101 @@ final class PaneBackgroundTests: XCTestCase {
         }
     }
 
+    /// silkweb-1.62 owner evidence: the titlebar/toolbar strip renders the pane token, not a lighter or
+    /// grey toolbar material, with only a hairline between it and the panes. Samples the real window frame.
+    @MainActor
+    func testToolbarStripRendersThePaneSurface() async throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebToolbar-" + UUID().uuidString)
+        let suite = "Silkweb.ToolbarSurface." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("Folder"), withIntermediateDirectories: true)
+        try Data("# Title\n\nBody.".utf8).write(to: root.appendingPathComponent("Note.md"))
+        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        workspace.canSaveWindowSession = false
+        workspace.root = root
+        workspace.install(try await LibraryScanner.scan(root: root))
+        let oldAppearance = NSApp.appearance
+        defer {
+            NSApp.appearance = oldAppearance
+            defaults.removePersistentDomain(forName: suite)
+            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+            try? FileManager.default.removeItem(at: root)
+        }
+        for name in [NSAppearance.Name.aqua, .darkAqua] {
+            let appearance = try XCTUnwrap(NSAppearance(named: name))
+            NSApp.appearance = appearance
+            // The production window shape (titled, unified toolbar from SwiftUI), never ordered on screen.
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+                                  styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.appearance = appearance
+            window.backgroundColor = .windowBackgroundColor
+            defer { window.contentViewController = nil; window.close() }
+            let controller = NSHostingController(rootView: LibraryWorkspaceView(workspace: workspace))
+            controller.sizingOptions = []
+            window.contentViewController = controller
+            window.setFrame(NSRect(x: 0, y: 0, width: 1400, height: 900), display: false)
+            for _ in 0..<3 {
+                controller.view.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(200))
+            }
+            XCTAssertFalse(window.isVisible)
+            let content = try XCTUnwrap(window.contentView)
+            let frameView = try XCTUnwrap(content.superview)
+            frameView.layoutSubtreeIfNeeded()
+            let swatch = TokenSwatch(frame: NSRect(x: 0, y: 0, width: 4, height: 4))
+            content.addSubview(swatch)
+            defer { swatch.removeFromSuperview() }
+            let bitmap = try XCTUnwrap(frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds))
+            appearance.performAsCurrentDrawingAppearance { frameView.cacheDisplay(in: frameView.bounds, to: bitmap) }
+            // Same backdrop the snapshot harness paints behind transparent regions.
+            let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            context.cgContext.scaleBy(x: CGFloat(bitmap.pixelsWide) / frameView.bounds.width, y: CGFloat(bitmap.pixelsHigh) / frameView.bounds.height)
+            appearance.performAsCurrentDrawingAppearance {
+                NSColor.windowBackgroundColor.setFill()
+                frameView.bounds.fill(using: .destinationOver)
+            }
+            NSGraphicsContext.restoreGraphicsState()
+            let scale = CGFloat(bitmap.pixelsHigh) / frameView.bounds.height
+            /// `top` is measured in points down from the window's top edge.
+            func pixel(x: CGFloat, top: CGFloat) throws -> NSColor {
+                try XCTUnwrap(bitmap.colorAt(x: Int(x * scale), y: Int(top * scale))?.usingColorSpace(bitmap.colorSpace))
+            }
+            let contentFrame = content.convert(content.bounds, to: frameView)
+            let titlebarHeight = frameView.isFlipped ? contentFrame.minY : frameView.bounds.height - contentFrame.maxY
+            XCTAssertGreaterThan(titlebarHeight, 20, "window has a titlebar/toolbar strip in \(name.rawValue)")
+            let swatchPoint = swatch.convert(NSPoint(x: 2, y: 2), to: frameView)
+            let token = try pixel(x: swatchPoint.x, top: frameView.isFlipped ? swatchPoint.y : frameView.bounds.height - swatchPoint.y)
+            // The editor surface just below the strip, as the reference the owner compared against.
+            let editor = try pixel(x: frameView.bounds.maxX - 24, top: titlebarHeight + 120)
+            func assertSurface(_ actual: NSColor, _ label: String) {
+                for (a, w, channel) in [(actual.redComponent, token.redComponent, "R"), (actual.greenComponent, token.greenComponent, "G"),
+                                        (actual.blueComponent, token.blueComponent, "B")] {
+                    XCTAssertEqual(a * 255, w * 255, accuracy: 1.01, "\(label) \(channel) in \(name.rawValue): \(actual) vs \(token)")
+                }
+            }
+            assertSurface(editor, "editor below toolbar")
+            // Empty toolbar space: above the controls, and between the title and the trailing items.
+            for (label, x, top) in [("toolbar top-centre", frameView.bounds.midX, CGFloat(4)),
+                                    ("toolbar top-trailing", frameView.bounds.maxX - 40, CGFloat(4)),
+                                    ("toolbar centre", frameView.bounds.width * 0.62, titlebarHeight / 2),
+                                    ("toolbar bottom", frameView.bounds.width * 0.62, titlebarHeight - 4)] {
+                assertSurface(try pixel(x: x, top: top), label)
+            }
+            // Exactly one divider between the strip and the panes: a hairline at the titlebar's bottom edge.
+            let edge = (Int((titlebarHeight - 2) * scale)...Int((titlebarHeight + 1) * scale)).compactMap {
+                bitmap.colorAt(x: Int(frameView.bounds.width * 0.62 * scale), y: $0)?.usingColorSpace(bitmap.colorSpace)
+            }
+            XCTAssertTrue(edge.contains { abs($0.redComponent - token.redComponent) * 255 > 4 },
+                          "titlebar hairline in \(name.rawValue): \(edge)")
+        }
+    }
+
     private final class TokenSwatch: NSView {
         var color = NSColor.silkwebPaneBackground
         override func draw(_ dirtyRect: NSRect) {

@@ -67,7 +67,6 @@ struct EditorWindowLifecycle: NSViewRepresentable {
         init(workspace: LibraryWorkspace) { self.workspace = workspace }
         func attach(_ window: NSWindow) {
             window.tabbingMode = .disallowed
-            window.titlebarSeparatorStyle = .line
             if window.delegate !== self {
                 previousDelegate = window.delegate
                 window.delegate = self

@@ -87,6 +87,33 @@ extension NSColor {
     static let silkwebThread = SilkwebTokens.color("SilkwebThread", SilkwebTokens.thread)
 }
 
+/// Puts the window's titlebar/toolbar strip on the pane surface (silkweb-1.62): the titlebar stops drawing
+/// its own material and the window background behind it is the pane token.
+struct WindowSurface: NSViewRepresentable {
+    func makeNSView(context: Context) -> Probe { Probe() }
+    func updateNSView(_ view: Probe, context: Context) {}
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            window.titlebarAppearsTransparent = true
+            window.backgroundColor = .silkwebPaneBackground
+            // A transparent titlebar draws no separator; `TitlebarHairline` is the one divider.
+            window.titlebarSeparatorStyle = .none
+        }
+    }
+}
+
+/// The single hairline under the titlebar strip, overlaid on the top edge of the window content.
+struct TitlebarHairline: View {
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1 / max(1, displayScale))
+            .allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
 extension Color {
     static let silkwebPaneBackground = Color(nsColor: .silkwebPaneBackground)
     static let silkwebAccent = Color(nsColor: .silkwebAccent)
