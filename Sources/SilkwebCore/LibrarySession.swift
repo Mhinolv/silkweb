@@ -84,6 +84,8 @@ public struct LibrarySession: Codable, Equatable, Sendable {
 public struct DocumentSummary: Sendable {
     public let modified: Date?
     public let firstLine: String
+    /// Up to ≈240 characters of body text for the two-line list excerpt (silkweb-1.64).
+    public let excerpt: String
 
     public static func load(document: LibraryDocument, root: URL) async -> DocumentSummary {
         await Task.detached(priority: .utility) {
@@ -106,10 +108,11 @@ public struct DocumentSummary: Sendable {
                     data.removeLast()
                 }
                 let title = URL(fileURLWithPath: document.name).deletingPathExtension().lastPathComponent
-                let line = DocumentRowPresentation.snippet(String(decoding: data, as: UTF8.self), title: title)
-                return DocumentSummary(modified: date, firstLine: line)
+                let text = String(decoding: data, as: UTF8.self)
+                return DocumentSummary(modified: date, firstLine: DocumentRowPresentation.snippet(text, title: title),
+                                       excerpt: DocumentRowPresentation.excerpt(text, title: title))
             } catch {
-                return DocumentSummary(modified: nil, firstLine: "No additional text")
+                return DocumentSummary(modified: nil, firstLine: "No additional text", excerpt: "No additional text")
             }
         }.value
     }

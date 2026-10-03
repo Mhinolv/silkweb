@@ -56,6 +56,7 @@ struct DocumentTable: NSViewRepresentable {
         var makeDragProvider: (([String]) -> NSItemProvider)?
         private var updating = false
         private var includesSubfolders = false
+        private var locationScope: (path: String?, name: String)?
         private var lastRename: LibraryRename?
         private var lastRevision = -1
 
@@ -70,12 +71,16 @@ struct DocumentTable: NSViewRepresentable {
                 $0.id != $1.id || $0.relativePath != $1.relativePath
             }
             let reload = structureChanged || includesSubfolders != workspace.includesSubfolders
+            // A visible selection stays in view when sorting or filtering reorders the rows.
+            let anchor = reload ? table.selectedRowIndexes.first.flatMap { row in
+                self.documents.indices.contains(row) && table.visibleRect.intersects(table.rect(ofRow: row)) ? self.documents[row].relativePath : nil
+            } : nil
             self.documents = documents
             self.dateReference = dateReference
             self.makeDragProvider = makeDragProvider
             includesSubfolders = workspace.includesSubfolders
-            let height: CGFloat = includesSubfolders ? 64 : 48
-            if table.rowHeight != height { table.rowHeight = height }
+            locationScope = Self.locationScope(workspace)
+            if table.rowHeight != DocumentRow.height { table.rowHeight = DocumentRow.height }
             if reload { table.reloadData() }
             // Refresh realized cells only; summaries still load asynchronously in DocumentRow.
             let visible = table.rows(in: table.visibleRect)
@@ -92,13 +97,26 @@ struct DocumentTable: NSViewRepresentable {
                let row = documents.firstIndex(where: { $0.relativePath == rename.path }) {
                 table.scrollRowToVisible(row)
             } else if lastRevision != workspace.revision, let row = selected.first { table.scrollRowToVisible(row) }
+            else if let anchor, let row = documents.firstIndex(where: { $0.relativePath == anchor }), selected.contains(row),
+                    !table.visibleRect.intersects(table.rect(ofRow: row)) { table.scrollRowToVisible(row) }
             lastRename = workspace.rename
             lastRevision = workspace.revision
         }
 
         private func rowView(_ document: LibraryDocument) -> DocumentRow {
             DocumentRow(document: document, root: workspace.snapshot!.rootURL, workspace: workspace,
-                        dateReference: dateReference, pointerState: pointerState)
+                        dateReference: dateReference, pointerState: pointerState,
+                        location: locationScope.map { DocumentRowPresentation.location(for: document.relativePath, scope: $0.path, scopeName: $0.name) })
+        }
+
+        /// Rows show where they live only when the list spans folders: All Documents, a tag, or Include Subfolders.
+        static func locationScope(_ workspace: LibraryWorkspace) -> (path: String?, name: String)? {
+            guard let snapshot = workspace.snapshot else { return nil }
+            if let folder = workspace.selectedFolder {
+                return workspace.includesSubfolders ? (folder.relativePath, folder.name) : nil
+            }
+            let library = snapshot.folders.first { $0.relativePath.isEmpty }?.name ?? snapshot.rootURL.lastPathComponent
+            return (nil, library)
         }
 
         func numberOfRows(in tableView: NSTableView) -> Int { documents.count }
@@ -204,6 +222,12 @@ struct DocumentTable: NSViewRepresentable {
 final class DocumentTableView: NSTableView {
     weak var coordinator: DocumentTable.Coordinator?
     var startDraggingSession: (([NSDraggingItem], NSEvent, NSDraggingSource) -> Void)?
+
+    /// Cells span the full row so `DocumentRow` insets its text from the capsule, not from the inset style's cell margin.
+    override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
+        let rect = rect(ofRow: row)
+        return NSRect(x: bounds.minX, y: rect.minY, width: bounds.width, height: rect.height)
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)

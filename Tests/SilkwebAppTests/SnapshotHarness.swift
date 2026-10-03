@@ -78,6 +78,9 @@ struct SnapshotScenario {
         // silkweb-1.62: one surface, hairlines, capsules, underline tab, status strip with “Saved” trailing.
         .init(name: "redesign-one-surface", folder: "Coffee/Brewing Guides", document: pourOver, outline: true,
               tabs: [pourOver, "Coffee/Why I Switched to Light Roasts.md"]),
+        // silkweb-1.64: Direction A rows (title, date, two-line excerpt) in one folder; All Documents adds the location.
+        .init(name: "redesign-list-a", folder: "Vanlife", document: "Vanlife/Settling In.md"),
+        .init(name: "redesign-list-a-all", selectedDocuments: [pourOver]),
         .init(name: "empty-folder", folder: "Snapshot Fixtures/Empty Folder"),
         .init(name: "outline-empty", document: "Snapshot Fixtures/Empty Document.md", outline: true),
         .init(name: "search-empty", searchQuery: "silkweb-no-matches-fixture"),

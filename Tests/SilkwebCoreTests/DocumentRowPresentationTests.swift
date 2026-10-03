@@ -102,6 +102,10 @@ final class DocumentRowPresentationTests: XCTestCase {
             XCTAssertFalse(summary.firstLine.contains("\u{fffd}"))
             if source.hasPrefix("# Title\n\n") { XCTAssertEqual(summary.firstLine, "Body link code") }
             if source.isEmpty { XCTAssertEqual(summary.firstLine, "No additional text") }
+            XCTAssertLessThanOrEqual(summary.excerpt.count, 240)
+            XCTAssertFalse(summary.excerpt.contains("\u{fffd}"))
+            if source.hasPrefix("# Title\n\n") { XCTAssertEqual(summary.excerpt, "Body link code") }
+            if source.isEmpty { XCTAssertEqual(summary.excerpt, "No additional text") }
         }
     }
 
@@ -113,6 +117,55 @@ final class DocumentRowPresentationTests: XCTestCase {
                 if count == 0 { XCTAssertEqual(snippet, "No additional text") }
                 else { XCTAssertTrue(snippet.allSatisfy { String($0) == character }) }
             }
+        }
+    }
+    func testExcerptSpansLinesStripsMarkupAndCollapsesWhitespace() {
+        let cases: [(String, String)] = [
+            ("# Title\n\nThe fog burned off.\nCoffee on the tailgate.", "The fog burned off. Coffee on the tailgate."),
+            ("# Title\n\n![Van at dawn](van.jpg) and [a link](https://example.com)", "Van at dawn and a link"),
+            ("# Title\n- **One**\n- _Two_\n\n> `three`", "One Two three"),
+            ("# Title\n- [x] Done\n1. Item", "Done Item"),
+            ("# Title\n\nA \t  wide\u{00A0}gap\n\n\nnext", "A wide gap next"),
+            ("# Other\nBody", "Other Body"),
+            ("# Title\n## Title\nBody", "Title Body"),
+            ("# Title", "No additional text"), ("", "No additional text"), ("---\n***", "No additional text"),
+            ("# Title\n日本語 👩🏽‍💻\n☕️", "日本語 👩🏽‍💻 ☕️")
+        ]
+        for (source, expected) in cases {
+            XCTAssertEqual(DocumentRowPresentation.excerpt(source, title: "Title"), expected, source)
+        }
+    }
+
+    func testExcerptLimitSweepPreservesGraphemes() {
+        for character in ["a", "日", "👩🏽‍💻"] {
+            for count in [0, 1, 239, 240, 241, 10_000] {
+                let lines = String(repeating: character, count: count) + "\n" + String(repeating: character, count: count)
+                let excerpt = DocumentRowPresentation.excerpt(lines, title: "Title")
+                XCTAssertLessThanOrEqual(excerpt.count, 240)
+                if count == 0 { XCTAssertEqual(excerpt, "No additional text") }
+                else { XCTAssertTrue(excerpt.allSatisfy { String($0) == character || $0 == " " }) }
+                if count >= 240 { XCTAssertEqual(excerpt.count, 240) }
+            }
+        }
+        XCTAssertEqual(DocumentRowPresentation.excerpt("Body text", title: "Title", limit: 4), "Body")
+        XCTAssertEqual(DocumentRowPresentation.excerpt("Body", title: "Title", limit: 0), "No additional text")
+    }
+
+    func testLocationRelativeToScope() {
+        let cases: [(String, String?, String, String)] = [
+            ("Note.md", nil, "Library", "Library"),
+            ("Note.md", "", "Library", "Library"),
+            ("Vanlife/Settling In.md", nil, "Library", "Vanlife"),
+            ("Travel/Japan/Kyoto.md", nil, "Library", "Travel › Japan"),
+            ("Travel/Japan/Kyoto.md", "", "Library", "Travel › Japan"),
+            ("Travel/Lisbon.md", "Travel", "Travel", "Travel"),
+            ("Travel/Japan/Kyoto.md", "Travel", "Travel", "Japan"),
+            ("Travel/Japan/Deep/Kyoto.md", "Travel", "Travel", "Japan › Deep"),
+            ("Travelogue/Note.md", "Travel", "Travel", "Travelogue"),
+            ("日本/旅/メモ.md", "日本", "日本", "旅")
+        ]
+        for (path, scope, name, expected) in cases {
+            XCTAssertEqual(DocumentRowPresentation.location(for: path, scope: scope, scopeName: name), expected, path)
         }
     }
 }

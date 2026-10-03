@@ -31,7 +31,7 @@ struct SearchView<Content: View>: View {
                     Button { search.text = ""; search.results = [] } label: { Image(systemName: "xmark.circle.fill") }
                         .buttonStyle(.plain).help("Clear Search").accessibilityLabel("Clear Search")
                 }
-            }.padding(8)
+            }.padding(.horizontal, Spacing.small).padding(.vertical, 10)
         } content: {
             ZStack(alignment: .top) {
                 content()
@@ -117,20 +117,28 @@ struct SearchRequestIdentity: Hashable {
     let revision: Int
 }
 
+/// Same metrics as `DocumentRow` (silkweb-1.64); the excerpt is the match context.
 struct SearchResultRow: View {
     let result: SearchResult
     let query: String
+    @Environment(\.locale) private var locale
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(SearchPresentation.highlight(result.displayName, query: query, font: .headline)).font(.headline).lineLimit(1)
-            HStack(spacing: 4) {
-                Text(SearchPresentation.path(result.folderPathComponents))
-                if let modified = result.modified { Text("·"); Text(modified, style: .date) }
-            }.font(.caption).foregroundStyle(.tertiary).lineLimit(1)
-            Text(SearchPresentation.highlight(result.snippet, ranges: result.matchRanges, font: .subheadline))
-                .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(SearchPresentation.highlight(result.displayName, query: query, font: .system(size: 13, weight: .semibold)))
+                .font(.system(size: 13, weight: .semibold)).lineLimit(1).frame(height: 17)
+            HStack(spacing: 0) {
+                if let modified = result.modified {
+                    Text(DocumentRowPresentation.dateLabel(modified, locale: locale)).fixedSize().layoutPriority(1)
+                    Text(" · ").foregroundStyle(.tertiary).fixedSize().layoutPriority(1)
+                }
+                Text(SearchPresentation.path(result.folderPathComponents)).truncationMode(.head)
+            }.font(.subheadline).foregroundStyle(.secondary).lineLimit(1).frame(height: 15)
+            Text(SearchPresentation.highlight(result.snippet, ranges: result.matchRanges, font: .system(size: 12)))
+                .font(.system(size: 12)).lineSpacing(DocumentRow.excerptLineSpacing).foregroundStyle(.secondary)
+                .lineLimit(2).frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34, alignment: .topLeading)
         }
+        .padding(.vertical, 8)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(result.displayName), in \(SearchPresentation.path(result.folderPathComponents))")
         .accessibilityValue(result.snippet)

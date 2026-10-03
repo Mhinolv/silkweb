@@ -118,7 +118,7 @@ struct TagFilterBar: View {
                             .accessibilityLabel("Remove filter \(tag.name)")
                     }
                     Button("Clear") { workspace.tagFilters = [] }
-                }.font(.caption).padding(.horizontal, 8)
+                }.font(.caption).padding(.horizontal, Spacing.small)
             }.frame(height: 28).paneStrip(hairline: .bottom)
         }
     }

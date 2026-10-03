@@ -16,7 +16,7 @@ struct DocumentList: View {
                         Spacer()
                         Button("Show Only This Folder") { workspace.setIncludeSubfolders(false) }.buttonStyle(.borderless)
                     }
-                    .font(.caption).monospacedDigit().padding(.horizontal, 8).frame(height: 28).paneStrip(hairline: .bottom)
+                    .font(.caption).monospacedDigit().padding(.horizontal, Spacing.small).frame(height: 28).paneStrip(hairline: .bottom)
                     .accessibilityElement(children: .contain).accessibilityLabel("Including subfolders")
                 }
             } content: {
@@ -61,47 +61,83 @@ struct DocumentList: View {
     }
 }
 
+/// Direction A list row (silkweb-1.64): title, `date · location`, two-line excerpt at a fixed 96 pt.
 struct DocumentRow: View {
+    /// 12 + 17 + 3 + 15 + 3 + 34 + 12: 11 pt padding inside the capsule plus its 1 pt inset on each edge.
+    static let height: CGFloat = 96
+    /// 12 pt inside the capsule, which sits `Spacing.capsuleInset` from the table edges.
+    static let horizontalPadding: CGFloat = Spacing.capsuleInset + 12
+    /// Brings the 12 pt excerpt to a 17 pt line height.
+    static let excerptLineSpacing = max(0, 17 - NSLayoutManager().defaultLineHeight(for: .systemFont(ofSize: 12)))
+
     let document: LibraryDocument
     let root: URL
     let workspace: LibraryWorkspace
     let dateReference: Date
     let pointerState: DocumentRowPointerState
+    /// Shown only when the list spans folders; a single-folder scope already names its folder.
+    var location: String? = nil
     @Environment(\.locale) private var locale
     @State private var summary: DocumentSummary?
     private var title: String { URL(fileURLWithPath: document.name).deletingPathExtension().lastPathComponent }
+    private var sortsByCreated: Bool { workspace.listPreference.key == .created }
+    private var date: Date? { sortsByCreated ? document.created : document.modified }
+    private var dateText: String? {
+        date.map { (sortsByCreated ? "Created " : "") + DocumentRowPresentation.dateLabel($0, now: dateReference, locale: locale) }
+    }
+    private var excerpt: String { summary?.excerpt ?? "" }
+    private var isEmpty: Bool { summary.map { $0.excerpt == "No additional text" } ?? false }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             if let item = workspace.rename, item.path == document.relativePath, !item.isFolder {
-                InlineRenameField(item: item, workspace: workspace).frame(height: 24)
+                // The 24 pt field overhangs the 17 pt title line so the other lines stay put.
+                InlineRenameField(item: item, workspace: workspace).frame(height: 24).frame(height: 17)
             } else {
-                Text(title).font(.headline).lineLimit(1)
+                Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1).frame(height: 17)
             }
-            HStack(spacing: 4) {
-                if let date = workspace.listPreference.key == .created ? document.created : document.modified {
-                    Text((workspace.listPreference.key == .created ? "Created " : "") + DocumentRowPresentation.dateLabel(date, now: dateReference, locale: locale))
+            HStack(spacing: 0) {
+                if let dateText { Text(dateText).fixedSize().layoutPriority(1) }
+                if let location {
+                    if dateText != nil { Text(" · ").foregroundStyle(.tertiary).fixedSize().layoutPriority(1) }
+                    Text(location).truncationMode(.head)
                 }
-                Text(summary?.firstLine ?? "")
-            }.font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-            if workspace.includesSubfolders, let path = LibraryPresentation.breadcrumb(for: document, in: workspace.session.selectedFolder) {
-                Label(path, systemImage: "folder").font(.caption).foregroundStyle(.tertiary).lineLimit(1)
             }
+            .font(.subheadline).foregroundStyle(.secondary).lineLimit(1).frame(height: 15)
+            Text(excerpt)
+                .font(.system(size: 12)).lineSpacing(Self.excerptLineSpacing)
+                .foregroundStyle(isEmpty ? .tertiary : .secondary)
+                .lineLimit(2).truncationMode(.tail)
+                .frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, Self.horizontalPadding)
+        .padding(.vertical, 12)
         .contentShape([.interaction, .dragPreview], Rectangle())
         .overlay(DocumentRowClickObserver(path: document.relativePath, workspace: workspace, pointerState: pointerState))
         .listRowInsets(EdgeInsets())
         .accessibilityElement(children: workspace.rename?.path == document.relativePath ? .contain : .ignore)
         .accessibilityLabel(title)
-        .accessibilityValue((workspace.listPreference.key == .created ? document.created : document.modified).map {
-            "\(workspace.listPreference.key == .created ? "created" : "modified") \($0.formatted(.relative(presentation: .named)))"
-        } ?? "")
+        .accessibilityValue(accessibilityValue)
         .task(id: DocumentSummaryIdentity(path: document.relativePath, modified: document.modified)) {
             summary = nil
             summary = await DocumentSummary.load(document: document, root: root)
         }
+    }
+
+    /// “modified 10:18 AM, in Vanlife. First sentence.”
+    var accessibilityValue: String {
+        var parts: [String] = []
+        if let date {
+            parts.append((sortsByCreated ? "created " : "modified ") + DocumentRowPresentation.dateLabel(date, now: dateReference, locale: locale))
+        }
+        if let location { parts.append("in " + location) }
+        var value = parts.joined(separator: ", ")
+        if let summary, !isEmpty {
+            let sentence = summary.excerpt.prefix { !".!?。".contains($0) }
+            value += (value.isEmpty ? "" : ". ") + sentence
+        }
+        return value
     }
 }
 

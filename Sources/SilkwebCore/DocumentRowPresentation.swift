@@ -49,6 +49,39 @@ public enum DocumentRowPresentation {
         return "No additional text"
     }
 
+    /// Two-line list excerpt (silkweb-1.64): body text after the leading title heading, Markdown
+    /// markers stripped, whitespace collapsed, bounded to `limit` characters.
+    public static func excerpt(_ markdown: String, title: String, limit: Int = 240) -> String {
+        var result = ""
+        var isLeadingLine = true
+        for (line, isHeading) in snippetLines(MarkdownParser.parse(markdown).blocks) {
+            let text = summaryText(line).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            guard !text.isEmpty else { continue }
+            if isLeadingLine && isHeading && text == title.split(whereSeparator: \.isWhitespace).joined(separator: " ") {
+                isLeadingLine = false
+                continue
+            }
+            isLeadingLine = false
+            if !result.isEmpty { result.append(" ") }
+            result.append(text)
+            if result.count >= limit { break }
+        }
+        let excerpt = result.prefix(max(0, limit)).trimmingCharacters(in: .whitespaces)
+        return excerpt.isEmpty ? "No additional text" : excerpt
+    }
+
+    /// Where a row's document lives, relative to the list scope (`nil` or `""` is the library root).
+    /// Documents directly in the scope show `scopeName` (the library or folder name).
+    public static func location(for relativePath: String, scope: String?, scopeName: String) -> String {
+        let base = scope ?? ""
+        let parent = (relativePath as NSString).deletingLastPathComponent
+        let relative: String
+        if parent == base { relative = "" }
+        else if !base.isEmpty, parent.hasPrefix(base + "/") { relative = String(parent.dropFirst(base.count + 1)) }
+        else { relative = parent }
+        return relative.isEmpty ? scopeName : relative.split(separator: "/").joined(separator: " › ")
+    }
+
     private static func snippetLines(_ blocks: [MarkdownBlock]) -> [(String, Bool)] {
         blocks.flatMap { block -> [(String, Bool)] in
             switch block {
