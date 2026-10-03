@@ -100,6 +100,12 @@ struct WindowSurface: NSViewRepresentable {
             window.backgroundColor = .silkwebPaneBackground
             // A transparent titlebar draws no separator; `TitlebarHairline` is the one divider.
             window.titlebarSeparatorStyle = .none
+            // The compact bar (1.65); the scene sets it at creation, other hosts get it here at the same frame.
+            if window.toolbarStyle != .unifiedCompact {
+                let frame = window.frame
+                window.toolbarStyle = .unifiedCompact
+                window.setFrame(frame, display: false)
+            }
         }
     }
 }

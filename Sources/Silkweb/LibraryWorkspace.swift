@@ -14,6 +14,7 @@ final class LibraryWorkspace {
     @ObservationIgnored var closingTabIDs: Set<UUID> = []
     @ObservationIgnored var recoveryDirectory: URL?
     let search = LibrarySearch()
+    let toolbarMetrics = ToolbarMetrics()
     let preview: PreviewCoordinator
     let columnAutosaveName: String
     @ObservationIgnored private let defaults: UserDefaults
@@ -151,6 +152,17 @@ final class LibraryWorkspace {
     }
     var subtitle: String {
         search.text.isEmpty ? CountPresentation.label(documents.count, unit: .document) + (includesSubfolders ? " (with subfolders)" : "") : CountPresentation.label(filteredSearchResults.count, unit: .result)
+    }
+    /// The toolbar path: the open document's real folder, else the list scope. Reads no document text.
+    var breadcrumb: Breadcrumb {
+        let rootURL = snapshot?.rootURL ?? root
+        let library = snapshot?.folders.first { $0.relativePath.isEmpty }?.name ?? rootURL?.lastPathComponent ?? "Library"
+        let documentPath = editor.url.flatMap { url -> String? in
+            guard let rootURL, url.path.hasPrefix(rootURL.path + "/") else { return nil }
+            return String(url.path.dropFirst(rootURL.path.count + 1))
+        }
+        return Breadcrumb.make(libraryName: library, documentPath: documentPath, documentTitle: editor.name,
+                               folder: session.selectedFolder, tagName: tags.first { $0.id == session.selectedTagID }?.name)
     }
 
     func restore() {
@@ -609,19 +621,23 @@ struct LibraryWorkspaceView: View {
                         Label(mode.title, systemImage: mode.symbol).tag(mode).help(mode.title)
                     }
                 }.pickerStyle(.segmented).labelStyle(.iconOnly).help("Editor, Split or Preview")
-                Button("Show Outline", systemImage: "list.bullet.indent") { workspace.inspectorInfo = false; workspace.preview.showsOutline.toggle() }.help("Show Outline")
+                    // Same glyph size; the selected segment keeps the system tint.
+                    .font(.system(size: 13, weight: .regular))
+                Button("Show Outline", systemImage: "list.bullet.indent") { workspace.inspectorInfo = false; workspace.preview.showsOutline.toggle() }
+                    .help("Show Outline").toolbarGlyph()
             }
             ToolbarItem(placement: .primaryAction) {
-                Button("Show Document Info", systemImage: "info.circle") { workspace.showInfo() }.help("Show Document Info")
+                Button("Show Document Info", systemImage: "info.circle") { workspace.showInfo() }.help("Show Document Info").toolbarGlyph()
             }
             ToolbarItem(placement: .navigation) {
                 Button(workspace.sidebarsTitle, systemImage: "sidebar.left") { workspace.toggleSidebars() }
                     .help(workspace.sidebarsTitle)
                     .accessibilityLabel(workspace.sidebarsTitle)
+                    .toolbarGlyph()
             }
             ToolbarItem(placement: .navigation) {
                 Button("New Document", systemImage: "square.and.pencil") { workspace.create(folder: false) }
-                    .help("New Document").disabled(!workspace.canMutate)
+                    .help("New Document").disabled(!workspace.canMutate).toolbarGlyph()
             }
             ToolbarItem(placement: .navigation) {
                 Menu {
@@ -632,6 +648,7 @@ struct LibraryWorkspaceView: View {
                 .help("Sort By")
                 .accessibilityLabel("Sort By, \(workspace.listPreference.key.title), \(workspace.listPreference.directionTitle)")
                 .disabled(workspace.snapshot == nil)
+                .toolbarGlyph()
             }
             ToolbarItem(placement: .navigation) {
                 Menu {
@@ -641,9 +658,15 @@ struct LibraryWorkspaceView: View {
                         }))
                     }
                 } label: { Label("Filter by Tag", systemImage: "tag") }
-                .help("Filter by Tag").disabled(workspace.tags.isEmpty)
+                .help("Filter by Tag").disabled(workspace.tags.isEmpty).toolbarGlyph()
+            }
+            ToolbarItem(placement: .navigation) {
+                ToolbarBreadcrumb(workspace: workspace)
             }
         }
+        // The compact bar has no title row; the breadcrumb replaces it. The title still feeds the
+        // Window menu, Mission Control and VoiceOver.
+        .toolbar(removing: .title)
         .navigationTitle(workspace.editor.url == nil ? workspace.folderName : workspace.editor.name)
         .navigationSubtitle(workspace.subtitle)
     }
@@ -670,6 +693,13 @@ struct LibraryWorkspaceView: View {
                 Text(hint).font(.subheadline).foregroundStyle(.secondary)
             }.frame(width: 224, height: 72, alignment: .leading).padding(8)
         }.buttonStyle(.bordered).accessibilityLabel(title).accessibilityHint(hint)
+    }
+}
+
+private extension View {
+    /// Smaller, lighter symbols for the compact bar (silkweb-1.65).
+    func toolbarGlyph() -> some View {
+        font(.system(size: 13, weight: .regular)).foregroundStyle(Color(nsColor: .secondaryLabelColor))
     }
 }
 

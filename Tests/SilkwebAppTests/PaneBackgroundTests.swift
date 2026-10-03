@@ -163,10 +163,10 @@ final class PaneBackgroundTests: XCTestCase {
             // Mid-strip: the leading counts slot is empty and “Saved” sits at the trailing edge.
             assertColor(try pixel(NSPoint(x: editorFrame.midX, y: below(13))), token, "status bar")
             XCTAssertNotEqual(try pixel(NSPoint(x: editorFrame.midX, y: below(25.75))), token, "status hairline in \(name.rawValue)")
-            // The active tab's 2 pt underline is ink (label colour), far from the pane colour.
+            // 1.65 folder tab: the active tab is open at the bottom onto the editor surface, with no underline.
             let active = try XCTUnwrap(tabBar.buttons.first { $0.tab.id == workspace.activeTabID })
-            let ink = try pixel(active.convert(NSPoint(x: active.bounds.width - 30, y: active.isFlipped ? active.bounds.maxY - 1 : 1), to: view))
-            XCTAssertGreaterThan(abs(ink.redComponent - token.redComponent), 0.4, "active tab underline in \(name.rawValue)")
+            let open = try pixel(active.convert(NSPoint(x: active.bounds.width - 30, y: active.isFlipped ? active.bounds.maxY - 0.25 : 0.25), to: view))
+            assertColor(open, token, "active tab joins the editor")
             // An unordered window is never key: both capsules use the inactive fill, never the system accent.
             var inactiveCenter = inactive.convert(NSPoint(x: 2, y: 2), to: view)
             if !view.isFlipped { inactiveCenter.y = view.bounds.height - inactiveCenter.y }

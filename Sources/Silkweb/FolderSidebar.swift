@@ -90,6 +90,10 @@ struct FolderSidebar: NSViewRepresentable {
             coordinator.rename = workspace.rename
             coordinator.restore()
         }
+        // Scope changes made outside the sidebar (the toolbar breadcrumb, 1.65) move the selected row too.
+        if coordinator.selectedFolder != .some(workspace.session.selectedFolder) {
+            coordinator.selectScope()
+        }
         coordinator.updateCurrentNode()
         if coordinator.lastFocusRequest != workspace.focusRequest {
             coordinator.lastFocusRequest = workspace.focusRequest
@@ -116,6 +120,8 @@ struct FolderSidebar: NSViewRepresentable {
         private var totalCount = 0
         weak var outline: NSOutlineView?
         var restoring = false
+        /// The folder scope the selected row last followed.
+        var selectedFolder: String??
         var lastFocusRequest = 0
         var revision = 0
         var rename: LibraryRename?
@@ -252,18 +258,31 @@ struct FolderSidebar: NSViewRepresentable {
             }
             tagsExpanded = workspace.tagsExpanded
             let item = scopeItem()
-            if let item {
-                var parent = outline.parent(forItem: item)
-                while let ancestor = parent {
-                    outline.expandItem(ancestor)
-                    parent = outline.parent(forItem: ancestor)
-                }
-                let row = outline.row(forItem: item)
-                if row >= 0 { outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false); outline.scrollRowToVisible(row) }
-            }
+            if let item { select(item) }
             if item == nil { outline.deselectAll(nil) }
+            selectedFolder = .some(workspace.session.selectedFolder)
             restoring = false
             updateCurrentNode()
+        }
+
+        /// Selects the scope's row without reloading; a no-op when it is already selected.
+        func selectScope() {
+            selectedFolder = .some(workspace.session.selectedFolder)
+            guard let outline, let item = scopeItem(), outline.item(atRow: outline.selectedRow) as? Item !== item else { return }
+            restoring = true
+            select(item)
+            restoring = false
+        }
+
+        private func select(_ item: Item) {
+            guard let outline else { return }
+            var parent = outline.parent(forItem: item)
+            while let ancestor = parent {
+                outline.expandItem(ancestor)
+                parent = outline.parent(forItem: ancestor)
+            }
+            let row = outline.row(forItem: item)
+            if row >= 0 { outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false); outline.scrollRowToVisible(row) }
         }
 
         func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {

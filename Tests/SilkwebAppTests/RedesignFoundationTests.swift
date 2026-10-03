@@ -243,13 +243,13 @@ final class RedesignFoundationTests: XCTestCase {
                 XCTAssertEqual(listCapsule.minX, 10, accuracy: 0.5, context)
                 XCTAssertEqual(listCapsule.maxX, list.bounds.width - 10, accuracy: 0.5, context)
 
-                // Tabs: a 32 pt strip; × only on hover, so neither clean tab shows one.
+                // Tabs: a 32 pt strip of 28 pt folder tabs (1.65); × on hover and on the active tab only.
                 let tabBar = try XCTUnwrap(views.compactMap { $0 as? EditorTabBarView }.first, context)
                 XCTAssertEqual(tabBar.frame.height, 32, accuracy: 0.5, context)
                 XCTAssertEqual(tabBar.buttons.count, 2)
                 for button in tabBar.buttons {
-                    XCTAssertEqual(button.frame.height, 31, accuracy: 0.5, context)
-                    XCTAssertTrue(button.close.isHidden, context)
+                    XCTAssertEqual(button.frame.height, 28, accuracy: 0.5, context)
+                    XCTAssertEqual(button.close.isHidden, !button.isActive, context)
                 }
 
                 if outline {

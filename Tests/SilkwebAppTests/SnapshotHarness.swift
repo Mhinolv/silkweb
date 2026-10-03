@@ -39,6 +39,11 @@ struct SnapshotScenario {
     var previewScrollState: String? = nil
     var createDocument = false
     var editImageHeading = false
+    /// Marks the active tab's document unsaved just before capture (no text change, so nothing autosaves).
+    var dirtyActive = false
+
+    static let deepFolder = "Field Notes/Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
+    static let deepDocument = deepFolder + "/Settling In at the Campground.md"
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
     static let image = "Snapshot Fixtures/Image Fixture.md"
@@ -113,6 +118,8 @@ struct SnapshotScenario {
         .init(name: "new-document-in-folder", folder: "Snapshot Fixtures/Empty Folder", document: "Snapshot Fixtures/Empty Document.md", createDocument: true),
         .init(name: "read-only-banner", document: "Snapshot Fixtures/Read Only.md"),
         .init(name: "tabs-open", document: image, tabs: [pourOver, image, "Snapshot Fixtures/Empty Document.md"]),
+        // silkweb-1.65: compact bar, one-line breadcrumb folded at `…`, folder tabs with a coral unsaved dot.
+        .init(name: "redesign-path-tabs", folder: deepFolder, document: deepDocument, tabs: [pourOver, deepDocument, image], dirtyActive: true),
     ]
 }
 
@@ -227,8 +234,15 @@ final class SnapshotHarness {
         return try result.value!.get()
     }
 
-    private func makeFixture(at root: URL) throws {
+    private func makeFixture(at root: URL, deepPath: Bool = false) throws {
         try FileManager.default.copyItem(at: Self.repository.appendingPathComponent("Test_Library"), to: root)
+        if deepPath {
+            // Only the breadcrumb scenario gets the deep path, so other sidebars are unchanged.
+            let folder = root.appendingPathComponent(SnapshotScenario.deepFolder)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data("# Settling In at the Campground\n\nThe first night by the lake.\n".utf8)
+                .write(to: root.appendingPathComponent(SnapshotScenario.deepDocument), options: .atomic)
+        }
         // Ignore owner navigation/tab state in the COPY, including any recovery metadata.
         for name in [".silkweb"] {
             try? FileManager.default.removeItem(at: root.appendingPathComponent(name))
@@ -434,7 +448,7 @@ final class SnapshotHarness {
         }
         do {
             try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
-            try makeFixture(at: root)
+            try makeFixture(at: root, deepPath: scenario.document == SnapshotScenario.deepDocument)
             workspace.root = root
             workspace.recoveryDirectory = root.appendingPathComponent("Snapshot Recovery")
             let snapshot = try await bounded("library scan") { try await LibraryScanner.scan(root: root) }
@@ -633,6 +647,10 @@ final class SnapshotHarness {
                     editor.insertionPointColor = .clear
                 }
                 if (scenario.name == "empty-document" || scenario.createDocument), let editor = workspace.preview.editor { window.makeFirstResponder(editor) }
+                if scenario.dirtyActive {
+                    workspace.editor.state = .dirty
+                    for _ in 0..<3 { view.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(100)) }
+                }
                 window.title = workspace.editor.url == nil ? workspace.folderName : workspace.editor.name
                 window.subtitle = workspace.subtitle
                 capture.windowTitle = window.title

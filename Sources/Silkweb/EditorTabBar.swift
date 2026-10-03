@@ -16,7 +16,7 @@ struct EditorTabBar: NSViewRepresentable {
 final class EditorTabBarView: NSView {
     let workspace: LibraryWorkspace
     let scroll = NSScrollView()
-    let strip = NSView()
+    let strip = TabStripView()
     let overflow = NSPopUpButton(frame: .zero, pullsDown: true)
     private(set) var buttons: [EditorTabButton] = []
     private var insertionGap: Int?
@@ -69,18 +69,21 @@ final class EditorTabBarView: NSView {
         needsLayout = true
     }
 
+    /// Folder tabs are 28 pt, bottom-aligned under a 4 pt gap, so the active tab opens into the editor.
+    static let tabHeight: CGFloat = 28
+
     override func layout() {
         super.layout()
         let available = max(0, bounds.width - 28)
-        scroll.frame = NSRect(x: 0, y: 1, width: available, height: max(0, bounds.height - 1))
+        scroll.frame = NSRect(x: 0, y: 0, width: available, height: bounds.height)
         overflow.frame = NSRect(x: available, y: 0, width: 28, height: bounds.height)
-        // Tabs fill the strip above the bottom hairline.
-        let height = max(0, bounds.height - 1)
+        let height = min(bounds.height, Self.tabHeight)
         let width = min(220, max(110, available / CGFloat(max(1, buttons.count))))
-        strip.frame = NSRect(x: 0, y: 0, width: max(available, width * CGFloat(buttons.count)), height: height)
+        strip.frame = NSRect(x: 0, y: 0, width: max(available, width * CGFloat(buttons.count)), height: bounds.height)
         for (index, button) in buttons.enumerated() {
             button.frame = NSRect(x: CGFloat(index) * width, y: 0, width: width, height: height)
         }
+        strip.activeFrame = buttons.first { $0.tab.id == workspace.activeTabID }?.frame
         if shownActiveID != workspace.activeTabID {
             shownActiveID = workspace.activeTabID
             buttons.first { $0.tab.id == shownActiveID }?.scrollToVisible(NSRect(x: 0, y: 0, width: width, height: height))
@@ -90,8 +93,9 @@ final class EditorTabBarView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         NSColor.silkwebPaneBackground.setFill()
         bounds.fill()
+        // The strip draws the hairline under the tabs; this part runs under the overflow control.
         NSColor.separatorColor.setFill()
-        NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
+        NSRect(x: overflow.frame.minX, y: 0, width: bounds.width - overflow.frame.minX, height: 1).fill()
     }
 
     func trackInsertion(at point: NSPoint) {
@@ -110,6 +114,17 @@ final class EditorTabBarView: NSView {
     }
     @objc private func choose(_ sender: NSMenuItem) {
         if let id = sender.representedObject as? UUID { workspace.activateTab(id) }
+    }
+}
+
+/// Draws the strip's bottom hairline everywhere except under the active tab.
+final class TabStripView: NSView {
+    var activeFrame: NSRect? { didSet { if activeFrame != oldValue { needsDisplay = true } } }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.separatorColor.setFill()
+        guard let active = activeFrame else { return NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill() }
+        NSRect(x: 0, y: 0, width: max(0, active.minX), height: 1).fill()
+        NSRect(x: active.maxX, y: 0, width: max(0, bounds.width - active.maxX), height: 1).fill()
     }
 }
 
@@ -143,36 +158,78 @@ final class EditorTabButton: NSView {
         let hit = super.hitTest(point)
         return hit === title ? self : hit
     }
+    var isActive: Bool { bar?.workspace.activeTabID == tab.id }
+    /// The coral dot marks unsaved text only; it is state, not a control, so it stays on hover.
+    var showsDirtyDot: Bool { tab.editor.state.isDirty }
+
     func refresh() {
-        let active = bar?.workspace.activeTabID == tab.id
+        let active = isActive
         title.stringValue = tab.editor.name
         let font = NSFont.systemFont(ofSize: 12)
         title.font = tab.isPreview ? NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) : font
         title.textColor = active ? .labelColor : .secondaryLabelColor
-        close.title = tab.editor.state.isDirty && !hovered ? "•" : "×"
-        // × only on hover; a dirty tab keeps its • in the same slot.
-        close.isHidden = !hovered && !tab.editor.state.isDirty
+        close.title = "×"
+        // × on hover and on the active tab.
+        close.isHidden = !hovered && !active
         close.setAccessibilityLabel("Close \(tab.editor.name)")
         close.toolTip = "Close \(tab.editor.name)"
         toolTip = tab.isPreview ? "Preview — edit or double-click to keep this tab open" : tab.editor.name
         setAccessibilityLabel(tab.editor.name + (tab.editor.state.isDirty ? ", edited" : "") + (tab.isPreview ? ", preview" : ""))
         setAccessibilityValue(active ? 1 : 0)
         setAccessibilityChildren([close])
+        needsLayout = true
         needsDisplay = true
     }
+
+    static let dotSize: CGFloat = 6
+    static let cornerRadius: CGFloat = 6
+
+    /// The dot sits 6 pt after the title, which gives up 12 pt of its budget while the dot shows.
+    var dotRect: NSRect? {
+        guard showsDirtyDot else { return nil }
+        return NSRect(x: title.frame.maxX + 6, y: (bounds.height - Self.dotSize) / 2, width: Self.dotSize, height: Self.dotSize)
+    }
+
     override func layout() {
         super.layout()
         close.frame = NSRect(x: 6, y: (bounds.height - 16) / 2, width: 16, height: 16)
-        title.frame = NSRect(x: 26, y: (bounds.height - 16) / 2, width: max(0, bounds.width - 52), height: 16)
+        let dot: CGFloat = showsDirtyDot ? 12 : 0
+        let budget = max(0, bounds.width - 52 - dot)
+        let width = min(budget, ceil(title.cell?.cellSize.width ?? budget))
+        // Centre the title and its dot together within the slot between the close button and the trailing edge.
+        let x = max(26, (bounds.width - width - dot) / 2)
+        title.frame = NSRect(x: x, y: (bounds.height - 16) / 2, width: width, height: 16)
     }
-    static let underlineHeight: CGFloat = 2
+
+    /// Top, left and right edges with rounded top corners; the bottom stays open onto the editor.
+    private func outline(_ rect: NSRect) -> NSBezierPath {
+        let r = min(Self.cornerRadius, rect.width / 2, rect.height)
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: rect.minX, y: rect.minY))
+        path.line(to: NSPoint(x: rect.minX, y: rect.maxY - r))
+        path.appendArc(withCenter: NSPoint(x: rect.minX + r, y: rect.maxY - r), radius: r, startAngle: 180, endAngle: 90, clockwise: true)
+        path.line(to: NSPoint(x: rect.maxX - r, y: rect.maxY))
+        path.appendArc(withCenter: NSPoint(x: rect.maxX - r, y: rect.maxY - r), radius: r, startAngle: 90, endAngle: 0, clockwise: true)
+        path.line(to: NSPoint(x: rect.maxX, y: rect.minY))
+        return path
+    }
+
     override func draw(_ dirtyRect: NSRect) {
-        // The active tab sits on the pane color, marked by its title and a 2 pt ink underline.
-        if bar?.workspace.activeTabID == tab.id {
-            NSColor.labelColor.setFill()
-            NSRect(x: 0, y: 0, width: bounds.width, height: Self.underlineHeight).fill()
+        if isActive {
+            let contrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+            let path = outline(bounds.insetBy(dx: 0.5, dy: 0).offsetBy(dx: 0, dy: -0.5))
+            path.lineWidth = 1
+            (contrast ? NSColor.labelColor.withAlphaComponent(0.4) : NSColor.separatorColor).setStroke()
+            path.stroke()
         } else if hovered {
-            NSColor.quaternarySystemFill.setFill(); bounds.fill()
+            NSColor.quaternarySystemFill.setFill()
+            let fill = outline(bounds)
+            fill.close()
+            fill.fill()
+        }
+        if let dotRect {
+            NSColor.silkwebCoral.setFill()
+            NSBezierPath(ovalIn: dotRect).fill()
         }
     }
     override func updateTrackingAreas() {

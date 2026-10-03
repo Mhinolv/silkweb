@@ -13,6 +13,8 @@ struct SilkwebApp: App {
                 .onAppear { appDelegate.workspace = workspace }
         }
         .defaultSize(width: 1200, height: 760)
+        // One slim bar: toolbar items share the traffic-lights row (silkweb-1.65).
+        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
         .commands { WorkspaceCommands(workspace: workspace) }
         .commands { PrintCommands(workspace: workspace) }
     }
