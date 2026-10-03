@@ -28,6 +28,7 @@ tr { break-inside: avoid; }
 .sw-align-left { text-align: left; } .sw-align-center { text-align: center; } .sw-align-right { text-align: right; }
 img { max-width: 100%; height: auto; max-height: 230mm; object-fit: contain; break-inside: avoid; }
 .sw-task { list-style: none; }
-.sw-missing-image,.sw-remote-image { border: .5pt dashed #aaa; padding: 4pt; }
+/* Unloadable images: a text-width dashed box naming the image, never a blank box. */
+.sw-missing-image,.sw-remote-image { display: block; border: .5pt dashed #aaa; padding: 4pt; break-inside: avoid; }
 .sw-toc { border-left: 2pt solid #aaa; padding: 8pt; } .sw-toc::before { content: 'Contents'; font-weight: 600; }
 .sw-footnotes { font-size: 9pt; }

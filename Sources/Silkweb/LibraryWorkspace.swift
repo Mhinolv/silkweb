@@ -44,6 +44,7 @@ final class LibraryWorkspace {
     var dragIdentity = UUID()
     var rename: LibraryRename?
     var exporting = false
+    var pdfProgress: PDFProgress?
     @ObservationIgnored let printInfo = PrintCoordinator.defaultPrintInfo()
     var mutating = false
     var revision = 0
@@ -582,6 +583,7 @@ struct LibraryWorkspaceView: View {
         } message: { Text(workspace.trashMessage) }
         .sheet(item: $workspace.importRequest) { request in ImportSheet(workspace: workspace, request: request) }
         .sheet(item: $workspace.moveRequest) { request in MovePicker(workspace: workspace, request: request) }
+        .sheet(item: $workspace.pdfProgress) { progress in PDFProgressSheet(progress: progress) }
         .task { workspace.restore(); await workspace.resumeEditor() }
         .onChange(of: workspace.session) { workspace.persistSession() }
         .onChange(of: workspace.preview.mode) { workspace.persistSession() }

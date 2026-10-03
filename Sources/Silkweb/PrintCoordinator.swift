@@ -14,8 +14,14 @@ final class PrintCoordinator: NSObject, WKNavigationDelegate {
     // Content blockers support a restricted regex syntax: keep scheme exceptions
     // separate rather than using unsupported groups or alternation.
     static let offlineRules = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^data:"},"action":{"type":"ignore-previous-rules"}},{"trigger":{"url-filter":"^about:blank$"},"action":{"type":"ignore-previous-rules"}}]"#
+    /// Horizontal space between layout columns. Each page is captured on its own, and the gap
+    /// keeps neighbouring columns out of the capture rect entirely, so WebKit paints neither
+    /// their pixels nor their text into the page.
+    static let columnGap: CGFloat = 128
     let web: WKWebView
     let hostWindow: NSWindow
+    /// The last paginated PDF, printed 1:1 by `operation(info:title:)`.
+    private(set) var pages: Data?
     private var completion: CheckedContinuation<Void, Error>?
     private var timeout: Task<Void, Never>?
 
@@ -48,15 +54,36 @@ final class PrintCoordinator: NSObject, WKNavigationDelegate {
         }
     }
 
-    func operation(info: NSPrintInfo, title: String) -> NSPrintOperation {
+    /// Prints the pages rendered by the last `exportPDF`, so the print preview and
+    /// Save as PDF match Export ▸ PDF exactly.
+    func operation(info: NSPrintInfo, title: String) throws -> NSPrintOperation {
+        guard let pages else { throw PDFExportError.invalidPDF }
+        return try Self.printOperation(pages: pages, info: info, title: title)
+    }
+
+    /// The pages already carry the Page Setup paper and margins, so they print 1:1
+    /// (zero operation margins) and the panel hides paper, orientation and scale.
+    static func printOperation(pages: Data, info: NSPrintInfo, title: String) throws -> NSPrintOperation {
+        guard let provider = CGDataProvider(data: pages as CFData),
+              let document = CGPDFDocument(provider), document.numberOfPages > 0 else {
+            throw PDFExportError.invalidPDF
+        }
         let copy = info.copy() as! NSPrintInfo
         copy.jobDisposition = .spool
-        let operation = web.printOperation(with: copy)
+        copy.topMargin = 0
+        copy.bottomMargin = 0
+        copy.leftMargin = 0
+        copy.rightMargin = 0
+        let view = PrintedPagesView(document: document, paper: info.paperSize, title: title,
+            margins: NSEdgeInsets(top: info.topMargin, left: info.leftMargin,
+                                  bottom: info.bottomMargin, right: info.rightMargin))
+        let operation = NSPrintOperation(view: view, printInfo: copy)
         operation.jobTitle = title
         operation.showsPrintPanel = true
         operation.showsProgressPanel = true
         operation.canSpawnSeparateThread = false
         operation.printPanel.options.insert(.showsPreview)
+        operation.printPanel.options.subtract([.showsPaperSize, .showsOrientation, .showsScaling])
         return operation
     }
 
@@ -69,57 +96,79 @@ final class PrintCoordinator: NSObject, WKNavigationDelegate {
     }
 
     /// createPDF captures screen layout, not @page pagination. Fixed-height CSS
-    /// columns apply the same break rules, then one capture is sliced into paper
-    /// pages. Margins are added exactly once, from the user's Page Setup settings.
+    /// columns apply the same break rules; each column is captured as its own page,
+    /// so a page holds only its own pixels and text. Margins are added exactly once,
+    /// from the user's Page Setup settings.
     func exportPDF(html: String, info: NSPrintInfo, title: String,
                    timeoutInterval: TimeInterval = 15) async throws -> Data {
+        pages = nil
         let paper = info.paperSize
         let width = paper.width - info.leftMargin - info.rightMargin
         let height = paper.height - info.topMargin - info.bottomMargin
-        guard width.isFinite, height.isFinite, width > 0, height > 0 else {
+        // CSS uses 96 pixels per inch; PDF paper and margins use 72 points. Layout
+        // in whole CSS pixels (no fractional column drift between pages), then page
+        // assembly scales to physical points so 11pt body type remains 11pt.
+        let layoutWidth = (width * 96 / 72).rounded(.down)
+        let layoutHeight = (height * 96 / 72).rounded(.down)
+        guard layoutWidth.isFinite, layoutHeight.isFinite, layoutWidth >= 1, layoutHeight >= 1 else {
             throw PDFExportError.invalidPage
         }
-        // CSS uses 96 pixels per inch; PDF paper and margins use 72 points.
-        // Layout in CSS pixels, then page assembly scales to physical points so
-        // the stylesheet's 11pt body type remains 11pt in the deliverable.
-        let layoutWidth = width * 96 / 72
-        let layoutHeight = height * 96 / 72
-        return try await PDFExportJob().wait(timeoutInterval: timeoutInterval, cancel: { [weak self] in
+        let gap = Self.columnGap
+        let content = CGRect(x: info.leftMargin, y: paper.height - info.topMargin - layoutHeight * 72 / 96,
+                             width: layoutWidth * 72 / 96, height: layoutHeight * 72 / 96)
+        // Final layout is in the document before it loads, so the image decoding awaited
+        // on navigation (and again before capture) is for the sizes actually painted.
+        let layout = """
+            <style>html, body { margin: 0; width: \(Int(layoutWidth))px; }
+            ::-webkit-scrollbar { display: none; width: 0; height: 0; }
+            .sw-doc { box-sizing: border-box; width: \(Int(layoutWidth))px; height: \(Int(layoutHeight))px;
+                column-width: \(Int(layoutWidth))px; column-gap: \(Int(gap))px; column-fill: auto; }
+            img { max-height: \(Int(layoutHeight))px; }</style>
+            """
+        let document = html.range(of: "</head>").map { html.replacingCharacters(in: $0, with: layout + "</head>") } ?? layout + html
+        let data = try await PDFExportJob().wait(timeoutInterval: timeoutInterval, cancel: { [weak self] in
             self?.web.stopLoading()
             self?.finish(.failure(PDFExportError.timedOut))
         }) { [self] in
             web.setFrameSize(NSSize(width: layoutWidth, height: layoutHeight))
-            try await load(html: html)
+            try await load(html: document)
             let value = try await javascript("""
-                const style = document.createElement('style');
-                style.textContent = `html, body { margin: 0; width: ${width}px; }
-                    .sw-doc { width: ${width}px; height: ${height}px;
-                        column-width: ${width}px; column-gap: 0; column-fill: auto; }
-                    img { max-height: ${height}px; }`;
-                document.head.appendChild(style);
+                const images = Array.from(document.images);
+                // Paint must never fall back to an asynchronous (blank) decode.
+                for (const image of images) image.decoding = 'sync';
+                await Promise.all(images.map(image => image.decode().catch(() => {})));
+                for (const image of images) {
+                    if (image.complete && image.naturalWidth > 0) continue;
+                    const placeholder = document.createElement('span');
+                    placeholder.className = 'sw-missing-image';
+                    placeholder.textContent = 'Image not included: ' + (image.alt || image.title || 'image');
+                    image.replaceWith(placeholder);
+                }
                 await document.fonts.ready;
-                // scrollWidth rounds to integral CSS pixels; ceil would add a
-                // blank page for fractional paper widths, even on empty notes.
-                return Math.max(1, Math.round(document.querySelector('.sw-doc').scrollWidth / width));
-                """, arguments: ["width": layoutWidth, "height": layoutHeight])
+                // n columns span n * width + (n - 1) * gap whole CSS pixels.
+                const span = document.querySelector('.sw-doc').scrollWidth;
+                return Math.max(1, Math.round((span + gap) / (width + gap)));
+                """, arguments: ["width": layoutWidth, "gap": gap])
             guard let count = value as? Int, count > 0, count <= 10_000 else {
                 throw PDFExportError.invalidPage
             }
-            try Task.checkCancellation()
-            let configuration = WKPDFConfiguration()
-            configuration.rect = CGRect(x: 0, y: 0, width: layoutWidth * CGFloat(count), height: layoutHeight)
-            let capture: Data = try await withCheckedThrowingContinuation { continuation in
-                web.createPDF(configuration: configuration) { result in
-                    continuation.resume(with: result)
-                }
+            var captures: [Data] = []
+            captures.reserveCapacity(count)
+            for index in 0..<count {
+                try Task.checkCancellation()
+                let configuration = WKPDFConfiguration()
+                configuration.rect = CGRect(x: CGFloat(index) * (layoutWidth + gap), y: 0,
+                                            width: layoutWidth, height: layoutHeight)
+                captures.append(try await withCheckedThrowingContinuation { continuation in
+                    web.createPDF(configuration: configuration) { result in
+                        continuation.resume(with: result)
+                    }
+                })
             }
             try Task.checkCancellation()
             // PDF parsing and page assembly are independent of AppKit/WebKit.
-            let left = info.leftMargin, bottom = info.bottomMargin
             let assembly = Task.detached(priority: .userInitiated) {
-                try Self.paginate(capture, count: count, paper: paper,
-                                  content: CGSize(width: width, height: height),
-                                  left: left, bottom: bottom, title: title)
+                try Self.assemble(captures, paper: paper, content: content, title: title)
             }
             return try await withTaskCancellationHandler {
                 try await assembly.value
@@ -127,6 +176,8 @@ final class PrintCoordinator: NSObject, WKNavigationDelegate {
                 assembly.cancel()
             }
         }
+        pages = data
+        return data
     }
 
     func javascript(_ script: String, arguments: [String: Any] = [:]) async throws -> Any? {
@@ -137,12 +188,12 @@ final class PrintCoordinator: NSObject, WKNavigationDelegate {
         }
     }
 
-    nonisolated static func paginate(_ capture: Data, count: Int, paper: CGSize,
-                                    content: CGSize, left: CGFloat, bottom: CGFloat,
-                                    title: String) throws -> Data {
-        guard let provider = CGDataProvider(data: capture as CFData),
-              let source = CGPDFDocument(provider), source.numberOfPages == 1,
-              let page = source.page(at: 1) else { throw PDFExportError.invalidPDF }
+    /// Places one single-page capture per paper page, scaled into `content` (PDF
+    /// coordinates). Each output page draws only its own capture, so its text layer
+    /// cannot contain a neighbour's text.
+    nonisolated static func assemble(_ captures: [Data], paper: CGSize, content: CGRect,
+                                     title: String) throws -> Data {
+        guard !captures.isEmpty else { throw PDFExportError.invalidPDF }
         let output = NSMutableData()
         var box = CGRect(origin: .zero, size: paper)
         guard let consumer = CGDataConsumer(data: output),
@@ -150,22 +201,25 @@ final class PrintCoordinator: NSObject, WKNavigationDelegate {
                                       [kCGPDFContextTitle: title] as CFDictionary) else {
             throw PDFExportError.invalidPDF
         }
-        for index in 0..<count {
+        for capture in captures {
             try Task.checkCancellation()
+            guard let provider = CGDataProvider(data: capture as CFData),
+                  let source = CGPDFDocument(provider), source.numberOfPages == 1,
+                  let page = source.page(at: 1) else { throw PDFExportError.invalidPDF }
+            let media = page.getBoxRect(.mediaBox)
+            guard media.width > 0, media.height > 0 else { throw PDFExportError.invalidPDF }
             context.beginPDFPage(nil)
             context.saveGState()
-            context.translateBy(x: left, y: bottom)
-            context.clip(to: CGRect(origin: .zero, size: content))
-            let strip = CGRect(x: -CGFloat(index) * content.width, y: 0,
-                               width: CGFloat(count) * content.width, height: content.height)
-            context.concatenate(page.getDrawingTransform(.mediaBox, rect: strip, rotate: 0, preserveAspectRatio: false))
+            context.translateBy(x: content.minX, y: content.minY)
+            context.scaleBy(x: content.width / media.width, y: content.height / media.height)
+            context.translateBy(x: -media.minX, y: -media.minY)
             context.drawPDFPage(page)
             context.restoreGState()
             context.endPDFPage()
         }
         context.closePDF()
         // Validate the deliverable rather than publishing a partial capture.
-        guard let document = PDFDocument(data: output as Data), document.pageCount == count else {
+        guard let document = PDFDocument(data: output as Data), document.pageCount == captures.count else {
             throw PDFExportError.invalidPDF
         }
         return output as Data
@@ -235,6 +289,82 @@ final class PrintCoordinator: NSObject, WKNavigationDelegate {
     }
 }
 
+/// Draws already-paginated PDF pages for NSPrintOperation, one paper page per print page.
+/// Drawing is synchronous and in-process, so preview thumbnails and Save as PDF never wait
+/// on (or miss) WebKit content. Header and footer go in the pages' own top/bottom margins.
+final class PrintedPagesView: NSView {
+    let document: CGPDFDocument
+    let paper: CGSize
+    let title: String
+    let margins: NSEdgeInsets
+    private let date = Date().formatted(date: .abbreviated, time: .shortened)
+
+    init(document: CGPDFDocument, paper: CGSize, title: String, margins: NSEdgeInsets) {
+        self.document = document
+        self.paper = paper
+        self.title = title
+        self.margins = margins
+        super.init(frame: NSRect(x: 0, y: 0, width: paper.width, height: paper.height * CGFloat(document.numberOfPages)))
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var isFlipped: Bool { true }
+    override var pageHeader: NSAttributedString { NSAttributedString() }
+    override var pageFooter: NSAttributedString { NSAttributedString() }
+
+    override func knowsPageRange(_ range: NSRangePointer) -> Bool {
+        range.pointee = NSRange(location: 1, length: document.numberOfPages)
+        return true
+    }
+
+    override func rectForPage(_ page: Int) -> NSRect {
+        NSRect(x: 0, y: CGFloat(page - 1) * paper.height, width: paper.width, height: paper.height)
+    }
+
+    /// Each page is the whole sheet: place it at the paper origin, not the printer's
+    /// imageable-area origin, so printed pages match the exported PDF exactly.
+    override func locationOfPrintRect(_ rect: NSRect) -> NSPoint { .zero }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext, paper.height > 0 else { return }
+        let first = max(1, Int((dirtyRect.minY / paper.height).rounded(.down)) + 1)
+        let last = min(document.numberOfPages, Int((dirtyRect.maxY / paper.height).rounded(.up)))
+        guard first <= last else { return }
+        for number in first...last {
+            guard let page = document.page(at: number) else { continue }
+            context.saveGState()
+            // Flipped view: move to the bottom of this page and restore PDF's y-up space.
+            context.translateBy(x: 0, y: CGFloat(number) * paper.height)
+            context.scaleBy(x: 1, y: -1)
+            context.drawPDFPage(page)
+            context.restoreGState()
+        }
+    }
+
+    override func drawPageBorder(with borderSize: NSSize) {
+        guard let operation = NSPrintOperation.current,
+              operation.printInfo.dictionary()[NSPrintInfo.AttributeKey.headerAndFooter] as? Bool == true else { return }
+        let font = NSFont.systemFont(ofSize: 8)
+        let lineHeight = ceil(font.ascender - font.descender)
+        // `top` is measured down from the paper's top edge; the border pass may be unflipped.
+        let flipped = NSGraphicsContext.current?.isFlipped ?? true
+        func text(_ string: String, _ alignment: NSTextAlignment, y top: CGFloat) {
+            let style = NSMutableParagraphStyle()
+            style.alignment = alignment
+            style.lineBreakMode = .byTruncatingMiddle
+            let y = flipped ? top : borderSize.height - top - lineHeight
+            (string as NSString).draw(in: NSRect(x: margins.left, y: y, width: borderSize.width - margins.left - margins.right, height: lineHeight),
+                withAttributes: [.font: font, .foregroundColor: NSColor(white: 0.35, alpha: 1), .paragraphStyle: style])
+        }
+        let header = max(0, (margins.top - lineHeight) / 2)
+        let footer = borderSize.height - margins.bottom + max(0, (margins.bottom - lineHeight) / 2)
+        text(title, .left, y: header)
+        text(date, .right, y: header)
+        text("\(operation.currentPage) of \(document.numberOfPages)", .center, y: footer)
+    }
+}
+
 /// Owns one completion and deadline, including when AppKit calls back after timeout.
 /// The retained context belongs to AppKit until didRun; a late callback is harmless.
 @MainActor
@@ -290,7 +420,7 @@ enum PDFExportError: LocalizedError, Equatable {
     case timedOut, invalidPage, invalidPDF
     var errorDescription: String? {
         switch self {
-        case .timedOut: return "PDF rendering took too long. Try exporting a smaller document."
+        case .timedOut: return "The document took too long to render. Try again, or export a shorter document."
         case .invalidPage: return "The selected paper size and margins leave no printable area."
         case .invalidPDF: return "The rendered PDF could not be read."
         }
@@ -305,21 +435,33 @@ final class PDFExportJob {
     private var deadline: Task<Void, Never>?
     private var work: Task<Void, Never>?
 
+    /// Cancelling the awaiting task (the progress sheet's Cancel) stops rendering
+    /// and completes immediately with CancellationError.
     func wait(timeoutInterval: TimeInterval, cancel: @escaping () -> Void,
               render: @escaping () async throws -> Data) async throws -> Data {
-        try await withCheckedThrowingContinuation { continuation in
-            completion = continuation
-            deadline = Task { [self] in
-                do { try await Task.sleep(for: .seconds(timeoutInterval)) } catch { return }
-                work?.cancel()
-                finish(.failure(PDFExportError.timedOut))
-                cancel()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                completion = continuation
+                guard !Task.isCancelled else { return stop(CancellationError(), cancel: cancel) }
+                deadline = Task { [self] in
+                    do { try await Task.sleep(for: .seconds(timeoutInterval)) } catch { return }
+                    stop(PDFExportError.timedOut, cancel: cancel)
+                }
+                work = Task { [self] in
+                    do { finish(.success(try await render())) }
+                    catch { finish(.failure(error)) }
+                }
             }
-            work = Task { [self] in
-                do { finish(.success(try await render())) }
-                catch { finish(.failure(error)) }
-            }
+        } onCancel: {
+            Task { @MainActor [self] in stop(CancellationError(), cancel: cancel) }
         }
+    }
+
+    private func stop(_ error: Error, cancel: () -> Void) {
+        guard completion != nil else { return }
+        work?.cancel()
+        finish(.failure(error))
+        cancel()
     }
 
     private func finish(_ result: Result<Data, Error>) {
