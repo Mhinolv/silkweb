@@ -33,6 +33,7 @@ struct SnapshotScenario {
     var visibleCaret: String? = nil
     var previewScrollState: String? = nil
     var createDocument = false
+    var editImageHeading = false
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
     static let image = "Snapshot Fixtures/Image Fixture.md"
@@ -71,6 +72,8 @@ struct SnapshotScenario {
         .init(name: "tabs-multi-selection", tabs: [pourOver], selectedDocuments: [pourOver, image]),
         .init(name: "editor-long-scrolled-end", document: "Snapshot Fixtures/Long Document.md", tabs: [pourOver, "Snapshot Fixtures/Long Document.md"], scrollToEnd: true, legacyScroller: true),
         .init(name: "editor-image", document: image),
+        .init(name: "editor-image-heading-edited", document: "Snapshot Fixtures/Image Heading Edits.md", editImageHeading: true),
+        .init(name: "editor-image-heading-edited-wide", document: "Snapshot Fixtures/Image Heading Edits.md", sidebarsHidden: true, editImageHeading: true),
         .init(name: "editor-image-placeholders", document: "Snapshot Fixtures/Image States.md"),
         .init(name: "preview-headings", document: "Snapshot Fixtures/Preview Headings.md", mode: .preview),
         .init(name: "preview-mode", document: pourOver, mode: .preview),
@@ -240,6 +243,8 @@ final class SnapshotHarness {
         try Data(outlineImages.utf8).write(to: fixtures.appendingPathComponent("Outline Images.md"))
         let scrollPreview = "# Scroll stability\n\n![Local fixture](fixture.png)\n\n" + (0..<100).map { "## Section \($0)\n\nA paragraph with **emphasis**.\n\n" }.joined()
         try Data(scrollPreview.utf8).write(to: fixtures.appendingPathComponent("Scroll Preview.md"), options: .atomic)
+        let headingImages = "# Journey\n\n![Landscape](fixture.png)\n\n" + String(repeating: "A paragraph between the images.\n\n", count: 40) + "![Portrait](portrait.png)\n\n![Transparent](transparent.png)\n"
+        try Data(headingImages.utf8).write(to: fixtures.appendingPathComponent("Image Heading Edits.md"))
         let imageText = "# Image Fixture\n\n![Local fixture](fixture.png)\n\n![Remote fixture](https://example.invalid/snapshot.png)\n"
         try Data(imageText.utf8).write(to: fixtures.appendingPathComponent("Image Fixture.md"), options: .atomic)
         try Data("not an image".utf8).write(to: fixtures.appendingPathComponent("unreadable.png"))
@@ -484,6 +489,12 @@ final class SnapshotHarness {
                     let expected = MarkdownParser.parse(workspace.editor.text).headings
                     try await wait("outline parsing") { workspace.preview.headings == expected }
                 }
+            }
+            if scenario.editImageHeading, let editor = workspace.preview.editor {
+                let heading = (editor.string as NSString).range(of: "# Journey")
+                guard heading.location != NSNotFound else { throw SnapshotFailure.error("Missing image fixture heading") }
+                editor.insertText(" edited", replacementRange: NSRange(location: NSMaxRange(heading), length: 0))
+                try await Task.sleep(for: .milliseconds(650))
             }
             if let marker = scenario.caretImage, let editor = workspace.preview.editor {
                 let range = (editor.string as NSString).range(of: marker)

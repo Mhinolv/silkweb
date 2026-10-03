@@ -13,6 +13,7 @@ import SilkwebCore
     private var paragraphs: [InlineImageParagraph] = []
     private(set) var imageViews: [InlineImageView] = []
     private var positionScheduled = false
+    private var sourceDirty = false
     private var geometry = NSSize.zero
     private var generation = 0
     private var heightsByEnd: [Int: CGFloat] = [:]
@@ -26,6 +27,17 @@ import SilkwebCore
         replaceViews()
         invalidate()
         schedule()
+    }
+
+    /// Called from text storage before TextKit lays out the edited characters.
+    /// Old paragraph offsets must never participate in positioning after an edit.
+    func sourceDidChange() {
+        sourceDirty = true
+        hideViews()
+    }
+
+    private func hideViews() {
+        for view in imageViews where !view.isHidden { view.isHidden = true }
     }
 
     func schedule() {
@@ -56,6 +68,7 @@ import SilkwebCore
         let size = NSSize(width: editor.textContainer?.containerSize.width ?? 1,
                           height: editor.enclosingScrollView?.contentSize.height ?? 1)
         if size != geometry {
+            hideViews()
             geometry = size
             for view in imageViews { view.refit(column: size.width, viewport: size.height) }
             updateHeights()
@@ -72,7 +85,8 @@ import SilkwebCore
                     && a.message == b.message && a.bitmap === b.bitmap
             }
         }
-        guard !equal else { return }
+        sourceDirty = false
+        guard !equal else { schedulePosition(); return }
         paragraphs = updated
         replaceViews(fade: fade)
         invalidate()
@@ -111,6 +125,7 @@ import SilkwebCore
     }
 
     private func invalidate() {
+        hideViews()
         updateHeights()
         guard let editor, let layout = editor.layoutManager else { return }
         layout.invalidateLayout(forCharacterRange: NSRange(location: 0, length: editor.string.utf16.count), actualCharacterRange: nil)
@@ -128,6 +143,7 @@ import SilkwebCore
     }
 
     func layoutManager(_ layoutManager: NSLayoutManager, didCompleteLayoutFor textContainer: NSTextContainer?, atEnd flag: Bool) {
+        hideViews()
         schedulePosition()
     }
 
@@ -142,7 +158,7 @@ import SilkwebCore
     }
 
     func positionViews() {
-        guard let editor, let layout = editor.layoutManager, let container = editor.textContainer else { return }
+        guard !sourceDirty, let editor, let layout = editor.layoutManager, let container = editor.textContainer else { return }
         layout.ensureLayout(for: container)
         for paragraph in paragraphs where NSMaxRange(paragraph.range) <= editor.string.utf16.count {
             let glyph = layout.glyphIndexForCharacter(at: NSMaxRange(paragraph.range) - 1)
@@ -151,6 +167,7 @@ import SilkwebCore
             for view in viewsByStart[paragraph.range.location] ?? [] {
                 let origin = NSPoint(x: editor.textContainerOrigin.x, y: y)
                 if view.frame.origin != origin { view.setFrameOrigin(origin) }
+                view.isHidden = false
                 y += view.frame.height + 8
             }
         }
@@ -172,6 +189,7 @@ import SilkwebCore
     init(content: InlineImageContent, sourceRange: NSRange, editor: PlainMarkdownTextView) {
         self.content = content; self.sourceRange = sourceRange; self.editor = editor
         super.init(frame: NSRect(origin: .zero, size: content.size))
+        isHidden = true
         identifier = NSUserInterfaceItemIdentifier("inline-image")
         registerForDraggedTypes([.fileURL])
         wantsLayer = true
