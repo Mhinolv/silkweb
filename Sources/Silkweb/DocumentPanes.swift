@@ -50,14 +50,22 @@ final class DocumentPanesController: NSSplitViewController {
         applying = true
         defer { applying = false }
         installedMode = mode
-        for item in splitViewItems { item.minimumThickness = mode == .split ? 280 : 0 }
-        splitViewItems[0].isCollapsed = mode == .preview
-        splitViewItems[1].isCollapsed = mode == .editor
-        if mode == .split {
-            let saved = workspace.preview.defaults.double(forKey: "Silkweb.Detail.SplitRatio")
-            let ratio = saved > 0 && saved < 1 ? saved : 0.5
-            if splitView.bounds.width > 0 { splitView.setPosition(splitView.bounds.width * ratio, ofDividerAt: 0) }
-            else { pendingRatio = ratio }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            context.allowsImplicitAnimation = false
+            for item in splitViewItems { item.minimumThickness = mode == .split ? 280 : 0 }
+            splitViewItems[0].isCollapsed = mode == .preview
+            splitViewItems[1].isCollapsed = mode == .editor
+            if mode == .split {
+                let saved = workspace.preview.defaults.double(forKey: "Silkweb.Detail.SplitRatio")
+                let ratio = saved > 0 && saved < 1 ? saved : 0.5
+                if splitView.bounds.width > 0 { splitView.setPosition(splitView.bounds.width * ratio, ofDividerAt: 0) }
+                else { pendingRatio = ratio }
+            }
+            // Collapse flags hide the outgoing pane immediately, but AppKit defers
+            // resizing the incoming pane. Commit both panes' final geometry before
+            // a display pass can expose a zero-width or stale split-width editor.
+            splitView.layoutSubtreeIfNeeded()
         }
     }
 
