@@ -31,6 +31,7 @@ struct SnapshotScenario {
     var focusOutline = false
     /// Draw the editor caret (normally hidden in captures) right after this source text.
     var visibleCaret: String? = nil
+    var previewScrollState: String? = nil
     var createDocument = false
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
@@ -74,6 +75,8 @@ struct SnapshotScenario {
         .init(name: "preview-headings", document: "Snapshot Fixtures/Preview Headings.md", mode: .preview),
         .init(name: "preview-mode", document: pourOver, mode: .preview),
         .init(name: "split-mode", document: pourOver, mode: .split),
+        .init(name: "split-scroll-update", document: "Snapshot Fixtures/Scroll Preview.md", mode: .split, previewScrollState: "update"),
+        .init(name: "split-scroll-entry", document: "Snapshot Fixtures/Scroll Preview.md", mode: .split, outline: true, previewScrollState: "entry"),
         .init(name: "inspector-outline", document: pourOver, outline: true),
         .init(name: "outline-images-split", document: "Snapshot Fixtures/Outline Images.md", mode: .split, outline: true, caretImage: "![Portrait]"),
         .init(name: "outline-images-only", document: "Snapshot Fixtures/Images Only.md", outline: true),
@@ -235,6 +238,8 @@ final class SnapshotHarness {
         try Data("![Landscape](fixture.png)\n![Remote](https://example.invalid/image.png)\n".utf8).write(to: fixtures.appendingPathComponent("Images Only.md"))
         let outlineImages = "![Landscape](fixture.png)\n# Journey\n## Places\n![Portrait](portrait.png)\n### Detail\n![Transparent](transparent.png)\n## Other\n![Missing](missing.png)\n![Remote](https://example.invalid/image.png)\n"
         try Data(outlineImages.utf8).write(to: fixtures.appendingPathComponent("Outline Images.md"))
+        let scrollPreview = "# Scroll stability\n\n![Local fixture](fixture.png)\n\n" + (0..<100).map { "## Section \($0)\n\nA paragraph with **emphasis**.\n\n" }.joined()
+        try Data(scrollPreview.utf8).write(to: fixtures.appendingPathComponent("Scroll Preview.md"), options: .atomic)
         let imageText = "# Image Fixture\n\n![Local fixture](fixture.png)\n\n![Remote fixture](https://example.invalid/snapshot.png)\n"
         try Data(imageText.utf8).write(to: fixtures.appendingPathComponent("Image Fixture.md"), options: .atomic)
         try Data("not an image".utf8).write(to: fixtures.appendingPathComponent("unreadable.png"))
@@ -538,6 +543,22 @@ final class SnapshotHarness {
                     if let error = workspace.preview.error { throw SnapshotFailure.error(error) }
                     if let error = (workspace.preview.webView?.navigationDelegate as? PreviewView.Coordinator)?.navigationError {
                         throw SnapshotFailure.error(error.localizedDescription)
+                    }
+                    if let state = scenario.previewScrollState, let web = workspace.preview.webView,
+                       let delegate = web.navigationDelegate as? PreviewView.Coordinator {
+                        try await wait("resting preview") { !delegate.restoring }
+                        _ = try await web.callAsyncJavaScript("scrollTo(0, Math.floor((document.documentElement.scrollHeight - innerHeight) / 2) + 17);", arguments: [:], in: nil, contentWorld: .defaultClient)
+                        try await Task.sleep(for: .milliseconds(350))
+                        if state == "entry" {
+                            workspace.preview.mode = .editor
+                            try await Task.sleep(for: .milliseconds(350))
+                        }
+                        workspace.editor.text = workspace.editor.text.replacingOccurrences(of: "Scroll stability", with: "Scroll stability updated")
+                        if state == "entry" { workspace.preview.mode = .split }
+                        try await wait("preview update at resting position") {
+                            workspace.preview.html.contains("Scroll stability updated") && delegate.lastHTML == workspace.preview.html && !delegate.restoring
+                        }
+                        try await Task.sleep(for: .milliseconds(350))
                     }
                     if let marker = scenario.caretImage, let web = workspace.preview.webView {
                         try await wait("preview image anchors") { (web.navigationDelegate as? PreviewView.Coordinator)?.restoring == false }

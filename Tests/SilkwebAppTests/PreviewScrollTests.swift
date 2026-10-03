@@ -1,0 +1,179 @@
+import AppKit
+import SwiftUI
+import WebKit
+import XCTest
+import SilkwebCore
+@testable import Silkweb
+
+final class PreviewScrollTests: XCTestCase {
+    @MainActor
+    func testRealSplitScrollNeverBouncesDuringEditsAndEntry() async throws {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
+        if SnapshotHarness.isWebKitUnavailable(environment: ProcessInfo.processInfo.environment, activationPolicy: NSApp.activationPolicy().rawValue) {
+            throw XCTSkip("Split scroll sampling needs real WebKit in a registered offscreen host outside the agent sandbox; run this test on both pre-fix and fixed builds there.")
+        }
+        let suite = "Silkweb.Scroll." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 40, pixelsHigh: 80, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 160, bitsPerPixel: 32))
+        for x in 0..<40 { for y in 0..<80 { bitmap.setColor(.systemBlue, atX: x, y: y) } }
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: root.appendingPathComponent("local.png"))
+        let source = "# Resting viewport\n\n![Local](local.png)\n\n" + (0..<100).map { "## Section \($0)\n\nParagraph \($0) with **emphasis** and a [local anchor](#section-99).\n\n" }.joined()
+        let url = root.appendingPathComponent("note.md")
+        try Data(source.utf8).write(to: url)
+        let workspace = LibraryWorkspace(defaults: defaults)
+        workspace.canSaveWindowSession = false
+        workspace.root = root
+        await workspace.editor.configure(root: root)
+        let opened = await workspace.editor.open(url, readOnly: false)
+        XCTAssertTrue(opened)
+        workspace.preview.mode = .split
+        let host = NSHostingController(rootView: DocumentDetail(workspace: workspace))
+        host.sizingOptions = []
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = host
+        defer { window.contentViewController = nil; window.close() }
+        func wait(_ predicate: () -> Bool) async throws {
+            let deadline = Date().addingTimeInterval(10)
+            while !predicate(), Date() < deadline {
+                host.view.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            XCTAssertTrue(predicate(), "Timed out waiting for the real detail preview")
+        }
+        try await wait {
+            guard let coordinator = workspace.preview.webView?.navigationDelegate as? PreviewView.Coordinator else { return false }
+            return coordinator.completedPage != nil && !coordinator.restoring
+        }
+        let web = try XCTUnwrap(workspace.preview.webView)
+        let delegate = try XCTUnwrap(web.navigationDelegate as? PreviewView.Coordinator)
+        let sampler = ScrollSampler(delegate: delegate)
+        web.navigationDelegate = sampler
+        web.configuration.userContentController.add(sampler, contentWorld: .defaultClient, name: "scrollSample")
+        defer {
+            web.configuration.userContentController.removeScriptMessageHandler(forName: "scrollSample", contentWorld: .defaultClient)
+            web.navigationDelegate = delegate
+        }
+        // Injection on every navigation catches the initial zero-offset frame of a
+        // replaced page. The same hook also runs continuously on the existing page.
+        let script = """
+        function sample() {
+          window.webkit.messageHandlers.scrollSample.postMessage(scrollY);
+          requestAnimationFrame(sample);
+        }
+        requestAnimationFrame(sample);
+        // Hidden offscreen windows can throttle animation frames. Keep an 8 ms
+        // equivalent hook as well, including during provisional navigation.
+        setInterval(() => window.webkit.messageHandlers.scrollSample.postMessage(scrollY), 8);
+        """
+        web.configuration.userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .defaultClient))
+        _ = try await web.callAsyncJavaScript(script, arguments: [:], in: nil, contentWorld: .defaultClient)
+        for outline in [false, true] {
+            workspace.preview.showsOutline = outline
+            try await Task.sleep(for: .milliseconds(700))
+            // Choose a non-heading-aligned resting offset. Heading/ratio restoration
+            // must not pass this test simply by ending at roughly the same section.
+            let value = try await web.callAsyncJavaScript("scrollTo(0, Math.floor((document.documentElement.scrollHeight - innerHeight) / 2) + 17); return scrollY;", arguments: [:], in: nil, contentWorld: .defaultClient)
+            let baseline = try XCTUnwrap(value as? Double)
+            XCTAssertGreaterThan(baseline, 1000)
+            try await Task.sleep(for: .milliseconds(350))
+            sampler.begin(at: baseline)
+            for edit in 1...5 {
+                let changed = source.replacingOccurrences(of: "Resting viewport", with: "Resting viewport \(outline)-\(edit)")
+                workspace.editor.text = changed
+                try await wait { workspace.preview.html.contains("Resting viewport \(outline)-\(edit)") && delegate.lastHTML == workspace.preview.html && !delegate.restoring }
+                try await Task.sleep(for: .milliseconds(350))
+                let title = try await web.callAsyncJavaScript("return document.querySelector('h1').textContent;", arguments: [:], in: nil, contentWorld: .defaultClient)
+                XCTAssertEqual(title as? String, "Resting viewport \(outline)-\(edit)")
+            }
+            XCTAssertGreaterThan(sampler.frames, 5, "High-frequency sampling must actually execute offscreen")
+            XCTAssertLessThanOrEqual(sampler.maximumDeviation, 2, "Split edits exposed a reset/restore frame or changed the resting pixel offset")
+            sampler.baseline = nil
+            workspace.preview.mode = .editor
+            try await Task.sleep(for: .milliseconds(500))
+            workspace.editor.text = source.replacingOccurrences(of: "Resting viewport", with: "Edited while hidden")
+            try await Task.sleep(for: .milliseconds(500))
+            sampler.begin(at: baseline)
+            workspace.preview.mode = .split
+            try await wait { workspace.preview.html.contains("Edited while hidden") && delegate.lastHTML == workspace.preview.html && !delegate.restoring }
+            try await Task.sleep(for: .milliseconds(500))
+            XCTAssertGreaterThan(sampler.frames, 2)
+            XCTAssertLessThanOrEqual(sampler.maximumDeviation, 2, "Entering Split must retain the resting offset on every frame")
+            sampler.baseline = nil
+        }
+        // Explicit navigation still moves the preview; excluded from stability samples.
+        workspace.preview.scrollPreview(to: "section-99")
+        try await Task.sleep(for: .milliseconds(700))
+        let top = try await web.callAsyncJavaScript("return document.getElementById('section-99').getBoundingClientRect().top;", arguments: [:], in: nil, contentWorld: .defaultClient)
+        XCTAssertLessThan(try XCTUnwrap(top as? Double), web.bounds.height)
+        // Exercise the changed representable lifecycle in the real hierarchy after
+        // the scroll assertion: reflow at small/large sizes and every display mode.
+        for mode in DocumentViewMode.allCases {
+            workspace.preview.mode = mode
+            for size in [NSSize(width: 560, height: 200), NSSize(width: 1400, height: 900), NSSize(width: 2400, height: 1600)] {
+                window.setContentSize(size)
+                host.view.layoutSubtreeIfNeeded()
+                await Task.yield()
+                XCTAssertTrue(web.frame.width.isFinite && web.frame.height.isFinite)
+            }
+        }
+        workspace.preview.mode = .split
+        window.setContentSize(NSSize(width: 1400, height: 900))
+        host.view.layoutSubtreeIfNeeded()
+        // Empty, smallest, structured, and long content exercise append/remove,
+        // replacement, nested text, Unicode, and image anchors on the live DOM.
+        for text in ["", "# A", "# 日本語 👩🏽‍💻\n\n> **Bold**\n\n- one\n- two\n\n![Local](local.png)\n", source] {
+            workspace.editor.text = text
+            workspace.preview.schedule(text: text, document: url, root: root)
+            try await Task.sleep(for: .milliseconds(600))
+            try await wait { delegate.lastHTML == workspace.preview.html && !delegate.restoring }
+            let rendered = try await web.callAsyncJavaScript("return document.body.innerHTML;", arguments: [:], in: nil, contentWorld: .defaultClient)
+            XCTAssertNotNil(rendered as? String)
+            XCTAssertNil(workspace.preview.error)
+        }
+        XCTAssertFalse(window.isVisible)
+    }
+}
+
+/// Records DOM offsets on animation frames and all navigation delegate callbacks.
+/// No production state publishes or production frame timers are needed.
+@MainActor
+private final class ScrollSampler: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+    let delegate: PreviewView.Coordinator
+    var baseline: Double?
+    var frames = 0
+    var maximumDeviation = 0.0
+    init(delegate: PreviewView.Coordinator) { self.delegate = delegate }
+    func begin(at offset: Double) { baseline = offset; frames = 0; maximumDeviation = 0 }
+    func record(_ value: Any) {
+        guard let baseline, let offset = value as? Double else { return }
+        frames += 1
+        maximumDeviation = max(maximumDeviation, abs(offset - baseline))
+    }
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) { record(message.body) }
+    func sample(_ web: WKWebView) {
+        web.callAsyncJavaScript("return scrollY;", arguments: [:], in: nil, in: .defaultClient) { [weak self] result in
+            if case .success(let value) = result { self?.record(value) }
+        }
+    }
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { sample(webView) }
+    func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) { sample(webView) }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { sample(webView) }
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { sample(webView) }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        sample(webView); delegate.webView(webView, didFinish: navigation)
+    }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        sample(webView); delegate.webView(webView, didFail: navigation, withError: error)
+    }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        sample(webView); delegate.webView(webView, didFailProvisionalNavigation: navigation, withError: error)
+    }
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        sample(webView); delegate.webView(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
+    }
+}

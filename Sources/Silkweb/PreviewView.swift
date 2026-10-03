@@ -81,14 +81,16 @@ struct PreviewView: NSViewRepresentable {
             let preview = workspace.preview
             guard preview.mode != .editor else {
                 loadTask?.cancel()
+                restoring = false
                 web?.stopLoading()
-                lastHTML = ""
+                if completedPage == nil { lastHTML = "" }
                 preview.endLoading()
                 return
             }
             guard !preview.html.isEmpty, let root = workspace.root,
                   let document = preview.renderedURL, document == workspace.editor.url,
                   preview.html != lastHTML || document != requestedDocument || root != requestedRoot || retry != preview.retry else { return }
+            let canPatch = completedPage != nil && self.document == document && requestedRoot == root && retry == preview.retry
             retry = preview.retry
             preview.beginLoading(document: document)
             requestedDocument = document
@@ -108,6 +110,16 @@ struct PreviewView: NSViewRepresentable {
                     }
                     guard !Task.isCancelled, preview.mode != .editor,
                           let handler = web.configuration.urlSchemeHandler(forURLScheme: PreviewResource.scheme) as? PreviewSchemeHandler else { return }
+                    if canPatch {
+                        self.restoring = true
+                        let value = try await web.callAsyncJavaScript(Self.patchScript, arguments: ["html": html, "images": self.imageAnchors, "anchor": preview.pendingAnchor ?? ""], in: nil, contentWorld: .defaultClient)
+                        guard !Task.isCancelled, preview.mode != .editor, self.document == workspace.editor.url else { return }
+                        preview.pendingAnchor = nil
+                        self.restoring = false
+                        if let values = value as? [String: Any] { self.updatePosition(values) }
+                        preview.didFinish(document: document)
+                        return
+                    }
                     let page = URL(string: "silkweb-preview://page/" + UUID().uuidString)!
                     handler.page = page
                     handler.html = Data(html.utf8)
@@ -123,6 +135,55 @@ struct PreviewView: NSViewRepresentable {
                 } catch { if !Task.isCancelled { self.failed(error) } }
             }
         }
+
+        private var imageAnchors: [[String: Any]] {
+            workspace.preview.outlineItems.compactMap { item in
+                guard case .image = item.content else { return nil }
+                return ["id": item.id, "line": item.sourceLine ?? "", "direct": item.isInlineImage]
+            }
+        }
+
+        // One isolated-world transaction: retain unchanged nodes (especially decoded
+        // images), update changed content, and restore pixels before the next paint.
+        // Passive updates never scroll to the last visible heading or a height ratio.
+        static let patchScript = """
+        const x = scrollX, y = scrollY;
+        const next = new DOMParser().parseFromString(html, 'text/html');
+        function patch(parent, source) {
+          const wanted = Array.from(source.childNodes);
+          for (let i = 0; i < wanted.length; i++) {
+            const old = parent.childNodes[i], node = wanted[i];
+            if (!old) { parent.appendChild(node.cloneNode(true)); continue; }
+            if (old.isEqualNode(node)) continue;
+            if (old.nodeType !== node.nodeType || old.nodeName !== node.nodeName) {
+              old.replaceWith(node.cloneNode(true)); continue;
+            }
+            if (old.nodeType === Node.ELEMENT_NODE) {
+              for (const attr of Array.from(old.attributes)) {
+                if (!node.hasAttribute(attr.name)) old.removeAttribute(attr.name);
+              }
+              for (const attr of Array.from(node.attributes)) {
+                if (old.getAttribute(attr.name) !== attr.value) old.setAttribute(attr.name, attr.value);
+              }
+              patch(old, node);
+            } else if (old.nodeValue !== node.nodeValue) old.nodeValue = node.nodeValue;
+          }
+          while (parent.childNodes.length > wanted.length) parent.lastChild.remove();
+        }
+        patch(document.body, next.body);
+        const rendered = Array.from(document.querySelectorAll('img,.sw-missing-image,.sw-remote-image:not(:has(img))'));
+        let index = 0;
+        for (const image of images) {
+          const node = image.direct ? rendered[index++] : Array.from(document.querySelectorAll('p,li')).find(p => p.textContent.includes(image.line));
+          if (node) node.id = image.id;
+        }
+        const target = anchor && document.getElementById(anchor);
+        if (target) target.scrollIntoView();
+        else scrollTo(x, y);
+        const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6,[id^=outline_image_]'));
+        const current = headings.filter(h => h.getBoundingClientRect().top <= 40).pop();
+        return {anchor: current?.id || '', ratio: scrollY / Math.max(1, document.documentElement.scrollHeight - innerHeight)};
+        """
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard !restoring, document == workspace.editor.url, message.frameInfo.isMainFrame, let values = message.body as? [String: Any] else { return }
@@ -146,10 +207,6 @@ struct PreviewView: NSViewRepresentable {
             preview.didFinish(document: document)
             let anchor = preview.pendingAnchor ?? restoreAnchor
             preview.pendingAnchor = nil
-            let images: [[String: Any]] = preview.outlineItems.compactMap { item in
-                guard case .image = item.content else { return nil }
-                return ["id": item.id, "line": item.sourceLine ?? "", "direct": item.isInlineImage]
-            }
             webView.callAsyncJavaScript("""
                 // Attach display-only anchors to the existing DOM. Reference images
                 // unsupported by the renderer still navigate to their source paragraph.
@@ -165,7 +222,7 @@ struct PreviewView: NSViewRepresentable {
                 const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6,[id^=outline_image_]'));
                 const current = headings.filter(h => h.getBoundingClientRect().top <= 40).pop();
                 return {anchor: current?.id || '', ratio: scrollY / Math.max(1, document.documentElement.scrollHeight - innerHeight)};
-                """, arguments: ["anchor": anchor, "ratio": restoreRatio, "images": images], in: nil, in: .defaultClient) { [weak self] result in
+                """, arguments: ["anchor": anchor, "ratio": restoreRatio, "images": imageAnchors], in: nil, in: .defaultClient) { [weak self] result in
                     self?.restoring = false
                     if case .success(let value) = result, let values = value as? [String: Any] { self?.updatePosition(values) }
                 }
@@ -182,6 +239,7 @@ struct PreviewView: NSViewRepresentable {
         }
 
         private func failed(_ error: Error) {
+            restoring = false
             let failure = error as NSError
             guard failure.code != NSURLErrorCancelled else { return }
             navigationError = failure
