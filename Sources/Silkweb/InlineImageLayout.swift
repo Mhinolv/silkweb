@@ -257,6 +257,8 @@ import SilkwebCore
         self.sourceRange = sourceRange
         guard content.bitmap !== self.content.bitmap || content.message != self.content.message || content.reference != self.content.reference
                 || content.naturalSize != self.content.naturalSize || content.size != self.content.size else { return }
+        // Drop layer contents set by updateLayer before falling back to draw(_:).
+        if content.bitmap == nil, self.content.bitmap != nil { layer?.contents = nil }
         self.content = content
         applyContent()
         needsDisplay = true
@@ -288,6 +290,22 @@ import SilkwebCore
         guard let editor, NSMaxRange(sourceRange) <= editor.string.utf16.count else { return NSRange(location: 0, length: 0) }
         let line = (editor.string as NSString).substring(with: sourceRange).trimmingCharacters(in: .newlines)
         return NSRange(location: sourceRange.location, length: line.utf16.count)
+    }
+    /// On screen a decoded bitmap is the layer's contents: the GPU scales and composites
+    /// it, so an image scrolling into view costs no main-thread rasterization. draw(_:)
+    /// still renders messages and offscreen captures (cacheDisplay, printing).
+    override var wantsUpdateLayer: Bool { content.bitmap != nil }
+    override func updateLayer() {
+        guard let layer, let bitmap = content.bitmap else { return }
+        var background: CGColor?
+        effectiveAppearance.performAsCurrentDrawingAppearance { background = NSColor.silkwebPaneBackground.cgColor }
+        layer.backgroundColor = background
+        layer.contentsGravity = .resize
+        if layer.contents as AnyObject? !== bitmap { layer.contents = bitmap }
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {
         NSColor.silkwebPaneBackground.setFill(); bounds.fill()
