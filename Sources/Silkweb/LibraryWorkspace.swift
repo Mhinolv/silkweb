@@ -82,6 +82,9 @@ final class LibraryWorkspace {
     var mediaDirectoryName = "media"
     var mediaMigrationRunning = false
     var mediaBannerVisible = false
+    /// A recovery file set aside in `Recovery/Unreadable/` (1.70); shown once per launch.
+    var unreadableRecoveryFile: URL?
+    @ObservationIgnored static var unreadableRecoveryShown = false
     var loadingCount: Int?
     var error: String?
     var errorTitle = "Can’t Open Library"
@@ -280,6 +283,7 @@ final class LibraryWorkspace {
             mediaProgress = nil
             mediaFailures = []
             mediaBannerVisible = false
+            unreadableRecoveryFile = nil
             loading = true
             loadingCount = nil
             do {
@@ -311,14 +315,19 @@ final class LibraryWorkspace {
                 }
                 session.selectedDocuments.formIntersection(Set(documents.map(\.relativePath)))
                 var recoveryURL: URL?
-                if let drafts = try? await SaveCoordinator().pendingRecoveryDrafts(),
-                   let draft = drafts.first(where: { $0.documentURL.path.hasPrefix(scanned.rootURL.path + "/") }) {
+                let recovery = SaveCoordinator(recoveryDirectory: recoveryDirectory)
+                let drafts = (try? await recovery.pendingRecoveryDrafts()) ?? []
+                reportUnreadableRecovery(await recovery.takeUnreadableRecoveryFiles())
+                if let draft = drafts.first(where: { $0.documentURL.path.hasPrefix(scanned.rootURL.path + "/") }) {
                     recoveryURL = draft.documentURL
                     session.selectedFolder = nil
                     session.selectedDocuments = Set(scanned.documents.filter { scanned.rootURL.appendingPathComponent($0.relativePath) == draft.documentURL }.map(\.relativePath))
                 }
                 if let recoveryURL, let document = scanned.documents.first(where: { scanned.rootURL.appendingPathComponent($0.relativePath) == recoveryURL }) {
                     _ = await openTab(document, pinned: true)
+                } else if let recoveryURL {
+                    // The note was deleted outside Silkweb; its draft must stay reachable (1.70).
+                    await openOrphanDraft(recoveryURL.standardizedFileURL)
                 } else if windowSession == nil, let document = selectedDocument {
                     _ = await openTab(document)
                 }
@@ -350,6 +359,15 @@ final class LibraryWorkspace {
             }
             loading = false
         }
+    }
+
+    func reportUnreadableRecovery(_ files: [URL]) {
+        guard let file = files.first, !Self.unreadableRecoveryShown else { return }
+        Self.unreadableRecoveryShown = true
+        unreadableRecoveryFile = file
+        NSAccessibility.post(element: NSApplication.shared, notification: .announcementRequested,
+                             userInfo: [.announcement: UnreadableRecoveryBanner.message,
+                                        .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
 
     func retryMediaMigration() {
@@ -457,6 +475,7 @@ final class LibraryWorkspace {
             withTransaction(transaction) {
                 session = LibraryReconciler.session(session, from: old, to: scanned)
                 install(scanned)
+                rekeyTabs(in: scanned)
                 revision += 1
             }
         } catch {

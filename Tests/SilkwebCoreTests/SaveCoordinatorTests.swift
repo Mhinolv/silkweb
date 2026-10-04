@@ -346,6 +346,100 @@ final class SaveCoordinatorTests: XCTestCase {
         XCTAssertEqual(disk.text, "original")
     }
 
+    /// silkweb-1.70 (1): one unreadable recovery file must not hide healthy drafts or block opening.
+    func testUnreadableRecoveryFileIsSetAsideAndNeverBlocksOtherDocuments() async throws {
+        for corrupt in ["{", "", "null", "{\"formatVersion\":1}", "\u{FF}\u{FE}garbage"] {
+            try? FileManager.default.removeItem(at: recovery)
+            let healthy = try document("\(UUID()).md", text: "healthy on disk")
+            let drafted = try document("\(UUID()).md", text: "drafted on disk")
+            let writer = SaveCoordinator(recoveryDirectory: recovery)
+            _ = try await writer.open(drafted)
+            try await writer.edit("recovered draft", at: drafted)
+            try await writer.preserveUnsavedDrafts()
+            let bad = recovery.appendingPathComponent("0000-corrupt.json")
+            try Data(corrupt.utf8).write(to: bad)
+
+            let restarted = SaveCoordinator(recoveryDirectory: recovery)
+            let drafts = try await restarted.pendingRecoveryDrafts()
+            XCTAssertEqual(drafts.map(\.text), ["recovered draft"], corrupt)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: bad.path), corrupt)
+            let unreadable = recovery.appendingPathComponent("Unreadable", isDirectory: true)
+            let quarantined = try FileManager.default.contentsOfDirectory(at: unreadable, includingPropertiesForKeys: nil)
+            XCTAssertEqual(quarantined.map(\.lastPathComponent), ["0000-corrupt.json"], corrupt)
+            XCTAssertEqual(try Data(contentsOf: quarantined[0]), Data(corrupt.utf8), "Quarantine keeps the bytes")
+            let opened = try await restarted.open(healthy)
+            XCTAssertEqual(opened.text, "healthy on disk")
+            // A second scan neither re-reports nor re-reads the quarantined file.
+            let again = try await restarted.pendingRecoveryDrafts()
+            XCTAssertEqual(again.count, 1)
+        }
+        // A draft written by a newer build stays in place for that build.
+        try? FileManager.default.removeItem(at: recovery)
+        try FileManager.default.createDirectory(at: recovery, withIntermediateDirectories: true)
+        let future = recovery.appendingPathComponent("future.json")
+        try Data(#"{"formatVersion":99,"documentURL":"file:///x.md","text":"t"}"#.utf8).write(to: future)
+        let drafts = try await SaveCoordinator(recoveryDirectory: recovery).pendingRecoveryDrafts()
+        XCTAssertTrue(drafts.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: future.path))
+    }
+
+    /// silkweb-1.70 (4): restored text stays off disk until the user keeps it.
+    func testRestoredDraftIsNotAutosavedUntilKeptAndDiscardReloadsDisk() async throws {
+        for text in ["", "日本語 🕸\n", String(repeating: "x", count: 1_000_000)] {
+            let url = try document("\(UUID()).md", text: "disk original")
+            let bytes = try Data(contentsOf: url)
+            let writer = SaveCoordinator(recoveryDirectory: recovery)
+            _ = try await writer.open(url)
+            try await writer.edit(text, at: url)
+            try await writer.preserveUnsavedDrafts()
+
+            let restarted = SaveCoordinator(recoveryDirectory: recovery)
+            let found = try await restarted.pendingRecoveryDrafts()
+            let draft = try XCTUnwrap(found.first { $0.documentURL == url.standardizedFileURL })
+            await restarted.restore(draft)
+            await restarted.scheduleSave(url, delay: .milliseconds(10))
+            // Watcher tick with an unchanged disk revision.
+            _ = try await restarted.reconcile(url)
+            try await restarted.edit(text + "more", at: url)
+            await restarted.scheduleSave(url, delay: .milliseconds(10))
+            let closed = await restarted.close(url)
+            XCTAssertFalse(closed, "Closing must not commit pending recovery text")
+            try await Task.sleep(for: .milliseconds(1300))
+            XCTAssertEqual(try Data(contentsOf: url), bytes, "Disk bytes change only after Keep")
+            let pending = await restarted.state(for: url)
+            XCTAssertEqual(pending, .dirty)
+
+            // Keep: an explicit save commits the recovered buffer.
+            let kept = await restarted.save(url)
+            XCTAssertEqual(kept, .clean)
+            XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), text + "more")
+            let remaining = try await restarted.pendingRecoveryDrafts()
+            XCTAssertFalse(remaining.contains { $0.documentURL == url.standardizedFileURL })
+            // After Keep, autosave resumes normally.
+            try await restarted.edit("after keep", at: url)
+            await restarted.scheduleSave(url, delay: .milliseconds(10))
+            try await Task.sleep(for: .milliseconds(200))
+            XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "after keep")
+        }
+        // Discard: the untouched disk text is reloaded as clean.
+        let url = try document("discard.md", text: "disk original")
+        let writer = SaveCoordinator(recoveryDirectory: recovery)
+        _ = try await writer.open(url)
+        try await writer.edit("unwanted", at: url)
+        try await writer.preserveUnsavedDrafts()
+        let restarted = SaveCoordinator(recoveryDirectory: recovery)
+        let found = try await restarted.pendingRecoveryDrafts()
+        let draft = try XCTUnwrap(found.first { $0.documentURL == url.standardizedFileURL })
+        await restarted.restore(draft)
+        _ = try await restarted.reconcile(url)
+        try await Task.sleep(for: .milliseconds(1300))
+        try await restarted.discardRecovery(url)
+        let reopened = try await restarted.open(url)
+        XCTAssertEqual(reopened.text, "disk original")
+        let state = await restarted.state(for: url)
+        XCTAssertEqual(state, .clean)
+    }
+
     func testZeroDelayAndScheduledFailureKeepBuffer() async throws {
         for failing in [false, true] {
             let url = try document("\(UUID()).md")
