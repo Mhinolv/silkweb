@@ -33,6 +33,13 @@ extension LibraryWorkspace {
         let editor = DocumentSession()
         await editor.configure(root: snapshot.rootURL, recoveryDirectory: recoveryDirectory)
         guard await editor.open(snapshot.rootURL.appendingPathComponent(document.relativePath), readOnly: snapshot.isReadOnly) else { return false }
+        if let tab = tabs.first(where: { $0.id == document.id }) {
+            // A concurrent open (e.g. session restore vs. a click) added this document meanwhile: focus it instead.
+            await editor.didCloseWindow()
+            if pinned { tab.isPreview = false }
+            activateTab(tab.id, syncSelection: false)
+            return true
+        }
         let tab = DocumentTab(id: document.id, editor: editor, isPreview: !pinned && !editor.state.isDirty)
         editor.didEdit = { [weak self, weak tab] in
             guard let self, let tab, tab.isPreview else { return }
@@ -188,7 +195,12 @@ extension LibraryWorkspace {
         return value
     }
 
+    /// Serialized with navigation, so a click during launch restore never races it.
     func restoreTabs(_ value: WindowSessionMetadata) async {
+        await afterNavigation { await self.performRestoreTabs(value) }
+    }
+
+    private func performRestoreTabs(_ value: WindowSessionMetadata) async {
         guard let snapshot else { return }
         restoringTabs = true
         defer { restoringTabs = false }

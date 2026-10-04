@@ -63,19 +63,8 @@ extension LibraryWorkspace {
                 let render = Task { try await renderer.exportPDF(html: result.html, info: info, title: name,
                                                                  timeoutInterval: exportPDF ? 15 : 60) }
                 let message = exportPDF ? "Exporting “\(name)” as PDF…" : "Preparing “\(name)” for printing…"
-                let delay = Task {
-                    try await Task.sleep(for: .seconds(1))
-                    pdfProgress = PDFProgress(message: message) { render.cancel() }
-                }
-                let data: Data
-                do {
-                    data = try await withTaskCancellationHandler { try await render.value } onCancel: { render.cancel() }
-                    delay.cancel()
-                    pdfProgress = nil
-                } catch {
-                    delay.cancel()
-                    pdfProgress = nil
-                    throw error
+                let data = try await withDelayedProgress(message, cancel: { render.cancel() }) {
+                    try await withTaskCancellationHandler { try await render.value } onCancel: { render.cancel() }
                 }
                 if let destination {
                     try await Task.detached(priority: .userInitiated) {
@@ -92,6 +81,22 @@ extension LibraryWorkspace {
                 mutationFailure(error, title: exportPDF ? "“\(name)” couldn’t be exported as PDF." : "“\(name)” couldn’t be printed.")
             }
         }
+    }
+
+    /// Runs `operation`, showing the progress sheet only while it is still running after `delay`.
+    /// The sheet closes when it finishes, fails or is cancelled, and never appears afterwards.
+    func withDelayedProgress<T>(_ message: String,
+                                delay: @escaping @MainActor () async throws -> Void = { try await Task.sleep(for: .seconds(1)) },
+                                cancel: @escaping () -> Void,
+                                operation: () async throws -> T) async throws -> T {
+        let shown = Task { @MainActor in
+            try await delay()
+            // The delay may elapse just as the operation finishes; its continuation can then run after the cleanup below.
+            try Task.checkCancellation()
+            pdfProgress = PDFProgress(message: message, cancel: cancel)
+        }
+        defer { shown.cancel(); pdfProgress = nil }
+        return try await operation()
     }
 }
 
