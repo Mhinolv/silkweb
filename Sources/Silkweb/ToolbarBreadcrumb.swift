@@ -12,8 +12,9 @@ final class ToolbarMetrics {
     init() { controller.metrics = self }
 }
 
-/// Keeps the compact bar laid out: sizes the breadcrumb, sets overflow priorities, and slides the leading
-/// items into the traffic-light area when the window buttons are absent (AppKit doesn't reflow for them).
+/// Keeps the compact bar laid out: sizes the breadcrumb to the room the other items leave, sets overflow
+/// priorities, and slides the leading items into the traffic-light area only while the window buttons are
+/// absent (full screen, or hidden buttons; AppKit doesn't reflow for them).
 @MainActor final class CompactToolbarController: NSObject {
     weak var metrics: ToolbarMetrics?
     private(set) weak var window: NSWindow?
@@ -21,14 +22,25 @@ final class ToolbarMetrics {
     private var observers: [NSObjectProtocol] = []
     private var buttonObservations: [NSKeyValueObservation] = []
     private var scheduled = false
-    private var relayoutPending = false
-    private var relayoutAttempts = 0
+    /// The last width each item took in the bar, viewer padding included, so items in the » menu still count.
+    private var slotWidths: [ObjectIdentifier: CGFloat] = [:]
+    /// AppKit's own toolbar-view frame while the leading items are shifted; nil when nothing is shifted.
+    private var naturalFrame: NSRect?
+    private var shiftedFrame: NSRect?
+    private var animating = false
+    private var shiftGrowthFailed = false
+    private var nudges = 0
+    /// Whether the last leading move slid (false: placed at once, as under Reduce Motion).
+    private(set) var lastMoveAnimated: Bool?
+    static var reduceMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
     static let leadingInset = Spacing.small
-    static let trailingInset = Spacing.small
+    /// Room after the last item's viewer, to the bar's edge or the inspector's titlebar area.
+    static let trailingInset: CGFloat = 8
     static let minimumBreadcrumbWidth: CGFloat = 120
-    static let overflowAllowance: CGFloat = 32
-    static let relayoutLimit = 3
-    /// Items that overflow into the » menu first have the lowest priority; the rest never overflow.
+    static let nudgeLimit = 3
+    /// The breadcrumb gives way first: it shortens through its `…` ladder, and only below its minimum width does
+    /// it go into the » menu. The buttons follow in this order; the sidebar toggle and mode control never do.
+    static let breadcrumbPriority = -2000
     static let overflowPriorities: [String: Int] = [
         "Filter by Tag": -1000, "Sort By": -800, "Show Outline": -600, "Show Document Info": -400, "New Document": -200,
     ]
@@ -41,17 +53,24 @@ final class ToolbarMetrics {
         if let window = anchor.window, window.toolbar != nil, window !== self.window {
             self.window = window
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
-            // Resize updates at once, so a shrinking window never flashes items into the » menu.
-            observers = [NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.relayoutAttempts = 0
-                    self?.update()
-                }
+            let center = NotificationCenter.default
+            // Resize updates at once, so the breadcrumb shrinks with the window instead of after it.
+            observers = [center.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.update() }
             }] + [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification].map { name in
-                NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
                     MainActor.assumeIsolated { self?.scheduleUpdate() }
                 }
-            }
+            } + [
+                // Sidebar and Outline columns move the toolbar's sections without resizing the window.
+                center.addObserver(forName: NSSplitView.didResizeSubviewsNotification, object: nil, queue: .main) { [weak self] note in
+                    let view = note.object as? NSView
+                    MainActor.assumeIsolated {
+                        guard let self, let window = self.window, view?.window === window else { return }
+                        self.scheduleUpdate()
+                    }
+                },
+            ]
             buttonObservations = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { kind in
                 window.standardWindowButton(kind)?.observe(\.isHidden) { [weak self] _, _ in
                     MainActor.assumeIsolated { self?.scheduleUpdate() }
@@ -61,99 +80,159 @@ final class ToolbarMetrics {
         scheduleUpdate()
     }
 
-    /// Coalesces bursts (live resize, three buttons hiding) into one pass after AppKit's toolbar layout.
+    /// Coalesces bursts (three buttons hiding, a divider drag) into one pass after AppKit's toolbar layout.
     func scheduleUpdate() {
         guard !scheduled else { return }
         scheduled = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             scheduled = false
+            nudges = 0
             update()
         }
     }
 
-    /// The traffic lights are present when the zoom button is visible in the toolbar's row.
-    var windowButtonsShown: Bool {
-        guard let zoom = window?.standardWindowButton(.zoomButton) else { return false }
-        return zoom.window != nil && !zoom.isHiddenOrHasHiddenAncestor && zoom.alphaValue > 0.01
+    /// Only positive evidence counts: full screen, or every standard button hidden. A visible traffic light
+    /// always keeps the items where AppKit put them.
+    static func windowButtonsAbsent(fullScreen: Bool, buttonsHidden: [Bool]) -> Bool {
+        fullScreen || buttonsHidden.allSatisfy { $0 }
+    }
+
+    var windowButtonsAbsent: Bool {
+        guard let window else { return false }
+        return Self.windowButtonsAbsent(fullScreen: window.styleMask.contains(.fullScreen),
+                                        buttonsHidden: [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].map {
+                                            window.standardWindowButton($0)?.isHidden ?? true
+                                        })
     }
 
     func update() {
-        // Measure through any placed item: the breadcrumb itself may be in the » menu after a shrink.
         guard let window, let anchor, let toolbar = window.toolbar,
-              let crumb = toolbar.items.first(where: { $0.view.map { anchor.isDescendant(of: $0) } == true })?.view,
-              let sample = toolbar.items.compactMap(\.view).first(where: { $0.superview?.superview?.superview != nil }),
-              let viewer = sample.superview, let toolbarView = viewer.superview, let bar = toolbarView.superview else { return }
+              let crumbItem = toolbar.items.first(where: { $0.view.map { anchor.isDescendant(of: $0) } == true }),
+              let crumb = crumbItem.view else { return }
         for item in toolbar.items {
-            let priority = item.view === crumb ? NSToolbarItem.VisibilityPriority.user.rawValue
+            let priority = item === crumbItem ? Self.breadcrumbPriority
                 : Self.overflowPriorities[item.label] ?? NSToolbarItem.VisibilityPriority.user.rawValue
             if item.visibilityPriority.rawValue != priority { item.visibilityPriority = NSToolbarItem.VisibilityPriority(rawValue: priority) }
         }
-        let views = toolbar.items.compactMap(\.view).filter { $0.isDescendant(of: toolbarView) && !$0.isHiddenOrHasHiddenAncestor }
-        func frame(_ view: NSView) -> NSRect { view.convert(view.bounds, to: bar) }
+        // Items in the » menu have no window; the sidebar toggle never overflows, so something is always placed.
+        let views = toolbar.items.compactMap(\.view)
+        let placed = views.filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor && $0.superview?.superview?.superview != nil }
+        guard let toolbarView = placed.first?.superview?.superview, let bar = toolbarView.superview,
+              placed.allSatisfy({ $0.superview?.superview === toolbarView }) else { return }
+        for view in placed { slotWidths[ObjectIdentifier(view)] = view.superview!.frame.width }
+        let padding = placed.first.map { $0.superview!.frame.width - $0.frame.width } ?? 8
+        func slot(_ view: NSView) -> CGFloat { slotWidths[ObjectIdentifier(view)] ?? view.fittingSize.width + padding }
 
-        // Leading edge: only move items when the system leaves the empty traffic-light area in place.
-        if let natural = views.map({ frame($0).minX }).min().map({ $0 - toolbarView.frame.minX }) {
-            let shift = windowButtonsShown ? 0 : min(0, Self.leadingInset - natural)
-            let target = NSRect(x: shift, y: toolbarView.frame.minY, width: bar.bounds.width - shift, height: toolbarView.frame.height)
-            if toolbarView.frame != target {
-                if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || window.inLiveResize {
-                    toolbarView.frame = target
-                } else {
-                    NSAnimationContext.runAnimationGroup { context in
-                        context.duration = 0.2
-                        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                        toolbarView.animator().frame = target
-                    } completionHandler: { [weak self] in
-                        MainActor.assumeIsolated { self?.scheduleUpdate() }
-                    }
-                }
+        // Leading edge. AppKit lays the row out itself (after the traffic lights, or after the sidebar column);
+        // its frame for the toolbar view is never overridden unless the window buttons are absent.
+        if animating { return }
+        if let shifted = shiftedFrame, toolbarView.frame != shifted {
+            // AppKit laid the toolbar view out again; its frame is the natural one now.
+            naturalFrame = nil
+            shiftedFrame = nil
+        }
+        let natural = naturalFrame ?? toolbarView.frame
+        let firstViewer = placed.map { $0.superview!.frame.minX }.min() ?? 0
+        let firstItem = placed.map { $0.frame.minX + $0.superview!.frame.minX }.min() ?? 0
+        var target = natural
+        if windowButtonsAbsent {
+            let shift = min(0, Self.leadingInset - (natural.minX + firstItem))
+            target = NSRect(x: natural.minX + shift, y: natural.minY, width: natural.width - shift, height: natural.height)
+        }
+        if target != toolbarView.frame {
+            if target == natural {
+                naturalFrame = nil
+                shiftedFrame = nil
+            } else {
+                naturalFrame = natural
+                shiftedFrame = target
             }
+            move(toolbarView, to: target, in: window)
         }
 
-        // The breadcrumb takes whatever the other items leave, so the row ends at the trailing inset. Every item
-        // counts, including any already in the » menu, so a too-wide breadcrumb can't hide what measures it.
-        guard let start = views.map({ frame($0).minX }).min() else { return }
-        let spacing = max(0, viewer.frame.width - sample.frame.width)
-        let others = toolbar.items.compactMap(\.view).filter { $0 !== crumb }
-        // An item in the » menu keeps its last toolbar frame; its fitting size there is its menu form.
-        let othersWidth = others.reduce(CGFloat(0)) { $0 + ($1.frame.width > 0 ? $1.frame.width : $1.fittingSize.width) + spacing }
-        // While anything is in the » menu the toolbar keeps room for its chevron, so leave that room until every
-        // item is back, then return to the exact width. A little slack keeps rounding from overflowing an item.
-        let overflowing = views.count < toolbar.items.compactMap(\.view).count
-        let allowance = overflowing && relayoutAttempts < Self.relayoutLimit ? Self.overflowAllowance : 0
-        let width = max(Self.minimumBreadcrumbWidth, floor(bar.bounds.width - Self.trailingInset - start - othersWidth) - 2 - allowance)
+        // The breadcrumb takes the room the other items leave, so the trailing items stay at the trailing edge.
+        // The row ends at the bar's edge or where AppKit reserves the titlebar over the Outline inspector.
+        // While shifted, the breadcrumb also takes the freed space, except where AppKit keeps a section for the
+        // sidebar column: there the row after the sidebar keeps its natural room, so the budget does too.
+        let naturalLeading = natural.minX + firstViewer
+        let regions = Self.reservedRegions(in: bar)
+        if shiftedFrame == nil { shiftGrowthFailed = false }
+        let grows = shiftedFrame != nil && !shiftGrowthFailed && !regions.contains { $0.maxX <= naturalLeading + 1 }
+        let leading = grows ? target.minX + firstViewer : naturalLeading
+        var limit = grows ? target.maxX : natural.maxX
+        for region in regions where region.minX > naturalLeading + 1 {
+            limit = min(limit, region.minX)
+        }
+        let others = views.filter { $0 !== crumb }.reduce(CGFloat(0)) { $0 + slot($1) }
+        let available = floor(limit - Self.trailingInset - leading - others - padding) - 2
+        let width = max(Self.minimumBreadcrumbWidth, available)
         let changed = metrics.map { abs($0.breadcrumbWidth - width) > 0.5 } ?? false
-        if changed { metrics?.breadcrumbWidth = width }
-        if overflowing {
-            relayout(toolbar, toolbarView: toolbarView, crumb: crumb)
-        } else if changed, relayoutAttempts > 0 {
-            // Confirm the row still fits once SwiftUI applies the exact width.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.update() }
+        if changed {
+            metrics?.breadcrumbWidth = width
+            nudges = 0
+        }
+        if placed.count < views.count, grows, nudges >= Self.nudgeLimit {
+            // AppKit didn't give the shifted row the freed space after all; fall back to the natural room.
+            shiftGrowthFailed = true
+            scheduleUpdate()
+        } else if placed.count < views.count, available >= Self.minimumBreadcrumbWidth {
+            nudge(toolbar, toolbarView: toolbarView)
+        } else if changed {
+            // Confirm the row once SwiftUI applies the width.
+            DispatchQueue.main.async { [weak self] in self?.update() }
         }
     }
 
-    /// NSToolbar doesn't re-measure items already in the » menu, so once the breadcrumb has shrunk to fit,
-    /// ask it to lay the row out again (after SwiftUI applies the new width).
-    private func relayout(_ toolbar: NSToolbar, toolbarView: NSView, crumb: NSView) {
-        guard !relayoutPending, relayoutAttempts < Self.relayoutLimit else { return }
-        relayoutPending = true
-        relayoutAttempts += 1
-        DispatchQueue.main.async { [weak self] in
-            self?.relayoutPending = false
-            for view in toolbar.items.compactMap(\.view) where view.window == nil {
-                view.invalidateIntrinsicContentSize()
-                if view === crumb { view.setFrameSize(NSSize(width: view.fittingSize.width, height: view.frame.height)) }
+    /// Where AppKit keeps the titlebar clear for a split view's trailing column (the Outline inspector). AppKit
+    /// marks the sidebar and inspector dividers with blocking views in the titlebar container (zero-width ones,
+    /// for plain dividers, don't stop items); without them the row runs to the bar's edge.
+    static func reservedRegions(in bar: NSView) -> [NSRect] {
+        guard let container = bar.superview else { return [] }
+        return container.subviews.filter { $0 !== bar && NSStringFromClass(type(of: $0)).contains("Blocking") && !$0.isHidden }
+            .map { $0.convert($0.bounds, to: bar) }.filter { $0.width > 0 }
+    }
+
+    private func move(_ toolbarView: NSView, to target: NSRect, in window: NSWindow) {
+        if Self.reduceMotion() || window.inLiveResize {
+            lastMoveAnimated = false
+            toolbarView.frame = target
+            return
+        }
+        lastMoveAnimated = true
+        animating = true
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            toolbarView.animator().frame = target
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.animating = false
+                toolbarView.frame = target
+                self.scheduleUpdate()
             }
-            if let item = toolbar.items.first(where: { $0.view === crumb }) {
+        }
+    }
+
+    /// NSToolbar doesn't re-measure items already in the » menu, so once the breadcrumb fits again, ask it to
+    /// lay the row out (after SwiftUI applies the new width). Bounded: a window narrower than the fixed items
+    /// legitimately keeps the » menu.
+    private func nudge(_ toolbar: NSToolbar, toolbarView: NSView) {
+        guard nudges < Self.nudgeLimit else { return }
+        nudges += 1
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            for item in toolbar.items where item.view?.window == nil {
+                item.view?.invalidateIntrinsicContentSize()
                 // Re-assigning a priority makes the toolbar re-evaluate which items fit.
-                item.visibilityPriority = .high
+                let priority = item.visibilityPriority
                 item.visibilityPriority = .user
+                item.visibilityPriority = priority
             }
             toolbarView.needsLayout = true
             toolbarView.layoutSubtreeIfNeeded()
-            // Bounded: a window narrower than the fixed items legitimately keeps the » menu.
-            self?.scheduleUpdate()
+            update()
         }
     }
 }

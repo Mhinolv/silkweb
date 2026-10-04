@@ -105,7 +105,7 @@ extension NSColor {
                                                               fallback: .unemphasizedSelectedContentBackgroundColor, override: { set, dark in
         set.surface == nil && set.text == nil ? nil : set.selectionInactive(dark: dark)
     })
-    /// Only the current-folder node and unsaved dots (R2/R4); the user may recolour but not repurpose it.
+    /// Only the unsaved dot on tabs (R4; the sidebar node was removed in 1.65); the user may recolour but not repurpose it.
     static let silkwebCoral = SilkwebTokens.color("SilkwebCoral", SilkwebTokens.coral, override: { set, _ in set.coral })
     /// Sidebar thread lines (R2); they follow the derived hairline.
     static let silkwebThread = SilkwebTokens.color("SilkwebThread", SilkwebTokens.thread, override: SilkwebTokens.surfaceOrText)

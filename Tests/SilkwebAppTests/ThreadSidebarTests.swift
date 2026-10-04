@@ -5,7 +5,8 @@ import XCTest
 @testable import SilkwebCore
 @testable import Silkweb
 
-/// silkweb-1.63 (Redesign R2): thread guides and the coral “you are here” node in the real sidebar.
+/// silkweb-1.63 (Redesign R2): thread guides in the real sidebar. The coral “you are here” node was removed in 1.65
+/// (owner decision): the selection capsule marks the scope, and the row's AX value still says “current folder”.
 final class ThreadSidebarTests: XCTestCase {
     private static let longName = "A very long folder name that must truncate before its count"
     private static let privateName = "Private folder with a very long unreadable name"
@@ -108,10 +109,10 @@ final class ThreadSidebarTests: XCTestCase {
 
     // MARK: Structure
 
-    /// Checks every row against AppKit's own tree and frames; returns the number of rows carrying the node.
+    /// Checks every row against AppKit's own tree and frames; returns the number of rows marked as the scope.
     @MainActor @discardableResult
     private func verifyRows(_ outline: NSOutlineView, _ coordinator: FolderSidebar.Coordinator, _ context: String) throws -> Int {
-        var nodes = 0
+        var scopes = 0
         for row in 0..<outline.numberOfRows {
             let item = try XCTUnwrap(outline.item(atRow: row) as? FolderSidebar.Item)
             let where_ = "\(item.title) \(context)"
@@ -167,34 +168,30 @@ final class ThreadSidebarTests: XCTestCase {
                 }
             }
             let value = cell.accessibilityValue() as? String ?? ""
-            if rowView.isCurrent {
-                nodes += 1
+            if item === coordinator.currentItem {
+                scopes += 1
                 XCTAssertTrue(item === coordinator.scopeItem(), where_)
                 XCTAssertTrue(value.hasSuffix(", current folder"), where_)
-                XCTAssertNotNil(rowView.nodeCenter)
             } else {
                 XCTAssertFalse(value.contains("current folder"), where_)
-                XCTAssertNil(rowView.nodeCenter)
             }
         }
-        XCTAssertEqual(nodes, 1, "exactly one coral node \(context)")
-        return nodes
+        XCTAssertEqual(scopes, 1, "exactly one scope row \(context)")
+        return scopes
     }
 
     @MainActor private func row(_ outline: NSOutlineView, _ item: FolderSidebar.Item) throws -> ThreadRowView {
         try XCTUnwrap(outline.rowView(atRow: outline.row(forItem: item), makeIfNecessary: true) as? ThreadRowView, item.title)
     }
 
-    /// The node is coral, threads draw over the capsule, and a plain row shows its elbow.
+    /// Threads draw over the capsule, and a plain row shows its elbow.
     @MainActor private func verifyPixels(_ outline: NSOutlineView, _ coordinator: FolderSidebar.Coordinator, current: FolderSidebar.Item,
                                          plain: FolderSidebar.Item, _ context: String) throws {
-        let node = try row(outline, current)
-        let center = try XCTUnwrap(node.nodeCenter, context)
-        assertColor(try pixel(node, at: center), .silkwebCoral, in: node, "node \(context)")
-        if let metrics = node.metrics, node.thread?.level ?? 0 > 0 {
-            let x = ThreadGuides.guideX(level: node.thread!.level - 1, metrics: metrics) - node.frame.minX
-            if node.isSelected {
-                assertColor(try pixel(node, at: point(node, x: x, below: 3)), .silkwebThread, in: node, "thread over capsule \(context)")
+        let scope = try row(outline, current)
+        if let metrics = scope.metrics, scope.thread?.level ?? 0 > 0 {
+            let x = ThreadGuides.guideX(level: scope.thread!.level - 1, metrics: metrics) - scope.frame.minX
+            if scope.isSelected {
+                assertColor(try pixel(scope, at: point(scope, x: x, below: 3)), .silkwebThread, in: scope, "thread over capsule \(context)")
             }
         }
         let other = try row(outline, plain)
@@ -210,7 +207,7 @@ final class ThreadSidebarTests: XCTestCase {
     }
 
     @MainActor
-    func testThreadsNodeSuffixAndLocksAcrossWidthsExpandRenameDropTagsAndToggle() async throws {
+    func testThreadsSuffixAndLocksAcrossWidthsExpandRenameDropTagsAndToggle() async throws {
         let fixture = try await makeFixture()
         defer { fixture.cleanUp() }
         let workspace = fixture.workspace
@@ -269,7 +266,7 @@ final class ThreadSidebarTests: XCTestCase {
             try verifyRows(outline, coordinator, "expanded \(expanded)")
         }
 
-        // Inline rename: the field replaces the label, the suffix hides, threads and node stay.
+        // Inline rename: the field replaces the label, the suffix hides, threads stay.
         workspace.rename = LibraryRename(path: "Vanlife", isFolder: true)
         FolderSidebar.update(scroll, coordinator: coordinator, snapshot: fixture.snapshot)
         try await settle(controller)
@@ -296,7 +293,7 @@ final class ThreadSidebarTests: XCTestCase {
         assertColor(try pixel(target, at: point(target, x: guide, below: 3)), .silkwebThread, in: target, "thread over drop capsule")
         target.isTargetForDropOperation = false
 
-        // Tag A → tag B moves the node directly, never via All Documents (1.21 guard).
+        // Tag A → tag B moves the scope directly, never via All Documents (1.21 guard).
         var seen: [String] = []
         for tag in group.children {
             outline.selectRowIndexes(IndexSet(integer: outline.row(forItem: tag)), byExtendingSelection: false)
@@ -304,8 +301,6 @@ final class ThreadSidebarTests: XCTestCase {
             while coordinator.currentItem !== tag, Date() < deadline {
                 FolderSidebar.update(scroll, coordinator: coordinator, snapshot: fixture.snapshot)
                 seen.append(coordinator.currentItem?.title ?? "nil")
-                let nodes = (0..<outline.numberOfRows).filter { (outline.rowView(atRow: $0, makeIfNecessary: false) as? ThreadRowView)?.isCurrent == true }
-                XCTAssertLessThanOrEqual(nodes.count, 1)
                 try await Task.sleep(for: .milliseconds(1))
             }
             XCTAssertTrue(coordinator.currentItem === tag, tag.title)
@@ -315,7 +310,7 @@ final class ThreadSidebarTests: XCTestCase {
         }
         XCTAssertFalse(seen.contains("All Documents"), "\(seen)")
         XCTAssertFalse(seen.contains("nil"))
-        // Selecting the Tags group keeps the scope, so the node stays on the tag.
+        // Selecting the Tags group keeps the scope on the tag.
         outline.selectRowIndexes(IndexSet(integer: outline.row(forItem: group)), byExtendingSelection: false)
         try await settle(controller)
         XCTAssertTrue(coordinator.currentItem === group.children[1])
@@ -339,6 +334,66 @@ final class ThreadSidebarTests: XCTestCase {
             try verifyRows(shown, shownCoordinator, "after show")
             try verifyPixels(shown, shownCoordinator, current: try XCTUnwrap(shownCoordinator.currentItem),
                              plain: try XCTUnwrap(shownCoordinator.itemsByPath["Travel/Japan"]), "after show")
+        }
+        XCTAssertFalse(window.isVisible)
+    }
+
+    /// Owner decision (1.65): the selection capsule is the only “you are here”; no coral is drawn anywhere in the
+    /// sidebar, for folders at every depth, the library row, tags and the Tags group, in light and dark.
+    @MainActor
+    func testNoCoralIsDrawnInTheSidebarForAnySelection() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.cleanUp() }
+        let workspace = fixture.workspace
+        workspace.session.expandedFolders.insert("Deep/A/B")
+        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: fixture.suite)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller // Never ordered on screen.
+        defer { window.contentViewController = nil; window.close(); workspace.search.reset() }
+        controller.view.setFrameSize(NSSize(width: 1400, height: 900))
+        try await settle(controller)
+        let outline = try XCTUnwrap(Self.descendants(controller.view).compactMap { $0 as? SidebarOutlineView }.first)
+        let coordinator = try XCTUnwrap(outline.delegate as? FolderSidebar.Coordinator)
+        let scroll = try XCTUnwrap(outline.enclosingScrollView)
+        let group = try XCTUnwrap(coordinator.tagsGroup)
+        let items: [FolderSidebar.Item] = try ["", "Vanlife", "Travel/Japan", "Deep/A/B/C", Self.longName]
+            .map { try XCTUnwrap(coordinator.itemsByPath[$0], $0) } + group.children + [group]
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            window.appearance = NSAppearance(named: appearance)
+            for item in items {
+                outline.selectRowIndexes(IndexSet(integer: outline.row(forItem: item)), byExtendingSelection: false)
+                FolderSidebar.update(scroll, coordinator: coordinator, snapshot: fixture.snapshot)
+                try await settle(controller)
+                var hits: [String] = []
+                for row in 0..<outline.numberOfRows {
+                    // Each row view with its cell, as drawn.
+                    let rowView = try XCTUnwrap(outline.rowView(atRow: row, makeIfNecessary: true))
+                    rowView.layoutSubtreeIfNeeded()
+                    let rep = try XCTUnwrap(rowView.bitmapImageRepForCachingDisplay(in: rowView.bounds))
+                    rowView.cacheDisplay(in: rowView.bounds, to: rep)
+                    // Coral painted into the same kind of bitmap, so colour matching cancels out.
+                    let swatch = try XCTUnwrap(rep.copy() as? NSBitmapImageRep)
+                    NSGraphicsContext.saveGraphicsState()
+                    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: swatch)
+                    rowView.effectiveAppearance.performAsCurrentDrawingAppearance {
+                        NSColor.silkwebCoral.setFill()
+                        NSRect(x: 0, y: 0, width: 4, height: 4).fill()
+                    }
+                    NSGraphicsContext.restoreGraphicsState()
+                    let coral = try XCTUnwrap(swatch.colorAt(x: 1, y: swatch.pixelsHigh - 2)?.usingColorSpace(.sRGB))
+                    for y in 0..<rep.pixelsHigh {
+                        for x in 0..<rep.pixelsWide {
+                            guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                            let distance = max(abs(color.redComponent - coral.redComponent), abs(color.greenComponent - coral.greenComponent),
+                                               abs(color.blueComponent - coral.blueComponent))
+                            if distance < 0.06 { hits.append("row \(row) (\(x), \(y))") }
+                        }
+                    }
+                }
+                XCTAssertTrue(hits.isEmpty, "\(hits.count) coral pixels in the sidebar with \(item.title) selected (\(appearance.rawValue)): \(hits.prefix(3))")
+            }
         }
         XCTAssertFalse(window.isVisible)
     }

@@ -68,14 +68,4 @@ final class ThreadGuidesTests: XCTestCase {
         // Missing ancestor flags draw no rails rather than trapping.
         XCTAssertEqual(ThreadGuides.segments(level: 4, isLastChild: true, ancestorContinues: [], hasChildren: false, metrics: metrics).count, 1)
     }
-
-    func testNodeSitsOnTheElbowCornerOrBeforeTheLevelZeroSlot() {
-        XCTAssertEqual(ThreadGuides.node(level: 0, metrics: metrics).x, 6)
-        XCTAssertEqual(ThreadGuides.node(level: 0, metrics: metrics).y, 14)
-        for level in 1...4 {
-            let node = ThreadGuides.node(level: level, metrics: metrics)
-            XCTAssertEqual(node.x, ThreadGuides.guideX(level: level - 1, metrics: metrics))
-            XCTAssertEqual(node.y, 14)
-        }
-    }
 }

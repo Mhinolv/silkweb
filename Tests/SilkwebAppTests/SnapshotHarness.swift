@@ -83,7 +83,7 @@ struct SnapshotScenario {
         .init(name: "media-migration-progress", document: image, mediaMigration: "progress"),
         .init(name: "media-migration-failure", document: image, mediaMigration: "failure"),
         .init(name: "sidebar-resized", folder: "Coffee", resizeSidebar: true),
-        // silkweb-1.63: thread guides and the coral node at both sidebar width limits.
+        // silkweb-1.63: thread guides at both sidebar width limits; no coral node since 1.65 (the capsule marks the scope).
         .init(name: "sidebar-resized-180", folder: "Coffee", resizeSidebar: true, sidebarWidth: 180),
         .init(name: "sidebar-resized-320", folder: "Coffee", resizeSidebar: true, sidebarWidth: 320),
         .init(name: "redesign-thread-sidebar", folder: "Vanlife", tagState: "expanded", expanded: ["Travel", "Travel/Japan"]),

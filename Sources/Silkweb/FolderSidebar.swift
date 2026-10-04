@@ -94,7 +94,7 @@ struct FolderSidebar: NSViewRepresentable {
         if coordinator.selectedFolder != .some(workspace.session.selectedFolder) {
             coordinator.selectScope()
         }
-        coordinator.updateCurrentNode()
+        coordinator.updateCurrentScope()
         if coordinator.lastFocusRequest != workspace.focusRequest {
             coordinator.lastFocusRequest = workspace.focusRequest
             if workspace.focusColumn == 0, workspace.rename == nil {
@@ -128,7 +128,7 @@ struct FolderSidebar: NSViewRepresentable {
         var hovered: Item?
         var springTask: Task<Void, Never>?
         var springExpanded: [Item] = []
-        /// The scope the list shows; its row carries the coral node.
+        /// The scope the list shows; its row's accessibility value says “current folder”.
         private(set) var currentItem: Item?
         private var hoverMonitor: Any?
         private var dragCache: (name: NSPasteboard.Name, count: Int, revision: Int, library: UUID, paths: [String]?)?
@@ -216,8 +216,9 @@ struct FolderSidebar: NSViewRepresentable {
                 ?? (workspace.session.selectedFolder.flatMap { itemsByPath[$0] } ?? roots.first)
         }
 
-        /// Moves the coral node by redrawing only the old and new rows.
-        func updateCurrentNode() {
+        /// Moves the “current folder” suffix by updating only the old and new rows' cells. The selection capsule
+        /// is the only visual mark (owner decision, 1.65: no coral node).
+        func updateCurrentScope() {
             let next = scopeItem()
             guard next !== currentItem else { return }
             let previous = currentItem
@@ -226,7 +227,6 @@ struct FolderSidebar: NSViewRepresentable {
             for item in [previous, next].compactMap({ $0 }) {
                 let row = outline.row(forItem: item)
                 guard row >= 0 else { continue }
-                (outline.rowView(atRow: row, makeIfNecessary: false) as? ThreadRowView)?.isCurrent = item === next
                 if let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarFolderCell {
                     applyCount(to: cell, item: item)
                 }
@@ -262,7 +262,7 @@ struct FolderSidebar: NSViewRepresentable {
             if item == nil { outline.deselectAll(nil) }
             selectedFolder = .some(workspace.session.selectedFolder)
             restoring = false
-            updateCurrentNode()
+            updateCurrentScope()
         }
 
         /// Selects the scope's row without reloading; a no-op when it is already selected.
@@ -304,7 +304,6 @@ struct FolderSidebar: NSViewRepresentable {
         func outlineView(_ outlineView: NSOutlineView, didAdd rowView: NSTableRowView, forRow row: Int) {
             guard let rowView = rowView as? ThreadRowView, let item = outlineView.item(atRow: row) as? Item else { return }
             rowView.thread = thread(for: item)
-            rowView.isCurrent = item === currentItem
         }
         func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
             guard let item = item as? Item else { return nil }
@@ -649,8 +648,8 @@ final class SidebarFolderCell: NSTableCellView, CapsuleAccessories {
     }
 }
 
-/// A sidebar row hanging from 1.5 pt thread guides with rounded elbows; the scope row carries the coral node
-/// (silkweb-1.63). Drawn per row after the capsule: no layers and no whole-tree pass.
+/// A sidebar row hanging from 1.5 pt thread guides with rounded elbows (silkweb-1.63). Drawn per row after the
+/// capsule: no layers and no whole-tree pass. No coral node: the selection capsule marks the scope (1.65).
 final class ThreadRowView: CapsuleRowView {
     struct Thread: Equatable {
         var level: Int
@@ -665,7 +664,6 @@ final class ThreadRowView: CapsuleRowView {
     static let lineWidth: CGFloat = 1.5
 
     var thread: Thread? { didSet { if thread != oldValue { needsDisplay = true } } }
-    var isCurrent = false { didSet { if isCurrent != oldValue { needsDisplay = true } } }
 
     init() { super.init(cornerRadius: 6) }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -709,26 +707,10 @@ final class ThreadRowView: CapsuleRowView {
         return path
     }
 
-    /// The node's centre in row coordinates, when this row is the current scope.
-    var nodeCenter: NSPoint? {
-        guard isCurrent, let thread, let metrics else { return nil }
-        let node = ThreadGuides.node(level: thread.level, metrics: metrics)
-        return NSPoint(x: node.x - frame.minX, y: y(node.y))
-    }
-
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         NSColor.silkwebThread.setStroke()
         threadPath?.stroke()
-        guard let center = nodeCenter else { return }
-        let diameter: CGFloat = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 8 : 7
-        let onCapsule = (isSelected || isTargetForDropOperation) && capsuleRect.contains(center)
-        let ring: NSColor = !onCapsule ? .silkwebPaneBackground : isTargetForDropOperation ? .silkwebSelection : style.fill
-        ring.setFill()
-        let outer = diameter / 2 + 2.5
-        NSBezierPath(ovalIn: NSRect(x: center.x - outer, y: center.y - outer, width: outer * 2, height: outer * 2)).fill()
-        NSColor.silkwebCoral.setFill()
-        NSBezierPath(ovalIn: NSRect(x: center.x - diameter / 2, y: center.y - diameter / 2, width: diameter, height: diameter)).fill()
     }
 
     /// Drop-on target: the focused capsule with a 1.5 pt sage outline; threads still draw on top.

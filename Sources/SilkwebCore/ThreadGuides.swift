@@ -16,8 +16,6 @@ public enum ThreadGuides {
         public var radius = 6.0
         /// Space left between a horizontal and the chevron or icon it points at.
         public var gap = 3.0
-        /// A level-0 node sits this far before the chevron slot.
-        public var nodeLead = 6.0
 
         public init(leadingInset: Double, indentation: Double = 16, slotWidth: Double = 13, chevronWidth: Double = 9,
                     iconInset: Double = 2, rowHeight: Double = 28) {
@@ -67,11 +65,5 @@ public enum ThreadGuides {
         result.append(.elbow(x: x, cornerY: metrics.rowHeight / 2, radius: metrics.radius,
                              endX: max(x + metrics.radius, target - metrics.gap)))
         return result
-    }
-
-    /// The “you are here” node: on the elbow corner, or before the chevron slot of a level-0 row.
-    public static func node(level: Int, metrics: Metrics) -> (x: Double, y: Double) {
-        let x = level > 0 ? guideX(level: level - 1, metrics: metrics) : metrics.leadingInset - metrics.nodeLead
-        return (x, metrics.rowHeight / 2)
     }
 }

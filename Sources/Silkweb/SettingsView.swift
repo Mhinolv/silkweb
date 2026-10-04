@@ -273,7 +273,7 @@ struct AppearanceSettingsTab: View {
         (.text, "Text", "Body text in the editor and preview"),
         (.headings, "Headings", "Editor and preview headings"),
         (.accent, "Accent", "Links, selection and tags"),
-        (.coral, "You are here", "Current folder and unsaved dot"),
+        (.coral, "Unsaved dot", "Dot on tabs with unsaved changes"),
     ]
 
     private var setName: String { settings.editingDark ? "Dark" : "Light" }
@@ -389,11 +389,7 @@ struct ColorPreviewCard: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text("Notes")
-                    Circle().fill(color(.coral)).frame(width: 6, height: 6)
-                }
-                .padding(.horizontal, 8).padding(.vertical, 3)
+                Text("Notes").padding(.horizontal, 8).padding(.vertical, 3)
                 Text("Drafts")
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -406,6 +402,11 @@ struct ColorPreviewCard: View {
             .frame(width: 140)
             Rectangle().fill(hairline).frame(width: 1)
             VStack(alignment: .leading, spacing: 6) {
+                // The unsaved dot, as on an edited tab (1.65).
+                HStack(spacing: 6) {
+                    Text("Edited note").foregroundStyle(color(.text))
+                    Circle().fill(color(.coral)).frame(width: 6, height: 6)
+                }
                 Text("A heading").bold().foregroundStyle(color(.headings))
                 Text("Body text on the surface.").foregroundStyle(color(.text))
                 Text("A link in the accent").underline().foregroundStyle(color(.accent))

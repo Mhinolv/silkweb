@@ -32,7 +32,7 @@ final class FolderSidebarTests: XCTestCase {
             try XCTUnwrap(coordinator.outlineView(outline, viewFor: outline.tableColumns[0], item: item) as? SidebarFolderCell)
         }
         XCTAssertEqual(try cell(item).countBadge.stringValue, " (1)")
-        // Chapter 2 is the list's scope, so it carries the coral node (1.63).
+        // Chapter 2 is the list's scope, so its value says “current folder” (1.63; no coral node since 1.65).
         XCTAssertEqual(try cell(item).accessibilityValue() as? String, "1 document, 2 including subfolders, current folder")
         XCTAssertEqual(try cell(coordinator.roots[0]).countBadge.stringValue, " (3)")
         XCTAssertEqual(try cell(coordinator.itemsByPath[""]!).countBadge.stringValue, " (1)")
@@ -222,7 +222,7 @@ final class FolderSidebarTests: XCTestCase {
                     XCTAssertLessThanOrEqual(countRect.maxX, cell.bounds.maxX - 3.5)
                     XCTAssertGreaterThan(titleRect.width, 0)
                     XCTAssertEqual(text.lineBreakMode, .byTruncatingTail)
-                    // The scope row (the coral node, 1.63) appends “current folder”.
+                    // The scope row appends “current folder” (1.63).
                     let current = item === coordinator.currentItem ? ", current folder" : ""
                     XCTAssertEqual(cell.accessibilityValue() as? String, (item.isTagsGroup ? "0 tags" : count.accessibilityValue) + current)
                     XCTAssertFalse(cell.accessibilityLabel()?.contains(count.inlineSuffix) ?? true)

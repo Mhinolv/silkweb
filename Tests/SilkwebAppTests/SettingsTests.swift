@@ -85,6 +85,11 @@ final class SettingsTests: XCTestCase {
                     XCTAssertGreaterThanOrEqual(views.compactMap { $0 as? NSSlider }.count, 1)
                 case .appearance:
                     XCTAssertGreaterThanOrEqual(views.compactMap { $0 as? NSColorWell }.count, 5, "Five colour wells")
+                    // Coral marks only unsaved tabs now (1.65).
+                    let coral = try XCTUnwrap(AppearanceSettingsTab.rows.first { $0.slot == .coral })
+                    XCTAssertEqual(coral.title, "Unsaved dot")
+                    XCTAssertEqual(coral.caption, "Dot on tabs with unsaved changes")
+                    XCTAssertFalse(AppearanceSettingsTab.rows.contains { $0.title == "You are here" })
                 case .library:
                     let path = try XCTUnwrap(views.compactMap { $0 as? NSPathControl }.first)
                     XCTAssertEqual(path.url?.standardizedFileURL, root.standardizedFileURL)
