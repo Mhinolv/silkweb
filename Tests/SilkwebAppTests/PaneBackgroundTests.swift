@@ -105,6 +105,11 @@ final class PaneBackgroundTests: XCTestCase {
                 .max { $0.convert($0.bounds, to: view).minX < $1.convert($1.bounds, to: view).minX })
             XCTAssertGreaterThan(outline.convert(outline.bounds, to: view).minX, editor.convert(editor.bounds, to: view).minX,
                                  "Outline must be the inspector column")
+            // 1.81: pin legacy scroll bars (System Settings with a mouse attached) so the result never depends
+            // on the machine; content that fits must not paint an empty scroller track over a pane.
+            for scroll in [sidebar, list, editor] { scroll.scrollerStyle = .legacy }
+            try await settle()
+            XCTAssertTrue(sidebar.verticalScroller?.isHidden ?? true, "sidebar scroller track in \(name.rawValue)")
 
             // The token as this window resolves it: an unordered dark window draws at its own
             // elevation, so a context-free resolution is not the reference.
@@ -207,6 +212,33 @@ final class PaneBackgroundTests: XCTestCase {
                 }
             }
         }
+    }
+
+    /// silkweb-1.81: custom Settings colours saved in the test runner's real defaults domain must not reach
+    /// tests. Loads preferences the way the app does at first use, then runs the pane-colour test.
+    @MainActor
+    func testCustomColoursInTheRealDomainDoNotReachThePanes() async throws {
+        let real = UserDefaults.standard
+        let key = WritingPreferences.defaultsKey
+        let saved = real.data(forKey: key)
+        let live = LivePreferences.shared.current
+        defer {
+            if let saved { real.set(saved, forKey: key) } else { real.removeObject(forKey: key) }
+            LivePreferences.shared.current = live
+        }
+        var custom = WritingPreferences()
+        custom.colors[dark: false].surface = HexColor(0x22AA44)
+        custom.colors[dark: true].surface = HexColor(0x114422)
+        custom.fontSize = 22
+        custom.save(to: real)
+
+        LivePreferences.shared.current = LivePreferences().current
+        let settings = WritingSettings(live: false)
+        XCTAssertFalse(settings.defaults === real, "tests must not use the real domain")
+        XCTAssertEqual(settings.preferences, WritingPreferences())
+        XCTAssertEqual(LivePreferences.shared.current, WritingPreferences())
+        try testTokenResolvesToConceptsSurfaceAndSystemTextBackgroundUnderIncreaseContrast()
+        try await testEveryPaneRendersTheSharedBackground()
     }
 
     /// silkweb-1.62 owner evidence: the titlebar/toolbar strip renders the pane token, not a lighter or

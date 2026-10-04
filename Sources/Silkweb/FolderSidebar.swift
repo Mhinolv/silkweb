@@ -28,6 +28,8 @@ struct FolderSidebar: NSViewRepresentable {
         let workspace = coordinator.workspace
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
+        // With legacy scroll bars (a mouse attached) a short folder list shows no empty track (1.81).
+        scroll.autohidesScrollers = true
         // Paint over the sidebar item's wallpaper-tinted material (1.56).
         scroll.drawsBackground = true
         scroll.backgroundColor = .silkwebPaneBackground
