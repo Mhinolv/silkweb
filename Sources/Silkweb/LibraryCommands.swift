@@ -56,13 +56,25 @@ extension LibraryWorkspace {
                 try await refresh(changes)
                 if folder { libraryUndo.append(.newFolder(change.newPath)) }
                 session.expandedFolders.insert(target)
-                session.selectedFolder = folder ? change.newPath : target
-                session.selectedDocuments = folder ? [] : [change.newPath]
+                // A tag scope or filter hides the new untagged row: never leave a rename pending on a
+                // row that isn't on screen (it blocks Trash, Return, drag). Keep scope and selection.
+                let visible = folder ? session.selectedTagID == nil
+                    : search.text.isEmpty && documents.contains { $0.relativePath == change.newPath }
+                if visible {
+                    session.selectedFolder = folder ? change.newPath : target
+                    session.selectedDocuments = folder ? [] : [change.newPath]
+                } else if !folder {
+                    session.selectedDocuments = []
+                }
                 if !folder, let document = snapshot?.documents.first(where: { $0.relativePath == change.newPath }) {
                     _ = await openTab(document, pinned: true)
                 }
-                rename = LibraryRename(path: change.newPath, isFolder: folder, focusEditor: !folder)
-                focus(folder ? 0 : 1)
+                if visible {
+                    rename = LibraryRename(path: change.newPath, isFolder: folder, focusEditor: !folder)
+                    focus(folder ? 0 : 1)
+                } else if !folder {
+                    focus(2)
+                }
             } catch { mutationFailure(error) }
         }
     }
