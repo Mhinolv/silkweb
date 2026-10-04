@@ -37,7 +37,10 @@ final class OutlineImageTests: XCTestCase {
         window.isReleasedWhenClosed = false; window.contentViewController = controller
         defer { window.contentViewController = nil; window.close() }
         controller.view.layoutSubtreeIfNeeded()
-        try await Task.sleep(for: .milliseconds(900))
+        try await waitUntil("debounced outline items and attached editor") {
+            controller.view.layoutSubtreeIfNeeded()
+            return !workspace.preview.outlineItems.isEmpty && workspace.preview.editor != nil
+        }
         controller.view.layoutSubtreeIfNeeded()
         let items = workspace.preview.outlineItems
         XCTAssertEqual(items.map(\.label), ["Before", "Journey", "Places", "Portrait", "Detail", "Transparent", "Other", "Missing", "Remote"])
