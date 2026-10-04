@@ -9,12 +9,14 @@ final class LibraryWatcherTests: XCTestCase {
         var calls = 0
         let watcher = LibraryWatcher(delay: .milliseconds(20)) { calls += 1 }
         for _ in 0..<100 { watcher.notifyChange() }
+        try await waitUntil("the debounced burst to call back once") { calls > 0 }
+        // Debounce plus margin: the burst never produces a second call.
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(calls, 1)
         watcher.notifyChange()
         watcher.stop()
         try await Task.sleep(for: .milliseconds(100))
-        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(calls, 1, "a change scheduled before stop() still called back")
     }
 
     @MainActor
