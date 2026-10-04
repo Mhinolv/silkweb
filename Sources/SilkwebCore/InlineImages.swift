@@ -11,7 +11,6 @@ public enum InlineImages {
     }
 
     public static func paragraph(_ text: String) -> [Reference] {
-        guard !text.hasPrefix("    "), !text.hasPrefix("\t") else { return [] }
         func inlines(_ values: [MarkdownInline]) -> [Reference] {
             values.flatMap { value -> [Reference] in
                 switch value {

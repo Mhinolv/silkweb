@@ -17,7 +17,8 @@ struct LibraryRename: Equatable {
 enum LibraryUndo {
     case tags(LibraryMetadata, String)
     case newFolder(String)
-    case rename(LibraryRename, String)
+    /// The renamed item, its previous name, and the exact reverse of the rename and its link rewrites.
+    case rename(LibraryRename, String, MovePlan)
     case move(MovePlan)
     case trash([TrashedItem])
     var title: String {
@@ -124,10 +125,10 @@ extension LibraryWorkspace {
             defer { editor.loading = false }
             do {
                 let engine = try LibraryMutations(root: root)
-                let changes = try await engine.rename(item.path, to: item.filename(value))
-                try await refresh(changes)
+                let plan = try await engine.planRename(item.path, to: item.filename(value))
+                let changes = try await commitMove(plan, using: engine)
                 if let change = changes.changes.first {
-                    libraryUndo.append(.rename(LibraryRename(path: change.newPath, isFolder: item.isFolder), (item.path as NSString).lastPathComponent))
+                    libraryUndo.append(.rename(LibraryRename(path: change.newPath, isFolder: item.isFolder), (item.path as NSString).lastPathComponent, plan.reversed))
                 }
                 rename = nil
                 if item.focusEditor { focus(2) }
@@ -183,7 +184,7 @@ extension LibraryWorkspace {
             return snapshot.folders.contains { $0.relativePath == path }
                 && !snapshot.folders.contains { $0.relativePath.hasPrefix(path + "/") }
                 && !snapshot.documents.contains { $0.relativePath.hasPrefix(path + "/") }
-        case .rename(let item, let name):
+        case .rename(let item, let name, _):
             let parent = (item.path as NSString).deletingLastPathComponent
             let target = parent.isEmpty ? name : parent + "/" + name
             return !snapshot.folders.contains { $0.relativePath == target }
@@ -232,9 +233,13 @@ extension LibraryWorkspace {
                     if session.selectedFolder == path { session.selectedFolder = (path as NSString).deletingLastPathComponent }
                     session.expandedFolders.remove(path)
                     try await refresh(LibraryChangeSet(changes: []))
-                case .rename(let item, let name):
-                    let changes = try await engine.restoreName(item.path, to: name)
-                    try await refresh(changes)
+                case .rename(let item, let name, let plan):
+                    do { _ = try await commitMove(plan, using: engine) }
+                    catch MovePlanError.changed {
+                        // Something changed since the rename: rename back and rewrite links afresh.
+                        let changes = try await engine.restoreName(item.path, to: name)
+                        try await refresh(changes)
+                    }
                 }
                 libraryUndo.removeLast()
             } catch { mutationFailure(error) }
