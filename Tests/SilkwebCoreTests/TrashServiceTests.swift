@@ -102,6 +102,76 @@ final class TrashServiceTests: XCTestCase {
         XCTAssertEqual(plan.counts.documents, 1000)
         XCTAssertEqual(plan.counts.folders, 1000)
     }
+    private func tag(_ names: [String], _ path: String, root: URL) async throws {
+        _ = try await TagStore.update(root: root) { metadata in
+            TagEditor.edit(names, documents: [metadata.IDsByPath[path]!], metadata: metadata)
+        }
+    }
+    /// silkweb-1.71: undo restores tag assignments, definitions and recency the post-trash scan pruned.
+    func testRestoreBringsBackTagsOfDocumentsAndDescendants() async throws {
+        let root = try fixture()
+        let trash = try fixture()
+        defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: trash) }
+        for path in ["Note.md", "Folder/A.md", "Folder/Sub/B.md", "Other.md"] { try write(path, root: root) }
+        _ = try await LibraryScanner.scan(root: root)
+        try await tag(["Shared", "Mid"], "Other.md", root: root)
+        try await tag(["Deep"], "Folder/Sub/B.md", root: root)
+        try await tag(["Folder Only", "Shared"], "Folder/A.md", root: root)
+        try await tag(["Unique", "Shared"], "Note.md", root: root)
+        let before = try await LibraryScanner.scan(root: root).metadata
+        XCTAssertEqual(before.tags.count, 5)
+        let service = try service(root: root, trash: trash)
+        let result = try await service.execute(try await service.plan(["Note.md", "Folder"]))
+        XCTAssertEqual(result.failures.map(\.path), [])
+        let pruned = try await LibraryScanner.scan(root: root).metadata
+        XCTAssertEqual(Set(pruned.tags.map(\.name)), ["Shared", "Mid"])
+        // Unrelated edits while the items are in Trash survive the restore.
+        try await tag(["Shared", "Mid", "Later"], "Other.md", root: root)
+        let restored = await service.restore(result.items)
+        XCTAssertEqual(restored.failures.map(\.path), [])
+        let after = try await LibraryScanner.scan(root: root).metadata
+        XCTAssertEqual(after.IDsByPath, before.IDsByPath)
+        for path in ["Note.md", "Folder/A.md", "Folder/Sub/B.md"] {
+            let id = before.IDsByPath[path]!.uuidString
+            XCTAssertEqual(after.tagsByDocument[id], before.tagsByDocument[id], path)
+        }
+        let other = before.IDsByPath["Other.md"]!.uuidString
+        XCTAssertEqual(Set(after.tags.map(\.name)), Set(before.tags.map(\.name)).union(["Later"]))
+        XCTAssertEqual(after.tagsByDocument[other]?.count, 3)
+        for tag in before.tags { XCTAssertEqual(after.tags.first { $0.id == tag.id }?.name, tag.name) }
+        let later = after.tags.first { $0.name == "Later" }!.id
+        XCTAssertEqual(after.tagRecency, [later] + before.tagRecency)
+    }
+    func testRestoreMergesIntoRecreatedTagNameAndPartialRecency() throws {
+        let note = UUID(), shared = LibraryTag(name: "Shared"), unique = LibraryTag(name: "Unique"), other = LibraryTag(name: "Other")
+        let tags = TrashedTags(tags: [shared, unique], tagsByDocument: [note.uuidString: [shared.id, unique.id]],
+                               tagRecency: [unique.id, other.id, shared.id])
+        // After trash the user re-created "unique" (different ID) and kept using "Other".
+        let recreated = LibraryTag(name: "UNIQUE")
+        var current = LibraryMetadata(IDsByPath: ["Note.md": note, "X.md": UUID()])
+        current.tags = [other, recreated]
+        current.tagsByDocument = [current.IDsByPath["X.md"]!.uuidString: [other.id, recreated.id]]
+        current.tagRecency = [recreated.id, other.id]
+        let merged = TagEditor.pruning(tags.merged(into: current))
+        XCTAssertEqual(Set(merged.tagsByDocument[note.uuidString] ?? []), [shared.id, recreated.id])
+        XCTAssertEqual(merged.tags.map(\.name).sorted(), ["Other", "Shared", "UNIQUE"])
+        XCTAssertEqual(merged.tagRecency, [recreated.id, other.id, shared.id])
+        // Missing first anchor goes to the front; an empty payload is a no-op.
+        current.tagRecency = [other.id]
+        XCTAssertEqual(TrashedTags(tags: [shared], tagsByDocument: [note.uuidString: [shared.id]], tagRecency: [shared.id, other.id])
+            .merged(into: current).tagRecency, [shared.id, other.id])
+        XCTAssertEqual(TrashedTags().merged(into: current), current)
+    }
+    func testTrashedItemWithoutTagPayloadDecodes() throws {
+        let id = UUID()
+        let legacy = Data(#"{"originalPath":"A.md","trashURL":"file:///tmp/A.md","identities":{"A.md":"\#(id.uuidString)"}}"#.utf8)
+        let item = try JSONDecoder().decode(TrashedItem.self, from: legacy)
+        XCTAssertEqual(item.identities, ["A.md": id])
+        XCTAssertEqual(item.tags, TrashedTags())
+        let round = try JSONDecoder().decode(TrashedItem.self, from: JSONEncoder().encode(item))
+        XCTAssertEqual(round.originalPath, "A.md")
+        XCTAssertEqual(round.tags, item.tags)
+    }
     /// silkweb-1.73: on-disk names that predate the new-name rules can still be trashed and put back.
     func testLegacyColonNamesTrashAndRestore() async throws {
         let root = try fixture()
