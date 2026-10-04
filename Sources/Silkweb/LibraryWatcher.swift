@@ -7,7 +7,10 @@ import CoreServices
 @MainActor final class LibraryWatcher {
     private var stream: FSEventStreamRef?
     private var rootPath = ""
-    private var pending: Task<Void, Never>?
+    /// Test seam: the scheduled debounce, so tests can await it instead of sleeping.
+    private(set) var pending: Task<Void, Never>?
+    /// Test seam: sees every delivered batch's paths, before filtering. Unset in the app.
+    var observeEvents: (@MainActor ([String]) -> Void)?
     private let delay: Duration
     private let changed: @MainActor () async -> Void
 
@@ -22,6 +25,7 @@ import CoreServices
             let paths = unsafeBitCast(paths, to: NSArray.self) as? [String] ?? []
             MainActor.assumeIsolated {
                 let watcher = Unmanaged<LibraryWatcher>.fromOpaque(info).takeUnretainedValue()
+                watcher.observeEvents?(paths)
                 if LibraryWatcher.isLibraryChange(paths, root: watcher.rootPath) { watcher.notifyChange() }
             }
         }, &context, [rootPath] as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 0.15,

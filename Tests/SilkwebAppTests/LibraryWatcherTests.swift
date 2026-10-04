@@ -29,8 +29,9 @@ final class LibraryWatcherTests: XCTestCase {
         var notifications = 0
         let watcher = LibraryWatcher(root: root, delay: .milliseconds(20)) { notifications += 1 }
         defer { watcher.stop() }
-        // Let stream startup finish before modifying a descendant, not the root.
-        try await Task.sleep(for: .milliseconds(200))
+        // Drain the stream's startup batch before modifying a descendant, not the root.
+        let events = EventLog(watcher)
+        try await events.barrier(root)
         notifications = 0
         let url = nested.appendingPathComponent("Note.md")
         try Data("created".utf8).write(to: url, options: .atomic)
@@ -62,17 +63,49 @@ final class LibraryWatcherTests: XCTestCase {
         var rescans = 0
         let watcher = LibraryWatcher(root: root, delay: .milliseconds(20)) { rescans += 1 }
         defer { watcher.stop() }
-        try await Task.sleep(for: .milliseconds(300))
+        // #50: the startup batch (root and .silkweb creation) can arrive late under
+        // load; a fixed sleep let it land after `rescans = 0`. Barrier instead.
+        let events = EventLog(watcher)
+        try await events.barrier(root)
         rescans = 0
+        events.paths = []
         for round in 0..<3 {
             try Data("{\"formatVersion\":1,\"records\":[\(round)]}".utf8).write(to: metadata.appendingPathComponent("search-index.json"), options: .atomic)
             try Data("{}".utf8).write(to: metadata.appendingPathComponent("search-recents.json"), options: .atomic)
         }
-        try await Task.sleep(for: .milliseconds(1000))
+        try await events.barrier(root)
+        XCTAssertTrue(events.paths.contains { $0.hasSuffix("/.silkweb/search-index.json") }, "metadata writes were not delivered: \(events.paths)")
         XCTAssertEqual(rescans, 0, "search-index.json writes under .silkweb/ enqueued a library rescan")
         try Data("note".utf8).write(to: root.appendingPathComponent("Note.md"), options: .atomic)
-        for _ in 0..<100 where rescans == 0 { try await Task.sleep(for: .milliseconds(50)) }
+        try await events.barrier(root)
         XCTAssertGreaterThan(rescans, 0)
+    }
+
+    /// Records a watcher's raw FSEvents batches. `barrier` writes a marker under
+    /// `.silkweb/` (filtered, so it schedules nothing) and waits for its delivery.
+    /// Events arrive in event-id order, so every earlier event, including the
+    /// stream's startup batch, has been seen; then any debounce they scheduled runs.
+    @MainActor
+    private final class EventLog {
+        var paths: [String] = []
+        let watcher: LibraryWatcher
+
+        init(_ watcher: LibraryWatcher) {
+            self.watcher = watcher
+            watcher.observeEvents = { [unowned self] in paths += $0 }
+        }
+
+        func barrier(_ root: URL, file: StaticString = #filePath, line: UInt = #line) async throws {
+            let metadata = root.appendingPathComponent(".silkweb")
+            try FileManager.default.createDirectory(at: metadata, withIntermediateDirectories: true)
+            let name = "/.silkweb/barrier-\(UUID().uuidString)"
+            try Data().write(to: URL(fileURLWithPath: root.path + name))
+            for _ in 0..<200 where !paths.contains(where: { $0.hasSuffix(name) }) {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            XCTAssertTrue(paths.contains { $0.hasSuffix(name) }, "FSEvents never delivered the barrier", file: file, line: line)
+            await watcher.pending?.value
+        }
     }
 
     /// 1.78: an autosave refreshes dates once; the watcher's follow-up scan of the
