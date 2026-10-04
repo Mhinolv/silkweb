@@ -353,7 +353,8 @@ final class DocumentSession {
 
     func announce() {
         guard let banner else { return }
-        NSAccessibility.post(element: NSApp.mainWindow ?? NSApplication.shared, notification: .announcementRequested,
+        // `NSApplication.shared`, not `NSApp`: the global is nil until something creates the application (#63).
+        NSAccessibility.post(element: NSApplication.shared.mainWindow ?? NSApplication.shared, notification: .announcementRequested,
                              userInfo: [.announcement: banner, .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 }

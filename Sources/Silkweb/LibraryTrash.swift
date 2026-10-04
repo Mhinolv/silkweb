@@ -124,7 +124,7 @@ extension LibraryWorkspace {
             persistSession()
             if !result.items.isEmpty {
                 focus(pane)
-                NSAccessibility.post(element: NSApp.mainWindow ?? NSApplication.shared, notification: .announcementRequested,
+                NSAccessibility.post(element: NSApplication.shared.mainWindow ?? NSApplication.shared, notification: .announcementRequested,
                     userInfo: [.announcement: "Moved \(result.items.count) items to the Trash", .priority: NSAccessibilityPriorityLevel.high.rawValue])
             }
             reportTrashFailures(result.failures, reveal: result.failures.map { plan.root.appendingPathComponent($0.path) })

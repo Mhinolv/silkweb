@@ -11,7 +11,7 @@ struct DocumentTable: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(workspace: workspace) }
 
-    func makeNSView(context: Context) -> NSScrollView {
+    func makeNSView(context: Context) -> DocumentScrollView {
         let table = DocumentTableView()
         table.coordinator = context.coordinator
         table.headerView = nil
@@ -24,7 +24,7 @@ struct DocumentTable: NSViewRepresentable {
         table.backgroundColor = .silkwebPaneBackground
         table.dataSource = context.coordinator
         table.delegate = context.coordinator
-        let scroll = NSScrollView()
+        let scroll = DocumentScrollView()
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.backgroundColor = .silkwebPaneBackground
@@ -34,12 +34,12 @@ struct DocumentTable: NSViewRepresentable {
         return scroll
     }
 
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
+    func updateNSView(_ scroll: DocumentScrollView, context: Context) {
         _ = workspace.editor.refusedNavigation // Restore native selection when unsaved text blocks navigation.
         context.coordinator.update(documents: documents, dateReference: dateReference, makeDragProvider: makeDragProvider)
     }
 
-    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+    static func dismantleNSView(_ scroll: DocumentScrollView, coordinator: Coordinator) {
         coordinator.pointerState.cancelRename()
         coordinator.table?.delegate = nil
         coordinator.table?.dataSource = nil
@@ -72,8 +72,8 @@ struct DocumentTable: NSViewRepresentable {
             }
             let reload = structureChanged || includesSubfolders != workspace.includesSubfolders
             // A visible selection stays in view when sorting or filtering reorders the rows.
-            let anchor = reload ? table.selectedRowIndexes.first.flatMap { row in
-                self.documents.indices.contains(row) && table.visibleRect.intersects(table.rect(ofRow: row)) ? self.documents[row].relativePath : nil
+            let anchor = reload ? table.visibleSelectedRow(in: table.visibleRect).flatMap { row in
+                self.documents.indices.contains(row) ? self.documents[row].relativePath : nil
             } : nil
             self.documents = documents
             self.dateReference = dateReference
@@ -227,9 +227,31 @@ struct DocumentTable: NSViewRepresentable {
     }
 }
 
+/// Keeps a visible selection on screen when the pane's height changes (#63). A pure resize never reaches
+/// `updateNSView`, and the clip view keeps its top origin, so shrinking the pane could leave the selected row below it.
+final class DocumentScrollView: NSScrollView {
+    /// Uses the clip view's bounds, not `visibleRect`: mid-layout, ancestors can still clip to the old size.
+    override func tile() {
+        let table = documentView as? DocumentTableView
+        let row = table?.visibleSelectedRow(in: contentView.bounds)
+        super.tile()
+        // Scroll as little as possible, and never pull back a selection the user had already scrolled away from.
+        if let table, let row, !contentView.bounds.isEmpty, table.visibleSelectedRow(in: contentView.bounds) == nil {
+            table.scrollRowToVisible(row)
+        }
+    }
+}
+
 final class DocumentTableView: NSTableView {
     weak var coordinator: DocumentTable.Coordinator?
     var startDraggingSession: (([NSDraggingItem], NSEvent, NSDraggingSource) -> Void)?
+
+    /// The first selected row while any of it is inside `viewport`: the row a reload or resize keeps in view.
+    func visibleSelectedRow(in viewport: NSRect) -> Int? {
+        selectedRowIndexes.first.flatMap { row in
+            row < numberOfRows && viewport.intersects(rect(ofRow: row)) ? row : nil
+        }
+    }
 
     /// Cells span the full row so `DocumentRow` insets its text from the capsule, not from the inset style's cell margin.
     override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {

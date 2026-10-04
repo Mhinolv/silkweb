@@ -50,9 +50,8 @@ final class SearchReturnTests: XCTestCase {
 
     @MainActor
     private func waitForOpen(_ workspace: LibraryWorkspace) async throws {
-        for _ in 0..<200 where workspace.session.selectedDocuments.isEmpty {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        // A loaded runner can resume the open well past any fixed budget (#63).
+        try await waitUntil("Return to open a document") { !workspace.session.selectedDocuments.isEmpty }
         await workspace.waitForNavigation()
     }
 
@@ -125,7 +124,10 @@ final class SearchReturnTests: XCTestCase {
         await workspace.search.query(quick: true)
         host.layoutSubtreeIfNeeded()
         try typeAndReturn("zzzabsent", host: host, window: window)
-        try await Task.sleep(for: .milliseconds(600))
+        // Prove the query ran before checking that nothing opened, instead of sleeping past the debounce (#63).
+        try await waitUntil("the no-match query to settle") {
+            !workspace.search.quickHasPendingQuery && workspace.search.quickResults.isEmpty
+        }
         await workspace.waitForNavigation()
         XCTAssertTrue(workspace.session.selectedDocuments.isEmpty)
         XCTAssertTrue(workspace.search.showsQuickOpen)

@@ -291,14 +291,27 @@ final class SaveCoordinatorTests: XCTestCase {
         let url = try document()
         let coordinator = SaveCoordinator(recoveryDirectory: recovery)
         _ = try await coordinator.open(url)
+        let stream = await coordinator.states(for: url)
+        var states = stream.makeAsyncIterator()
+        let opened = await states.next()
+        XCTAssertEqual(opened, .clean)
+        // #63: no fixed sleeps sized against the deadlines. The replacing deadline is checked from
+        // the observed save instead: a loaded machine can only make a save late, never early, so
+        // a commit seen before the replacing delay elapsed can only come from the first deadline.
+        // The first deadline is long enough that two consecutive actor calls never straddle it.
         try await coordinator.edit("first", at: url)
-        await coordinator.scheduleSave(url, delay: .milliseconds(200))
-        try await Task.sleep(for: .milliseconds(50))
+        await coordinator.scheduleSave(url, delay: .seconds(1))
         try await coordinator.edit("latest 日本語", at: url)
-        await coordinator.scheduleSave(url, delay: .milliseconds(400))
-        try await Task.sleep(for: .milliseconds(250))
-        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "original")
-        try await Task.sleep(for: .milliseconds(250))
+        let rescheduled = ContinuousClock.now
+        await coordinator.scheduleSave(url, delay: .milliseconds(1500))
+        var observed: [DocumentSaveState] = []
+        while let state = await states.next() {
+            observed.append(state)
+            if state == .clean { break }
+        }
+        let elapsed = ContinuousClock.now - rescheduled
+        XCTAssertEqual(observed, [.dirty, .dirty, .saving, .clean], "one save, after both edits")
+        XCTAssertGreaterThanOrEqual(elapsed, .milliseconds(1500), "the first deadline was replaced, not kept")
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "latest 日本語")
         try await coordinator.edit("explicit flush", at: url)
         await coordinator.scheduleSave(url, delay: .seconds(60))
