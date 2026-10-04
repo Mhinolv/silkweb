@@ -52,6 +52,39 @@ import SilkwebCore
         if typewriter { scheduleAnchor() }
     }
 
+    /// Called while the text storage processes an edit, before anything can display. The
+    /// queued update below recomputes the unit a turn later; until then the bright band (and
+    /// a running fade's start) must cover the same text, or a frame drawn in between lights
+    /// the wrong lines — e.g. ⌫ in a heading pulled the band onto the body line below (1.80).
+    func sourceDidChange(editedRange: NSRange, delta: Int) {
+        guard focus || fadeFrom != nil, let storage = editor?.textStorage else { return }
+        let text = storage.string as NSString
+        if let range = activeRange {
+            activeRange = Self.shift(range, editedRange: editedRange, delta: delta, in: text) ?? computeRange()
+        }
+        if let from = fadeFrom, let range = from.range {
+            fadeFrom = (from.on, Self.shift(range, editedRange: editedRange, delta: delta, in: text))
+        }
+    }
+
+    /// `range` after an edit, or nil when the edit crosses its boundary (the unit itself changes).
+    static func shift(_ range: NSRange, editedRange: NSRange, delta: Int, in text: NSString) -> NSRange? {
+        let start = editedRange.location
+        let oldEnd = NSMaxRange(editedRange) - delta
+        let end = NSMaxRange(range)
+        if start < range.location {
+            guard oldEnd <= range.location else { return nil }
+            return NSRange(location: range.location + delta, length: range.length)
+        }
+        // Text inserted right after a unit that ends with a newline belongs to the next line.
+        if start > end || (start == end && range.length > 0 && start > 0 && start <= text.length
+                           && text.character(at: start - 1) == 0x0A) {
+            return range
+        }
+        guard oldEnd <= end else { return nil }
+        return NSRange(location: range.location, length: max(0, range.length + delta))
+    }
+
     /// Once per run loop turn, after the styler has refreshed its fence checkpoints.
     private func scheduleUpdate() {
         guard !updateScheduled else { return }

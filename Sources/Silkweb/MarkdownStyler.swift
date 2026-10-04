@@ -20,6 +20,7 @@ import SilkwebCore
             else if location >= oldEnd, location + delta > editedRange.location { shifted[location + delta] = state }
         }
         checkpoints = shifted
+        editor?.writingModes.sourceDidChange(editedRange: editedRange, delta: delta)
         if let previous = dirty {
             // Multiple edits before the coalesced pass: conservatively include their bounds.
             dirty = NSUnionRange(previous, editedRange)
