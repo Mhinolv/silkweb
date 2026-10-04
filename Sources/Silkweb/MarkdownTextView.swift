@@ -263,14 +263,21 @@ final class PlainMarkdownTextView: NSTextView {
     }
     private var isLayingOutEditor = false
     private var contentSizingTask: Task<Void, Never>?
+    private var contentSizingGeneration = 0
     private var needsEndMarginAfterEdit = false
+    /// Restyling, an inline-image pass or the debounced fit to the full text is still due; the frame
+    /// may not cover the document yet. Lets tests wait for the real condition instead of a fixed delay.
+    var isContentSizingPending: Bool { contentSizingTask != nil || inlineImages.isLoading || styler.scheduled }
 
     /// TextKit's viewport layout alone leaves the document frame sized to a partial
     /// layout. Coalesce loads, restyling and width changes before fitting the full text.
     /// This never runs in a scroll/gesture callback or on every keystroke.
     func scheduleContentSizing() {
         contentSizingTask?.cancel()
+        contentSizingGeneration += 1
+        let requested = contentSizingGeneration
         contentSizingTask = Task { [weak self] in
+            defer { if let self, requested == self.contentSizingGeneration { self.contentSizingTask = nil } }
             do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
             guard let self, !self.hasMarkedText(), let container = self.textContainer else { return }
             guard let layout = self.layoutManager else { return }

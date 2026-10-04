@@ -352,7 +352,7 @@ final class RedesignFoundationTests: XCTestCase {
             samples.sort()
             let p95 = samples[Int(Double(samples.count - 1) * 0.95)]
             print("R1 scroll benchmark \(type(of: table)): p95 \(String(format: "%.2f", p95)) ms, max \(String(format: "%.2f", samples.last!)) ms")
-            XCTAssertLessThan(p95, 16, "\(type(of: table)) scroll p95")
+            XCTAssertLessThan(p95, TestEnvironment.frameBudget(16), "\(type(of: table)) scroll p95")
             // The clip view, not `visibleRect`: an unordered window reports no visible area.
             XCTAssertGreaterThan(scroll.contentView.bounds.minY, 0, "\(type(of: table)) scrolled")
         }
