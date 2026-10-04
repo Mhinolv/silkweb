@@ -75,6 +75,12 @@ final class LibraryRenameTests: XCTestCase {
                     XCTAssertTrue(window.makeFirstResponder(table))
                     try key(window, text: "\r", code: 36)
                 }
+                // Menu, Return and creation all begin the rename in a task (#56): wait for the session and its
+                // field instead of a fixed layout pass a loaded runner can outlast.
+                try await waitUntil("\(folder) \(mode): rename session and field") {
+                    host.layoutSubtreeIfNeeded()
+                    return workspace.rename != nil && descendants(host).contains { $0 is RenameNameField }
+                }
                 try await settle(host)
                 let item = try XCTUnwrap(workspace.rename, "\(folder) \(mode): rename disappeared")
                 path = item.path
@@ -96,8 +102,9 @@ final class LibraryRenameTests: XCTestCase {
                 XCTAssertTrue(window.firstResponder === editor)
                 XCTAssertEqual(field.stringValue, name)
                 try key(window, text: "\r", code: 36)
+                // Return validates asynchronously before the rename mutation starts.
+                try await waitUntil("\(folder) \(mode): rename committed") { workspace.rename == nil && !workspace.mutating }
                 try await settle(host)
-                for _ in 0..<1000 where workspace.mutating { try await Task.sleep(for: .milliseconds(10)) }
                 XCTAssertNil(workspace.rename)
                 XCTAssertNil(workspace.mutationError)
                 let newPath = folder ? name : name + ".md"
@@ -110,11 +117,15 @@ final class LibraryRenameTests: XCTestCase {
             // Invalid Return retains the draft; Escape and a focus change cancel it.
             for cancellation in ["escape", "blur"] {
                 workspace.beginRename(LibraryRename(path: path, isFolder: folder))
-                try await settle(host)
+                try await waitUntil("\(folder) \(cancellation): rename field") {
+                    host.layoutSubtreeIfNeeded()
+                    return workspace.rename != nil
+                        && descendants(host).contains { ($0 as? RenameNameField)?.currentEditor() != nil }
+                }
                 let field = try XCTUnwrap(descendants(host).compactMap { $0 as? RenameNameField }.first)
                 try key(window, text: "a/b", code: 0)
                 try key(window, text: "\r", code: 36)
-                try await settle(host)
+                try await waitUntil("\(folder) \(cancellation): invalid name flagged") { field.layer?.borderWidth == 1 }
                 XCTAssertNotNil(workspace.rename)
                 XCTAssertEqual(field.layer?.borderWidth, 1)
                 if cancellation == "escape" {
@@ -125,6 +136,7 @@ final class LibraryRenameTests: XCTestCase {
                     let table = try XCTUnwrap(descendants(host).compactMap { $0 as? SidebarOutlineView }.first)
                     XCTAssertTrue(window.makeFirstResponder(table))
                 }
+                try await waitUntil("\(folder) \(cancellation): rename cancelled") { workspace.rename == nil }
                 try await settle(host)
                 XCTAssertNil(workspace.rename)
                 XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path))

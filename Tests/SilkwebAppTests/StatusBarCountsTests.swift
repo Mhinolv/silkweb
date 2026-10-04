@@ -114,11 +114,17 @@ final class StatusBarCountsTests: XCTestCase {
         // A non-empty selection shows “N of M”; collapsing it reverts after the debounce.
         let editor = try XCTUnwrap(workspace.preview.editor)
         let selected = (editor.string as NSString).range(of: "Kyoto rewards **slowness**.")
+        func waitForCounts(_ value: String, _ description: String) async throws {
+            try await waitUntil(description) {
+                window.contentView?.superview?.layoutSubtreeIfNeeded()
+                return Self.value(try strip().counts) == value
+            }
+        }
         editor.setSelectedRange(selected)
+        let selection = DocumentStatistics(words: 3, characters: 23)
+        try await waitForCounts(DocumentStatisticsPresentation.accessibilityValue(document: expected, selection: selection), "selection counts")
         try await settle()
         counts = try strip().counts
-        let selection = DocumentStatistics(words: 3, characters: 23)
-        XCTAssertEqual(Self.value(counts), DocumentStatisticsPresentation.accessibilityValue(document: expected, selection: selection))
         XCTAssertTrue(Self.value(counts)?.hasPrefix("Selection: 3 of ") == true)
         try assertLayout("selection")
 
@@ -133,15 +139,13 @@ final class StatusBarCountsTests: XCTestCase {
         workspace.setWritingModes(focus: false, typewriter: false)
 
         editor.setSelectedRange(NSRange(location: 0, length: 0))
-        try await settle()
-        XCTAssertEqual(Self.value(try strip().counts), DocumentStatisticsPresentation.accessibilityValue(document: expected))
+        try await waitForCounts(DocumentStatisticsPresentation.accessibilityValue(document: expected), "collapsed selection reverts to totals")
 
         // Typing updates the totals after the debounce, never synchronously.
         editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
         editor.insertText(" extra words", replacementRange: editor.selectedRange())
         XCTAssertEqual(workspace.editor.statistics.document, expected, "no count work on the keystroke itself")
-        try await settle()
-        XCTAssertEqual(workspace.editor.statistics.document?.words, expected.words + 2)
+        try await waitUntil("debounced totals after typing") { workspace.editor.statistics.document?.words == expected.words + 2 }
 
         // Preview-only keeps document totals visible and ignores the editor selection.
         editor.setSelectedRange(selected)
@@ -235,19 +239,20 @@ final class StatusBarCountsTests: XCTestCase {
         XCTAssertEqual(model.document, DocumentStatistics(words: 3, characters: 13))
         let before = model.refreshCount
         for location in 0...13 { model.selectionDidChange(NSRange(location: location, length: 0)) }
-        try await Task.sleep(for: .milliseconds(400))
+        try await Task.sleep(for: DocumentStatisticsModel.debounce + .milliseconds(100))
         XCTAssertEqual(model.refreshCount, before)
+        // The positive anchor (#56): one real selection change recounts exactly once, so the caret moves above
+        // added nothing. Waits on the count instead of a fixed sleep a loaded CI runner can outlast.
         session.selection = NSRange(location: 4, length: 3)
         model.selectionDidChange(session.selection)
-        try await Task.sleep(for: .milliseconds(400))
-        XCTAssertEqual(model.selection, DocumentStatistics(words: 1, characters: 3))
+        try await waitUntil("selection counts") { model.selection == DocumentStatistics(words: 1, characters: 3) }
+        XCTAssertEqual(model.refreshCount, before + 1, "caret moves without a selection must not recount")
         session.selection = NSRange(location: 4, length: 0)
         model.selectionDidChange(session.selection)
-        try await Task.sleep(for: .milliseconds(400))
+        try await waitUntil("collapsed selection recount") { model.refreshCount == before + 2 }
         XCTAssertNil(model.selection)
         // Large buffers count off the main thread and still publish.
         session.text = String(repeating: "word ", count: 20_000)
-        try await Task.sleep(for: .milliseconds(600))
-        XCTAssertEqual(model.document?.words, 20_000)
+        try await waitUntil("background count of 20,000 words") { model.document?.words == 20_000 }
     }
 }
