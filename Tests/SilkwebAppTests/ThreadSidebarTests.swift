@@ -67,39 +67,47 @@ final class ThreadSidebarTests: XCTestCase {
 
     // MARK: Pixels
 
+    /// Pixel checks render at a fixed 2×, never the host's backing scale (#51). The display-less CI runner backs
+    /// windows at 1×, where a 1.5 pt stroke centred on a pixel edge covers two pixels by 75 % each, so no pixel of
+    /// the elbow's horizontal carries the thread colour (distance 0.047 against the 0.03 tolerance).
+    static let renderScale: CGFloat = 2
+
+    @MainActor private func pixel(_ row: NSView, at point: NSPoint, scale: CGFloat = renderScale) throws -> Pixel {
+        let rep = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int((row.bounds.width * scale).rounded(.up)),
+            pixelsHigh: Int((row.bounds.height * scale).rounded(.up)), bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+            isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        rep.size = row.bounds.size
+        row.cacheDisplay(in: row.bounds, to: rep)
+        let top = row.isFlipped ? point.y : row.bounds.height - point.y
+        return Pixel(color: try XCTUnwrap(rep.colorAt(x: Int(point.x * scale), y: Int(top * scale))), rep: rep)
+    }
+
     struct Pixel {
         let color: NSColor
         let rep: NSBitmapImageRep
     }
 
-    @MainActor private func pixel(_ row: NSView, at point: NSPoint) throws -> Pixel {
-        let rep = try XCTUnwrap(row.bitmapImageRepForCachingDisplay(in: row.bounds))
-        row.cacheDisplay(in: row.bounds, to: rep)
-        let scale = CGFloat(rep.pixelsWide) / row.bounds.width
-        let top = row.isFlipped ? point.y : row.bounds.height - point.y
-        return Pixel(color: try XCTUnwrap(rep.colorAt(x: Int(point.x * scale), y: Int(top * scale))), rep: rep)
-    }
-
-    /// Compares against a swatch of `expected` painted into the same kind of bitmap, so colour matching cancels out.
-    @MainActor private func assertColor(_ pixel: Pixel, _ expected: NSColor, in view: NSView, _ message: String,
-                                        file: StaticString = #filePath, line: UInt = #line) {
-        guard let swatch = pixel.rep.copy() as? NSBitmapImageRep, let context = NSGraphicsContext(bitmapImageRep: swatch) else {
-            return XCTFail("swatch \(message)", file: file, line: line)
-        }
+    /// Max channel distance from `expected`, painted as a swatch into the same kind of bitmap so colour matching cancels out.
+    @MainActor private func distance(_ pixel: Pixel, _ expected: NSColor, in view: NSView) throws -> (CGFloat, String) {
+        let swatch = try XCTUnwrap(pixel.rep.copy() as? NSBitmapImageRep)
         NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = context
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: swatch)
         view.effectiveAppearance.performAsCurrentDrawingAppearance {
             expected.setFill()
             NSRect(x: 0, y: 0, width: 4, height: 4).fill()
         }
         NSGraphicsContext.restoreGraphicsState()
-        guard let actual = pixel.color.usingColorSpace(.sRGB),
-              let resolved = swatch.colorAt(x: 1, y: swatch.pixelsHigh - 2)?.usingColorSpace(.sRGB) else {
-            return XCTFail("unresolved \(message)", file: file, line: line)
-        }
+        let actual = try XCTUnwrap(pixel.color.usingColorSpace(.sRGB))
+        let resolved = try XCTUnwrap(swatch.colorAt(x: 1, y: swatch.pixelsHigh - 2)?.usingColorSpace(.sRGB))
         let distance = max(abs(actual.redComponent - resolved.redComponent), abs(actual.greenComponent - resolved.greenComponent),
                            abs(actual.blueComponent - resolved.blueComponent))
-        XCTAssertLessThan(distance, 0.03, "\(message): \(actual) vs \(resolved)", file: file, line: line)
+        return (distance, "\(actual) vs \(resolved)")
+    }
+
+    @MainActor private func assertColor(_ pixel: Pixel, _ expected: NSColor, in view: NSView, _ message: String,
+                                        file: StaticString = #filePath, line: UInt = #line) throws {
+        let (distance, colors) = try distance(pixel, expected, in: view)
+        XCTAssertLessThan(distance, 0.03, "\(message): \(colors)", file: file, line: line)
     }
 
     /// A point `distance` below the row's top edge.
@@ -191,19 +199,19 @@ final class ThreadSidebarTests: XCTestCase {
         if let metrics = scope.metrics, scope.thread?.level ?? 0 > 0 {
             let x = ThreadGuides.guideX(level: scope.thread!.level - 1, metrics: metrics) - scope.frame.minX
             if scope.isSelected {
-                assertColor(try pixel(scope, at: point(scope, x: x, below: 3)), .silkwebThread, in: scope, "thread over capsule \(context)")
+                try assertColor(try pixel(scope, at: point(scope, x: x, below: 3)), .silkwebThread, in: scope, "thread over capsule \(context)")
             }
         }
         let other = try row(outline, plain)
         let metrics = try XCTUnwrap(other.metrics)
         let x = ThreadGuides.guideX(level: other.thread!.level - 1, metrics: metrics) - other.frame.minX
-        assertColor(try pixel(other, at: point(other, x: x, below: 3)), .silkwebThread, in: other, "elbow \(context)")
+        try assertColor(try pixel(other, at: point(other, x: x, below: 3)), .silkwebThread, in: other, "elbow \(context)")
         // The elbow's horizontal, past the arc.
-        assertColor(try pixel(other, at: point(other, x: x + metrics.radius + 1, below: metrics.rowHeight / 2)), .silkwebThread,
-                    in: other, "horizontal \(context)")
+        try assertColor(try pixel(other, at: point(other, x: x + metrics.radius + 1, below: metrics.rowHeight / 2)), .silkwebThread,
+                        in: other, "horizontal \(context)")
         // Nothing drawn in the empty space right of the guide above the corner.
-        assertColor(try pixel(other, at: point(other, x: x + metrics.radius + 1, below: 3)), .silkwebPaneBackground,
-                    in: other, "background \(context)")
+        try assertColor(try pixel(other, at: point(other, x: x + metrics.radius + 1, below: 3)), .silkwebPaneBackground,
+                        in: other, "background \(context)")
     }
 
     @MainActor
@@ -286,11 +294,11 @@ final class ThreadSidebarTests: XCTestCase {
         let target = try row(outline, japan)
         target.isTargetForDropOperation = true
         let capsule = target.capsuleRect
-        assertColor(try pixel(target, at: NSPoint(x: capsule.maxX - 0.75, y: capsule.midY)), .silkwebAccent, in: target, "drop outline")
-        assertColor(try pixel(target, at: NSPoint(x: capsule.maxX - 12, y: capsule.midY)), .silkwebSelection, in: target, "drop fill")
+        try assertColor(try pixel(target, at: NSPoint(x: capsule.maxX - 0.75, y: capsule.midY)), .silkwebAccent, in: target, "drop outline")
+        try assertColor(try pixel(target, at: NSPoint(x: capsule.maxX - 12, y: capsule.midY)), .silkwebSelection, in: target, "drop fill")
         let targetMetrics = try XCTUnwrap(target.metrics)
         let guide = ThreadGuides.guideX(level: 1, metrics: targetMetrics) - target.frame.minX
-        assertColor(try pixel(target, at: point(target, x: guide, below: 3)), .silkwebThread, in: target, "thread over drop capsule")
+        try assertColor(try pixel(target, at: point(target, x: guide, below: 3)), .silkwebThread, in: target, "thread over drop capsule")
         target.isTargetForDropOperation = false
 
         // Tag A → tag B moves the scope directly, never via All Documents (1.21 guard).
@@ -396,6 +404,42 @@ final class ThreadSidebarTests: XCTestCase {
             }
         }
         XCTAssertFalse(window.isVisible)
+    }
+
+    /// #51 regression: the CI runner backs windows at 1×, where the elbow's 1.5 pt horizontal never fully covers
+    /// a pixel. The checks render at a fixed 2× instead, and still reject a wrong colour or a thread leaking right.
+    @MainActor
+    func testThreadPixelChecksDoNotDependOnBackingScale() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.cleanUp() }
+        let coordinator = FolderSidebar.Coordinator(workspace: fixture.workspace, snapshot: fixture.snapshot)
+        let scroll = FolderSidebar.makeScrollView(coordinator: coordinator)
+        defer { FolderSidebar.dismantleNSView(scroll, coordinator: coordinator) }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 260, height: 700), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .aqua)
+        window.contentView = scroll
+        defer { window.contentView = nil; window.close() }
+        scroll.layoutSubtreeIfNeeded()
+        let outline = try XCTUnwrap(coordinator.outline)
+        let japan = try row(outline, try XCTUnwrap(coordinator.itemsByPath["Travel/Japan"]))
+        japan.layoutSubtreeIfNeeded()
+        let metrics = try XCTUnwrap(japan.metrics)
+        let x = ThreadGuides.guideX(level: try XCTUnwrap(japan.thread).level - 1, metrics: metrics) - japan.frame.minX
+        let horizontal = point(japan, x: x + metrics.radius + 1, below: metrics.rowHeight / 2)
+        let background = point(japan, x: x + metrics.radius + 1, below: 3)
+
+        // What a 1× backing (the CI host) produces: the horizontal is only partly covered.
+        let (blended, colors) = try distance(try pixel(japan, at: horizontal, scale: 1), .silkwebThread, in: japan)
+        XCTAssertGreaterThanOrEqual(blended, 0.03, "1× horizontal is anti-aliased: \(colors)")
+        // The fixed render scale sees the thread colour on any host.
+        XCTAssertEqual(Self.renderScale, 2)
+        try assertColor(try pixel(japan, at: horizontal), .silkwebThread, in: japan, "horizontal")
+        try assertColor(try pixel(japan, at: background), .silkwebPaneBackground, in: japan, "background")
+        for wrong: NSColor in [.silkwebAccent, .silkwebCoral, .labelColor, .silkwebPaneBackground] {
+            XCTAssertGreaterThanOrEqual(try distance(try pixel(japan, at: horizontal), wrong, in: japan).0, 0.03, "horizontal is not \(wrong)")
+        }
+        XCTAssertGreaterThanOrEqual(try distance(try pixel(japan, at: background), .silkwebThread, in: japan).0, 0.03, "no thread right of the guide")
     }
 
     /// The drop path through the real delegate lands on a folder row and leaves its guides alone.

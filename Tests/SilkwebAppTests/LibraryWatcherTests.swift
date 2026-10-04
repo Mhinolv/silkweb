@@ -31,8 +31,9 @@ final class LibraryWatcherTests: XCTestCase {
         var notifications = 0
         let watcher = LibraryWatcher(root: root, delay: .milliseconds(20)) { notifications += 1 }
         defer { watcher.stop() }
-        // Let stream startup finish before modifying a descendant, not the root.
-        try await Task.sleep(for: .milliseconds(200))
+        // Drain the stream's startup batch before modifying a descendant, not the root.
+        let events = EventLog(watcher)
+        try await events.barrier(root)
         notifications = 0
         let url = nested.appendingPathComponent("Note.md")
         try Data("created".utf8).write(to: url, options: .atomic)
@@ -57,24 +58,78 @@ final class LibraryWatcherTests: XCTestCase {
         if ProcessInfo.processInfo.environment["CODEX_SANDBOX"] == "seatbelt" {
             throw XCTSkip("Managed seatbelt sandbox does not deliver FSEvents; debounce and reconciliation are tested separately.")
         }
-        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".build/watcher-\(UUID().uuidString)")
+        try await assertMetadataWritesDoNotTriggerRescan(root: URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".build/watcher-\(UUID().uuidString)"))
+    }
+
+    /// #50: a library opened through a symlinked path (`/tmp` → `/private/tmp`).
+    /// FSEvents reports `/private/tmp/...`; the root was canonicalised to `/tmp/...`
+    /// by `resolvingSymlinksInPath`, so every `.silkweb/` write counted as a change.
+    @MainActor
+    func testSilkwebMetadataWritesDoNotTriggerRescanUnderSymlinkedRoot() async throws {
+        if ProcessInfo.processInfo.environment["CODEX_SANDBOX"] == "seatbelt" {
+            throw XCTSkip("Managed seatbelt sandbox does not deliver FSEvents; debounce and reconciliation are tested separately.")
+        }
+        try await assertMetadataWritesDoNotTriggerRescan(root: URL(fileURLWithPath: "/tmp/silkweb-watcher-\(UUID().uuidString)"))
+        try await assertMetadataWritesDoNotTriggerRescan(root: URL(fileURLWithPath: "/private/tmp/silkweb-watcher-\(UUID().uuidString)"))
+        let target = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".build/watcher-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: target) }
+        let link = URL(fileURLWithPath: "/tmp/silkweb-watcher-link-\(UUID().uuidString)")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        try await assertMetadataWritesDoNotTriggerRescan(root: link)
+    }
+
+    @MainActor
+    private func assertMetadataWritesDoNotTriggerRescan(root: URL, file: StaticString = #filePath, line: UInt = #line) async throws {
         let metadata = root.appendingPathComponent(".silkweb")
         try FileManager.default.createDirectory(at: metadata, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         var rescans = 0
         let watcher = LibraryWatcher(root: root, delay: .milliseconds(20)) { rescans += 1 }
         defer { watcher.stop() }
-        try await Task.sleep(for: .milliseconds(300))
+        // #50: the startup batch (root and .silkweb creation) can arrive late under
+        // load; a fixed sleep let it land after `rescans = 0`. Barrier instead.
+        let events = EventLog(watcher)
+        try await events.barrier(root, file: file, line: line)
         rescans = 0
+        events.paths = []
         for round in 0..<3 {
             try Data("{\"formatVersion\":1,\"records\":[\(round)]}".utf8).write(to: metadata.appendingPathComponent("search-index.json"), options: .atomic)
             try Data("{}".utf8).write(to: metadata.appendingPathComponent("search-recents.json"), options: .atomic)
         }
-        try await Task.sleep(for: .milliseconds(1000))
-        XCTAssertEqual(rescans, 0, "search-index.json writes under .silkweb/ enqueued a library rescan")
+        try await events.barrier(root, file: file, line: line)
+        XCTAssertTrue(events.paths.contains { $0.hasSuffix("/.silkweb/search-index.json") }, "metadata writes were not delivered: \(events.paths)", file: file, line: line)
+        XCTAssertEqual(rescans, 0, "search-index.json writes under .silkweb/ enqueued a library rescan; root \(root.path), FSEvents paths \(events.paths)", file: file, line: line)
         try Data("note".utf8).write(to: root.appendingPathComponent("Note.md"), options: .atomic)
-        for _ in 0..<100 where rescans == 0 { try await Task.sleep(for: .milliseconds(50)) }
-        XCTAssertGreaterThan(rescans, 0)
+        try await events.barrier(root, file: file, line: line)
+        XCTAssertGreaterThan(rescans, 0, file: file, line: line)
+    }
+
+    /// Records a watcher's raw FSEvents batches. `barrier` writes a marker under
+    /// `.silkweb/` (filtered, so it schedules nothing) and waits for its delivery.
+    /// Events arrive in event-id order, so every earlier event, including the
+    /// stream's startup batch, has been seen; then any debounce they scheduled runs.
+    @MainActor
+    private final class EventLog {
+        var paths: [String] = []
+        let watcher: LibraryWatcher
+
+        init(_ watcher: LibraryWatcher) {
+            self.watcher = watcher
+            watcher.observeEvents = { [unowned self] in paths += $0 }
+        }
+
+        func barrier(_ root: URL, file: StaticString = #filePath, line: UInt = #line) async throws {
+            let metadata = root.appendingPathComponent(".silkweb")
+            try FileManager.default.createDirectory(at: metadata, withIntermediateDirectories: true)
+            let name = "/.silkweb/barrier-\(UUID().uuidString)"
+            try Data().write(to: URL(fileURLWithPath: root.path + name))
+            for _ in 0..<200 where !paths.contains(where: { $0.hasSuffix(name) }) {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            XCTAssertTrue(paths.contains { $0.hasSuffix(name) }, "FSEvents never delivered the barrier", file: file, line: line)
+            await watcher.pending?.value
+        }
     }
 
     /// 1.78: an autosave refreshes dates once; the watcher's follow-up scan of the
@@ -121,6 +176,43 @@ final class LibraryWatcherTests: XCTestCase {
         XCTAssertTrue(LibraryWatcher.isLibraryChange(["/Volumes/Notes/Library"], root: root))
         XCTAssertTrue(LibraryWatcher.isLibraryChange(["/Volumes/Notes"], root: root))
         XCTAssertTrue(LibraryWatcher.isLibraryChange([], root: root))
+    }
+
+    /// #50: FSEvents and the opened root can spell the same directory differently.
+    func testMetadataEventPathFilterMatchesMismatchedPathForms() {
+        let forms = ["/tmp/Lib", "/private/tmp/Lib", "/System/Volumes/Data/private/tmp/Lib", "/tmp/Lib/"]
+        for root in forms {
+            for event in forms {
+                let base = event.hasSuffix("/") ? String(event.dropLast()) : event
+                XCTAssertFalse(LibraryWatcher.isLibraryChange([base + "/.silkweb/search-index.json"], root: root), "\(event) vs root \(root)")
+                XCTAssertFalse(LibraryWatcher.isLibraryChange([base + "/.silkweb/"], root: root), "\(event) vs root \(root)")
+                XCTAssertTrue(LibraryWatcher.isLibraryChange([base + "/Note.md"], root: root), "\(event) vs root \(root)")
+                XCTAssertTrue(LibraryWatcher.isLibraryChange([base + "/.silkwebnotes/a.md"], root: root), "\(event) vs root \(root)")
+                XCTAssertTrue(LibraryWatcher.isLibraryChange([base], root: root), "\(event) vs root \(root)")
+            }
+        }
+        XCTAssertFalse(LibraryWatcher.isLibraryChange(["/System/Volumes/Data/Users/me/Notes/.silkweb/x"], root: "/Users/me/Notes"))
+        XCTAssertFalse(LibraryWatcher.isLibraryChange(["/Users/me/Notes/.silkweb/x"], root: "/System/Volumes/Data/Users/me/Notes"))
+        XCTAssertFalse(LibraryWatcher.isLibraryChange(["/private/var/folders/x/Lib/.silkweb/x"], root: "/var/folders/x/Lib"))
+        XCTAssertTrue(LibraryWatcher.isLibraryChange(["/private/tmpfoo/Lib/.silkweb/x"], root: "/tmp/Lib"))
+        XCTAssertTrue(LibraryWatcher.isLibraryChange(["/System/Volumes/DataX/Lib/.silkweb/x"], root: "/Lib"))
+        XCTAssertEqual(LibraryWatcher.eventPathForm("/"), "/")
+        XCTAssertEqual(LibraryWatcher.eventPathForm("/tmpfoo"), "/tmpfoo")
+    }
+
+    /// #50: the start-time root resolves symlinks the way FSEvents reports them.
+    func testCanonicalRootResolvesSymlinksAndKeepsPrivatePrefix() throws {
+        let name = "silkweb-canonical-\(UUID().uuidString)"
+        let real = URL(fileURLWithPath: "/private/tmp/\(name)")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: real) }
+        let link = URL(fileURLWithPath: "/tmp/\(name)-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: URL(fileURLWithPath: "/tmp/\(name)"))
+        defer { try? FileManager.default.removeItem(at: link) }
+        for url in [real, URL(fileURLWithPath: "/tmp/\(name)"), URL(fileURLWithPath: "/tmp/\(name)/"), link, URL(fileURLWithPath: "/tmp/\(name)/sub/..")] {
+            XCTAssertEqual(LibraryWatcher.canonicalRoot(url), real.path, url.path)
+        }
+        XCTAssertEqual(LibraryWatcher.canonicalRoot(URL(fileURLWithPath: "/tmp/\(name)-missing")), "/private/tmp/\(name)-missing")
     }
 
     @MainActor
