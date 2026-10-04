@@ -159,8 +159,18 @@ public actor LibraryMutations {
     }
 
     public func rename(_ path: String, to name: String) throws -> LibraryChangeSet {
-        let name = try Self.validateName(name)
+        let name = try Self.validateRenameTarget(name, for: path)
         return try perform(operation: "renamed", name: LibraryMutationError.displayName((path as NSString).lastPathComponent)) {
+            let components = try Self.components(path, allowRoot: false)
+            return try relocate(path, parentPath: components.dropLast().joined(separator: "/"), name: name)
+        }
+    }
+
+    /// Used only by Undo Rename: the previous name came from disk and may predate the
+    /// rules for new names (e.g. "Meeting 10:04.md"), so it gets structural checks only.
+    public func restoreName(_ path: String, to name: String) throws -> LibraryChangeSet {
+        return try perform(operation: "renamed", name: LibraryMutationError.displayName((path as NSString).lastPathComponent)) {
+            try Self.validateExistingComponent(name)
             let components = try Self.components(path, allowRoot: false)
             return try relocate(path, parentPath: components.dropLast().joined(separator: "/"), name: name)
         }
@@ -168,7 +178,7 @@ public actor LibraryMutations {
 
     /// Read-only preflight for live rename feedback, using the volume's lookup rules.
     public func validateRename(_ path: String, to name: String) throws {
-        let name = try Self.validateName(name)
+        let name = try Self.validateRenameTarget(name, for: path)
         let source = try item(path)
         let isFolder = try source.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
         let parent = source.deletingLastPathComponent()
@@ -203,8 +213,32 @@ public actor LibraryMutations {
         return name
     }
 
+    /// Structural checks for a path component that already exists on disk. Its name may
+    /// predate the rules for new names (e.g. contain ':'), so only reject spellings that
+    /// change which item the path refers to. Hidden entries (including the .silkweb
+    /// index) are never library items and stay off-limits.
+    static func validateExistingComponent(_ name: String) throws {
+        guard !name.isEmpty, name != ".", name != "..", !name.hasPrefix("."),
+              !name.contains("/"), !name.unicodeScalars.contains(Unicode.Scalar(0)) else {
+            throw LibraryError.invalidRelativePath
+        }
+    }
+
+    /// Committing an item's unchanged name is a no-op even when that name predates the
+    /// rules for new names; any other target must satisfy them.
+    private static func validateRenameTarget(_ name: String, for path: String) throws -> String {
+        guard name == (path as NSString).lastPathComponent else { return try validateName(name) }
+        try validateExistingComponent(name)
+        return name
+    }
+
     /// Inline fields edit only the base name, preserving a document's original extension.
     public static func renameFilename(_ input: String, for path: String, isFolder: Bool) throws -> String {
+        let current = (path as NSString).lastPathComponent
+        let currentBase = isFolder ? current : (current as NSString).deletingPathExtension
+        if input.trimmingCharacters(in: .whitespacesAndNewlines) == currentBase, (try? validateExistingComponent(current)) != nil {
+            return current
+        }
         let base = try validateName(input)
         return try validateName(isFolder ? base : base + "." + (path as NSString).pathExtension)
     }
@@ -260,7 +294,7 @@ public actor LibraryMutations {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         guard !parts.isEmpty else { throw LibraryError.invalidRelativePath }
         for part in parts {
-            do { try validateName(part) } catch { throw LibraryError.invalidRelativePath }
+            try validateExistingComponent(part)
         }
         return parts
     }
@@ -433,7 +467,9 @@ extension LibraryMutations {
                 collisions.append(path)
                 if keepBoth {
                     repeat {
-                        name = try Self.validateName(stem + " \(number)" + (ext.isEmpty ? "" : "." + ext)); number += 1
+                        // Derived from an existing name, which may predate the new-name rules.
+                        name = stem + " \(number)" + (ext.isEmpty ? "" : "." + ext); number += 1
+                        try Self.validateExistingComponent(name)
                     } while try occupied(name)
                 }
             }

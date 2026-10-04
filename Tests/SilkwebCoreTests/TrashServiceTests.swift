@@ -102,4 +102,29 @@ final class TrashServiceTests: XCTestCase {
         XCTAssertEqual(plan.counts.documents, 1000)
         XCTAssertEqual(plan.counts.folders, 1000)
     }
+    /// silkweb-1.73: on-disk names that predate the new-name rules can still be trashed and put back.
+    func testLegacyColonNamesTrashAndRestore() async throws {
+        let root = try fixture()
+        let trash = try fixture()
+        defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: trash) }
+        for path in ["Meeting 10:04.md", "Notes 9:30/Inner 1:2.md", "Other.md"] { try write(path, root: root) }
+        let before = try await LibraryScanner.scan(root: root)
+        let service = try service(root: root, trash: trash)
+        let plan = try await service.plan(["Meeting 10:04.md", "Notes 9:30"])
+        XCTAssertEqual(plan.paths, ["Meeting 10:04.md", "Notes 9:30"])
+        let result = try await service.execute(plan)
+        XCTAssertEqual(result.failures.map(\.path), [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("Meeting 10:04.md").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("Notes 9:30").path))
+        _ = try await LibraryScanner.scan(root: root)
+        let restored = await service.restore(result.items)
+        XCTAssertEqual(restored.failures.map(\.path), [])
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("Notes 9:30/Inner 1:2.md"), encoding: .utf8), "text")
+        let after = try await LibraryScanner.scan(root: root)
+        XCTAssertEqual(after.metadata.IDsByPath, before.metadata.IDsByPath)
+        // Structural checks still refuse paths that escape or reach hidden entries.
+        for paths in [["Meeting 10:04.md/.."], [".silkweb"], ["./Other.md"], ["Notes 9:30//Inner 1:2.md"]] {
+            do { _ = try await service.plan(paths); XCTFail("Accepted unsafe selection: \(paths)") } catch { }
+        }
+    }
 }
