@@ -290,6 +290,71 @@ final class DocumentListRedesignTests: XCTestCase {
 
     // MARK: Lifecycle
 
+    /// #63: a pure resize (no workspace change) keeps a visible selected row on screen with a minimal scroll, keeps the
+    /// scroll origin while the row stays visible anyway, and never pulls back a selection the user scrolled away from.
+    @MainActor
+    func testHeightResizeKeepsVisibleSelectionOnScreen() async throws {
+        var extra: [String: String] = [:]
+        for index in 0..<60 { extra[String(format: "Many/Note %02d.md", index)] = "# Note \(index)\n\nBody \(index)." }
+        let fixture = try await fixture(extra: extra)
+        let workspace = fixture.workspace
+        workspace.session.selectedFolder = "Many"
+        workspace.setSortKey(.name)
+        if workspace.listPreference.descending { workspace.setSortDescending(false) }
+        let target = "Many/Note 45.md"
+        workspace.selectDocuments([target])
+        await workspace.waitForNavigation()
+        let host = NSHostingView(rootView: DocumentList(workspace: workspace))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 1400), styleMask: [.titled, .resizable],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.contentView = nil; window.close() }
+        try await settle(host)
+        let table = try table(in: host)
+        let row = try XCTUnwrap(workspace.documents.firstIndex { $0.relativePath == target })
+        XCTAssertEqual(row, 45, "name order puts the target deep in the list")
+        func visible() -> Bool { table.visibleRect.intersects(table.rect(ofRow: row)) }
+        func resize(_ height: CGFloat) async throws {
+            window.setContentSize(NSSize(width: 320, height: height))
+            try await settle(host)
+        }
+
+        // Scrolling down to the row brings it in at the bottom edge, as a click or arrow key does.
+        table.scrollRowToVisible(0)
+        try await settle(host)
+        table.scrollRowToVisible(row)
+        try await settle(host)
+        XCTAssertTrue(visible(), "fixture: row visible at 1400")
+        XCTAssertGreaterThan(table.visibleRect.minY, 0, "fixture must scroll")
+        XCTAssertGreaterThan(table.rect(ofRow: row).minY - table.visibleRect.minY, 560, "fixture: row sits low in the tall pane")
+
+        // Shrinking must not leave the visible selection off-screen; the nudge is minimal, not centring.
+        try await resize(560)
+        XCTAssertTrue(visible(), "shrink 1400 → 560: selected row scrolled away: visible \(table.visibleRect), row \(table.rect(ofRow: row))")
+        XCTAssertTrue(table.visibleRect.contains(table.rect(ofRow: row)), "shrink: row fully on screen")
+        XCTAssertLessThan(table.visibleRect.maxY - table.rect(ofRow: row).maxY, table.rowHeight, "shrink: minimal nudge, not centred")
+
+        // A height change that keeps the row visible anyway keeps the (top-anchored) scroll origin.
+        let origin = table.visibleRect.minY
+        try await resize(900)
+        XCTAssertTrue(visible(), "grow 560 → 900")
+        XCTAssertEqual(table.visibleRect.minY, origin, accuracy: 1, "grow: scroll position jumped")
+
+        // A selection the user scrolled away from is not pulled back by a resize.
+        table.scrollRowToVisible(0)
+        try await settle(host)
+        let top = table.visibleRect.minY
+        XCTAssertFalse(visible(), "fixture: selection scrolled away")
+        for height: CGFloat in [560, 300, 1400, 560] {
+            try await resize(height)
+            XCTAssertFalse(visible(), "height \(height): scrolled-away selection was pulled back: visible \(table.visibleRect)")
+            XCTAssertEqual(table.visibleRect.minY, top, accuracy: 1, "height \(height): scroll position jumped")
+        }
+        XCTAssertEqual(workspace.session.selectedDocuments, [target])
+        XCTAssertEqual(table.selectedRowIndexes, IndexSet(integer: row))
+    }
+
     @MainActor
     func testFolderSortTagSearchAndResizeKeepSelectionAndScroll() async throws {
         var extra: [String: String] = [:]

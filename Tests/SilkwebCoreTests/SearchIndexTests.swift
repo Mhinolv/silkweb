@@ -320,5 +320,8 @@ final class SearchIndexTests: XCTestCase {
         catch is CancellationError { }
         let subsequent = try await index.query(SearchQuery("Note-0", mode: .quickOpen))
         XCTAssertEqual(subsequent.count, 100)
+        // Land the coalesced cache write now: on a loaded runner it otherwise fires ~2 s after `reconcile`,
+        // mid-tearDown, and the recursive removal of the library fails with "directory not empty" (#63).
+        await index.flushCache()
     }
 }
