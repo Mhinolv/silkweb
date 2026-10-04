@@ -16,8 +16,16 @@ on:
   workflow_dispatch:
 jobs:
   build-and-test:
-    # Skip drafts and labels other than `run-ci`. Concurrency lives on the job, so a
-    # skipped run for another label (e.g. `qa-pass`) never cancels a real CI run.
+    # Skip drafts and labels other than `run-ci`. A skipped job still posts a check, so
+    # skipped runs are named `ci-skipped` instead: they never add a skipped
+    # `build-and-test` check (which counts as passing) on top of a real failure.
+    # Keep `name` and `if` in sync. Concurrency lives on the job, so a skipped run for
+    # another label (e.g. `qa-pass`) never cancels a real CI run.
+    name: >-
+      ${{ (github.event_name == 'workflow_dispatch' ||
+           (!github.event.pull_request.draft &&
+            (github.event.action != 'labeled' || github.event.label.name == 'run-ci')))
+          && 'build-and-test' || 'ci-skipped' }}
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (!github.event.pull_request.draft &&

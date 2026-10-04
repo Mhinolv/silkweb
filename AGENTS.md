@@ -113,7 +113,8 @@ Rules:
 - `CI / build-and-test` runs only when a PR is opened ready or leaves draft, on the `run-ci` label, or via
   `workflow_dispatch` — never on draft pushes, later pushes, or branch pushes — and only if the PR touches `Sources/`,
   `Tests/`, `Package.*`, `scripts/` or `ci.yml` (doc-only PRs have no CI check and count as passing). To re-run:
-  `gh pr edit <n> --remove-label run-ci; gh pr edit <n> --add-label run-ci`.
+  `gh pr edit <n> --remove-label run-ci; gh pr edit <n> --add-label run-ci`. Other label events and draft events show a
+  skipped `ci-skipped` check; ignore it, and judge CI only by the latest `build-and-test` check.
 - The Engineer does not close issues or merge. QA does not modify source. Only the Orchestrator merges and closes.
 - For this epic, **QA PASS + Orchestrator approval replaces the manual user-test gate** (delegated by the product owner).
   Product-owner decisions are recorded as issue comments and override the original acceptance wording.
