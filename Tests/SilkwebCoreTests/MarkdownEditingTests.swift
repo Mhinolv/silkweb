@@ -100,6 +100,31 @@ final class MarkdownEditingTests: XCTestCase {
         XCTAssertEqual(MarkdownEditing.edit(.outdent, text: "\t- item", selection: NSRange(location: 0, length: 0)).replacement, "- item")
     }
 
+    /// silkweb-1.76: Shift Right/Left move one level of the Settings › Editor › Indent with choice.
+    func testIndentAndOutdentFollowIndentSetting() {
+        let caret = NSRange(location: 0, length: 0)
+        for indent in WritingPreferences.Indent.allCases {
+            let unit = indent.text
+            var text = "- a"
+            for level in 1...3 {
+                text = MarkdownEditing.edit(.indent, text: text, selection: caret, indent: unit).applying(to: text)
+                XCTAssertEqual(text, String(repeating: unit, count: level) + "- a", indent.title)
+            }
+            for level in (0..<3).reversed() {
+                text = MarkdownEditing.edit(.outdent, text: text, selection: caret, indent: unit).applying(to: text)
+                XCTAssertEqual(text, String(repeating: unit, count: level) + "- a", indent.title)
+            }
+            XCTAssertEqual(MarkdownEditing.edit(.outdent, text: "- a", selection: caret, indent: unit).applying(to: "- a"), "- a")
+            XCTAssertEqual(MarkdownEditing.edit(.outdent, text: "\t\t- a", selection: caret, indent: unit).applying(to: "\t\t- a"), "\t- a",
+                           "A tab is always one level")
+        }
+        // A space-indented level written under a spaces setting is one level under Tab too.
+        let spaced = "        1. b"
+        XCTAssertEqual(MarkdownEditing.edit(.outdent, text: spaced, selection: caret, indent: "\t").applying(to: spaced), "    1. b")
+        XCTAssertEqual(MarkdownEditing.edit(.outdent, text: "  1. b", selection: caret, indent: "\t").applying(to: "  1. b"), "1. b")
+        XCTAssertEqual(MarkdownEditing.edit(.outdent, text: spaced, selection: caret, indent: "  ").applying(to: spaced), "      1. b")
+    }
+
     func testLinkCaretModes() {
         for clipboard in [nil, "https://example.com/a", "http://example.com", "ftp://example.com", "ordinary text"] as [String?] {
             let valid = clipboard?.hasPrefix("http") == true

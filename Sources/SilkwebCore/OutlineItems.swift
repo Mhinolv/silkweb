@@ -58,10 +58,11 @@ public struct OutlineItem: Equatable, Sendable, Identifiable {
                 if marker == current.0, count >= current.1, trimmed.dropFirst(count).trimmingCharacters(in: .whitespaces).isEmpty { fence = nil }
                 continue
             }
-            if line.prefix(while: { $0 == " " }).count <= 3, marker == "`" || marker == "~", count >= 3 {
+            // Any indentation: nested list items may hold fences. Indented lines are not code;
+            // the parser has no indented code and renders their images.
+            if marker == "`" || marker == "~", count >= 3 {
                 fence = (marker!, count); continue
             }
-            guard !line.hasPrefix("    "), !line.hasPrefix("\t") else { continue }
             lines.append((line, range))
         }
         // Resolve the bounded single-line reference grammar before using the shared

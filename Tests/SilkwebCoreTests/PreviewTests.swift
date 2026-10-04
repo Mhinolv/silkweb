@@ -83,4 +83,20 @@ final class PreviewTests: XCTestCase {
             XCTAssertEqual(action(value), .blocked, value)
         }
     }
+
+    /// silkweb-1.72: `.markdown` documents are library documents, so preview links open them like `.md`.
+    func testNavigationOpensMarkdownExtensionDocuments() {
+        let root = URL(fileURLWithPath: "/silkweb-preview-test")
+        let document = root.appendingPathComponent("notes/a.md")
+        let page = URL(fileURLWithPath: "/tmp/preview.html")
+        for name in ["note.markdown", "Note.MARKDOWN", "note.md", "Note.MD"] {
+            let url = URL(string: name, relativeTo: document)!.absoluteURL
+            XCTAssertEqual(PreviewNavigation.action(for: url, document: document, root: root, page: page),
+                           .document(root.appendingPathComponent("notes/" + name)), name)
+        }
+        for name in ["note.markdownx", "note.mdown", "note.txt"] {
+            let url = root.appendingPathComponent("notes/" + name)
+            XCTAssertEqual(PreviewNavigation.action(for: url, document: document, root: root, page: page), .blocked, name)
+        }
+    }
 }

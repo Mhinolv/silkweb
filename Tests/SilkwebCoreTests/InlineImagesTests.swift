@@ -6,8 +6,12 @@ final class InlineImagesTests: XCTestCase {
         let references = InlineImages.paragraph("Text ![a [nested] label](one.png) and ![two](two%20words.png \"title\")\n")
         XCTAssertEqual(references.map(\.alt), ["a [nested] label", "two"])
         XCTAssertEqual(references.map(\.destination), ["one.png", "two%20words.png"])
-        for source in ["`![x](a.png)`", "`` ![x](a.png) ``", #"\![x](a.png)"#, "    ![x](a.png)", "\t![x](a.png)", "```\n![x](a.png)\n```", "~~~\n![x](a.png)\n~~~"] {
+        for source in ["`![x](a.png)`", "`` ![x](a.png) ``", #"\![x](a.png)"#, "```\n![x](a.png)\n```", "~~~\n![x](a.png)\n~~~"] {
             XCTAssertTrue(InlineImages.paragraph(source).isEmpty, source)
+        }
+        // silkweb-1.72: the parser has no indented code, so indented (nested list) lines show their images.
+        for source in ["    ![x](a.png)", "\t![x](a.png)", "    - ![x](a.png)", "\t\t![x](a.png)"] {
+            XCTAssertEqual(InlineImages.paragraph(source).map(\.destination), ["a.png"], source)
         }
         XCTAssertEqual(InlineImages.paragraph("![escaped \\[alt\\]](a.png)").count, 1)
     }

@@ -68,6 +68,72 @@ final class MovePlanTests: XCTestCase {
         XCTAssertTrue(MoveSelection.permits(["A", "Two.md"], destination: "B"))
     }
 
+    /// silkweb-1.73: one on-disk name that predates the new-name rules must not block other
+    /// moves, and the legacy item itself can be moved, renamed and restored.
+    func testLegacyColonNameDoesNotBlockMovesOrRenames() async throws {
+        let (root, engine) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("[two](Two.md)\n".utf8).write(to: root.appendingPathComponent("Meeting 10:04.md"))
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("Notes 9:30"), withIntermediateDirectories: false)
+        _ = try await LibraryScanner.scan(root: root)
+        // Unrelated move and rename.
+        let plan = try await engine.planMove(["Two.md"], toFolder: "B")
+        _ = try await engine.executeMove(plan)
+        XCTAssertEqual(try text(root, "Meeting 10:04.md"), "[two](B/Two.md)\n")
+        _ = try await engine.executeMove(plan.reversed)
+        let renamed = try await engine.rename("A", to: "Archive")
+        XCTAssertEqual(renamed.changes.map(\.newPath), ["Archive"])
+        // The legacy items themselves: move, Keep Both, rename, unchanged rename, undo rename.
+        let legacy = try await engine.planMove(["Meeting 10:04.md", "Notes 9:30"], toFolder: "B")
+        _ = try await engine.executeMove(legacy)
+        XCTAssertEqual(try text(root, "B/Meeting 10:04.md"), "[two](../Two.md)\n")
+        _ = try await engine.executeMove(legacy.reversed)
+        try Data().write(to: root.appendingPathComponent("B/Meeting 10:04.md"))
+        let both = try await engine.planMove(["Meeting 10:04.md"], toFolder: "B", keepBoth: true)
+        XCTAssertEqual(both.changes.changes.map(\.newPath), ["B/Meeting 10:04 2.md"])
+        try await engine.validateRename("Meeting 10:04.md", to: "Meeting 10:04.md")
+        let unchanged = try await engine.rename("Meeting 10:04.md", to: "Meeting 10:04.md")
+        XCTAssertTrue(unchanged.changes.isEmpty)
+        XCTAssertEqual(try LibraryMutations.renameFilename(" Meeting 10:04 ", for: "Meeting 10:04.md", isFolder: false), "Meeting 10:04.md")
+        XCTAssertEqual(try LibraryMutations.renameFilename("Notes 9:30", for: "Notes 9:30", isFolder: true), "Notes 9:30")
+        let fixed = try await engine.rename("Meeting 10:04.md", to: "Meeting 10-04.md")
+        XCTAssertEqual(fixed.changes.map(\.newPath), ["Meeting 10-04.md"])
+        try FileManager.default.moveItem(at: root.appendingPathComponent("Meeting 10-04.md"), to: root.appendingPathComponent("Meeting 10:04.md"))
+        // New names keep the 1.6 rules, including renaming a legacy item to another ':' name.
+        for (path, name) in [("Meeting 10:04.md", "a:b.md"), ("Archive", "a:b"), ("Notes 9:30", ".hidden"), ("Archive", "x/y")] {
+            do { _ = try await engine.rename(path, to: name); XCTFail("Accepted \(name)") }
+            catch { guard case LibraryMutationError.invalidName = error else { return XCTFail("Unexpected \(error)") } }
+            do { try await engine.validateRename(path, to: name); XCTFail("Accepted \(name)") }
+            catch { guard case LibraryMutationError.invalidName = error else { return XCTFail("Unexpected \(error)") } }
+        }
+        for input in ["a:b", "Meeting 10:05"] {
+            do { _ = try LibraryMutations.renameFilename(input, for: "Meeting 10:04.md", isFolder: false); XCTFail("Accepted \(input)") }
+            catch { guard case LibraryMutationError.invalidName(.separator) = error else { return XCTFail("Unexpected \(error)") } }
+        }
+        do { _ = try await engine.createFolder(named: "a:b"); XCTFail("Accepted a:b") }
+        catch { guard case LibraryMutationError.invalidName(.separator) = error else { return XCTFail("Unexpected \(error)") } }
+        // Structural checks still refuse escaping and hidden paths.
+        for (paths, destination) in [(["Meeting 10:04.md/.."], "B"), ([".silkweb"], "B"), (["./Two.md"], "B"), (["Two.md"], ".silkweb")] {
+            do { _ = try await engine.planMove(paths, toFolder: destination); XCTFail("Expected refusal: \(paths) → \(destination)") } catch { }
+        }
+    }
+
+    /// silkweb-1.73: Undo Rename puts back a legacy on-disk name that new names may not use.
+    func testUndoRenameRestoresLegacyColonName() async throws {
+        let (root, engine) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data().write(to: root.appendingPathComponent("Meeting 10:04.md"))
+        _ = try await LibraryScanner.scan(root: root)
+        let fixed = try await engine.rename("Meeting 10:04.md", to: "Meeting 10-04.md")
+        let restored = try await engine.restoreName("Meeting 10-04.md", to: "Meeting 10:04.md")
+        XCTAssertEqual(restored.changes.map(\.newPath), ["Meeting 10:04.md"])
+        XCTAssertEqual(restored.changes.first?.id, fixed.changes.first?.id)
+        for name in ["../x.md", ".hidden.md", "", "a/b.md"] {
+            do { _ = try await engine.restoreName("Meeting 10:04.md", to: name); XCTFail("Accepted \(name)") } catch { }
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("Meeting 10:04.md").path))
+    }
+
     func testMetadataFailureRollsBackAllMovesAndRewrites() async throws {
         let (root, engine) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -317,6 +383,95 @@ final class MovePlanTests: XCTestCase {
             XCTAssertFalse(result.unsupported.isEmpty)
         }
     }
+    /// silkweb-1.72: renames use the same link rewrite as moves; restoring the name restores the links.
+    func testRenameRewritesIncomingLinksAndRestoreNameRevertsThem() async throws {
+        let (root, engine) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let one = try text(root, "A/Child/One.md")
+        let two = try text(root, "Two.md")
+        let before = try await LibraryScanner.scan(root: root)
+        _ = try await engine.rename("A/Child/One.md", to: "Renamed.md")
+        XCTAssertEqual(try text(root, "Two.md"), two.replacingOccurrences(of: "A/Child/One.md", with: "A/Child/Renamed.md"))
+        XCTAssertEqual(try text(root, "A/Child/Renamed.md"), one)
+        _ = try await engine.restoreName("A/Child/Renamed.md", to: "One.md")
+        XCTAssertEqual(try text(root, "Two.md"), two)
+        _ = try await engine.rename("A", to: "Z Folder")
+        XCTAssertEqual(try text(root, "Two.md"), two.replacingOccurrences(of: "A/Child/One.md", with: "Z%20Folder/Child/One.md"))
+        XCTAssertEqual(try text(root, "Z Folder/Child/One.md"), one)
+        _ = try await engine.restoreName("Z Folder", to: "A")
+        XCTAssertEqual(try text(root, "Two.md"), two)
+        XCTAssertEqual(try text(root, "A/Child/One.md"), one)
+        let restored = try await LibraryScanner.scan(root: root)
+        XCTAssertEqual(restored.metadata.IDsByPath, before.metadata.IDsByPath)
+    }
+
+    /// silkweb-1.72: the parser renders links on 4-space/tab-indented lines (nested list items), so they are rewritten.
+    func testIndentedNestedListLinksAreRewritten() {
+        let changes = LibraryChangeSet(changes: [.init(id: UUID(), oldPath: "A", newPath: "B/A", isFolder: true)])
+        for indent in ["    ", "\t", "        ", "\t\t", "  \t"] {
+            let text = "- parent\n\(indent)- [one](A/One.md)\n\(indent)![image](A/pic.png \"Title\")\n\(indent)text [two](<A/Two.md#x>)"
+            let result = MarkdownDestinations.rewrite(text, source: "Two.md", changes: changes)
+            XCTAssertEqual(result.text, text.replacingOccurrences(of: "A/", with: "B/A/"), indent.debugDescription)
+            XCTAssertTrue(result.unsupported.isEmpty)
+            let unsupported = MarkdownDestinations.rewrite("- parent\n\(indent)- [bad](A/a(b).md)", source: "Two.md", changes: changes)
+            XCTAssertEqual(unsupported.unsupported.count, 1, indent.debugDescription)
+        }
+        // Indented fences and inline code stay protected.
+        let fenced = "- item\n    ```\n    [a](A/One.md)\n    ```\n    `[b](A/One.md)`"
+        XCTAssertEqual(MarkdownDestinations.rewrite(fenced, source: "Two.md", changes: changes).text, fenced)
+    }
+
+    /// silkweb-1.72: CRLF and CR documents split into lines like LF, and every terminator is preserved.
+    func testCRLFAndCRDocumentsSplitLikeLFAndKeepTerminators() {
+        let changes = LibraryChangeSet(changes: [.init(id: UUID(), oldPath: "A", newPath: "B/A", isFolder: true)])
+        let lines = ["[one](A/One.md)", "```", "[code](A/One.md)", "```", "[ref]: A/One.md", "    - [nested](A/One.md)", "~~~", "[tilde](A/One.md)", "~~~", "end [two](A/Two.md)"]
+        let expected = ["[one](B/A/One.md)", "```", "[code](A/One.md)", "```", "[ref]: B/A/One.md", "    - [nested](B/A/One.md)", "~~~", "[tilde](A/One.md)", "~~~", "end [two](B/A/Two.md)"]
+        for newline in ["\n", "\r\n", "\r"] {
+            for trailing in ["", newline, newline + newline] {
+                let text = lines.joined(separator: newline) + trailing
+                let result = MarkdownDestinations.rewrite(text, source: "Two.md", changes: changes)
+                XCTAssertEqual(result.text, expected.joined(separator: newline) + trailing, newline.debugDescription)
+                XCTAssertTrue(result.unsupported.isEmpty, newline.debugDescription)
+            }
+        }
+        let mixed = "a [x](A/One.md)\r\nb\nc [y](A/One.md)\r\r\n\n"
+        XCTAssertEqual(MarkdownDestinations.rewrite(mixed, source: "Two.md", changes: changes).text,
+                       "a [x](B/A/One.md)\r\nb\nc [y](B/A/One.md)\r\r\n\n")
+        for text in ["", "\n", "\r\n", "\r\n\r\n", "plain\r\n"] {
+            XCTAssertEqual(MarkdownDestinations.rewrite(text, source: "Two.md", changes: changes).text, text)
+        }
+        XCTAssertEqual(Array(MarkdownDestinations.rewrite("[a](A/x.md)\r\n", source: "Two.md", changes: changes).text.utf8.suffix(2)), [13, 10])
+        // Sweep: every 3-line combination gives the same rewrite under LF, CRLF and CR; no-op changes are identity.
+        let pool = ["", "[a](A/One.md)", "    - [b](A/One.md)", "\t![c](A/c.png)", "```", "~~~", "[r]: A/One.md", "`[d](A/One.md)`", "[bad](A/a(b).md)", "📝 [e](<A/e f.md>)"]
+        for a in pool { for b in pool { for c in pool {
+            let lf = MarkdownDestinations.rewrite([a, b, c].joined(separator: "\n") + "\n", source: "Two.md", changes: changes)
+            for newline in ["\r\n", "\r"] {
+                let other = MarkdownDestinations.rewrite([a, b, c].joined(separator: newline) + newline, source: "Two.md", changes: changes)
+                XCTAssertEqual(other.text, lf.text.replacingOccurrences(of: "\n", with: newline))
+                XCTAssertEqual(other.unsupported, lf.unsupported)
+            }
+            let identity = [a, b, c].joined(separator: "\r\n")
+            XCTAssertEqual(MarkdownDestinations.rewrite(identity, source: "Two.md", changes: LibraryChangeSet(changes: [])).text, identity)
+        } } }
+    }
+
+    /// silkweb-1.72: nested changes (ancestor and descendant both renamed) remap to the most specific match in any order.
+    func testRemappingPrefersMostSpecificChange() {
+        let parent = LibraryPathChange(id: UUID(), oldPath: "a:b", newPath: "a_b", isFolder: true)
+        let child = LibraryPathChange(id: UUID(), oldPath: "a:b/c:d.md", newPath: "a_b/c_d.md", isFolder: false)
+        let folder = LibraryPathChange(id: UUID(), oldPath: "a:b/e:f", newPath: "a_b/e_f", isFolder: true)
+        for changes in [[parent, child, folder], [folder, child, parent], [child, parent, folder]] {
+            let set = LibraryChangeSet(changes: changes)
+            XCTAssertEqual(set.remapping("a:b/c:d.md"), "a_b/c_d.md")
+            XCTAssertEqual(set.remapping("a:b/e:f/g.md"), "a_b/e_f/g.md")
+            XCTAssertEqual(set.remapping("a:b/e:f"), "a_b/e_f")
+            XCTAssertEqual(set.remapping("a:b/plain.md"), "a_b/plain.md")
+            XCTAssertEqual(set.remapping("a:b"), "a_b")
+            XCTAssertEqual(set.remapping("a:bc/x.md"), "a:bc/x.md")
+            XCTAssertEqual(set.remapping("other.md"), "other.md")
+        }
+    }
+
     private static func reverse(_ changes: LibraryChangeSet) -> LibraryChangeSet {
         .init(changes: changes.changes.map { .init(id: $0.id, oldPath: $0.newPath, newPath: $0.oldPath!, isFolder: $0.isFolder) })
     }

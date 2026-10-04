@@ -28,7 +28,7 @@ public enum PreviewNavigation {
             if let fragment = URLComponents(url: url, resolvingAgainstBaseURL: false)?.fragment { return .anchor(fragment) }
         }
         let base = root.standardizedFileURL.resolvingSymlinksInPath().path
-        guard path.hasPrefix(base == "/" ? "/" : base + "/"), url.pathExtension.lowercased() == "md" else { return .blocked }
+        guard path.hasPrefix(base == "/" ? "/" : base + "/"), ["md", "markdown"].contains(url.pathExtension.lowercased()) else { return .blocked }
         return .document(url.standardizedFileURL)
     }
 }

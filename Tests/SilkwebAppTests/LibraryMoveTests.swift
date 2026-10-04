@@ -56,6 +56,43 @@ final class LibraryMoveTests: XCTestCase {
         XCTAssertEqual(workspace.editor.text, "dirty [two](../Two.md)")
         XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("Two.md"), encoding: .utf8), "[one](A/One.md)")
     }
+    /// silkweb-1.72: renaming a document or folder rewrites incoming links; one undo restores name and links.
+    @MainActor
+    func testRenameRewritesIncomingLinksAndUndoRestoresBoth() async throws {
+        let (root, workspace) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        func two() throws -> String { try String(contentsOf: root.appendingPathComponent("Two.md"), encoding: .utf8) }
+        for (item, expected, renamed) in [(LibraryRename(path: "A/One.md", isFolder: false), "[one](A/Renamed.md)", "A/Renamed.md"),
+                                          (LibraryRename(path: "A", isFolder: true), "[one](Renamed/One.md)", "Renamed/One.md")] {
+            workspace.rename = item
+            workspace.finishRename(item, value: "Renamed")
+            try await wait(workspace)
+            XCTAssertNil(workspace.mutationError)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(renamed).path))
+            XCTAssertEqual(try two(), expected)
+            XCTAssertEqual(try String(contentsOf: root.appendingPathComponent(renamed), encoding: .utf8), "[two](../Two.md)")
+            XCTAssertEqual(workspace.libraryUndo.last?.title, "Undo Rename")
+            XCTAssertTrue(workspace.canUndoLibrary)
+            workspace.undoLibrary()
+            try await wait(workspace)
+            XCTAssertNil(workspace.mutationError)
+            XCTAssertTrue(workspace.libraryUndo.isEmpty)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("A/One.md").path))
+            XCTAssertEqual(try two(), "[one](A/One.md)")
+        }
+        // Undo still restores name and links after an unrelated edit invalidated the exact snapshot.
+        let item = LibraryRename(path: "A/One.md", isFolder: false)
+        workspace.rename = item
+        workspace.finishRename(item, value: "Renamed")
+        try await wait(workspace)
+        XCTAssertEqual(try two(), "[one](A/Renamed.md)")
+        try Data("[one](A/Renamed.md)\nedited".utf8).write(to: root.appendingPathComponent("Two.md"), options: .atomic)
+        workspace.undoLibrary()
+        try await wait(workspace)
+        XCTAssertNil(workspace.mutationError)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("A/One.md").path))
+        XCTAssertEqual(try two(), "[one](A/One.md)\nedited")
+    }
     @MainActor
     func testFailedDirtySaveAbortsMove() async throws {
         let (root, workspace) = try await fixture()

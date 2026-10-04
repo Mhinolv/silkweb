@@ -2,31 +2,50 @@ import XCTest
 @testable import SilkwebCore
 
 final class MarkdownTableTests: XCTestCase {
-    func testEveryDimensionAndAlignment() {
+    func testEveryDimensionAndAlignmentIsCompact() {
         for columns in 1...20 {
             for rows in 1...100 {
                 for alignment in TableAlignment.allCases {
                     let source = MarkdownTable.source(options: TableOptions(columns: columns, rows: rows, alignment: alignment))
                     let lines = source.components(separatedBy: "\n")
                     XCTAssertEqual(lines.count, rows + 2)
-                    XCTAssertTrue(lines.allSatisfy { $0.filter { $0 == "|" }.count == columns + 1 })
+                    XCTAssertEqual(lines[0], "| " + (1...columns).map { "Column \($0)" }.joined(separator: " | ") + " |")
+                    XCTAssertEqual(lines[1], "| " + Array(repeating: alignment.marker, count: columns).joined(separator: " | ") + " |")
+                    XCTAssertTrue(lines.dropFirst(2).allSatisfy { $0 == String(repeating: "|  ", count: columns) + "|" })
+                    for line in lines {
+                        XCTAssertEqual(line.filter { $0 == "|" }.count, columns + 1)
+                        XCTAssertTrue(line.hasPrefix("| ") && line.hasSuffix(" |"), line)
+                    }
+                    // Exactly one space on each side of every pipe: no padding runs (body rows checked above).
+                    for line in lines.prefix(2) {
+                        XCTAssertFalse(line.contains("  "), line)
+                    }
                     let markers = lines[1].split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }
                     XCTAssertEqual(markers.count, columns)
                     for marker in markers {
                         XCTAssertEqual(marker.hasPrefix(":"), alignment == .left || alignment == .center)
                         XCTAssertEqual(marker.hasSuffix(":"), alignment == .right || alignment == .center)
-                        XCTAssertGreaterThanOrEqual(marker.filter { $0 == "-" }.count, 3)
+                        XCTAssertEqual(marker.filter { $0 == "-" }.count, 3)
                     }
-                    XCTAssertTrue(lines[0].contains("Column \(columns)"))
                 }
             }
         }
     }
-    func testEscapingAndPadding() {
+    func testCompactExactOutput() {
+        let expected: [TableAlignment: String] = [.default: "---", .left: ":---", .center: ":---:", .right: "---:"]
+        for (alignment, marker) in expected {
+            XCTAssertEqual(MarkdownTable.source(options: TableOptions(columns: 3, rows: 1, alignment: alignment)),
+                           "| Column 1 | Column 2 | Column 3 |\n| \(marker) | \(marker) | \(marker) |\n|  |  |  |")
+            XCTAssertEqual(MarkdownTable.source(options: TableOptions(columns: 1, rows: 1, alignment: alignment)),
+                           "| Column 1 |\n| \(marker) |\n|  |")
+        }
+    }
+    func testEscapingWithoutPadding() {
         XCTAssertEqual(MarkdownTable.escape("a|b\\|c\r\nd\ne\rf"), "a\\|b\\\\\\|c d e f")
         let source = MarkdownTable.source(options: TableOptions(columns: 2, rows: 1), headers: ["A|B", "Long header"])
         XCTAssertEqual(source.components(separatedBy: "\n")[0], "| A\\|B | Long header |")
-        XCTAssertEqual(source.components(separatedBy: "\n")[2], "|      |             |")
+        XCTAssertEqual(source.components(separatedBy: "\n")[1], "| --- | --- |")
+        XCTAssertEqual(source.components(separatedBy: "\n")[2], "|  |  |")
     }
     func testGeneratedSourceParsesAsTableIncludingEscapedHeaders() {
         for alignment in TableAlignment.allCases {
@@ -44,8 +63,6 @@ final class MarkdownTableTests: XCTestCase {
                     XCTAssertEqual(markers, Array(repeating: expected, count: columns))
                 }
             }
-            let source = MarkdownTable.source(options: TableOptions(columns: 1, rows: 1, alignment: alignment), headers: ["A"])
-            XCTAssertEqual(Set(source.components(separatedBy: "\n").map(\.count)).count, 1)
         }
     }
     func testInsertionBoundariesAndReplacement() {

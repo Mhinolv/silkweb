@@ -81,7 +81,7 @@ final class ToolbarRealWindowTests: XCTestCase {
         XCTAssertEqual(workspace.preview.showsOutline, outline)
         let oldAppearance = NSApp.appearance
         NSApp.appearance = NSAppearance(named: .aqua)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 900),
+        let window = SimulatedFullScreenWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 900),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -210,14 +210,30 @@ final class ToolbarRealWindowTests: XCTestCase {
         }
     }
 
-    /// Only positive evidence moves items into the traffic-light area: full screen, or all three buttons hidden.
+    /// Only positive evidence moves items into the traffic-light area: no standard button shows. Full screen
+    /// alone isn't evidence (attempt 3): its titlebar reveal shows the buttons while the window stays full screen.
     @MainActor
-    func testWindowButtonsCountAsAbsentOnlyInFullScreenOrWhenAllAreHidden() {
-        XCTAssertTrue(CompactToolbarController.windowButtonsAbsent(fullScreen: true, buttonsHidden: [false, false, false]))
-        XCTAssertTrue(CompactToolbarController.windowButtonsAbsent(fullScreen: false, buttonsHidden: [true, true, true]))
-        XCTAssertFalse(CompactToolbarController.windowButtonsAbsent(fullScreen: false, buttonsHidden: [false, false, false]))
-        XCTAssertFalse(CompactToolbarController.windowButtonsAbsent(fullScreen: false, buttonsHidden: [true, true, false]))
-        XCTAssertFalse(CompactToolbarController.windowButtonsAbsent(fullScreen: false, buttonsHidden: [false, true, true]))
+    func testWindowButtonsCountAsAbsentOnlyWhenNoneShows() {
+        XCTAssertTrue(CompactToolbarController.windowButtonsAbsent(buttonsShown: [false, false, false]))
+        XCTAssertTrue(CompactToolbarController.windowButtonsAbsent(buttonsShown: []))
+        XCTAssertFalse(CompactToolbarController.windowButtonsAbsent(buttonsShown: [true, true, true]))
+        XCTAssertFalse(CompactToolbarController.windowButtonsAbsent(buttonsShown: [false, false, true]))
+        XCTAssertFalse(CompactToolbarController.windowButtonsAbsent(buttonsShown: [true, false, false]))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let zoom = window.standardWindowButton(.zoomButton)
+        XCTAssertTrue(CompactToolbarController.isShown(zoom))
+        zoom?.alphaValue = 0
+        XCTAssertFalse(CompactToolbarController.isShown(zoom), "faded out")
+        zoom?.alphaValue = 1
+        zoom?.superview?.isHidden = true
+        XCTAssertFalse(CompactToolbarController.isShown(zoom), "titlebar hidden")
+        zoom?.superview?.isHidden = false
+        zoom?.isHidden = true
+        XCTAssertFalse(CompactToolbarController.isShown(zoom), "hidden")
+        XCTAssertFalse(CompactToolbarController.isShown(nil))
     }
 
     /// The toolbar stays visible in full screen: the window delegate drops `.autoHideToolbar`.
@@ -280,5 +296,79 @@ final class ToolbarRealWindowTests: XCTestCase {
         for _ in 0..<10 where abs(firstMinX() - shown) > 0.5 { try await h.settle() }
         XCTAssertEqual(firstMinX(), shown, accuracy: 0.5, h.geometry)
         try assertClearOfWindowButtons(h, "after the slide back")
+    }
+
+    /// No placed item touches a window button that is showing, whatever the window's full-screen state.
+    @MainActor private func assertClearOfVisibleButtons(_ h: Harness, _ context: String, file: StaticString = #filePath, line: UInt = #line) {
+        let visible = h.buttons.filter { !$0.isHiddenOrHasHiddenAncestor && $0.alphaValue > 0.01 && $0.window != nil }
+        XCTAssertEqual(visible.count, 3, "\(context): the revealed titlebar shows all three buttons", file: file, line: line)
+        for item in h.placed {
+            let frame = h.frame(item.view!)
+            for button in visible {
+                XCTAssertFalse(frame.insetBy(dx: 0.5, dy: 0.5).intersects(h.frame(button)),
+                               "\(context): \(item.label) \(frame) overlaps a visible window button \(h.frame(button)) — \(h.geometry)",
+                               file: file, line: line)
+            }
+        }
+    }
+
+    /// silkweb-1.65 attempt 3, the owner's repro on f85a28d: in full screen the items slide into the empty
+    /// traffic-light area, then hovering at the top reveals the menu bar and macOS shows the titlebar WITH the
+    /// buttons while the window stays full screen. Offscreen the window can't enter real full screen (AppKit
+    /// traps when `.fullScreen` is set outside a transition), so the window reports the `.fullScreen` style mask
+    /// and the test hides or shows the standard buttons as macOS does when it conceals or reveals the titlebar.
+    @MainActor
+    func testFullScreenTitlebarRevealNeverPutsItemsUnderTheWindowButtons() async throws {
+        let h = try await makeHarness(width: 1400, outline: false)
+        defer { h.cleanUp() }
+        h.workspace.navigate(folder: Self.deep, documents: [Self.document], pinned: true)
+        await h.workspace.waitForNavigation()
+        try await h.settle()
+        let shown = firstMinX(h)
+        try assertClearOfWindowButtons(h, "before full screen")
+        let window = try XCTUnwrap(h.window as? SimulatedFullScreenWindow)
+        window.simulatesFullScreen = true
+        h.workspace.toolbarMetrics.controller.scheduleUpdate()
+        XCTAssertTrue(h.window.styleMask.contains(.fullScreen))
+        // Full screen, titlebar revealed: the buttons are visible from the start.
+        try await h.settle()
+        assertClearOfVisibleButtons(h, "full screen, titlebar revealed")
+        try assertNothingOverflows(h, "full screen, titlebar revealed")
+        for round in 1...2 {
+            try await concealAndReveal(h, round: round, shown: shown)
+        }
+        // The window leaves full screen with the row where it started.
+        window.simulatesFullScreen = false
+        h.workspace.toolbarMetrics.controller.scheduleUpdate()
+        try await h.settle()
+        try assertClearOfWindowButtons(h, "after full screen")
+        try assertNothingOverflows(h, "after full screen")
+    }
+
+    /// Titlebar concealed (buttons hidden: items take the freed space), then the hover reveal (buttons shown:
+    /// items move back beside them).
+    @MainActor private func concealAndReveal(_ h: Harness, round: Int, shown: CGFloat) async throws {
+        for button in h.buttons { button.isHidden = true }
+        for _ in 0..<10 where firstMinX(h) > Spacing.small { try await h.settle() }
+        XCTAssertLessThanOrEqual(firstMinX(h), Spacing.small, "round \(round), concealed: \(h.geometry)")
+        try assertNothingOverflows(h, "round \(round), full screen, titlebar concealed")
+        for button in h.buttons { button.isHidden = false }
+        for _ in 0..<10 where abs(firstMinX(h) - shown) > 0.5 { try await h.settle() }
+        assertClearOfVisibleButtons(h, "round \(round), full screen, titlebar revealed after hover")
+        try assertNothingOverflows(h, "round \(round), full screen, titlebar revealed after hover")
+        XCTAssertEqual(firstMinX(h), shown, accuracy: 0.5, "round \(round), revealed: \(h.geometry)")
+    }
+
+    @MainActor private func firstMinX(_ h: Harness) -> CGFloat {
+        h.placed.compactMap(\.view).map { h.frame($0).minX }.min() ?? .infinity
+    }
+}
+
+/// Reports the `.fullScreen` style mask while `simulatesFullScreen` is set, to AppKit and to Silkweb alike.
+final class SimulatedFullScreenWindow: NSWindow {
+    var simulatesFullScreen = false
+    override var styleMask: NSWindow.StyleMask {
+        get { simulatesFullScreen ? super.styleMask.union(.fullScreen) : super.styleMask }
+        set { super.styleMask = newValue }
     }
 }

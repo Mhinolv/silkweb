@@ -45,3 +45,24 @@ struct MediaMigrationBanner: View {
         }
     }
 }
+
+/// Shares the media strip's slot: a recovery file couldn't be read and was set aside (1.70).
+struct UnreadableRecoveryBanner: View {
+    static let message = "A recovery file couldn’t be read and was set aside."
+    let workspace: LibraryWorkspace
+
+    var body: some View {
+        if let file = workspace.unreadableRecoveryFile {
+            HStack(spacing: 8) {
+                Image(systemName: "info.circle").foregroundStyle(.secondary)
+                Text(Self.message)
+                Spacer()
+                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
+                Button { workspace.unreadableRecoveryFile = nil } label: { Image(systemName: "xmark") }
+                    .accessibilityLabel("Dismiss message").help("Dismiss message")
+            }
+            .font(.callout).controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8)
+            .frame(minHeight: 36).paneStrip(hairline: .bottom)
+        }
+    }
+}

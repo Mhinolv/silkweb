@@ -13,8 +13,8 @@ final class ToolbarMetrics {
 }
 
 /// Keeps the compact bar laid out: sizes the breadcrumb to the room the other items leave, sets overflow
-/// priorities, and slides the leading items into the traffic-light area only while the window buttons are
-/// absent (full screen, or hidden buttons; AppKit doesn't reflow for them).
+/// priorities, and slides the leading items into the traffic-light area only while no window button shows
+/// (hidden buttons, or the concealed full-screen titlebar; AppKit doesn't reflow for them).
 @MainActor final class CompactToolbarController: NSObject {
     weak var metrics: ToolbarMetrics?
     private(set) weak var window: NSWindow?
@@ -71,11 +71,15 @@ final class ToolbarMetrics {
                     }
                 },
             ]
-            buttonObservations = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { kind in
-                window.standardWindowButton(kind)?.observe(\.isHidden) { [weak self] _, _ in
-                    MainActor.assumeIsolated { self?.scheduleUpdate() }
-                }
-            }
+            // macOS shows the buttons again when the full-screen titlebar is revealed (hover at the top edge), so
+            // follow the buttons themselves, and their titlebar view, rather than the window's full-screen state.
+            let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { window.standardWindowButton($0) }
+            let changed: (NSView) -> Void = { [weak self] _ in MainActor.assumeIsolated { self?.scheduleUpdate() } }
+            buttonObservations = buttons.flatMap { button in
+                [button.observe(\.isHidden) { view, _ in changed(view) },
+                 button.observe(\.alphaValue) { view, _ in changed(view) },
+                 button.observe(\.superview) { view, _ in changed(view) }]
+            } + Set(buttons.compactMap(\.superview)).map { titlebar in titlebar.observe(\.isHidden) { view, _ in changed(view) } }
         }
         scheduleUpdate()
     }
@@ -92,18 +96,24 @@ final class ToolbarMetrics {
         }
     }
 
-    /// Only positive evidence counts: full screen, or every standard button hidden. A visible traffic light
-    /// always keeps the items where AppKit put them.
-    static func windowButtonsAbsent(fullScreen: Bool, buttonsHidden: [Bool]) -> Bool {
-        fullScreen || buttonsHidden.allSatisfy { $0 }
+    /// The buttons are absent only when none of them shows. Full screen alone isn't evidence: macOS reveals the
+    /// titlebar with its buttons on hover while the window stays full screen. A visible traffic light always
+    /// keeps the items where AppKit put them.
+    static func windowButtonsAbsent(buttonsShown: [Bool]) -> Bool {
+        !buttonsShown.contains(true)
+    }
+
+    /// Shown: in a window, not hidden (itself or its titlebar), and not faded out.
+    static func isShown(_ button: NSButton?) -> Bool {
+        guard let button else { return false }
+        return button.window != nil && !button.isHiddenOrHasHiddenAncestor && button.alphaValue > 0.01
     }
 
     var windowButtonsAbsent: Bool {
         guard let window else { return false }
-        return Self.windowButtonsAbsent(fullScreen: window.styleMask.contains(.fullScreen),
-                                        buttonsHidden: [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].map {
-                                            window.standardWindowButton($0)?.isHidden ?? true
-                                        })
+        return Self.windowButtonsAbsent(buttonsShown: [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].map {
+            Self.isShown(window.standardWindowButton($0))
+        })
     }
 
     func update() {

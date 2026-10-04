@@ -1,9 +1,82 @@
 import Foundation
 
-public struct TrashedItem: Sendable {
+public struct TrashedItem: Codable, Sendable {
     public let originalPath: String
     public let trashURL: URL
     let identities: [String: UUID]
+    /// Tag state of the trashed documents; the post-trash scan prunes it from the index.
+    var tags = TrashedTags()
+
+    init(originalPath: String, trashURL: URL, identities: [String: UUID], tags: TrashedTags = TrashedTags()) {
+        self.originalPath = originalPath; self.trashURL = trashURL; self.identities = identities; self.tags = tags
+    }
+
+    private enum CodingKeys: String, CodingKey { case originalPath, trashURL, identities, tags }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        originalPath = try values.decode(String.self, forKey: .originalPath)
+        trashURL = try values.decode(URL.self, forKey: .trashURL)
+        identities = try values.decodeIfPresent([String: UUID].self, forKey: .identities) ?? [:]
+        tags = (try? values.decode(TrashedTags.self, forKey: .tags)) ?? TrashedTags()
+    }
+}
+
+/// Tag assignments, their definitions and the recency order captured at trash time.
+struct TrashedTags: Codable, Equatable, Sendable {
+    var tags: [LibraryTag] = []
+    var tagsByDocument: [String: Set<UUID>] = [:]
+    var tagRecency: [UUID] = []
+
+    init(tags: [LibraryTag] = [], tagsByDocument: [String: Set<UUID>] = [:], tagRecency: [UUID] = []) {
+        self.tags = tags; self.tagsByDocument = tagsByDocument; self.tagRecency = tagRecency
+    }
+
+    init(documents: Set<String>, metadata: LibraryMetadata) {
+        tagsByDocument = metadata.tagsByDocument.filter { documents.contains($0.key) }
+        let used = tagsByDocument.values.reduce(into: Set<UUID>()) { $0.formUnion($1) }
+        tags = metadata.tags.filter { used.contains($0.id) }
+        tagRecency = metadata.tagRecency
+    }
+
+    private enum CodingKeys: String, CodingKey { case tags, tagsByDocument, tagRecency }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        tags = (try? values.decode([LibraryTag].self, forKey: .tags)) ?? []
+        tagsByDocument = (try? values.decode([String: Set<UUID>].self, forKey: .tagsByDocument)) ?? [:]
+        tagRecency = (try? values.decode([UUID].self, forKey: .tagRecency)) ?? []
+    }
+
+    /// Adds back what trashing removed without dropping tags created or applied since.
+    /// A tag whose name was re-created in the meantime merges into the current one.
+    func merged(into metadata: LibraryMetadata) -> LibraryMetadata {
+        guard !tagsByDocument.isEmpty else { return metadata }
+        var result = metadata
+        var mapped: [UUID: UUID] = [:]
+        for tag in tags {
+            if result.tags.contains(where: { $0.id == tag.id }) { mapped[tag.id] = tag.id }
+            else if let current = TagEditor.existing(tag.name, in: result.tags) { mapped[tag.id] = current.id }
+            else { result.tags.append(tag); mapped[tag.id] = tag.id }
+        }
+        for (document, ids) in tagsByDocument {
+            result.tagsByDocument[document, default: []].formUnion(ids.compactMap { mapped[$0] })
+        }
+        // Reinsert each missing tag just before its next captured neighbour that is still
+        // listed, so tags applied since the trash stay ahead; else after the previous one.
+        var anchor: UUID?
+        for (offset, old) in tagRecency.enumerated() {
+            let id = mapped[old] ?? old
+            if mapped[old] != nil, !result.tagRecency.contains(id) {
+                let next = tagRecency[(offset + 1)...].lazy.map { mapped[$0] ?? $0 }
+                    .compactMap { result.tagRecency.firstIndex(of: $0) }.first
+                let index = next ?? anchor.flatMap { result.tagRecency.firstIndex(of: $0) }.map { $0 + 1 } ?? result.tagRecency.endIndex
+                result.tagRecency.insert(id, at: index)
+            }
+            if result.tagRecency.contains(id) { anchor = id }
+        }
+        return result
+    }
 }
 
 public struct TrashFailure: Sendable {
@@ -51,8 +124,8 @@ public actor TrashService {
         var url = root
         try LibraryMetadataStore.rejectLink(url)
         for component in path.split(separator: "/", omittingEmptySubsequences: false) {
-            do { _ = try LibraryMutations.validateName(String(component)) }
-            catch { throw LibraryError.invalidRelativePath }
+            // Structural checks only: on-disk names may predate the rules for new names.
+            try LibraryMutations.validateExistingComponent(String(component))
             url.appendPathComponent(String(component))
             try LibraryMetadataStore.rejectLink(url)
         }
@@ -106,8 +179,9 @@ public actor TrashService {
             do {
                 let url = try item(path)
                 let destination = try trash(url)
-                result.items.append(TrashedItem(originalPath: path, trashURL: destination,
-                    identities: metadata.IDsByPath.filter { $0.key == path || $0.key.hasPrefix(path + "/") }))
+                let identities = metadata.IDsByPath.filter { $0.key == path || $0.key.hasPrefix(path + "/") }
+                result.items.append(TrashedItem(originalPath: path, trashURL: destination, identities: identities,
+                    tags: TrashedTags(documents: Set(identities.values.map(\.uuidString)), metadata: metadata)))
             } catch { result.failures.append(TrashFailure(path: path, reason: error.localizedDescription)) }
         }
         return result
@@ -125,6 +199,7 @@ public actor TrashService {
                 try FileManager.default.moveItem(at: record.trashURL, to: destination)
                 result.items.append(record)
                 for (path, id) in record.identities { metadata.IDsByPath[path] = id }
+                metadata = TagEditor.pruning(record.tags.merged(into: metadata))
                 // A rebuildable index failure must not report a restored file as
                 // still in Trash. The next scan can reconstruct its identity.
                 try? LibraryMetadataStore.save(metadata, root: root)

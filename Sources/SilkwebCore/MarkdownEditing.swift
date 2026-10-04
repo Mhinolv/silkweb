@@ -120,7 +120,9 @@ public enum MarkdownEditing {
             if command == .indent { return indent + line }
             if command == .outdent {
                 if line.hasPrefix("\t") { return String(line.dropFirst()) }
-                return String(line.dropFirst(min(whitespace.prefix { $0 == " " }.count, indent.count)))
+                // Under Tab, a space-indented level counts as one tab stop.
+                let level = indent.contains("\t") ? 4 : indent.count
+                return String(line.dropFirst(min(whitespace.prefix { $0 == " " }.count, level)))
             }
             let stripped: String
             if [.bullet, .numbered, .task].contains(command), let prefix = listPrefix(body) {

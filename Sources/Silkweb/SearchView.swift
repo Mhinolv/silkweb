@@ -71,12 +71,22 @@ struct SearchView<Content: View>: View {
                                         openSelected()
                                     } label: {
                                         SearchResultRow(result: result, query: search.resultText)
+                                            .padding(.horizontal, 12)
                                             .frame(maxWidth: .infinity, alignment: .leading)
+                                            .background { if selected == result.id { SearchResultCapsule(focused: resultsFocused) } }
+                                            .padding(.horizontal, Spacing.capsuleInset - SearchResultCapsule.cellInset).padding(.vertical, 1)
                                             .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
                                     .tag(result.id)
+                                    .listRowInsets(EdgeInsets())
+                                    .listRowSeparator(.hidden)
+                                    .background(SelectionHighlightSuppressor())
                                 }
+                                .listStyle(.plain)
+                                // The flat Surface (1.67): no list material behind or below the rows.
+                                .scrollContentBackground(.hidden)
+                                .background(Color.silkwebPaneBackground)
                                 .focused($resultsFocused)
                                 .onKeyPress(.return) { openSelected(); return .handled }
                             }
@@ -139,10 +149,46 @@ struct SearchResultRow: View {
                 .font(.system(size: 12)).lineSpacing(DocumentRow.excerptLineSpacing).foregroundStyle(.secondary)
                 .lineLimit(2).frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34, alignment: .topLeading)
         }
-        .padding(.vertical, 8)
+        // 11 pt inside the 1 pt-inset capsule: the 96 pt `DocumentRow` height.
+        .padding(.vertical, 11)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(result.displayName), in \(SearchPresentation.path(result.folderPathComponents))")
         .accessibilityValue(result.snippet)
+    }
+}
+
+/// The document list's selection capsule (1.62) behind a search result, in place of the system highlight.
+struct SearchResultCapsule: View {
+    /// A plain List places its cells this far in from the table edges, even with zero row insets.
+    static let cellInset: CGFloat = 8
+    let focused: Bool
+    @Environment(\.appearsActive) private var appearsActive
+
+    var body: some View {
+        let style = CapsuleStyle.fill(isKey: appearsActive, isFocused: focused,
+                                      contrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
+        let shape = RoundedRectangle(cornerRadius: 8)
+        shape.fill(style.tintsAccessories ? Color.silkwebSelection : Color.silkwebSelectionInactive)
+            .overlay { if style.stroke != nil { shape.strokeBorder(Color.silkwebAccent, lineWidth: 1) } }
+    }
+}
+
+/// Turns off the hosting table's own selection fill so only the capsule shows; selection itself is unchanged.
+private struct SelectionHighlightSuppressor: NSViewRepresentable {
+    func makeNSView(context: Context) -> Probe { Probe() }
+    func updateNSView(_ view: Probe, context: Context) { view.suppress() }
+
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            suppress()
+        }
+
+        func suppress() {
+            var ancestor = superview
+            while let view = ancestor, !(view is NSTableView) { ancestor = view.superview }
+            if let table = ancestor as? NSTableView, table.selectionHighlightStyle != .none { table.selectionHighlightStyle = .none }
+        }
     }
 }
 

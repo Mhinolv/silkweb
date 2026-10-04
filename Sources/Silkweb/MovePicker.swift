@@ -104,11 +104,11 @@ struct MovePicker: View {
             defer { workspace.mutating = false }
             do {
                 let engine = try LibraryMutations(root: root)
-                let changes = try await engine.rename(path, to: folderName)
-                try await workspace.refresh(changes)
+                let plan = try await engine.planRename(path, to: folderName)
+                let changes = try await workspace.commitMove(plan, using: engine)
                 destination = changes.changes.first?.newPath ?? path
                 if let newPath = changes.changes.first?.newPath {
-                    workspace.libraryUndo.append(.rename(LibraryRename(path: newPath, isFolder: true), (path as NSString).lastPathComponent))
+                    workspace.libraryUndo.append(.rename(LibraryRename(path: newPath, isFolder: true), (path as NSString).lastPathComponent, plan.reversed))
                 }
                 renamingPath = nil
                 error = nil

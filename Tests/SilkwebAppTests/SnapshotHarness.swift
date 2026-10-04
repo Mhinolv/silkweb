@@ -29,6 +29,8 @@ struct SnapshotScenario {
     /// Folders expanded in addition to the default set.
     var expanded: Set<String> = []
     var mediaMigration: String? = nil
+    /// silkweb-1.70 recovery states: "pending" (Keep/Discard), "orphan" (draft for a deleted note), "unreadable" (strip).
+    var recovery: String? = nil
     var tableInsert: String? = nil
     var exportWarning = false
     var printWarning = false
@@ -82,6 +84,10 @@ struct SnapshotScenario {
         .init(name: "table-insert-right", tableInsert: "right"),
         .init(name: "media-migration-progress", document: image, mediaMigration: "progress"),
         .init(name: "media-migration-failure", document: image, mediaMigration: "failure"),
+        // silkweb-1.70: recovered text awaiting Keep/Discard; a draft whose note was deleted; a set-aside recovery file.
+        .init(name: "recovery-pending", document: pourOver, recovery: "pending"),
+        .init(name: "recovery-orphan-draft", folder: "Coffee", recovery: "orphan"),
+        .init(name: "recovery-unreadable", document: pourOver, recovery: "unreadable"),
         .init(name: "sidebar-resized", folder: "Coffee", resizeSidebar: true),
         // silkweb-1.63: thread guides at both sidebar width limits; no coral node since 1.65 (the capsule marks the scope).
         .init(name: "sidebar-resized-180", folder: "Coffee", resizeSidebar: true, sidebarWidth: 180),
@@ -388,6 +394,23 @@ final class SnapshotHarness {
         workspace.session.selectedFolder = scenario.folder
         if let folder = scenario.folder, !snapshot.folders.contains(where: { $0.relativePath == folder }) {
             throw SnapshotFailure.error("Missing fixture folder: \(folder)")
+        }
+        if let recovery = scenario.recovery {
+            // Drafts are written exactly as a previous launch would have on quit.
+            let path = recovery == "orphan" ? "Coffee/Deleted Note.md" : SnapshotScenario.pourOver
+            let url = snapshot.rootURL.appendingPathComponent(path)
+            if recovery == "orphan" { try Data("# Deleted Note\n".utf8).write(to: url) }
+            let coordinator = SaveCoordinator(store: DocumentStore(root: snapshot.rootURL), recoveryDirectory: workspace.recoveryDirectory)
+            let text = try await coordinator.open(url).text
+            try await coordinator.edit(text + "\nA recovered paragraph that was never saved.\n", at: url)
+            if recovery != "unreadable" { try await coordinator.preserveUnsavedDrafts() }
+            if recovery == "orphan" {
+                try FileManager.default.removeItem(at: url)
+                await workspace.openOrphanDraft(url.standardizedFileURL)
+            }
+            if recovery == "unreadable", let directory = workspace.recoveryDirectory {
+                workspace.unreadableRecoveryFile = directory.appendingPathComponent("Unreadable/draft.json")
+            }
         }
         let paths = scenario.tabs.isEmpty ? scenario.document.map({ [$0] }) ?? [] : scenario.tabs
         for path in paths {

@@ -70,7 +70,8 @@ struct FormatCommands: Commands {
 extension PlainMarkdownTextView {
     func format(_ command: MarkdownCommand) {
         guard isEditable, !hasMarkedText() else { return }
-        apply(MarkdownEditing.edit(command, text: string, selection: selectedRange(), clipboard: command == .link ? NSPasteboard.general.string(forType: .string) : nil), name: command.name)
+        apply(MarkdownEditing.edit(command, text: string, selection: selectedRange(), clipboard: command == .link ? NSPasteboard.general.string(forType: .string) : nil,
+                                   indent: style.indent.text), name: command.name)
     }
 
     func apply(_ edit: MarkdownEdit, name: String) {
