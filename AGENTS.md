@@ -110,6 +110,10 @@ Rules:
   the `PR template` check fails otherwise. Use `Refs #n` instead of `Closes #n` while the owner still has to check it.
 - Merge requires: `qa-pass`, green CI, a passing template check, and (bugs) the regression test proven to fail on
   the pre-fix code. Closing keywords don't fire on `team/roadmap`, so the Orchestrator closes issues explicitly.
+- `CI / build-and-test` runs only when a PR is opened ready or leaves draft, on the `run-ci` label, or via
+  `workflow_dispatch` — never on draft pushes, later pushes, or branch pushes — and only if the PR touches `Sources/`,
+  `Tests/`, `Package.*`, `scripts/` or `ci.yml` (doc-only PRs have no CI check and count as passing). To re-run:
+  `gh pr edit <n> --remove-label run-ci; gh pr edit <n> --add-label run-ci`.
 - The Engineer does not close issues or merge. QA does not modify source. Only the Orchestrator merges and closes.
 - For this epic, **QA PASS + Orchestrator approval replaces the manual user-test gate** (delegated by the product owner).
   Product-owner decisions are recorded as issue comments and override the original acceptance wording.
