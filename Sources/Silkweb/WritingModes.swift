@@ -208,15 +208,16 @@ import SilkwebCore
         }
     }
 
-    /// Inline image overlays (1.41) in dimmed paragraphs take the text's opacity.
+    /// Inline image overlays (1.41) are never part of the bright unit (1.68): dimmed text's
+    /// opacity whenever Focus is on, wherever the caret is. Only toggling Focus fades them.
+    var imageOpacity: CGFloat { 1 - overlay(at: 0, to: nil, from: nil) }
+
     func applyImageAlpha() {
         guard let editor else { return }
         let views = editor.inlineImages.imageViews
         guard !views.isEmpty else { return }
-        for view in views {
-            let target = opacity(at: view.frame.midY)
-            if view.alphaValue != target { view.alphaValue = target }
-        }
+        let target = imageOpacity
+        for view in views where view.alphaValue != target { view.alphaValue = target }
     }
 
     // MARK: Typewriter

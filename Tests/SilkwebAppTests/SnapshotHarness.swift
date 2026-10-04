@@ -135,6 +135,9 @@ struct SnapshotScenario {
         .init(name: "settings-library", settingsTab: .library),
         // silkweb-1.27: caret mid-document with a dimmed inline image; caret near the start at the 40% anchor.
         .init(name: "focus-mode", document: writingModes, visibleCaret: "The caret rests", focusMode: true),
+        // silkweb-1.68: caret on the caption line right under an image (same paragraph); the image stays dimmed.
+        .init(name: "focus-mode-image-adjacent", document: "Snapshot Fixtures/Focus Image Adjacent.md",
+              visibleCaret: "no blank line", focusMode: true),
         .init(name: "typewriter-mode", document: writingModes, visibleCaret: "Second paragraph", typewriterMode: true),
         // silkweb-1.25: selection counts leading, Focus chip + “Saved” trailing; narrow detail drops the characters segment.
         .init(name: "status-bar-counts", document: writingModes, visibleCaret: "The caret rests", focusMode: true,
@@ -361,6 +364,17 @@ final class SnapshotHarness {
             if index == 14 { writingModes += "- A list item\n- Another item\n\n```swift\nlet focused = true\n```\n\n" }
         }
         try Data(writingModes.utf8).write(to: fixtures.appendingPathComponent("Writing Modes.md"), options: .atomic)
+        let adjacent = """
+        # Day Four
+
+        We left the campground before sunrise and drove north along the shore.
+
+        ![Shoreline](fixture.png)
+        The caption sits directly under the photo, with no blank line in between.
+
+        The afternoon was spent walking the beach and writing up the morning.
+        """
+        try Data(adjacent.utf8).write(to: fixtures.appendingPathComponent("Focus Image Adjacent.md"), options: .atomic)
         try FileManager.default.createDirectory(at: fixtures.appendingPathComponent("Empty Folder"), withIntermediateDirectories: true)
         try Data().write(to: fixtures.appendingPathComponent("Empty Document.md"), options: .atomic)
         // Exercise the app's real invalid-UTF8 read-only banner without permission tricks.

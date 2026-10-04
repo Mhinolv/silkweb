@@ -161,8 +161,8 @@ import SilkwebCore
                 // Fade once per newly decoded bitmap, never on reuse of a shown bitmap.
                 if fade, firstBitmap, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                     view.alphaValue = 0
-                    // Focus Mode (1.27): fade in to the paragraph's opacity.
-                    let target = editor.writingModes.opacity(at: view.frame.midY)
+                    // Focus Mode (1.27, 1.68): fade in to the dimmed opacity.
+                    let target = editor.writingModes.imageOpacity
                     NSAnimationContext.runAnimationGroup { context in
                         context.duration = 0.12
                         view.animator().alphaValue = target

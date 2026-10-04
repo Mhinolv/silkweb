@@ -190,13 +190,13 @@ final class WritingModesTests: XCTestCase {
         let restored = try capture(editor)
         XCTAssertEqual(restored.tiffRepresentation, before.tiffRepresentation, "focus off draws exactly as before")
 
-        // Caret in the image paragraph lights the image; other paragraphs stay dim.
+        // Caret in the image paragraph lights its source line, never the image (1.68); other paragraphs stay dim.
         workspace.setWritingModes(focus: true)
         try await fixture.settle()
         editor.setSelectedRange(NSRange(location: source.range(of: "![Figure]").location, length: 0))
         try await fixture.settle()
         XCTAssertEqual(source.substring(with: try XCTUnwrap(editor.writingModes.activeRange)), "![Figure](figure.png)\n")
-        XCTAssertEqual(image.alphaValue, 1)
+        XCTAssertEqual(image.alphaValue, dimmed, accuracy: 0.001)
         XCTAssertEqual(editor.writingModes.opacity(at: try XCTUnwrap(editor.writingModes.band(for: NSRange(location: 0, length: 1))).top + 1), dimmed, accuracy: 0.001)
 
         // Fenced block and list item units; a multi-paragraph selection lights every touched paragraph.
@@ -253,6 +253,97 @@ final class WritingModesTests: XCTestCase {
         try await fixture.settle()
         XCTAssertTrue(workspace.focusMode)
         XCTAssertTrue(try XCTUnwrap(workspace.preview.editor).writingModes.focus)
+        XCTAssertFalse(fixture.window.isVisible)
+    }
+
+    static let adjacentDocument = """
+    # Adjacent Fixture
+
+    Intro paragraph above the figure.
+
+    ![Figure](figure.png)
+    ![Missing](missing.png)
+    Caption typed directly under the images.
+
+    Other paragraph below.
+    """
+
+    /// silkweb-1.68: images are never part of the bright unit, even when the caret's
+    /// paragraph (no blank line) contains their source lines.
+    @MainActor
+    func testFocusKeepsImagesDimmedInTheActiveParagraph() async throws {
+        let fixture = try await Fixture(files: ["Adjacent.md": Self.adjacentDocument], open: "Adjacent.md")
+        defer { fixture.close() }
+        let workspace = fixture.workspace
+        try await fixture.settle()
+        let editor = try XCTUnwrap(workspace.preview.editor)
+        func source() -> NSString { editor.string as NSString }
+        for _ in 0..<40 where !(editor.inlineImages.imageViews.count == 2 && editor.inlineImages.imageViews[0].content.bitmap != nil) {
+            try await fixture.settle(100)
+        }
+        let images = editor.inlineImages.imageViews
+        XCTAssertEqual(images.count, 2, "decoded bitmap and missing-file placeholder")
+        XCTAssertNotNil(images.first?.content.bitmap, "inline image decoded")
+        XCTAssertNil(images.last?.content.bitmap, "placeholder chip")
+        let dimmed = WritingModeController.dimmedOpacity
+        func assertDimmed(_ message: String, file: StaticString = #filePath, line: UInt = #line) {
+            for view in editor.inlineImages.imageViews {
+                XCTAssertFalse(view.isHidden, message, file: file, line: line)
+                XCTAssertEqual(view.alphaValue, dimmed, accuracy: 0.001, "\(view.content.reference.alt): \(message)", file: file, line: line)
+            }
+        }
+        /// The source glyphs follow paragraph focus: bright at the caret line.
+        func assertCaretLineBright(_ message: String, file: StaticString = #filePath, line: UInt = #line) throws {
+            let caret = try XCTUnwrap(editor.writingModes.caretLine(at: editor.selectedRange().location))
+            XCTAssertEqual(editor.writingModes.opacity(at: caret.midY), 1, accuracy: 0.001, message, file: file, line: line)
+        }
+
+        for typewriter in [false, true] {
+            workspace.setWritingModes(focus: false, typewriter: typewriter)
+            try await fixture.settle()
+            XCTAssertTrue(editor.inlineImages.imageViews.allSatisfy { $0.alphaValue == 1 }, "focus off restores alpha 1")
+            editor.setSelectedRange(NSRange(location: source().range(of: "Caption").location + 7, length: 0))
+            workspace.setWritingModes(focus: true)
+            try await fixture.settle()
+            XCTAssertFalse(editor.writingModes.isFading)
+            let active = source().substring(with: try XCTUnwrap(editor.writingModes.activeRange))
+            XCTAssertTrue(active.hasPrefix("![Figure]") && active.contains("Caption"), "images share the caret's paragraph: \(active)")
+            let slot = try XCTUnwrap(images.first).frame.midY
+            let band = try XCTUnwrap(editor.writingModes.band(for: try XCTUnwrap(editor.writingModes.activeRange)))
+            XCTAssertTrue(slot > band.top && slot < band.bottom, "the image slot lies inside the bright band")
+            assertDimmed("caret in the caption, before typing (typewriter \(typewriter))")
+            try assertCaretLineBright("caption line bright")
+
+            // Typing in the caption: dimmed on the same turn, while scheduled updates run, and after.
+            editor.insertText(" typed", replacementRange: editor.selectedRange())
+            assertDimmed("during insertText")
+            try await fixture.settle(50)
+            assertDimmed("after the focus update")
+            try await fixture.settle(400)
+            assertDimmed("after the image reparse")
+            XCTAssertTrue(editor.inlineImages.imageViews.first === images.first, "overlay view reused (1.60)")
+            try assertCaretLineBright("caption line bright after typing")
+
+            // Caret on the image source line: its glyphs are bright, the bitmap below stays dim.
+            editor.setSelectedRange(NSRange(location: source().range(of: "![Figure]").location + 3, length: 0))
+            try await fixture.settle()
+            assertDimmed("caret on the image source line")
+            try assertCaretLineBright("source line bright")
+
+            // A different paragraph: still dimmed, including while the paragraph-change fade runs.
+            editor.setSelectedRange(NSRange(location: source().range(of: "Other paragraph").location, length: 0))
+            try await Task.sleep(for: .milliseconds(20))
+            assertDimmed("during the paragraph-change fade")
+            editor.setSelectedRange(NSRange(location: source().range(of: "Intro paragraph").location, length: 0))
+            try await Task.sleep(for: .milliseconds(20))
+            assertDimmed("moving back across the images")
+            try await fixture.settle()
+            assertDimmed("caret in another paragraph")
+            XCTAssertEqual(source().substring(with: try XCTUnwrap(editor.writingModes.activeRange)), "Intro paragraph above the figure.\n")
+        }
+        workspace.setWritingModes(focus: false, typewriter: false)
+        try await fixture.settle()
+        XCTAssertTrue(editor.inlineImages.imageViews.allSatisfy { $0.alphaValue == 1 })
         XCTAssertFalse(fixture.window.isVisible)
     }
 
