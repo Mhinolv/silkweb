@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import ObjectiveC
 import UniformTypeIdentifiers
 import XCTest
 import SilkwebCore
@@ -526,6 +527,168 @@ final class WritingModesTests: XCTestCase {
         XCTAssertEqual(clip.bounds.minY, 0, accuracy: 0.5)
         XCTAssertFalse(workspace.windowMetadata().typewriterMode)
         XCTAssertFalse(fixture.window.isVisible)
+    }
+
+    static let headingDocument = """
+    # Heading Fixture
+
+    First body paragraph with enough words to sample its dimmed glyphs.
+
+    Second body paragraph with enough words to sample its dimmed glyphs.
+
+    Third body paragraph with enough words to sample its dimmed glyphs.
+    """
+
+    /// silkweb-1.80: typing in a heading never undims other paragraphs. Sampled in the
+    /// editor's real draw callback (the frame the user sees, as in 1.60), after every keystroke
+    /// and again after the queued styler / Focus updates run. Invariant: the overlay that
+    /// `drawOverlay` paints over each body line leaves exactly `dimmedOpacity`
+    /// (`opacity(at:)`), and no glyphs are drawn outside `draw(_:)`, where no overlay follows.
+    @MainActor
+    func testTypingInHeadingKeepsBodyDimmedAtEveryDisplay() async throws {
+        let fixture = try await Fixture(files: ["Heading.md": Self.headingDocument], open: "Heading.md")
+        defer { fixture.close() }
+        let workspace = fixture.workspace
+        try await fixture.settle()
+        let editor = try XCTUnwrap(workspace.preview.editor)
+        let dimmed = WritingModeController.dimmedOpacity
+        func source() -> NSString { editor.string as NSString }
+        /// Mid-line y of each body paragraph's first line, from already-computed layout.
+        func bodyLines() -> [(String, CGFloat)] {
+            ["Intro paragraph", "First body", "Second body", "Third body"].compactMap { phrase in
+                let location = source().range(of: phrase).location
+                guard location != NSNotFound, let line = editor.writingModes.caretLine(at: location) else { return nil }
+                return (phrase, line.midY)
+            }
+        }
+
+        var phase = ""
+        var sampling = false
+        var samples = 0
+        var violations: [String] = []
+        func sampleDisplay(_ editor: PlainMarkdownTextView, _ rect: NSRect) {
+            guard sampling, editor.window != nil else { return }
+            samples += 1
+            let heading = source().lineRange(for: source().range(of: "Heading Fixture"))
+            if NSLocationInRange(editor.selectedRange().location, heading),
+               let caret = editor.writingModes.caretLine(at: editor.selectedRange().location),
+               abs(editor.writingModes.opacity(at: caret.midY) - 1) > 0.001 {
+                violations.append("[\(phase)] heading dimmed: \(editor.writingModes.opacity(at: caret.midY))")
+            }
+            for (phrase, y) in bodyLines() where y >= rect.minY && y < rect.maxY {
+                let opacity = editor.writingModes.opacity(at: y)
+                if abs(opacity - dimmed) > 3.0 / 255 { violations.append("[\(phase)] \(phrase) drawn at \(opacity)") }
+            }
+        }
+        var restores: [(Method, IMP, IMP)] = []
+        defer { for (method, old, replacement) in restores.reversed() { method_setImplementation(method, old); imp_removeBlock(replacement) } }
+        let drawSelector = #selector(NSView.draw(_:))
+        let inherited = try XCTUnwrap(class_getInstanceMethod(PlainMarkdownTextView.self, drawSelector))
+        class_addMethod(PlainMarkdownTextView.self, drawSelector, method_getImplementation(inherited), method_getTypeEncoding(inherited))
+        let method = try XCTUnwrap(class_getInstanceMethod(PlainMarkdownTextView.self, drawSelector))
+        let drawIMP = method_getImplementation(method)
+        var inDraw = false
+        let replacement = imp_implementationWithBlock({ (editor: PlainMarkdownTextView, rect: NSRect) in
+            inDraw = true
+            unsafeBitCast(drawIMP, to: (@convention(c) (AnyObject, Selector, NSRect) -> Void).self)(editor, drawSelector, rect)
+            inDraw = false
+            sampleDisplay(editor, rect)
+        } as @convention(block) (PlainMarkdownTextView, NSRect) -> Void)
+        method_setImplementation(method, replacement)
+        restores.append((method, drawIMP, replacement))
+        let layoutClass: AnyClass = try XCTUnwrap(object_getClass(try XCTUnwrap(editor.layoutManager)))
+        for name in ["drawGlyphsForGlyphRange:atPoint:", "drawBackgroundForGlyphRange:atPoint:"] {
+            let selector = NSSelectorFromString(name)
+            let inheritedGlyphs = try XCTUnwrap(class_getInstanceMethod(layoutClass, selector))
+            class_addMethod(layoutClass, selector, method_getImplementation(inheritedGlyphs), method_getTypeEncoding(inheritedGlyphs))
+            let glyphMethod = try XCTUnwrap(class_getInstanceMethod(layoutClass, selector))
+            let glyphIMP = method_getImplementation(glyphMethod)
+            let glyphReplacement = imp_implementationWithBlock({ (layout: NSLayoutManager, range: NSRange, point: NSPoint) in
+                // Glyphs drawn outside draw(_:) would get no Focus overlay painted over them.
+                if sampling, !inDraw, layout === editor.layoutManager { violations.append("[\(phase)] \(name) \(range) outside draw(_:)") }
+                unsafeBitCast(glyphIMP, to: (@convention(c) (AnyObject, Selector, NSRange, NSPoint) -> Void).self)(layout, selector, range, point)
+            } as @convention(block) (NSLayoutManager, NSRange, NSPoint) -> Void)
+            method_setImplementation(glyphMethod, glyphReplacement)
+            restores.append((glyphMethod, glyphIMP, glyphReplacement))
+        }
+        // Offscreen text views do not invalidate themselves on edits as on screen: dirty the
+        // visible rect so each sample is the whole frame the user would see.
+        func redraw() {
+            editor.setNeedsDisplay(editor.visibleRect)
+            fixture.controller.view.layoutSubtreeIfNeeded()
+            fixture.window.displayIfNeeded()
+        }
+
+        fixture.window.makeFirstResponder(editor)
+        // Blank line under the heading (Test_Library style), and body copy directly under a
+        // heading that has a paragraph above it.
+        let documents = [Self.headingDocument, "Intro paragraph above the heading.\n" + Self.headingDocument.replacingOccurrences(of: "Fixture\n\n", with: "Fixture\n")]
+        for (variant, document) in documents.enumerated() {
+            for typewriter in [false, true] {
+                for level in ["#", "##", "######"] {
+                    workspace.setWritingModes(focus: false, typewriter: false)
+                    try await fixture.settle()
+                    let text = document.replacingOccurrences(of: "# Heading Fixture", with: "\(level) Heading Fixture")
+                    editor.insertText(text, replacementRange: NSRange(location: 0, length: source().length))
+                    let heading = source().lineRange(for: source().range(of: "Heading Fixture"))
+                    editor.setSelectedRange(NSRange(location: NSMaxRange(heading) - 1, length: 0))
+                    workspace.setWritingModes(focus: true, typewriter: typewriter)
+                    try await fixture.settle()
+                    XCTAssertFalse(editor.writingModes.isFading)
+                    XCTAssertEqual(source().substring(with: try XCTUnwrap(editor.writingModes.activeRange)), "\(level) Heading Fixture\n")
+                    XCTAssertEqual(bodyLines().count, 3 + variant, "every non-active paragraph is visible")
+                    sampling = true
+                    for (index, text) in ["a", "b", "c", " typed", "d", "", "", "e"].enumerated() {
+                        phase = "document \(variant) \(level) typewriter=\(typewriter) keystroke \(index) \(text.debugDescription)"
+                        if text.isEmpty { try key(editor, 51, "\u{7F}") }
+                        else if text.count == 1 { try key(editor, 0, text) }
+                        else { editor.insertText(text, replacementRange: editor.selectedRange()) }
+                        // The very next frame, before the queued styler / Focus updates run.
+                        redraw()
+                        await Task.yield()
+                        redraw()
+                        // Typing pace: the 150 ms content-sizing pass runs between keystrokes.
+                        for _ in 0..<5 {
+                            try await Task.sleep(for: .milliseconds(40))
+                            fixture.window.displayIfNeeded()
+                        }
+                        redraw()
+                        XCTAssertFalse(editor.writingModes.isFading, "no fade restarts per keystroke: \(phase)")
+                    }
+                    sampling = false
+                    try await fixture.settle()
+                    XCTAssertEqual(source().substring(with: try XCTUnwrap(editor.writingModes.activeRange)), "\(level) Heading Fixtureabc typee\n")
+                }
+            }
+        }
+        XCTAssertGreaterThan(samples, 150, "draw callbacks were sampled")
+        XCTAssertTrue(violations.isEmpty, "\(violations.count) undimmed body samples:\n" + violations.prefix(20).joined(separator: "\n"))
+        workspace.setWritingModes(focus: false, typewriter: false)
+        XCTAssertFalse(fixture.window.isVisible)
+    }
+
+    /// silkweb-1.80: the bright unit follows each edit until the queued update recomputes it.
+    @MainActor
+    func testActiveRangeShiftsWithEdits() {
+        // "# Title\nBody\n" with the heading unit {0, 8}; `after` is the text once edited.
+        func shift(_ edited: NSRange, _ delta: Int, _ after: String, _ range: NSRange = NSRange(location: 0, length: 8)) -> NSRange? {
+            WritingModeController.shift(range, editedRange: edited, delta: delta, in: after as NSString)
+        }
+        XCTAssertEqual(shift(NSRange(location: 7, length: 1), 1, "# Titlex\nBody\n"), NSRange(location: 0, length: 9), "typing at the end")
+        XCTAssertEqual(shift(NSRange(location: 0, length: 1), 1, "x# Title\nBody\n"), NSRange(location: 0, length: 9), "typing at the start")
+        XCTAssertEqual(shift(NSRange(location: 6, length: 0), -1, "# Titl\nBody\n"), NSRange(location: 0, length: 7), "⌫ stays on the heading")
+        XCTAssertEqual(shift(NSRange(location: 2, length: 3), 0, "# Abcle\nBody\n"), NSRange(location: 0, length: 8), "replacement inside")
+        XCTAssertEqual(shift(NSRange(location: 8, length: 1), 1, "# Title\nxBody\n"), NSRange(location: 0, length: 8), "next line's start is not the unit")
+        XCTAssertEqual(shift(NSRange(location: 10, length: 2), 2, "# Title\nBoxxdy\n"), NSRange(location: 0, length: 8), "edits below")
+        let body = NSRange(location: 8, length: 5)
+        XCTAssertEqual(shift(NSRange(location: 2, length: 1), 1, "# xTitle\nBody\n", body), NSRange(location: 9, length: 5), "edits above shift")
+        XCTAssertEqual(shift(NSRange(location: 1, length: 0), -1, "#Title\nBody\n", body), NSRange(location: 7, length: 5))
+        XCTAssertEqual(shift(NSRange(location: 4, length: 1), 1, "Body!", NSRange(location: 0, length: 4)), NSRange(location: 0, length: 5),
+                       "a last paragraph without a newline grows at its end")
+        XCTAssertEqual(shift(NSRange(location: 7, length: 0), -1, "# TitleBody\n", body), NSRange(location: 7, length: 5), "⌫ at the line start")
+        XCTAssertNil(shift(NSRange(location: 6, length: 0), -3, "# Titlody\n", body), "deleting across the boundary")
+        XCTAssertNil(shift(NSRange(location: 0, length: 12), 0, "Replaced all", body), "a reload crosses the boundary")
+        XCTAssertEqual(shift(NSRange(location: 0, length: 0), -8, "Body\n"), NSRange(location: 0, length: 0), "deleting the whole unit")
     }
 
     @MainActor
