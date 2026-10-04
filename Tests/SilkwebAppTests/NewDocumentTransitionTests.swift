@@ -60,25 +60,32 @@ final class NewDocumentTransitionTests: XCTestCase {
                 }
                 for _ in 0..<10 { host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(10)) }
                 XCTAssertEqual(frame().placeholder, startsEmpty)
-                var frames = [frame()]
+                final class Frames { var values: [Frame] = [] }
+                let sampled = Frames()
+                sampled.values = [frame()]
                 func record() {
                     let next = frame()
-                    if frames.last != next { frames.append(next) }
+                    if sampled.values.last != next { sampled.values.append(next) }
                 }
+                // Sample every frame the window could show, including the asynchronous save/scan/open gaps: once per
+                // main run-loop turn, after SwiftUI and Core Animation committed it (#63). A sleep-paced sampler could
+                // wake between a model change and SwiftUI's update in the same turn and record a state never drawn.
+                let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max) { _, _ in
+                    MainActor.assumeIsolated { record() }
+                }
+                CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+                defer { CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes) }
                 workspace.create(folder: false, parent: parent)
-                // Sample each main-thread turn, including the asynchronous save/scan/open gaps.
-                for _ in 0..<1000 {
-                    record()
-                    if !workspace.mutating { break }
-                    try await Task.sleep(for: .milliseconds(1))
-                }
-                XCTAssertFalse(workspace.mutating)
+                try await waitUntil("the new document to finish creating", timeout: .seconds(10)) { !workspace.mutating }
                 XCTAssertNil(workspace.mutationError)
                 let newID = try XCTUnwrap(workspace.activeTabID)
                 XCTAssertNotEqual(newID, oldID)
                 let url = root.appendingPathComponent(parent == nil ? "Untitled.md" : "Writing/Untitled.md")
                 XCTAssertEqual(workspace.editor.url, url)
-                for _ in 0..<30 { record(); try await Task.sleep(for: .milliseconds(10)) }
+                // Keep sampling while follow-up work (rename, focus) settles.
+                try await Task.sleep(for: .milliseconds(300))
+                CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes)
+                let frames = sampled.values
                 let transitions = zip(frames, frames.dropFirst()).filter { $0.tab != $1.tab }
                 XCTAssertEqual(transitions.count, 1, "Tab sequence: \(frames)")
                 XCTAssertTrue(frames.allSatisfy {

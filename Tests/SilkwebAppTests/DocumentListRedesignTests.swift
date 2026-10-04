@@ -76,6 +76,21 @@ final class DocumentListRedesignTests: XCTestCase {
         }
     }
 
+    /// #63: SwiftUI applies workspace changes to the table on a later pass, which a loaded machine can push past
+    /// `settle`'s fixed rounds. Waits until the laid-out table shows the workspace's rows with `target` selected
+    /// (and on screen when `visible`).
+    @MainActor
+    private func waitForList(_ host: NSView, _ workspace: LibraryWorkspace, selecting target: String, visible: Bool = false,
+                             _ step: String) async throws {
+        try await waitUntil("\(step): table shows \(workspace.documents.count) rows with \(target) selected") {
+            host.layoutSubtreeIfNeeded()
+            guard let table = Self.descendants(host).compactMap({ $0 as? DocumentTableView }).first,
+                  let row = workspace.documents.firstIndex(where: { $0.relativePath == target }) else { return false }
+            return table.numberOfRows == workspace.documents.count && table.selectedRowIndexes == IndexSet(integer: row)
+                && table.visibleRect.height >= 96 && (!visible || table.visibleRect.intersects(table.rect(ofRow: row)))
+        }
+    }
+
     @MainActor
     private func table(in view: NSView) throws -> DocumentTableView {
         try XCTUnwrap(Self.descendants(view).compactMap { $0 as? DocumentTableView }.first)
@@ -290,6 +305,72 @@ final class DocumentListRedesignTests: XCTestCase {
 
     // MARK: Lifecycle
 
+    /// #63: a pure resize (no workspace change) keeps a visible selected row on screen with a minimal scroll, keeps the
+    /// scroll origin while the row stays visible anyway, and never pulls back a selection the user scrolled away from.
+    @MainActor
+    func testHeightResizeKeepsVisibleSelectionOnScreen() async throws {
+        var extra: [String: String] = [:]
+        for index in 0..<60 { extra[String(format: "Many/Note %02d.md", index)] = "# Note \(index)\n\nBody \(index)." }
+        let fixture = try await fixture(extra: extra)
+        let workspace = fixture.workspace
+        workspace.session.selectedFolder = "Many"
+        workspace.setSortKey(.name)
+        if workspace.listPreference.descending { workspace.setSortDescending(false) }
+        let target = "Many/Note 45.md"
+        workspace.selectDocuments([target])
+        await workspace.waitForNavigation()
+        let host = NSHostingView(rootView: DocumentList(workspace: workspace))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 1400), styleMask: [.titled, .resizable],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.contentView = nil; window.close() }
+        try await settle(host)
+        try await waitForList(host, workspace, selecting: target, "fixture")
+        let table = try table(in: host)
+        let row = try XCTUnwrap(workspace.documents.firstIndex { $0.relativePath == target })
+        XCTAssertEqual(row, 45, "name order puts the target deep in the list")
+        func visible() -> Bool { table.visibleRect.intersects(table.rect(ofRow: row)) }
+        func resize(_ height: CGFloat) async throws {
+            window.setContentSize(NSSize(width: 320, height: height))
+            try await settle(host)
+        }
+
+        // Scrolling down to the row brings it in at the bottom edge, as a click or arrow key does.
+        table.scrollRowToVisible(0)
+        try await settle(host)
+        table.scrollRowToVisible(row)
+        try await settle(host)
+        XCTAssertTrue(visible(), "fixture: row visible at 1400")
+        XCTAssertGreaterThan(table.visibleRect.minY, 0, "fixture must scroll")
+        XCTAssertGreaterThan(table.rect(ofRow: row).minY - table.visibleRect.minY, 560, "fixture: row sits low in the tall pane")
+
+        // Shrinking must not leave the visible selection off-screen; the nudge is minimal, not centring.
+        try await resize(560)
+        XCTAssertTrue(visible(), "shrink 1400 → 560: selected row scrolled away: visible \(table.visibleRect), row \(table.rect(ofRow: row))")
+        XCTAssertTrue(table.visibleRect.contains(table.rect(ofRow: row)), "shrink: row fully on screen")
+        XCTAssertLessThan(table.visibleRect.maxY - table.rect(ofRow: row).maxY, table.rowHeight, "shrink: minimal nudge, not centred")
+
+        // A height change that keeps the row visible anyway keeps the (top-anchored) scroll origin.
+        let origin = table.visibleRect.minY
+        try await resize(900)
+        XCTAssertTrue(visible(), "grow 560 → 900")
+        XCTAssertEqual(table.visibleRect.minY, origin, accuracy: 1, "grow: scroll position jumped")
+
+        // A selection the user scrolled away from is not pulled back by a resize.
+        table.scrollRowToVisible(0)
+        try await settle(host)
+        let top = table.visibleRect.minY
+        XCTAssertFalse(visible(), "fixture: selection scrolled away")
+        for height: CGFloat in [560, 300, 1400, 560] {
+            try await resize(height)
+            XCTAssertFalse(visible(), "height \(height): scrolled-away selection was pulled back: visible \(table.visibleRect)")
+            XCTAssertEqual(table.visibleRect.minY, top, accuracy: 1, "height \(height): scroll position jumped")
+        }
+        XCTAssertEqual(workspace.session.selectedDocuments, [target])
+        XCTAssertEqual(table.selectedRowIndexes, IndexSet(integer: row))
+    }
+
     @MainActor
     func testFolderSortTagSearchAndResizeKeepSelectionAndScroll() async throws {
         var extra: [String: String] = [:]
@@ -314,7 +395,8 @@ final class DocumentListRedesignTests: XCTestCase {
         defer { window.contentView = nil; window.close() }
         try await settle(host)
 
-        func assertStable(_ step: String, scrollOrigin: CGFloat? = nil, visible: Bool = true, file: StaticString = #filePath, line: UInt = #line) throws {
+        func assertStable(_ step: String, scrollOrigin: CGFloat? = nil, visible: Bool = true, file: StaticString = #filePath, line: UInt = #line) async throws {
+            try await waitForList(host, workspace, selecting: target, visible: visible, step)
             let table = try table(in: host)
             XCTAssertEqual(workspace.session.selectedDocuments, [target], step, file: file, line: line)
             let row = try XCTUnwrap(workspace.documents.firstIndex { $0.relativePath == target }, step, file: file, line: line)
@@ -328,10 +410,11 @@ final class DocumentListRedesignTests: XCTestCase {
                 XCTAssertEqual(table.visibleRect.minY, scrollOrigin, accuracy: 1, "\(step): scroll position jumped", file: file, line: line)
             }
         }
-        // Bring the selection into view the way a click or navigation does.
+        // Bring the selection into view the way a click or navigation does, once the table has its rows.
+        try await waitForList(host, workspace, selecting: target, "fixture")
         try table(in: host).scrollRowToVisible(try XCTUnwrap(workspace.documents.firstIndex { $0.relativePath == target }))
         try await settle(host)
-        try assertStable("initial")
+        try await assertStable("initial")
         let origin = try table(in: host).visibleRect.minY
         XCTAssertGreaterThan(origin, 0, "fixture must scroll")
 
@@ -339,34 +422,34 @@ final class DocumentListRedesignTests: XCTestCase {
         for width: CGFloat in [240, 320, 480, 900, 240, 320] {
             window.setContentSize(NSSize(width: width, height: 560))
             try await settle(host, rounds: 2)
-            try assertStable("width \(width)", scrollOrigin: origin)
+            try await assertStable("width \(width)", scrollOrigin: origin)
         }
         for height: CGFloat in [300, 900, 1400, 560] {
             window.setContentSize(NSSize(width: 320, height: height))
             try await settle(host, rounds: 2)
-            try assertStable("height \(height)")
+            try await assertStable("height \(height)")
         }
 
         // Sort changes reorder rows; the selection follows the document.
         for key in [DocumentSortKey.name, .created, .modified] {
             workspace.setSortKey(key)
             try await settle(host)
-            try assertStable("sort \(key)")
+            try await assertStable("sort \(key)")
         }
         workspace.setSortDescending(!workspace.listPreference.descending)
         try await settle(host)
-        try assertStable("sort direction")
+        try await assertStable("sort direction")
         workspace.setSortDescending(!workspace.listPreference.descending)
 
         // Tag filter on and off.
         workspace.tagFilters = [draft.id]
         try await settle(host)
         XCTAssertEqual(workspace.documents.count, 3)
-        try assertStable("tag filter on")
+        try await assertStable("tag filter on")
         workspace.tagFilters = []
         try await settle(host)
         XCTAssertEqual(workspace.documents.count, 60)
-        try assertStable("tag filter off")
+        try await assertStable("tag filter off")
 
         // Search mode overlays results with the same row metrics, then restores the list.
         workspace.search.text = "fog"
@@ -375,11 +458,11 @@ final class DocumentListRedesignTests: XCTestCase {
         XCTAssertFalse(workspace.filteredSearchResults.isEmpty)
         let resultRows = Self.descendants(host).compactMap { $0 as? NSTableView }.filter { !($0 is DocumentTableView) }
         XCTAssertFalse(resultRows.isEmpty, "1.20 results list is shown")
-        try assertStable("search mode")
+        try await assertStable("search mode")
         workspace.search.text = ""
         workspace.search.results = []
         try await settle(host)
-        try assertStable("search cleared")
+        try await assertStable("search cleared")
 
         // Folder switch and back: the list restores the same rows and selection.
         workspace.session.selectedFolder = "Vanlife"
@@ -390,7 +473,7 @@ final class DocumentListRedesignTests: XCTestCase {
         await workspace.waitForNavigation()
         try await settle(host)
         // A folder switch starts the new list at the top; only the selection must survive.
-        try assertStable("folder switch", visible: false)
+        try await assertStable("folder switch", visible: false)
     }
 
     // MARK: Performance
