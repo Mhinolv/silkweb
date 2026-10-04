@@ -14,7 +14,8 @@ final class ToolbarMetrics {
 
 /// Keeps the compact bar laid out: sizes the breadcrumb to the room the other items leave, sets overflow
 /// priorities, and slides the leading items into the traffic-light area only while no window button shows
-/// (hidden buttons, or the concealed full-screen titlebar; AppKit doesn't reflow for them).
+/// (hidden buttons, or the concealed full-screen titlebar; AppKit doesn't reflow for them) and AppKit lets the
+/// row take the freed room.
 @MainActor final class CompactToolbarController: NSObject {
     weak var metrics: ToolbarMetrics?
     private(set) weak var window: NSWindow?
@@ -28,7 +29,8 @@ final class ToolbarMetrics {
     private var naturalFrame: NSRect?
     private var shiftedFrame: NSRect?
     private var animating = false
-    private var shiftGrowthFailed = false
+    /// AppKit refused the shifted row the freed room; the items stay put until a window button shows again.
+    private(set) var shiftGrowthFailed = false
     private var nudges = 0
     /// Whether the last leading move slid (false: placed at once, as under Reduce Motion).
     private(set) var lastMoveAnimated: Bool?
@@ -38,6 +40,12 @@ final class ToolbarMetrics {
     static let trailingInset: CGFloat = 8
     static let minimumBreadcrumbWidth: CGFloat = 120
     static let nudgeLimit = 3
+    /// AppKit starts the row about 10 pt after the zoom button; a row starting further in follows a section.
+    static let sectionSlack: CGFloat = 24
+    /// Tests turn this off to make the controller try the slide after a section and hit AppKit's refusal.
+    static var predictsSections = true
+    /// How far short of its end the shifted row may stop before it counts as refused (rounding, viewer padding).
+    static let rowEndSlack: CGFloat = 12
     /// The breadcrumb gives way first: it shortens through its `…` ladder, and only below its minimum width does
     /// it go into the » menu. The buttons follow in this order; the sidebar toggle and mode control never do.
     static let breadcrumbPriority = -2000
@@ -145,8 +153,19 @@ final class ToolbarMetrics {
         let natural = naturalFrame ?? toolbarView.frame
         let firstViewer = placed.map { $0.superview!.frame.minX }.min() ?? 0
         let firstItem = placed.map { $0.frame.minX + $0.superview!.frame.minX }.min() ?? 0
+        let naturalLeading = natural.minX + firstViewer
+        let regions = Self.reservedRegions(in: bar)
+        let buttonsAbsent = windowButtonsAbsent
+        if !buttonsAbsent { shiftGrowthFailed = false }        // The slide is worth it only while the row also takes the freed room; otherwise the trailing items would
+        // leave the edge (#54). AppKit never grows the row into a section it keeps for the sidebar column, so
+        // after one the items stay where AppKit put them, as they do once AppKit refuses the wider row.
+        let buttonsEnd = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+            .compactMap { window.standardWindowButton($0) }.filter { $0.window === bar.window }
+            .map { $0.convert($0.bounds, to: bar).maxX }.max()
+        let slides = buttonsAbsent && !shiftGrowthFailed
+            && !(Self.predictsSections && Self.rowFollowsSection(naturalLeading: naturalLeading, regions: regions, buttonsEnd: buttonsEnd))
         var target = natural
-        if windowButtonsAbsent {
+        if slides {
             let shift = min(0, Self.leadingInset - (natural.minX + firstItem))
             target = NSRect(x: natural.minX + shift, y: natural.minY, width: natural.width - shift, height: natural.height)
         }
@@ -163,12 +182,8 @@ final class ToolbarMetrics {
 
         // The breadcrumb takes the room the other items leave, so the trailing items stay at the trailing edge.
         // The row ends at the bar's edge or where AppKit reserves the titlebar over the Outline inspector.
-        // While shifted, the breadcrumb also takes the freed space, except where AppKit keeps a section for the
-        // sidebar column: there the row after the sidebar keeps its natural room, so the budget does too.
-        let naturalLeading = natural.minX + firstViewer
-        let regions = Self.reservedRegions(in: bar)
-        if shiftedFrame == nil { shiftGrowthFailed = false }
-        let grows = shiftedFrame != nil && !shiftGrowthFailed && !regions.contains { $0.maxX <= naturalLeading + 1 }
+        // While shifted, the breadcrumb also takes the freed space.
+        let grows = shiftedFrame != nil
         let leading = grows ? target.minX + firstViewer : naturalLeading
         var limit = grows ? target.maxX : natural.maxX
         for region in regions where region.minX > naturalLeading + 1 {
@@ -182,8 +197,14 @@ final class ToolbarMetrics {
             metrics?.breadcrumbWidth = width
             nudges = 0
         }
-        if placed.count < views.count, grows, nudges >= Self.nudgeLimit {
-            // AppKit didn't give the shifted row the freed space after all; fall back to the natural room.
+        // Once the breadcrumb has its width, a row that still stops short of its end wasn't given the room.
+        let rowEnd = toolbarView.frame.minX + (placed.map { $0.superview!.frame.maxX }.max() ?? 0)
+        let rowShort = grows && !animating && toolbarView.frame == target && !changed && placed.count == views.count
+            && available >= Self.minimumBreadcrumbWidth
+            && abs(crumb.frame.width - width) < 1 && rowEnd < limit - Self.trailingInset - Self.rowEndSlack
+        if grows, rowShort || (placed.count < views.count && nudges >= Self.nudgeLimit) {
+            // AppKit didn't give the shifted row the freed space after all: keep AppKit's placement instead, so
+            // the breadcrumb keeps its room and the trailing items their edge.
             shiftGrowthFailed = true
             scheduleUpdate()
         } else if placed.count < views.count, available >= Self.minimumBreadcrumbWidth {
@@ -192,6 +213,12 @@ final class ToolbarMetrics {
             // Confirm the row once SwiftUI applies the width.
             DispatchQueue.main.async { [weak self] in self?.update() }
         }
+    }
+
+    /// Whether AppKit starts the row after a section it keeps for the sidebar column (a blocking view before the
+    /// row, or a start well past the traffic lights). The row never grows into that section.
+    static func rowFollowsSection(naturalLeading: CGFloat, regions: [NSRect], buttonsEnd: CGFloat?) -> Bool {
+        regions.contains { $0.maxX <= naturalLeading + 1 } || buttonsEnd.map { naturalLeading > $0 + sectionSlack } == true
     }
 
     /// Where AppKit keeps the titlebar clear for a split view's trailing column (the Outline inspector). AppKit

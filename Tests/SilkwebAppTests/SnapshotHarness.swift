@@ -52,6 +52,9 @@ struct SnapshotScenario {
     var selectText: String? = nil
     /// Widens the sidebar and list to their limits so the detail column (and its status bar) is narrow.
     var narrowDetail = false
+    /// Hides the traffic lights as macOS does in full screen with the titlebar concealed (#54). The window can't
+    /// enter real full screen offscreen; the toolbar controller reacts to the buttons, not the style mask.
+    var concealedTitlebar = false
 
     static let deepFolder = "Field Notes/Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
     static let deepDocument = deepFolder + "/Settling In at the Campground.md"
@@ -135,6 +138,9 @@ struct SnapshotScenario {
         .init(name: "tabs-open", document: image, tabs: [pourOver, image, "Snapshot Fixtures/Empty Document.md"]),
         // silkweb-1.65: compact bar, one-line breadcrumb folded at `…`, folder tabs with a coral unsaved dot.
         .init(name: "redesign-path-tabs", folder: deepFolder, document: deepDocument, tabs: [pourOver, deepDocument, image], dirtyActive: true),
+        // #54: full screen, titlebar concealed: the whole path, the trailing items at the edge.
+        .init(name: "redesign-path-tabs-fullscreen", folder: "Coffee/Brewing Guides", document: pourOver, tabs: [pourOver, image],
+              concealedTitlebar: true),
         // silkweb-1.24: Settings tabs. Appearance edits the Light set with a low-contrast Text so the warning shows.
         .init(name: "settings-editor", settingsTab: .editor),
         .init(name: "settings-appearance", settingsTab: .appearance),
@@ -770,6 +776,11 @@ final class SnapshotHarness {
                 if scenario.dirtyActive {
                     workspace.editor.state = .dirty
                     for _ in 0..<3 { view.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(100)) }
+                }
+                if scenario.concealedTitlebar {
+                    for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { window.standardWindowButton(type)?.isHidden = true }
+                    // The toolbar controller's pass, any slide (0.2 s) and the breadcrumb's new width.
+                    for _ in 0..<8 { view.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(100)) }
                 }
                 window.title = workspace.editor.url == nil ? workspace.folderName : workspace.editor.name
                 window.subtitle = workspace.subtitle
