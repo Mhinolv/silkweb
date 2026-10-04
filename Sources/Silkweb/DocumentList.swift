@@ -153,6 +153,7 @@ struct DocumentDetail: View {
         VStack(spacing: 0) {
             if !workspace.tabs.isEmpty { EditorTabBar(workspace: workspace).frame(height: Spacing.tabBarHeight) }
             MediaMigrationBanner(workspace: workspace)
+            UnreadableRecoveryBanner(workspace: workspace)
             if workspace.snapshot?.isReadOnly == true {
                 Label("This library is read-only. Documents can be viewed, but changes can’t be saved.", systemImage: "lock")
                     .font(.callout).frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)

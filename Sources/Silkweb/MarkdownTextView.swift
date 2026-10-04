@@ -627,7 +627,12 @@ struct EditorBanner: View {
                         await workspace?.reconcileFinderChanges()
                         if !session.externalDeleted, let url = session.url { workspace?.showDocument(url) }
                     } }
-                    Button("Close") { Task { await session.closeDeleted(); workspace?.removeClosedTabs() } }
+                    // An orphan recovery draft offers Save a Copy instead of Close so it can't be lost.
+                    if session.orphanDraft {
+                        Button("Save a Copy…") { session.saveCopy() }
+                    } else {
+                        Button("Close") { Task { await session.closeDeleted(); workspace?.removeClosedTabs() } }
+                    }
                 } else if session.recovered {
                     Button("Keep Recovered Text") { session.keepRecovery() }
                     Button("Discard Recovered Text") { session.discardRecovery() }

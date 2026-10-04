@@ -11,6 +11,11 @@ final class DocumentSession {
     var state: DocumentSaveState = .clean
     var readOnly = false
     var recovered = false
+    /// A recovery draft whose file was deleted outside Silkweb (1.70): editable, never
+    /// autosaved, offered Save Again / Save a Copy; closing the tab keeps the draft.
+    var orphanDraft = false
+    /// Recovery files set aside by the last open, for the workspace strip.
+    @ObservationIgnored var unreadableRecovery: [URL] = []
     var error: String?
     var assetMessage: String?
     var assetFailures: [AssetFailure] = []
@@ -90,13 +95,20 @@ final class DocumentSession {
         error = nil
         self.readOnly = readOnly
         recovered = false
+        orphanDraft = false
         guard let destination else { return true }
         do {
-            if let draft = try await coordinator.pendingRecoveryDrafts().first(where: { $0.documentURL.standardizedFileURL == destination }) {
+            // Each draft decodes on its own; an unreadable one never blocks opening (1.70).
+            let drafts = (try? await coordinator.pendingRecoveryDrafts()) ?? []
+            unreadableRecovery = await coordinator.takeUnreadableRecoveryFiles()
+            if let draft = drafts.first(where: { $0.documentURL.standardizedFileURL == destination }) {
                 await coordinator.restore(draft)
                 text = draft.text
-                state = .dirty
-                recovered = true
+                state = await coordinator.state(for: destination) ?? .dirty
+                // A draft for a deleted file uses the deleted strip instead of Keep/Discard.
+                orphanDraft = externalDeleted
+                wasDirtyBeforeDelete = orphanDraft
+                recovered = !orphanDraft
                 announce()
             } else {
                 text = try await coordinator.open(destination).text
@@ -192,6 +204,7 @@ final class DocumentSession {
             self.url = try await coordinator.recreate(url, root: root)
             state = .clean
             recovered = false
+            orphanDraft = false
             error = nil
             observe(self.url!)
         } catch { self.error = error.localizedDescription; announce() }
@@ -210,6 +223,14 @@ final class DocumentSession {
         await tail?.value
         do { try await coordinator.discardRecovery(url); await didCloseWindow() }
         catch { self.error = error.localizedDescription; announce() }
+    }
+
+    /// Closing an orphan draft's tab keeps its latest text as the recovery draft.
+    func preserveOrphanDraft() async -> Bool {
+        guard orphanDraft else { return false }
+        await tail?.value
+        do { try await coordinator.preserveUnsavedDrafts(); return true }
+        catch { self.error = "Recovery draft couldn’t be saved: \(error.localizedDescription)"; announce(); return false }
     }
 
     func libraryDisappeared() async {
@@ -321,6 +342,7 @@ final class DocumentSession {
         text = ""
         state = .clean
         recovered = false
+        orphanDraft = false
         error = nil
     }
 

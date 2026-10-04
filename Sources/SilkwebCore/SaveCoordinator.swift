@@ -81,12 +81,15 @@ public actor SaveCoordinator {
         var revision: DocumentRevision?
         var state: DocumentSaveState
         var attempts = 0
+        /// Restored from a recovery draft and not yet kept: only an explicit save may write it.
+        var recoveryPending = false
     }
     private let store: DocumentStore
     private let recoveryDirectory: URL
     private var entries: [URL: Entry] = [:]
     private var scheduled: [URL: Task<Void, Never>] = [:]
     private var recoveryFailures: [URL: DocumentSaveFailure] = [:]
+    private var unreadableRecovery: [URL] = []
     private var observers: [URL: [UUID: AsyncStream<DocumentSaveState>.Continuation]] = [:]
 
     public init(store: DocumentStore = DocumentStore(), recoveryDirectory: URL? = nil) {
@@ -120,15 +123,17 @@ public actor SaveCoordinator {
     }
 
     /// Replaces the pending deadline; explicit save/close cancels it.
+    /// A pending recovery draft is never autosaved; see `save(_:)`.
     public func scheduleSave(_ url: URL, delay: Duration = .seconds(1)) {
         let url = url.standardizedFileURL
         if case .conflict = entries[url]?.state { return }
+        if entries[url]?.recoveryPending == true { return }
         scheduled[url]?.cancel()
         scheduled[url] = Task { [weak self] in
             do {
                 try await Task.sleep(for: delay)
                 try Task.checkCancellation()
-                _ = await self?.save(url)
+                _ = await self?.commit(url, explicit: false)
             } catch { }
         }
     }
@@ -137,7 +142,7 @@ public actor SaveCoordinator {
     @discardableResult
     public func close(_ url: URL) -> Bool {
         let url = url.standardizedFileURL
-        guard save(url)?.isDirty != true else { return false }
+        guard commit(url, explicit: false)?.isDirty != true else { return false }
         entries[url] = nil
         recoveryFailures[url] = nil
         return true
@@ -171,12 +176,21 @@ public actor SaveCoordinator {
         }
     }
 
+    /// An explicit save (Keep Recovered Text, Save) also accepts a pending recovery draft.
     /// Failure is represented in state; the in-memory text always remains available.
     @discardableResult
-    public func save(_ url: URL) -> DocumentSaveState? {
+    public func save(_ url: URL) -> DocumentSaveState? { commit(url, explicit: true) }
+
+    private func commit(_ url: URL, explicit: Bool) -> DocumentSaveState? {
         let url = url.standardizedFileURL
         scheduled.removeValue(forKey: url)?.cancel()
         guard var entry = entries[url], entry.state.isDirty else { return entries[url]?.state }
+        if entry.recoveryPending {
+            // Until the user keeps the recovered text, the file on disk stays untouched.
+            guard explicit else { return entry.state }
+            entry.recoveryPending = false
+            entries[url] = entry
+        }
         if case .conflict = entry.state {
             _ = try? reconcile(url)
             return entries[url]?.state
@@ -219,18 +233,56 @@ public actor SaveCoordinator {
         for (url, entry) in entries where entry.state.isDirty { try persistRecovery(url, entry: entry) }
     }
 
+    /// Decodes each draft on its own. A file that can't be read is moved to
+    /// `Unreadable/` (bytes kept) and reported once through `takeUnreadableRecoveryFiles()`;
+    /// drafts from a newer format stay in place for the build that wrote them.
     public func pendingRecoveryDrafts() throws -> [RecoveryDraft] {
         guard FileManager.default.fileExists(atPath: recoveryDirectory.path) else { return [] }
         return try FileManager.default.contentsOfDirectory(at: recoveryDirectory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }.sorted { $0.path < $1.path }
-            .map { try JSONDecoder().decode(RecoveryDraft.self, from: Data(contentsOf: $0)) }
+            .compactMap { file in
+                let data = try? Data(contentsOf: file)
+                if let data, let draft = try? JSONDecoder().decode(RecoveryDraft.self, from: data) { return draft }
+                if let data, let version = try? JSONDecoder().decode(RecoveryVersion.self, from: data).formatVersion,
+                   version > RecoveryDraft.currentVersion { return nil }
+                quarantine(file)
+                return nil
+            }
+    }
+
+    /// Quarantined files since the last call, so the UI reports each one once.
+    public func takeUnreadableRecoveryFiles() -> [URL] {
+        defer { unreadableRecovery = [] }
+        return unreadableRecovery
+    }
+
+    private struct RecoveryVersion: Decodable { let formatVersion: Int }
+
+    private func quarantine(_ file: URL) {
+        let folder = recoveryDirectory.appendingPathComponent("Unreadable", isDirectory: true)
+        var target = folder.appendingPathComponent(file.lastPathComponent)
+        if FileManager.default.fileExists(atPath: target.path) {
+            target = folder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + " " + UUID().uuidString + ".json")
+        }
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: file, to: target)
+            unreadableRecovery.append(target)
+        } catch {
+            // Left in place, it is skipped again next time; opening never depends on it.
+            unreadableRecovery.append(file)
+        }
     }
 
     /// Explicit review action: restore as dirty, retaining the original disk token.
+    /// The draft is not written over the file until an explicit `save(_:)`. A draft whose
+    /// file no longer exists opens as deleted (Save Again / Save a Copy), never autosaved.
     public func restore(_ draft: RecoveryDraft) {
         let url = draft.documentURL.standardizedFileURL
         guard entries[url] == nil else { return }
-        entries[url] = Entry(text: draft.text, revision: draft.revision, state: .dirty)
+        let deleted = !FileManager.default.fileExists(atPath: url.path)
+        entries[url] = Entry(text: draft.text, revision: draft.revision,
+                             state: deleted ? .conflict(diskRevision: nil) : .dirty, recoveryPending: true)
         publish(url)
     }
 

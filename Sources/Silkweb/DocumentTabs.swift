@@ -30,9 +30,7 @@ extension LibraryWorkspace {
             // A recovered/conflicted preview must retain its buffer. Keep it and open a new slot.
             oldPreview.isPreview = false
         }
-        let editor = DocumentSession()
-        await editor.configure(root: snapshot.rootURL, recoveryDirectory: recoveryDirectory)
-        guard await editor.open(snapshot.rootURL.appendingPathComponent(document.relativePath), readOnly: snapshot.isReadOnly) else { return false }
+        guard let editor = await openEditor(snapshot.rootURL.appendingPathComponent(document.relativePath)) else { return false }
         let tab = DocumentTab(id: document.id, editor: editor, isPreview: !pinned && !editor.state.isDirty)
         editor.didEdit = { [weak self, weak tab] in
             guard let self, let tab, tab.isPreview else { return }
@@ -48,6 +46,39 @@ extension LibraryWorkspace {
         }
         activateTab(tab.id, syncSelection: false)
         return true
+    }
+
+    private func openEditor(_ url: URL) async -> DocumentSession? {
+        guard let snapshot else { return nil }
+        let editor = DocumentSession()
+        await editor.configure(root: snapshot.rootURL, recoveryDirectory: recoveryDirectory)
+        guard await editor.open(url, readOnly: snapshot.isReadOnly) else { return nil }
+        reportUnreadableRecovery(editor.unreadableRecovery)
+        return editor
+    }
+
+    /// A recovery draft whose note was deleted outside Silkweb has no library row (1.70).
+    /// It opens as a pinned tab; `reconcileFinderChanges` re-keys it once Save Again recreates the note.
+    func openOrphanDraft(_ url: URL) async {
+        guard !tabs.contains(where: { $0.editor.url == url }), let editor = await openEditor(url) else { return }
+        let tab = DocumentTab(id: UUID(), editor: editor, isPreview: false)
+        let index = activeTabID.flatMap { active in tabs.firstIndex { $0.id == active } }.map { $0 + 1 } ?? tabs.count
+        tabs.insert(tab, at: index)
+        activateTab(tab.id, syncSelection: false)
+    }
+
+    /// Tabs whose note came back under a new library ID (Save Again) follow the new row.
+    func rekeyTabs(in snapshot: LibrarySnapshot) {
+        let ids = Set(snapshot.documents.map(\.id))
+        for (index, tab) in tabs.enumerated() where !ids.contains(tab.id) {
+            guard let url = tab.editor.url,
+                  let document = snapshot.documents.first(where: { snapshot.rootURL.appendingPathComponent($0.relativePath) == url }),
+                  !tabs.contains(where: { $0.id == document.id }) else { continue }
+            let replacement = DocumentTab(id: document.id, editor: tab.editor, isPreview: tab.isPreview)
+            replacement.textView = tab.textView
+            tabs[index] = replacement
+            if activeTabID == tab.id { activeTabID = document.id }
+        }
     }
 
     func openSelectionInNewTab(_ path: String? = nil) {
@@ -114,7 +145,10 @@ extension LibraryWorkspace {
         defer { closingTabIDs.remove(id) }
         tab.editor.loading = true
         defer { tab.editor.loading = false }
-        guard await tab.editor.flush() else { activateTab(id); return false }
+        // Closing an orphan recovery draft keeps the draft instead of refusing (1.70).
+        var closable = await tab.editor.flush()
+        if !closable { closable = await tab.editor.preserveOrphanDraft() }
+        guard closable else { activateTab(id); return false }
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return true }
         await tab.editor.didCloseWindow()
         tabs.remove(at: index)
