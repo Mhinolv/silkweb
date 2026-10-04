@@ -439,22 +439,34 @@ final class PDFExportJob {
     /// and completes immediately with CancellationError.
     func wait(timeoutInterval: TimeInterval, cancel: @escaping () -> Void,
               render: @escaping () async throws -> Data) async throws -> Data {
-        try await withTaskCancellationHandler {
+        let limit = ContinuousClock.now + .seconds(timeoutInterval)
+        let data = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 completion = continuation
                 guard !Task.isCancelled else { return stop(CancellationError(), cancel: cancel) }
                 deadline = Task { [self] in
-                    do { try await Task.sleep(for: .seconds(timeoutInterval)) } catch { return }
+                    do { try await Task.sleep(until: limit, clock: .continuous) } catch { return }
                     stop(PDFExportError.timedOut, cancel: cancel)
                 }
                 work = Task { [self] in
-                    do { finish(.success(try await render())) }
-                    catch { finish(.failure(error)) }
+                    let result: Result<Data, Error>
+                    do { result = .success(try await render()) } catch { result = .failure(error) }
+                    // On a busy main thread the render can return after the deadline but before
+                    // the deadline task runs. The deadline is final: a late result is discarded.
+                    if ContinuousClock.now >= limit { stop(PDFExportError.timedOut, cancel: cancel) }
+                    else { finish(result) }
                 }
             }
         } onCancel: {
             Task { @MainActor [self] in stop(CancellationError(), cancel: cancel) }
         }
+        // Cancel's stop is queued behind a render that returned in the same turn; the user
+        // still asked to stop, so the result is discarded and nothing is written.
+        if Task.isCancelled {
+            cancel()
+            throw CancellationError()
+        }
+        return data
     }
 
     private func stop(_ error: Error, cancel: () -> Void) {
