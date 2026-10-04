@@ -87,20 +87,32 @@ QA cannot launch the app or deliver real mouse events, and WebKit does not run i
 
 ## Team Roadmap Workflow (multi-agent)
 
-A multi-agent team works the roadmap epic. Roles:
+A multi-agent team works the roadmap on GitHub: **https://github.com/Mhinolv/silkweb** (Issues + PRs;
+milestones `v1`, `v2`). Roles:
 
 | Role | Responsibility | Output |
 |---|---|---|
-| Orchestrator | Supervises, prioritizes, assigns, commits for the engineer, final approver | Closes issues |
+| Orchestrator | Supervises, prioritizes, assigns, commits for the engineer, opens PRs, final approver | Merges PRs, closes issues |
 | Product Research | Studies MWeb in depth (+ competitors for folder UX) | `research.md` |
-| Product Manager | Turns research/requests into beads issues with acceptance criteria | beads issues under one epic |
-| UI/UX | Design notes in each issue's `design` field | beads design notes |
-| Engineer | Implements one issue at a time and builds | changes + COMMIT FILES block |
-| QA | Verifies against acceptance criteria and comments | PASS / FAIL report + beads comment |
+| Product Manager | Turns research/requests into GitHub issues with acceptance criteria | Issue body + `**PM review**` comment |
+| UI/UX | Design notes for each issue (bugs too, unless P0 with no visible change) | `## Design notes` section + `**UX notes**` comment |
+| Engineer | Implements one issue at a time on its linked branch and builds | changes + COMMIT FILES block + PR body |
+| QA | Verifies the PR against the acceptance criteria | `QA RESULT: PASS/FAIL` PR comment + `qa-pass`/`qa-fail` label |
+
+Flow labels (exactly one at a time): `needs-pm` → `needs-ux` → `ready` → `in-progress` → `in-review` →
+`needs-owner-check` (or closed). Plus `bug`/`feature`, `P0`–`P3`, `owner-request`, `blocked`.
 
 Rules:
-- Work happens on the branch `team/roadmap`; never on main. No remote ⇒ "push" means commit on that branch.
-- One issue per commit: `<id>: <summary>`. Stage only the files changed for that issue (+ `.beads/issues.jsonl`). Never `git add -A`.
-- The Engineer does not close issues. QA does not modify source. Only the Orchestrator closes issues.
-- For this epic, **QA PASS + Orchestrator approval replaces the manual user-test gate** (delegated by the product owner). Product-owner decisions are recorded as issue comments and override the original acceptance wording.
+- Integration branch is `team/roadmap`; never commit to main. One issue = one branch `<n>-<slug>` cut from
+  `team/roadmap` = one PR into `team/roadmap`.
+- Commits: `#<n>: <summary>`. Stage only the files changed for that issue. Never `git add -A`.
+- Every PR uses `.github/pull_request_template.md` (Issue / What changed / How it was tested / Screenshots);
+  the `PR template` check fails otherwise. Use `Refs #n` instead of `Closes #n` while the owner still has to check it.
+- Merge requires: `qa-pass`, green CI, a passing template check, and (bugs) the regression test proven to fail on
+  the pre-fix code. Closing keywords don't fire on `team/roadmap`, so the Orchestrator closes issues explicitly.
+- The Engineer does not close issues or merge. QA does not modify source. Only the Orchestrator merges and closes.
+- For this epic, **QA PASS + Orchestrator approval replaces the manual user-test gate** (delegated by the product owner).
+  Product-owner decisions are recorded as issue comments and override the original acceptance wording.
 - No agent may use browser/Chrome/computer-use/GUI automation tools, and no agent launches GUI apps (including MWeb or Silkweb).
+- History before the GitHub move used a local tracker; old commits say `silkweb-1.NN`. The mapping to issue
+  numbers is in each migrated issue's body.
