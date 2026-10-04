@@ -286,6 +286,16 @@ public actor SaveCoordinator {
         publish(url)
     }
 
+    /// Whether `reconcile(_:)` could change the entry: the disk revision moved, the file is
+    /// unreadable or gone, or a conflict may resolve. Never mutates and never reschedules a save,
+    /// so an unchanged file costs one read and no editor lock (1.74).
+    public func needsReconcile(_ url: URL) -> Bool {
+        guard let entry = entries[url.standardizedFileURL] else { return false }
+        if case .conflict = entry.state { return true }
+        guard let disk = try? store.load(url.standardizedFileURL) else { return true }
+        return disk.revision != entry.revision
+    }
+
     /// Reads only the open document; library scans never read all document bodies.
     public func reconcile(_ url: URL, movedTo destination: URL? = nil) throws -> LoadedDocument? {
         let old = url.standardizedFileURL
