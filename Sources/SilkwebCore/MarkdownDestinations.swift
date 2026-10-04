@@ -20,17 +20,25 @@ public enum MarkdownDestinations {
         var output = ""
         var unsupported: [String] = []
         var fence: String?
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = String(raw)
+        // Split like the parser (LF, CRLF or CR) and write each original terminator back.
+        // Indented lines are not code: the parser has no indented code and renders their links.
+        let body = text as NSString
+        var offset = 0
+        while offset < body.length {
+            let lineRange = body.lineRange(for: NSRange(location: offset, length: 0))
+            offset = NSMaxRange(lineRange)
+            var contentsEnd = 0
+            body.getLineStart(nil, end: nil, contentsEnd: &contentsEnd, for: lineRange)
+            let line = body.substring(with: NSRange(location: lineRange.location, length: contentsEnd - lineRange.location))
+            let terminator = body.substring(with: NSRange(location: contentsEnd, length: NSMaxRange(lineRange) - contentsEnd))
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if let marker = fence {
                 if trimmed.hasPrefix(marker), trimmed.drop(while: { $0 == marker.first! }).trimmingCharacters(in: .whitespaces).isEmpty { fence = nil }
-                output += line + "\n"
+                output += line + terminator
                 continue
             }
-            if line.hasPrefix("    ") || line.hasPrefix("\t") { output += line + "\n"; continue }
             if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-                fence = String(trimmed.prefix(while: { $0 == trimmed.first! })); output += line + "\n"; continue
+                fence = String(trimmed.prefix(while: { $0 == trimmed.first! })); output += line + terminator; continue
             }
             let ns = line as NSString
             let full = NSRange(location: 0, length: ns.length)
@@ -95,9 +103,8 @@ public enum MarkdownDestinations {
                     unsupported.append(line)
                 }
             }
-            output += (mutable as String) + "\n"
+            output += (mutable as String) + terminator
         }
-        if !output.isEmpty { output.removeLast() } // split always returns at least one line, including empty input.
         return Result(text: output, unsupported: unsupported)
     }
 }

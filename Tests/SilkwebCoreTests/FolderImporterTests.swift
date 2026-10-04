@@ -131,4 +131,24 @@ final class FolderImporterTests: XCTestCase {
         XCTAssertEqual(try fm.contentsOfDirectory(atPath: library.path), [])
         XCTAssertEqual(try fm.contentsOfDirectory(atPath: source.path).count, 128)
     }
+    /// silkweb-1.72: links into renamed folders and renamed children resolve to the most specific copy path.
+    func testNestedRenamedPathsRemapToMostSpecificDestination() throws {
+        let (base, source, library) = try fixture()
+        defer { try? fm.removeItem(at: base) }
+        try put("child", "a:b/c:d.md", in: source)
+        try put("grandchild", "a:b/e:f/g:h.md", in: source)
+        try put("plain", "a:b/plain.md", in: source)
+        try put("[child](a%3Ab/c%3Ad.md)\n[deep](a%3Ab/e%3Af/g%3Ah.md)\n[plain](a%3Ab/plain.md)", "index.md", in: source)
+        try put("[up](../index.md)\n[sibling](e%3Af/g%3Ah.md)", "a:b/links.md", in: source)
+        let plan = try FolderImporter.plan(source: source, library: library, destination: "")
+        let path = try FolderImporter.copy(plan)
+        let copy = library.appendingPathComponent(path)
+        for file in ["a_b/c_d.md", "a_b/e_f/g_h.md", "a_b/plain.md"] {
+            XCTAssertTrue(fm.fileExists(atPath: copy.appendingPathComponent(file).path), file)
+        }
+        XCTAssertEqual(try String(contentsOf: copy.appendingPathComponent("index.md"), encoding: .utf8),
+                       "[child](a_b/c_d.md)\n[deep](a_b/e_f/g_h.md)\n[plain](a_b/plain.md)")
+        XCTAssertEqual(try String(contentsOf: copy.appendingPathComponent("a_b/links.md"), encoding: .utf8),
+                       "[up](../index.md)\n[sibling](e_f/g_h.md)")
+    }
 }

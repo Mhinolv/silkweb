@@ -119,13 +119,14 @@ public struct DocumentSummary: Sendable {
 }
 
 extension LibraryChangeSet {
+    /// Nested changes (e.g. an import renaming a folder and its child) use the most specific match.
     public func remapping(_ path: String) -> String {
+        var best: LibraryPathChange?
         for change in changes {
-            guard let old = change.oldPath else { continue }
-            if path == old || (change.isFolder && path.hasPrefix(old + "/")) {
-                return change.newPath + path.dropFirst(old.count)
-            }
+            guard let old = change.oldPath, old.count > (best?.oldPath?.count ?? -1) else { continue }
+            if path == old || (change.isFolder && path.hasPrefix(old + "/")) { best = change }
         }
-        return path
+        guard let best, let old = best.oldPath else { return path }
+        return best.newPath + path.dropFirst(old.count)
     }
 }
