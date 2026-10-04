@@ -191,11 +191,13 @@ private final class SnapshotResult<Value> {
 
 @MainActor
 final class SnapshotHarness {
-    static let repository = URL(fileURLWithPath: #filePath)
+    nonisolated static let repository = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     let size: NSSize
     let timeout: TimeInterval
     private let environment: [String: String]
+    /// Source library copied into each disposable fixture; tests substitute a clean or owner-like copy.
+    let library: URL
     var webKitUnavailable: Bool {
         Self.isWebKitUnavailable(environment: environment, activationPolicy: NSApp.activationPolicy().rawValue)
     }
@@ -212,10 +214,12 @@ final class SnapshotHarness {
     }
 
     init(size: NSSize = NSSize(width: 1400, height: 900), timeout: TimeInterval = 12,
-         environment: [String: String] = ProcessInfo.processInfo.environment) {
+         environment: [String: String] = ProcessInfo.processInfo.environment,
+         library: URL = SnapshotHarness.repository.appendingPathComponent("Test_Library")) {
         self.size = size
         self.timeout = timeout
         self.environment = environment
+        self.library = library
     }
 
     func run(output: URL, names: [String] = []) async throws -> SnapshotManifest {
@@ -271,8 +275,16 @@ final class SnapshotHarness {
         return try result.value!.get()
     }
 
-    private func makeFixture(at root: URL, deepPath: Bool = false) throws {
-        try FileManager.default.copyItem(at: Self.repository.appendingPathComponent("Test_Library"), to: root)
+    /// Same rows as `DocumentListRedesignTests`, plus the earlier Road Notes; newest first.
+    static let vanlifeDocuments: [(String, String)] = [
+        ("Settling In.md", "# Settling In\n\n" + DocumentListRedesignTests.longBody),
+        ("Short.md", "# Short\n\nOne line."),
+        ("Blank.md", ""),
+        ("Road Notes.md", "# Road Notes\n"),
+    ]
+
+    func makeFixture(at root: URL, deepPath: Bool = false) throws {
+        try FileManager.default.copyItem(at: library, to: root)
         if deepPath {
             // Only the breadcrumb scenario gets the deep path, so other sidebars are unchanged.
             let folder = root.appendingPathComponent(SnapshotScenario.deepFolder)
@@ -287,11 +299,16 @@ final class SnapshotHarness {
         for name in ["A very long folder name that truncates before its count", "Private folder with a very long unreadable name"] {
             try FileManager.default.createDirectory(at: root.appendingPathComponent(name), withIntermediateDirectories: true)
         }
-        // The thread scenario selects Vanlife; supply it in the copy when the owner library has none.
+        // #49: Vanlife is harness-owned. Replace any copied folder so captures match on every machine,
+        // and pin dates (newest first) so the list order and date column are stable.
         let vanlife = root.appendingPathComponent("Vanlife")
-        if !FileManager.default.fileExists(atPath: vanlife.path) {
-            try FileManager.default.createDirectory(at: vanlife, withIntermediateDirectories: true)
-            try Data("# Road Notes\n".utf8).write(to: vanlife.appendingPathComponent("Road Notes.md"), options: .atomic)
+        try? FileManager.default.removeItem(at: vanlife)
+        try FileManager.default.createDirectory(at: vanlife, withIntermediateDirectories: true)
+        for (index, (name, text)) in Self.vanlifeDocuments.enumerated() {
+            let url = vanlife.appendingPathComponent(name)
+            try Data(text.utf8).write(to: url, options: .atomic)
+            let date = Date(timeIntervalSince1970: 1_780_000_000 - Double(index) * 86_400)
+            try FileManager.default.setAttributes([.creationDate: date, .modificationDate: date], ofItemAtPath: url.path)
         }
         let fixtures = root.appendingPathComponent("Snapshot Fixtures")
         try FileManager.default.createDirectory(at: fixtures, withIntermediateDirectories: true)

@@ -282,7 +282,7 @@ final class ScrollPerformanceTests: XCTestCase {
             XCTAssertEqual(entered.count, imageCount, "every image scrolled through the viewport")
             // CPU time of the main thread, so a loaded test machine descheduling the process
             // does not fail the frame budget; wall time is reported alongside.
-            XCTAssertLessThanOrEqual(p95, 4, "main-thread p95 per scroll step: " + summary)
+            XCTAssertLessThanOrEqual(p95, TestEnvironment.frameBudget(4), "main-thread p95 per scroll step: " + summary)
             XCTAssertEqual(work.bitmapRasterizations, 0, "decoded images must not be rasterized on the main thread while scrolling: " + summary)
             XCTAssertEqual(work.overlayMoves, 0, "overlays move only when geometry changes: " + summary)
             XCTAssertEqual(work.fullLayouts, 0, "no full-document layout during scroll: " + summary)

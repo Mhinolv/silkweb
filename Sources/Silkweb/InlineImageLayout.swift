@@ -10,6 +10,8 @@ import SilkwebCore
     var document: URL?
     private let loader = InlineImageLoader()
     private var task: Task<Void, Never>?
+    /// A debounced load is due or running; it reserves image space and re-sizes the editor when it lands.
+    var isLoading: Bool { task != nil }
     private var paragraphs: [InlineImageParagraph] = []
     private(set) var imageViews: [InlineImageView] = []
     private var geometry = NSSize.zero
@@ -24,6 +26,7 @@ import SilkwebCore
             if enabled { schedule() } else {
                 generation += 1
                 task?.cancel()
+                task = nil
                 install([])
             }
         }
@@ -83,6 +86,7 @@ import SilkwebCore
         let requested = generation
         task?.cancel()
         task = Task { [weak self] in
+            defer { if let self, requested == self.generation { self.task = nil } }
             do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
             guard let self, let editor = self.editor, !editor.hasMarkedText(),
                   let root = self.root, let document = self.document else { return }
