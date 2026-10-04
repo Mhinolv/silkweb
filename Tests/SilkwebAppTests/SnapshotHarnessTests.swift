@@ -98,6 +98,49 @@ final class SnapshotHarnessTests: XCTestCase {
         }
     }
 
+    /// #49: the tracked Test_Library has no `Vanlife/`, so a clean checkout (lanes, CI) must still render the list scenario.
+    @MainActor
+    func testListScenarioRendersFromCleanCheckout() async throws {
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: output) }
+        let manifest = try await SnapshotHarness().run(output: output, names: ["redesign-list-a", "redesign-thread-sidebar"])
+        XCTAssertEqual(manifest.captures.count, 4)
+        for capture in manifest.captures {
+            XCTAssertEqual(capture.status, "ok", "\(capture.scenario)-\(capture.appearance): \(capture.details)")
+            XCTAssertNotNil(capture.file)
+        }
+        XCTAssertEqual(manifest.captures.first?.windowTitle, "Settling In")
+    }
+
+    /// #49: an owner library with its own Vanlife gets the same harness-owned rows as a clean checkout.
+    @MainActor
+    func testHarnessReplacesCopiedVanlife() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebFixture-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let owner = temporary.appendingPathComponent("Owner")
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: SnapshotHarness.repository.appendingPathComponent("Test_Library"), to: owner)
+        try FileManager.default.createDirectory(at: owner.appendingPathComponent("Vanlife/Photos"), withIntermediateDirectories: true)
+        try Data("# Settling In\n\nOwner text.".utf8).write(to: owner.appendingPathComponent("Vanlife/Settling In.md"))
+        try Data("# Private\n".utf8).write(to: owner.appendingPathComponent("Vanlife/Owner Note.md"))
+        for (name, library) in [("clean", SnapshotHarness.repository.appendingPathComponent("Test_Library")), ("owner", owner)] {
+            let root = temporary.appendingPathComponent("Fixture from " + name)
+            try SnapshotHarness(library: library).makeFixture(at: root)
+            let vanlife = root.appendingPathComponent("Vanlife")
+            let names = try FileManager.default.contentsOfDirectory(atPath: vanlife.path).filter { !$0.hasPrefix(".") }
+            XCTAssertEqual(Set(names), Set(SnapshotHarness.vanlifeDocuments.map(\.0)), name)
+            var dates: [Date] = []
+            for (file, text) in SnapshotHarness.vanlifeDocuments {
+                let url = vanlife.appendingPathComponent(file)
+                XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), text, "\(name)/\(file)")
+                dates.append(try XCTUnwrap(url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate))
+            }
+            XCTAssertEqual(dates, dates.sorted(by: >), "\(name): newest first")
+            XCTAssertEqual(Set(dates).count, dates.count, "\(name): distinct dates")
+            XCTAssertEqual(dates.first, Date(timeIntervalSince1970: 1_780_000_000), "\(name): pinned, not the copy time")
+        }
+    }
+
     @MainActor
     func testUnknownScenariosAreReportedInBothAppearances() async throws {
         let output = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
