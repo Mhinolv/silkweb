@@ -62,7 +62,7 @@ final class PreviewCoordinator {
 
     @ObservationIgnored private var settingsObserver: NSObjectProtocol?
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = AppDefaults.store) {
         self.defaults = defaults
         mode = DocumentViewMode(rawValue: defaults.string(forKey: "Silkweb.Detail.Mode") ?? "") ?? .editor
         showsOutline = defaults.bool(forKey: "Silkweb.Detail.Outline")

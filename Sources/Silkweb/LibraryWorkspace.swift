@@ -24,7 +24,7 @@ final class LibraryWorkspace {
     let columnAutosaveName: String
     @ObservationIgnored private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard, columnAutosaveName: String = "Silkweb.LibraryColumns") {
+    init(defaults: UserDefaults = AppDefaults.store, columnAutosaveName: String = "Silkweb.LibraryColumns") {
         self.defaults = defaults
         self.columnAutosaveName = columnAutosaveName
         preview = PreviewCoordinator(defaults: defaults)

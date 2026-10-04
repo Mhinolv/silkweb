@@ -273,12 +273,13 @@ final class PlainMarkdownTextView: NSTextView {
         contentSizingTask = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
             guard let self, !self.hasMarkedText(), let container = self.textContainer else { return }
-            self.layoutManager?.ensureLayout(for: container)
-            self.sizeToFit()
+            guard let layout = self.layoutManager else { return }
+            layout.ensureLayout(for: container)
             self.inlineImages.positionViews()
-            if let bottom = self.inlineImages.imageViews.map({ $0.frame.maxY + 10 + self.textContainerInset.height }).max(), bottom > self.frame.height {
-                self.setFrameSize(NSSize(width: self.frame.width, height: bottom))
-            }
+            // One resize to the text (what sizeToFit measures) and the trailing images together.
+            let text = layout.usedRect(for: container).height + 2 * self.textContainerInset.height
+            let height = min(self.maxSize.height, max(self.minSize.height, text, self.imagesBottom))
+            if self.frame.height != height { self.setFrameSize(NSSize(width: self.frame.width, height: height)) }
             if self.needsEndMarginAfterEdit {
                 self.needsEndMarginAfterEdit = false
                 // Typewriter's own bottom inset already reaches the anchor; never jump past it.
@@ -291,8 +292,16 @@ final class PlainMarkdownTextView: NSTextView {
         }
     }
 
+    /// Where the last inline image ends; TextKit sizes the view to its text only.
+    private var imagesBottom: CGFloat {
+        inlineImages.imageViews.map { $0.frame.maxY + 10 + textContainerInset.height }.max() ?? 0
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
+        // TextKit refits the view to its text whenever the container width changes. Under legacy
+        // scroll bars that cut off trailing images, hid the scroller, widened the container and
+        // re-grew the frame on every sizing pass, leaving the last images unreachable (silkweb-1.81).
+        super.setFrameSize(NSSize(width: newSize.width, height: max(newSize.height, imagesBottom)))
         layoutEditor()
     }
 

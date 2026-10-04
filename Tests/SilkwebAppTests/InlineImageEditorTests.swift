@@ -97,8 +97,17 @@ final class InlineImageEditorTests: XCTestCase {
         XCTAssertEqual(views().count, 3)
         XCTAssertFalse(window.isVisible)
     }
+    /// 1.81: both scroll bar styles, never the machine's setting. Under legacy scroll bars the trailing
+    /// images used to toggle the scroller and the frame shrank back below them on every sizing pass.
     @MainActor
     func testLargeImageStackAtEndAndCacheInvalidation() async throws {
+        for style in [NSScroller.Style.legacy, .overlay] {
+            try await largeImageStackAtEndAndCacheInvalidation(scrollerStyle: style)
+        }
+    }
+
+    @MainActor
+    private func largeImageStackAtEndAndCacheInvalidation(scrollerStyle: NSScroller.Style) async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -113,6 +122,7 @@ final class InlineImageEditorTests: XCTestCase {
         }
         try writeImage(width: 1600, height: 800)
         let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
+        scroll.scrollerStyle = scrollerStyle
         let editor = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.contentView = scroll
@@ -134,7 +144,12 @@ final class InlineImageEditorTests: XCTestCase {
             XCTAssertLessThanOrEqual(views[0].frame.width, try XCTUnwrap(editor.textContainer).containerSize.width)
             XCTAssertLessThanOrEqual(views[0].frame.height, scroll.contentSize.height * 0.7 + 0.01)
             XCTAssertEqual(views[1].frame.minY, views[0].frame.maxY + 8, accuracy: 0.01)
-            XCTAssertGreaterThanOrEqual(editor.frame.height, views[1].frame.maxY + 10)
+            XCTAssertGreaterThanOrEqual(editor.frame.height, views[1].frame.maxY + 10, "\(size) style \(scrollerStyle.rawValue)")
+            // Settled: another sizing pass leaves the frame and the images where they are.
+            let settled = (editor.frame, views.map(\.frame))
+            try await settle()
+            XCTAssertEqual(editor.frame, settled.0, "\(size) style \(scrollerStyle.rawValue)")
+            XCTAssertEqual(editor.inlineImages.imageViews.map(\.frame), settled.1, "\(size) style \(scrollerStyle.rawValue)")
             let bitmap = try XCTUnwrap(views[0].content.bitmap)
             XCTAssertLessThanOrEqual(bitmap.width, 1440, "ImageIO downsampled below the natural 1600 pixels")
         }

@@ -2,12 +2,26 @@ import AppKit
 import SwiftUI
 import SilkwebCore
 
+/// The app's preferences domain. Under XCTest (unit tests, snapshot harness) it is an empty suite private
+/// to the process, so tests start from defaults and never read or write the runner's real domain (silkweb-1.81).
+enum AppDefaults {
+    static let store: UserDefaults = {
+        guard NSClassFromString("XCTestCase") != nil else { return .standard }
+        let suite = UserDefaults(suiteName: testSuiteName) ?? .standard
+        suite.removePersistentDomain(forName: testSuiteName)
+        atexit { UserDefaults(suiteName: AppDefaults.testSuiteName)?.removePersistentDomain(forName: AppDefaults.testSuiteName) }
+        return suite
+    }()
+
+    static let testSuiteName = "Silkweb.Tests.Preferences.\(ProcessInfo.processInfo.processIdentifier)"
+}
+
 /// The preferences in effect, readable from any thread: dynamic colour providers resolve off the main
 /// thread, and new editors read their initial style here (silkweb-1.24).
 final class LivePreferences: @unchecked Sendable {
     static let shared = LivePreferences()
     private let lock = NSLock()
-    private var value = WritingPreferences.load()
+    private var value = WritingPreferences.load(from: AppDefaults.store)
 
     var current: WritingPreferences {
         get { lock.withLock { value } }
@@ -53,7 +67,7 @@ extension Notification.Name {
     @ObservationIgnored let isLive: Bool
     @ObservationIgnored private var saveTask: Task<Void, Never>?
 
-    init(defaults: UserDefaults = .standard, live: Bool = true) {
+    init(defaults: UserDefaults = AppDefaults.store, live: Bool = true) {
         self.defaults = defaults
         isLive = live
         let loaded = WritingPreferences.load(from: defaults)

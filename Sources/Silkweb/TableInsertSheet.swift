@@ -7,7 +7,7 @@ final class TableInsertForm {
     var columns: String
     var rows: String
     var alignment: TableAlignment
-    init(options: TableOptions = .load()) {
+    init(options: TableOptions = .load(from: AppDefaults.store)) {
         columns = String(options.columns); rows = String(options.rows); alignment = options.alignment
     }
     var options: TableOptions? {
@@ -94,7 +94,7 @@ extension PlainMarkdownTextView {
         }, insert: { [weak self, weak window] options in
             window?.endSheet(sheet)
             guard let self, self.string == original, self.isEditable else { return }
-            options.save()
+            options.save(to: AppDefaults.store)
             self.insertTable(options, selection: selection)
             window?.makeFirstResponder(self)
         }))
