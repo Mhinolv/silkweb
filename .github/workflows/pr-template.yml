@@ -1,0 +1,23 @@
+name: PR template
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the PR template sections
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          fail=0
+          need() { printf '%s' "$BODY" | grep -Eq "$1" || { echo "::error::Missing: $2"; fail=1; }; }
+          need '^## Issue'                         '"## Issue" section'
+          need '(Closes|Fixes|Resolves|Refs) #[0-9]+' 'a linked issue ("Closes #N" or "Refs #N")'
+          need '^## What changed'                  '"## What changed" section'
+          need '^## How it was tested'             '"## How it was tested" section'
+          need '^## Screenshots'                   '"## Screenshots" section'
+          # The "What changed" section must have at least one real bullet.
+          printf '%s' "$BODY" | awk '/^## What changed/{f=1;next} /^## /{f=0} f && /^- [^[:space:]]/{ok=1} END{exit ok?0:1}' \
+            || { echo "::error::'What changed' needs at least one filled-in bullet"; fail=1; }
+          exit $fail

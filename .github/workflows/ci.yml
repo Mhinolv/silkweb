@@ -1,0 +1,22 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main, team/roadmap]
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      SILKWEB_SNAPSHOT_NO_WEBKIT: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Build
+        run: ./scripts/build.sh
+      - name: Test
+        run: ./scripts/build.sh test
