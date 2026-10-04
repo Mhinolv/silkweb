@@ -68,7 +68,8 @@ struct SearchView<Content: View>: View {
                                 List(results, selection: $selected) { result in
                                     Button {
                                         selected = result.id
-                                        openSelected()
+                                        let query = search.text
+                                        Task { await workspace.openSearchResult(result, findText: query) }
                                     } label: {
                                         SearchResultRow(result: result, query: search.resultText)
                                             .padding(.horizontal, 12)
@@ -116,9 +117,7 @@ struct SearchView<Content: View>: View {
     }
 
     private func openSelected() {
-        guard let result = workspace.filteredSearchResults.first(where: { $0.id == selected }) ?? workspace.filteredSearchResults.first else { return }
-        let query = search.text
-        Task { await workspace.openSearchResult(result, findText: query) }
+        Task { [selected] in await workspace.openSearchSelection(selected, quick: false) }
     }
 }
 

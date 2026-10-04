@@ -99,7 +99,15 @@ final class LibrarySearch {
 
     func waitForIndex() async { await buildTask?.value }
 
-    func query(quick: Bool) async {
+    /// Finishes a debouncing query now so Return chooses from the text in the field (silkweb-1.75).
+    /// False when results for that text still aren't available (no index, error, or the text changed again).
+    func settle(quick: Bool) async -> Bool {
+        if !quick, text.isEmpty { return false }
+        if quick ? quickHasPendingQuery : hasPendingQuery { await query(quick: quick, debounce: false) }
+        return !(quick ? quickHasPendingQuery : hasPendingQuery)
+    }
+
+    func query(quick: Bool, debounce: Bool = true) async {
         guard !Task.isCancelled, let index else { return }
         let queryText = quick ? quickText : text
         let scope = quick ? nil : folderScope
@@ -120,7 +128,11 @@ final class LibrarySearch {
             if !quick, request == token { isSearching = false }
         }
         do {
-            try await Task.sleep(for: .milliseconds(150))
+            if debounce {
+                try await Task.sleep(for: .milliseconds(150))
+                // Return may have settled this exact query during the debounce.
+                guard identity != (quick ? quickCompleted : completed) else { return }
+            }
             #if DEBUG
             queryCount += 1
             #endif
@@ -177,6 +189,15 @@ final class LibrarySearch {
 }
 
 extension LibraryWorkspace {
+    /// Return in Search Library or Quick Open: the selected row, else the first, of the current query's results.
+    /// A pending query is awaited first; nothing opens when it has no results.
+    func openSearchSelection(_ selected: UUID?, quick: Bool, pinned: Bool = false) async {
+        guard await search.settle(quick: quick) else { return }
+        let results = quick ? search.quickResults : filteredSearchResults
+        guard let result = results.first(where: { $0.id == selected }) ?? results.first else { return }
+        await openSearchResult(result, findText: quick ? nil : search.text, pinned: pinned)
+    }
+
     func openSearchResult(_ result: SearchResult, findText: String? = nil, pinned: Bool = false) async {
         guard let snapshot, let document = snapshot.documents.first(where: { $0.id == result.id }) else { return }
         let url = snapshot.rootURL.appendingPathComponent(document.relativePath)

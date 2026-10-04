@@ -58,7 +58,7 @@ struct QuickOpenPanel: View {
                 ForEach(search.quickResults) { result in
                     Button {
                         selected = result.id
-                        openSelected()
+                        Task { await workspace.openSearchResult(result) }
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "doc.text").foregroundStyle(.secondary)
@@ -87,7 +87,6 @@ struct QuickOpenPanel: View {
     }
 
     private func openSelected(pinned: Bool = false) {
-        guard let result = workspace.search.quickResults.first(where: { $0.id == selected }) ?? workspace.search.quickResults.first else { return }
-        Task { await workspace.openSearchResult(result, pinned: pinned) }
+        Task { [selected] in await workspace.openSearchSelection(selected, quick: true, pinned: pinned) }
     }
 }
