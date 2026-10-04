@@ -58,15 +58,9 @@ public enum MarkdownTable {
         let cells = (0..<options.columns).map { index in
             escape(headers.flatMap { index < $0.count ? $0[index] : nil } ?? "Column \(index + 1)")
         }
-        let widths = cells.map { max(options.alignment.marker.count, $0.count) }
-        func row(_ values: [String]) -> String {
-            "| " + zip(values, widths).map { value, width in value + String(repeating: " ", count: max(0, width - value.count)) }.joined(separator: " | ") + " |"
-        }
-        let separators = widths.map { width -> String in
-            let left = options.alignment == .left || options.alignment == .center
-            let right = options.alignment == .right || options.alignment == .center
-            return (left ? ":" : "") + String(repeating: "-", count: max(3, width - (left ? 1 : 0) - (right ? 1 : 0))) + (right ? ":" : "")
-        }
+        // Compact GFM: one space on each side of every pipe, no column padding (cells drift once edited).
+        func row(_ values: [String]) -> String { "| " + values.joined(separator: " | ") + " |" }
+        let separators = Array(repeating: options.alignment.marker, count: options.columns)
         return ([row(cells), row(separators)] + Array(repeating: row(Array(repeating: "", count: options.columns)), count: options.rows)).joined(separator: "\n")
     }
     public static func insertion(text: String, selection: NSRange, options: TableOptions) -> MarkdownEdit {
