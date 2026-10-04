@@ -28,6 +28,37 @@ final class TableInsertSheetTests: XCTestCase {
             }
         }
     }
+    /// The sheet's live preview shows exactly the compact source that Insert puts in the editor.
+    @MainActor func testPreviewShowsInsertedCompactSource() async throws {
+        StatusBarCountsTests.exposeAccessibility(true)
+        defer { StatusBarCountsTests.exposeAccessibility(false) }
+        let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
+        let editor = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
+        let form = TableInsertForm(options: TableOptions(columns: 1, rows: 1))
+        let host = NSHostingView(rootView: TableInsertSheet(form: form, cancel: {}, insert: { _ in }))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.contentView = nil; window.close() }
+        for (columns, rows) in [(1, 1), (3, 1), (20, 100)] {
+            for alignment in TableAlignment.allCases {
+                form.columns = String(columns); form.rows = String(rows); form.alignment = alignment
+                for _ in 0..<3 { host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(20)) }
+                let options = TableOptions(columns: columns, rows: rows, alignment: alignment)
+                editor.string = ""
+                editor.styler.reload()
+                editor.setSelectedRange(NSRange(location: 0, length: 0))
+                editor.insertTable(options)
+                let inserted = editor.string
+                XCTAssertEqual(inserted, MarkdownTable.source(options: options))
+                XCTAssertFalse(inserted.contains("|   "), "compact: no column padding")
+                let tree = StatusBarCountsTests.accessibilityTree(host)
+                let text = try XCTUnwrap(tree.first { $0.accessibilityIdentifier?() == "tableSourcePreviewText" }, "\(options)")
+                let shown = [StatusBarCountsTests.label(text), StatusBarCountsTests.value(text)].compactMap { $0 }
+                XCTAssertTrue(shown.contains(inserted), "\(options) preview \(shown)")
+            }
+        }
+    }
     @MainActor func testInsertionUndoReadOnlyAndEditorLifecycle() throws {
         let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
         let text = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
