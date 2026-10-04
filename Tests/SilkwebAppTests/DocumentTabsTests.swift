@@ -92,6 +92,83 @@ final class DocumentTabsTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: workspace.root!.appendingPathComponent("B.md"), encoding: .utf8), "B changed")
     }
 
+    /// Types (plain inserts and IME marked text) through the editor delegate while `tick` runs.
+    /// Returns how many keystrokes the delegate refused.
+    @MainActor private func type(into text: NSTextView, during tick: @escaping @MainActor () async -> Void) async -> Int {
+        final class Done { var value = false }
+        let done = Done()
+        let task = Task { @MainActor in await tick(); done.value = true }
+        var refused = 0
+        var keys = 0
+        while !done.value {
+            keys += 1
+            let end = NSRange(location: (text.string as NSString).length, length: 0)
+            if keys % 3 == 0 {
+                // IME composition, then commit.
+                text.setSelectedRange(end)
+                text.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0), replacementRange: end)
+                if !text.hasMarkedText() { refused += 1 }
+                text.insertText("火", replacementRange: text.hasMarkedText() ? text.markedRange() : end)
+            } else {
+                if text.delegate?.textView?(text, shouldChangeTextIn: end, replacementString: "k") == false { refused += 1 }
+                text.insertText("k", replacementRange: end)
+            }
+            await Task.yield()
+        }
+        await task.value
+        return refused
+    }
+
+    @MainActor func testTypingAcceptedDuringNoOpWatcherTickAfterAutosave() async throws {
+        let workspace = try await fixture()
+        defer { try? FileManager.default.removeItem(at: workspace.root!) }
+        await select("A", in: workspace, pinned: true)
+        let session = workspace.editor
+        let coordinator = MarkdownTextView.Coordinator(session: session)
+        let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        text.string = session.text
+        text.delegate = coordinator
+        coordinator.textView = text
+        text.insertText(" saved", replacementRange: NSRange(location: 1, length: 0))
+        // Simulated autosave: the file now carries our own new revision.
+        let saved = await session.flush()
+        XCTAssertTrue(saved)
+        XCTAssertEqual(try String(contentsOf: session.url!, encoding: .utf8), "A saved")
+        for tick in 0..<3 {
+            let refused = await type(into: text) {
+                if tick == 0 { await workspace.reconcileFinderChanges() } else { await session.reconcileExternalChange() }
+            }
+            XCTAssertEqual(refused, 0, "tick \(tick): a no-op reconcile must not refuse typing or IME input")
+            XCTAssertFalse(session.loading)
+        }
+        XCTAssertEqual(session.text, text.string)
+        XCTAssertTrue(session.text.hasPrefix("A saved"))
+        XCTAssertGreaterThan(session.text.count, "A saved".count)
+        let flushed = await session.flush()
+        XCTAssertTrue(flushed)
+        XCTAssertEqual(try String(contentsOf: session.url!, encoding: .utf8), text.string)
+    }
+
+    @MainActor func testExternalChangeStillLocksBufferUntilReloadApplies() async throws {
+        let workspace = try await fixture()
+        defer { try? FileManager.default.removeItem(at: workspace.root!) }
+        await select("A", in: workspace, pinned: true)
+        let session = workspace.editor
+        let coordinator = MarkdownTextView.Coordinator(session: session)
+        try Data("external".utf8).write(to: session.url!, options: .atomic)
+        let task = Task { @MainActor in await session.reconcileExternalChange() }
+        var locked = false
+        while !locked, session.text != "external" {
+            locked = !coordinator.textView(NSTextView(), shouldChangeTextIn: NSRange(location: 0, length: 0), replacementString: "x")
+            await Task.yield()
+        }
+        await task.value
+        XCTAssertTrue(locked, "edits must be refused while the changed file replaces the buffer")
+        XCTAssertEqual(session.text, "external")
+        XCTAssertEqual(session.state, .clean)
+        XCTAssertFalse(session.loading)
+    }
+
     @MainActor func testRestoreAndInactiveRenameAndFinderMove() async throws {
         let workspace = try await fixture()
         defer { try? FileManager.default.removeItem(at: workspace.root!) }

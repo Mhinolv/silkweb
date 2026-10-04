@@ -42,6 +42,38 @@ final class LibraryReconcilerTests: XCTestCase {
         }
     }
 
+    /// 1.74: the watcher-tick peek is true only when a reconcile could change the entry.
+    func testNeedsReconcileOnlyForRealDiskChanges() async throws {
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        for dirty in [false, true] {
+            let url = root.appendingPathComponent("\(UUID()).md")
+            try Data("original".utf8).write(to: url)
+            let coordinator = SaveCoordinator(store: DocumentStore(root: root), recoveryDirectory: root.appendingPathComponent(".recovery"))
+            let unopened = await coordinator.needsReconcile(url)
+            XCTAssertFalse(unopened)
+            _ = try await coordinator.open(url)
+            try await coordinator.edit("saved", at: url)
+            _ = await coordinator.save(url)
+            if dirty { try await coordinator.edit("typing", at: url) }
+            // After an autosave the disk revision is our own: no reconcile, state untouched.
+            let unchanged = await coordinator.needsReconcile(url)
+            XCTAssertFalse(unchanged)
+            let state = await coordinator.state(for: url)
+            XCTAssertEqual(state, dirty ? .dirty : .clean)
+            try Data("external".utf8).write(to: url, options: .atomic)
+            let changed = await coordinator.needsReconcile(url)
+            XCTAssertTrue(changed)
+            _ = try await coordinator.reconcile(url)
+            // A conflict may resolve on the next tick, so it always reconciles.
+            let afterwards = await coordinator.needsReconcile(url)
+            XCTAssertEqual(afterwards, dirty)
+            try FileManager.default.removeItem(at: url)
+            let deleted = await coordinator.needsReconcile(url)
+            XCTAssertTrue(deleted)
+        }
+    }
+
     func testDeletionRetainsCleanAndDirtyDraftsAndRecreatesWithoutOverwrite() async throws {
         let root = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }

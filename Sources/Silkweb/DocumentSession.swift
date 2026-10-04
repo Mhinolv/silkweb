@@ -144,6 +144,11 @@ final class DocumentSession {
 
     func reconcileExternalChange(movedTo destination: URL? = nil) async {
         guard !loading, let original = url else { return }
+        // Watcher ticks after every autosave: an unchanged file must not refuse typing or IME
+        // input. Only a move or a real disk change locks the buffer for the reload (1.74).
+        if destination == nil || destination?.standardizedFileURL == original.standardizedFileURL {
+            guard await coordinator.needsReconcile(original), !loading, url == original else { return }
+        }
         loading = true
         defer { loading = false }
         observation?.cancel()
