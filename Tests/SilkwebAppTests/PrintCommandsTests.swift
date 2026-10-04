@@ -115,14 +115,18 @@ final class PrintCommandsTests: XCTestCase {
         }
     }
 
+    /// The render ignores cancellation and returns only when the test releases it, like a WebKit
+    /// callback arriving after the deadline: only the deadline can end the wait, and the late
+    /// result neither resumes the job a second time nor stops the renderer again.
     @MainActor func testPDFExportDeadlineAndLateCompletion() async throws {
         let job = PDFExportJob()
-        var cancelled = false
-        let start = Date()
+        var cancels = 0
+        var release: CheckedContinuation<Void, Never>?
+        var returned = false
         do {
-            _ = try await job.wait(timeoutInterval: 0.02, cancel: { cancelled = true }) {
-                // Simulates a delayed WebKit callback even after cancellation.
-                try? await Task.sleep(for: .milliseconds(100))
+            _ = try await job.wait(timeoutInterval: 0.02, cancel: { cancels += 1 }) { @MainActor in
+                await withCheckedContinuation { release = $0 }
+                returned = true
                 return Data("late".utf8)
             }
             XCTFail("An export that never completes must time out")
@@ -130,27 +134,74 @@ final class PrintCommandsTests: XCTestCase {
             XCTAssertEqual(error as? PDFExportError, .timedOut)
             XCTAssertTrue(error.localizedDescription.contains("took too long"))
         }
-        XCTAssertTrue(cancelled)
-        XCTAssertLessThan(Date().timeIntervalSince(start), 1)
-        try await Task.sleep(for: .milliseconds(30))
-        let data = try await PDFExportJob().wait(timeoutInterval: 1, cancel: { XCTFail("Completed export cancelled") }) {
+        XCTAssertEqual(cancels, 1)
+        while release == nil { await Task.yield() }
+        release?.resume()
+        // The render's job finishes on the main actor in the same turn it returns.
+        while !returned { await Task.yield() }
+        await Task.yield()
+        XCTAssertEqual(cancels, 1)
+        let data = try await PDFExportJob().wait(timeoutInterval: 60, cancel: { XCTFail("Completed export cancelled") }) {
             Data("done".utf8)
         }
         XCTAssertEqual(data, Data("done".utf8))
     }
 
-    /// The progress sheet's Cancel cancels the awaiting task: rendering stops at once with
-    /// CancellationError (no alert, nothing written) and a late render cannot complete it.
-    @MainActor func testPDFExportCancellationAndProgressSheet() async throws {
-        var stopped = false
-        let render = Task { @MainActor in
-            try await PDFExportJob().wait(timeoutInterval: 5, cancel: { stopped = true }) {
-                try? await Task.sleep(for: .milliseconds(300))
+    /// #61 (CI flake): on a busy runner the render can return after the deadline but before the
+    /// deadline task gets the main actor. The deadline is final, so that late render must still
+    /// time out. Blocking the main actor past a 20 ms deadline reproduces the ordering exactly.
+    @MainActor func testPDFExportRenderReturningAfterDeadlineTimesOut() async throws {
+        var cancels = 0
+        do {
+            let data = try await PDFExportJob().wait(timeoutInterval: 0.02, cancel: { cancels += 1 }) { @MainActor in
+                let busy = ContinuousClock.now + .milliseconds(100)
+                while ContinuousClock.now < busy {}
+                return Data("late".utf8)
+            }
+            XCTFail("A render that returned after the deadline was published: \(String(decoding: data, as: UTF8.self))")
+        } catch {
+            XCTAssertEqual(error as? PDFExportError, .timedOut, "\(error)")
+        }
+        XCTAssertEqual(cancels, 1)
+    }
+
+    /// #61: Cancel can arrive in the same turn the render returns (its stop is queued behind the
+    /// render's result). The user asked to stop, so no data is returned and nothing is written.
+    @MainActor func testPDFExportCancelRacingCompletionDiscardsData() async throws {
+        final class Box { var task: Task<Data, Error>? }
+        let box = Box()
+        var cancels = 0
+        box.task = Task { @MainActor in
+            try await PDFExportJob().wait(timeoutInterval: 60, cancel: { cancels += 1 }) { @MainActor in
+                box.task?.cancel()
                 return Data("late".utf8)
             }
         }
-        try await Task.sleep(for: .milliseconds(20))
-        let start = Date()
+        do {
+            let data = try await XCTUnwrap(box.task).value
+            XCTFail("A cancelled export returned data: \(String(decoding: data, as: UTF8.self))")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "\(error)")
+        }
+        await Task.yield()
+        XCTAssertEqual(cancels, 1)
+    }
+
+    /// The progress sheet's Cancel cancels the awaiting task: rendering stops at once with
+    /// CancellationError (no alert, nothing written) and a late render cannot complete it.
+    /// The render returns only when released, so the outcome cannot depend on timing.
+    @MainActor func testPDFExportCancellationAndProgressSheet() async throws {
+        var stopped = false
+        var started = false
+        var release: CheckedContinuation<Void, Never>?
+        let render = Task { @MainActor in
+            try await PDFExportJob().wait(timeoutInterval: 60, cancel: { stopped = true }) { @MainActor in
+                started = true
+                await withCheckedContinuation { release = $0 }
+                return Data("late".utf8)
+            }
+        }
+        while !started { await Task.yield() }
         render.cancel()
         do {
             _ = try await render.value
@@ -159,7 +210,7 @@ final class PrintCommandsTests: XCTestCase {
             XCTAssertTrue(error is CancellationError, "\(error)")
         }
         XCTAssertTrue(stopped)
-        XCTAssertLessThan(Date().timeIntervalSince(start), 0.25)
+        release?.resume()
         XCTAssertEqual(PDFExportError.timedOut.localizedDescription,
                        "The document took too long to render. Try again, or export a shorter document.")
 
