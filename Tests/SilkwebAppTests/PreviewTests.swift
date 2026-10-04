@@ -100,8 +100,7 @@ final class PreviewTests: XCTestCase {
         preview.beginLoading(document: document)
         XCTAssertFalse(preview.isLoading)
         XCTAssertEqual(preview.error, "Test failure")
-        try await Task.sleep(for: .milliseconds(450))
-        XCTAssertTrue(preview.isLoading)
+        try await waitUntil("delayed initial loading indicator") { preview.isLoading }
         preview.didFinish(document: document)
         XCTAssertFalse(preview.isLoading)
         XCTAssertNil(preview.error)
@@ -119,7 +118,7 @@ final class PreviewTests: XCTestCase {
         preview.mode = .split
         preview.schedule(text: "# Obsolete", document: document, root: root)
         preview.schedule(text: "# Latest\n## Child", document: document, root: root)
-        try await Task.sleep(for: .milliseconds(500))
+        try await waitUntil("debounced preview render") { !preview.html.isEmpty }
         XCTAssertEqual(preview.headings.map(\.text), ["Latest", "Child"])
         XCTAssertFalse(preview.html.contains("Obsolete"))
         XCTAssertTrue(preview.html.contains("script-src 'none'"))
@@ -267,12 +266,12 @@ final class PreviewTests: XCTestCase {
         XCTAssertFalse(preview.isLoading)
         preview.showsOutline = true
         preview.schedule(text: "# Outline", document: document, root: document.deletingLastPathComponent())
-        try await Task.sleep(for: .milliseconds(450))
+        try await waitUntil("outline-only headings") { !preview.headings.isEmpty }
         XCTAssertEqual(preview.headings.map(\.text), ["Outline"])
         XCTAssertTrue(preview.html.isEmpty)
         preview.mode = .split
         preview.schedule(text: "# Visible", document: document, root: document.deletingLastPathComponent())
-        try await Task.sleep(for: .milliseconds(450))
+        try await waitUntil("visible preview render") { !preview.html.isEmpty }
         let html = preview.html
         XCTAssertTrue(html.contains("Visible"))
         preview.didFinish(document: document)
@@ -283,7 +282,7 @@ final class PreviewTests: XCTestCase {
         preview.schedule(text: "# Cancelled", document: document, root: document.deletingLastPathComponent())
         preview.mode = .editor
         preview.schedule(text: "# Cancelled", document: document, root: document.deletingLastPathComponent())
-        try await Task.sleep(for: .milliseconds(450))
+        try await waitUntil("outline-only render") { preview.headings.map(\.text) == ["Cancelled"] }
         XCTAssertEqual(preview.html, "") // outline-only work never publishes preview HTML
     }
 
