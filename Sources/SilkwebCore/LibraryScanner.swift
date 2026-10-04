@@ -53,9 +53,12 @@ public enum LibraryScanner {
                 try LibraryMetadataStore.rejectLink(url)
             }
             let values = try url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
             var documents = snapshot.documents
             documents[index].created = values.creationDate
             documents[index].modified = values.contentModificationDate
+            // An atomic save replaces the inode; match the next scan so it is not a second change.
+            documents[index].fileIdentity = "\(attributes[.systemNumber] ?? ""):\(attributes[.systemFileNumber] ?? "")"
             return LibrarySnapshot(rootURL: snapshot.rootURL, folders: snapshot.folders, documents: documents,
                                    presentation: LibraryPresentation(folders: snapshot.folders, documents: documents),
                                    metadata: snapshot.metadata, recoveredMetadataURL: snapshot.recoveredMetadataURL,

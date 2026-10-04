@@ -55,9 +55,18 @@ public actor SearchIndex {
     private var mutationSerial = 0
     private var mutations: [UUID: Int] = [:]
     private var observers: [UUID: AsyncStream<SearchIndexState>.Continuation] = [:]
+    private let cacheWriteDelay: Duration
+    private var cacheReadOnly = false
+    private var cacheDirty = false
+    private var cacheWrite: Task<Void, Never>?
+    private var cacheWriting: Task<Void, Never>?
     public private(set) var state: SearchIndexState = .building(indexed: 0, total: 0)
 
-    public init(root: URL) { self.root = root.standardizedFileURL }
+    /// Cache writes are coalesced: one write `cacheWriteDelay` after the last change.
+    public init(root: URL, cacheWriteDelay: Duration = .seconds(2)) {
+        self.root = root.standardizedFileURL
+        self.cacheWriteDelay = cacheWriteDelay
+    }
 
     public func states() -> AsyncStream<SearchIndexState> {
         let id = UUID()
@@ -126,7 +135,8 @@ public actor SearchIndex {
         try Task.checkCancellation()
         // A derived cache failure must not prevent searching a read-only library.
         let recordsChanged = previousRecords != entries.mapValues(\.record)
-        if recordsChanged, !snapshot.isReadOnly { try? saveCache() }
+        cacheReadOnly = snapshot.isReadOnly
+        if recordsChanged { scheduleCacheWrite() }
         mutations = mutations.filter { live.contains($0.key) }
         publish(.ready)
         return recordsChanged || previousFolders != folders
@@ -137,6 +147,7 @@ public actor SearchIndex {
         mutationSerial += 1
         mutations[document.id] = mutationSerial
         entries[document.id] = Entry(record(document, body: body))
+        scheduleCacheWrite()
     }
 
     public func remove(_ id: UUID) {
@@ -144,6 +155,13 @@ public actor SearchIndex {
         mutations[id] = mutationSerial
         entries[id] = nil
         recents.opened[id] = nil
+        scheduleCacheWrite()
+    }
+
+    /// Writes a pending cache change now (library close, tests).
+    public func flushCache() async {
+        cacheWrite?.cancel()
+        await writeCacheIfNeeded()
     }
 
     public func recordOpened(_ id: UUID, at date: Date = Date(), persist: Bool = true) throws {
@@ -257,7 +275,33 @@ public actor SearchIndex {
         try JSONEncoder().encode(value).write(to: file, options: .atomic)
     }
 
-    private func saveCache() throws { try write(Cache(records: entries.values.map(\.record)), name: "search-index.json") }
+    /// Saves and reconciles never encode the whole library inline; bursts produce one write.
+    private func scheduleCacheWrite() {
+        cacheDirty = true
+        cacheWrite?.cancel()
+        let delay = cacheWriteDelay
+        cacheWrite = Task {
+            do { try await Task.sleep(for: delay) } catch { return }
+            await self.writeCacheIfNeeded()
+        }
+    }
+
+    private func writeCacheIfNeeded() async {
+        guard cacheDirty else { return }
+        cacheDirty = false
+        guard !cacheReadOnly, let file = try? file("search-index.json") else { return }
+        let cache = Cache(records: entries.values.map(\.record))
+        // Encode off the actor so searches never wait on the write; writes land in order.
+        let previous = cacheWriting
+        let writing = Task.detached(priority: .utility) {
+            await previous?.value
+            // A late write must never recreate a library that was moved or deleted meanwhile.
+            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: false)
+            if let data = try? JSONEncoder().encode(cache) { try? data.write(to: file, options: .atomic) }
+        }
+        cacheWriting = writing
+        await writing.value
+    }
     private func publish(_ state: SearchIndexState) {
         self.state = state
         for observer in observers.values { observer.yield(state) }
