@@ -165,7 +165,11 @@ struct DocumentTable: NSViewRepresentable {
             let html = NSMenuItem(title: "HTML…", action: #selector(exportHTML(_:)), keyEquivalent: "")
             html.target = self; html.representedObject = path
             html.isEnabled = workspace.canExport && workspace.documentDragPaths(path).count == 1
-            exportMenu.addItem(html); export.submenu = exportMenu; menu.addItem(export)
+            // Same title and action as File ▸ Export ▸ PDF… (1.23), for this row's document.
+            let pdf = NSMenuItem(title: "PDF…", action: #selector(exportPDF(_:)), keyEquivalent: "")
+            pdf.target = self; pdf.representedObject = path
+            pdf.isEnabled = html.isEnabled && workspace.root != nil
+            exportMenu.addItem(html); exportMenu.addItem(pdf); export.submenu = exportMenu; menu.addItem(export)
             menu.addItem(.separator())
             let tagsItem = NSMenuItem(title: "Tags", action: nil, keyEquivalent: "")
             let submenu = NSMenu()
@@ -211,6 +215,10 @@ struct DocumentTable: NSViewRepresentable {
             workspace.requestMove(workspace.documentDragPaths(path))
         }
         @objc private func exportHTML(_ sender: NSMenuItem) { workspace.exportHTML(path: sender.representedObject as? String) }
+        @objc func exportPDF(_ sender: NSMenuItem) {
+            guard let path = sender.representedObject as? String else { return }
+            workspace.exportPDF(path: path)
+        }
         @objc private func reveal(_ sender: NSMenuItem) { workspace.reveal(sender.representedObject as? String) }
         @objc private func trash(_ sender: NSMenuItem) {
             guard let path = sender.representedObject as? String else { return }

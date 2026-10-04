@@ -24,6 +24,7 @@ struct MenuCommandValues: Equatable {
     var canToggleSidebars: Bool
     var previewMode: DocumentViewMode
     var showsOutline: Bool
+    var showsStatusBar: Bool
     var focusMode: Bool
     var typewriterMode: Bool
     var canToggleWritingModes: Bool
@@ -33,8 +34,8 @@ struct MenuCommandValues: Equatable {
 
     @MainActor init(workspace: LibraryWorkspace) {
         canMutate = workspace.canMutate
-        canRename = canMutate && workspace.selectedItem != nil
-        canMove = canMutate && !workspace.movePaths.isEmpty
+        canRename = canMutate && workspace.libraryHasFocus && workspace.selectedItem != nil
+        canMove = canMutate && workspace.libraryHasFocus && !workspace.movePaths.isEmpty
         trashTitle = workspace.trashMenuTitle
         canTrash = workspace.canTrashSelection
         hasLibrary = workspace.snapshot != nil
@@ -53,6 +54,7 @@ struct MenuCommandValues: Equatable {
         canToggleSidebars = hasLibrary || workspace.loading
         previewMode = workspace.preview.mode
         showsOutline = workspace.preview.showsOutline
+        showsStatusBar = workspace.preview.showsStatusBar
         focusMode = workspace.focusMode
         typewriterMode = workspace.typewriterMode
         canToggleWritingModes = workspace.canToggleWritingModes

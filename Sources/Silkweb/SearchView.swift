@@ -19,6 +19,7 @@ struct SearchView<Content: View>: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search Library", text: $search.text)
                     .textFieldStyle(.plain).focused($fieldFocused)
+                    .accessibilityLabel("Search Library")
                     .accessibilityIdentifier("library-search")
                     .columnLayoutAnchor("library-search")
                     .onSubmit { openSelected() }

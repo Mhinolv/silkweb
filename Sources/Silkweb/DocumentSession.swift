@@ -28,6 +28,14 @@ final class DocumentSession {
     var caretLocation = 0
     @ObservationIgnored var selection = NSRange(location: 0, length: 0)
     @ObservationIgnored var scroll = NSPoint.zero
+    /// Created by the first status bar that shows this buffer (silkweb-1.25).
+    @ObservationIgnored private(set) var loadedStatistics: DocumentStatisticsModel?
+    var statistics: DocumentStatisticsModel {
+        if let loadedStatistics { return loadedStatistics }
+        let model = DocumentStatisticsModel(session: self)
+        loadedStatistics = model
+        return model
+    }
     private var positions: [URL: (NSRange, NSPoint)] = [:]
     private var coordinator = SaveCoordinator()
     private var tail: Task<Void, Never>?

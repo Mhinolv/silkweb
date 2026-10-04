@@ -123,11 +123,11 @@ final class DocumentRowPresentationTests: XCTestCase {
         let cases: [(String, String)] = [
             ("# Title\n\nThe fog burned off.\nCoffee on the tailgate.", "The fog burned off. Coffee on the tailgate."),
             ("# Title\n\n![Van at dawn](van.jpg) and [a link](https://example.com)", "Van at dawn and a link"),
-            ("# Title\n- **One**\n- _Two_\n\n> `three`", "One Two three"),
-            ("# Title\n- [x] Done\n1. Item", "Done Item"),
+            ("# Title\n- **One**\n- _Two_\n\n> `three`", "One · Two · three"),
+            ("# Title\n- [x] Done\n1. Item", "Done · Item"),
             ("# Title\n\nA \t  wide\u{00A0}gap\n\n\nnext", "A wide gap next"),
-            ("# Other\nBody", "Other Body"),
-            ("# Title\n## Title\nBody", "Title Body"),
+            ("# Other\nBody", "Other · Body"),
+            ("# Title\n## Title\nBody", "Title · Body"),
             ("# Title", "No additional text"), ("", "No additional text"), ("---\n***", "No additional text"),
             ("# Title\n日本語 👩🏽‍💻\n☕️", "日本語 👩🏽‍💻 ☕️")
         ]
@@ -149,6 +149,33 @@ final class DocumentRowPresentationTests: XCTestCase {
         }
         XCTAssertEqual(DocumentRowPresentation.excerpt("Body text", title: "Title", limit: 4), "Body")
         XCTAssertEqual(DocumentRowPresentation.excerpt("Body", title: "Title", limit: 0), "No additional text")
+    }
+
+    /// silkweb-1.25: the fixtures named in the 1.64 snapshot review.
+    func testExcerptSkipsTitleHeadingAndSeparatesMergedSegments() {
+        let cases: [(String, String, String)] = [
+            ("Ten Days in Kyoto", "# Ten Days in Kyoto（京都の十日間）\n\n*Posted November 12*\n\nKyoto rewards slowness.\n\n## Day by day",
+             "Posted November 12 Kyoto rewards slowness. · Day by day"),
+            ("Cold Brew Basics", "# Cold Brew Basics\n\nCold brew is forgiving.\n\n- Ratio: `1:8`\n- Steep: 14–18 hours\n\nFilter twice.",
+             "Cold brew is forgiving. · Ratio: 1:8 · Steep: 14–18 hours · Filter twice."),
+            ("Untitled Idea", "# Untitled idea\n\nHalf-formed thought about *paper notebooks*.\n\n- ...",
+             "Half-formed thought about paper notebooks. · ..."),
+            ("Pour-Over in Five Steps", "# Pour-Over in Five Steps\n\n[TOC]\n# Header\n## What you need\n\n#### Test\n- [x] Dripper (V60 or similar)\n- [ ] Patience\n",
+             "Header · What you need · Test · Dripper (V60 or similar) · Patience"),
+            // Case and whitespace differences still count as the title.
+            ("Title", "#   TITLE  \nBody", "Body"),
+            // A heading that only shares a prefix inside a word is real content.
+            ("Kyoto", "# Kyotos and more\nBody", "Kyotos and more · Body"),
+            // Only the leading heading is skipped; a later repeat stays.
+            ("Title", "Intro\n\n# Title\n\nBody", "Intro · Title · Body"),
+            // Body paragraphs keep a plain space; the separator never doubles.
+            ("Title", "# Title\n\nOne.\n\nTwo.\n\n## A\n## B\n\nThree.", "One. Two. · A · B · Three."),
+            ("", "# \nBody", "Body")
+        ]
+        for (title, source, expected) in cases {
+            XCTAssertEqual(DocumentRowPresentation.excerpt(source, title: title), expected, title)
+            XCTAssertFalse(DocumentRowPresentation.excerpt(source, title: title).contains(" ·  · "), title)
+        }
     }
 
     func testLocationRelativeToScope() {

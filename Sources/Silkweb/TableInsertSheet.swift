@@ -41,11 +41,17 @@ struct TableInsertSheet: View {
                     ForEach(TableAlignment.allCases, id: \.self) { Text($0.title).tag($0) }
                 }.pickerStyle(.segmented).accessibilityLabel("Alignment")
             }.formStyle(.grouped).frame(height: 180)
-            ScrollView([.horizontal, .vertical]) {
-                Text(MarkdownTable.source(options: form.options ?? TableOptions()))
-                    .font(.system(.caption, design: .monospaced))
-                    .fixedSize()
-            }.defaultScrollAnchor(.topLeading).frame(height: 80).padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+            // A source smaller than the box sits top-left: the ScrollView would otherwise center it,
+            // so the content is at least as large as the visible box.
+            GeometryReader { box in
+                ScrollView([.horizontal, .vertical]) {
+                    Text(MarkdownTable.source(options: form.options ?? TableOptions()))
+                        .font(.system(.caption, design: .monospaced))
+                        .fixedSize()
+                        .accessibilityIdentifier("tableSourcePreviewText")
+                        .frame(minWidth: box.size.width, minHeight: box.size.height, alignment: .topLeading)
+                }.defaultScrollAnchor(.topLeading)
+            }.frame(height: 80).padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                 .accessibilityLabel("Table source preview")
             HStack {
                 Spacer()

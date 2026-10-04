@@ -214,6 +214,7 @@ struct MarkdownTextView: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView else { return }
             session.selection = textView.selectedRange()
+            session.loadedStatistics?.selectionDidChange(session.selection)
             (textView as? PlainMarkdownTextView)?.inlineImages.refreshSelection()
             session.caretLocation = session.selection.location
             session.scroll = textView.enclosingScrollView?.contentView.bounds.origin ?? .zero

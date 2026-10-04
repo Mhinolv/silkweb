@@ -24,6 +24,20 @@ extension LibraryWorkspace {
         NSPageLayout().runModal(with: printInfo)
     }
 
+    /// Export ▸ PDF… from a document row (silkweb-1.25): opens that document if needed, then runs
+    /// the same export as File ▸ Export ▸ PDF….
+    func exportPDF(path: String) {
+        guard canExport, let root else { return }
+        let target = root.appendingPathComponent(path).standardizedFileURL
+        if editor.url?.standardizedFileURL == target { printDocument(exportPDF: true); return }
+        selectDocuments([path])
+        Task {
+            await waitForNavigation()
+            guard editor.url?.standardizedFileURL == target else { return }
+            printDocument(exportPDF: true)
+        }
+    }
+
     func printDocument(exportPDF: Bool = false) {
         guard canPrint else { return }
         exporting = true

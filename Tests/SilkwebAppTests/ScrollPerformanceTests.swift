@@ -186,6 +186,8 @@ final class ScrollPerformanceTests: XCTestCase {
                 let session = workspace.editor
                 _ = (session.text, session.url, session.state, session.caretLocation, session.loading, session.readOnly,
                      session.banner, session.assetProgress, session.refusedNavigation)
+                // silkweb-1.25: the status-bar counts publish only after edits or selection changes.
+                _ = (session.statistics.document, session.statistics.selection)
                 _ = (workspace.tabs, workspace.activeTabID, workspace.focusRequest, workspace.focusColumn, workspace.revision,
                      workspace.inspectorInfo, workspace.sidebarsHidden, workspace.snapshot?.documents.count, workspace.session.selectedDocuments)
                 let preview = workspace.preview
@@ -227,6 +229,8 @@ final class ScrollPerformanceTests: XCTestCase {
             observing = true
             observeChrome()
             let renders = workspace.preview.renderCount
+            let counts = workspace.editor.statistics.refreshCount
+            XCTAssertNotNil(workspace.editor.statistics.document, "counts computed off the main thread before scrolling")
             let frames = editor.inlineImages.imageViews.map(\.frame)
             var entered = Set<ObjectIdentifier>()
             var times: [Double] = [], wall: [Double] = []
@@ -287,6 +291,7 @@ final class ScrollPerformanceTests: XCTestCase {
             XCTAssertEqual(work.geometryWrites, [:], "layoutEditor must not rewrite geometry during scroll: " + summary)
             XCTAssertEqual(publishes, 0, "scrolling must not publish workspace/session state: " + summary)
             XCTAssertEqual(workspace.preview.renderCount, renders, "scrolling must not re-render the preview")
+            XCTAssertEqual(workspace.editor.statistics.refreshCount, counts, "scrolling must not recount the document")
             XCTAssertEqual(faded, [], "already-decoded images scroll in opaque and visible")
             XCTAssertEqual(editor.inlineImages.imageViews.map(\.frame), frames, "overlays stay in their slots")
             // On screen the GPU composites the decoded bitmap; offscreen captures still draw it.

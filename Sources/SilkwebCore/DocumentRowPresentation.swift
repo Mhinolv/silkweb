@@ -27,10 +27,10 @@ public enum DocumentRowPresentation {
 
     public static func snippet(_ markdown: String, title: String) -> String {
         var isLeadingLine = true
-        for (line, isHeading) in snippetLines(MarkdownParser.parse(markdown).blocks) {
+        for (line, kind) in snippetLines(MarkdownParser.parse(markdown).blocks) {
             let text = summaryText(line).trimmingCharacters(in: .whitespaces)
             guard !text.isEmpty else { continue }
-            if isLeadingLine && isHeading && text == title {
+            if isLeadingLine && kind == .heading && text == title {
                 isLeadingLine = false
                 continue
             }
@@ -50,24 +50,43 @@ public enum DocumentRowPresentation {
     }
 
     /// Two-line list excerpt (silkweb-1.64): body text after the leading title heading, Markdown
-    /// markers stripped, whitespace collapsed, bounded to `limit` characters.
+    /// markers stripped, whitespace collapsed, bounded to `limit` characters. A leading heading that
+    /// repeats the title (or that the title was derived from) is skipped; headings and list items are
+    /// joined to their neighbours with ` · ` so they never run together (silkweb-1.25).
     public static func excerpt(_ markdown: String, title: String, limit: Int = 240) -> String {
         var result = ""
         var isLeadingLine = true
-        for (line, isHeading) in snippetLines(MarkdownParser.parse(markdown).blocks) {
+        var previousIsSegment = false
+        for (line, kind) in snippetLines(MarkdownParser.parse(markdown).blocks) {
             let text = summaryText(line).split(whereSeparator: \.isWhitespace).joined(separator: " ")
             guard !text.isEmpty else { continue }
-            if isLeadingLine && isHeading && text == title.split(whereSeparator: \.isWhitespace).joined(separator: " ") {
+            if isLeadingLine && kind == .heading && headingRepeatsTitle(text, title: title) {
                 isLeadingLine = false
                 continue
             }
             isLeadingLine = false
-            if !result.isEmpty { result.append(" ") }
+            let isSegment = kind != .body
+            if !result.isEmpty { result.append(isSegment || previousIsSegment ? " · " : " ") }
             result.append(text)
+            previousIsSegment = isSegment
             if result.count >= limit { break }
         }
         let excerpt = result.prefix(max(0, limit)).trimmingCharacters(in: .whitespaces)
         return excerpt.isEmpty ? "No additional text" : excerpt
+    }
+
+    /// The heading equals the title ignoring case and whitespace, or begins with it at a word
+    /// boundary (a file named “Ten Days in Kyoto” for `# Ten Days in Kyoto（京都の十日間）`).
+    static func headingRepeatsTitle(_ heading: String, title: String) -> Bool {
+        func normalized(_ value: String) -> String {
+            value.split(whereSeparator: \.isWhitespace).joined(separator: " ").lowercased()
+        }
+        let heading = normalized(heading), title = normalized(title)
+        guard !title.isEmpty else { return false }
+        if heading == title { return true }
+        guard heading.hasPrefix(title) else { return false }
+        let next = heading[heading.index(heading.startIndex, offsetBy: title.count)]
+        return !(next.isLetter || next.isNumber)
     }
 
     /// Where a row's document lives, relative to the list scope (`nil` or `""` is the library root).
@@ -82,18 +101,21 @@ public enum DocumentRowPresentation {
         return relative.isEmpty ? scopeName : relative.split(separator: "/").joined(separator: " › ")
     }
 
-    private static func snippetLines(_ blocks: [MarkdownBlock]) -> [(String, Bool)] {
-        blocks.flatMap { block -> [(String, Bool)] in
+    private enum LineKind { case body, heading, listItem }
+
+    private static func snippetLines(_ blocks: [MarkdownBlock], inList: Bool = false) -> [(String, LineKind)] {
+        let body: LineKind = inList ? .listItem : .body
+        return blocks.flatMap { block -> [(String, LineKind)] in
             switch block {
             case .paragraph(let children):
-                return children.map(\.plainText).joined().components(separatedBy: "\n").map { ($0, false) }
-            case .heading(_, let children): return [(children.map(\.plainText).joined(), true)]
-            case .code(_, let text): return text.components(separatedBy: "\n").map { ($0, false) }
-            case .quote(let children): return snippetLines(children)
-            case .list(_, let items): return items.flatMap { snippetLines($0) }
-            case .taskItem(_, let children): return snippetLines(children)
+                return children.map(\.plainText).joined().components(separatedBy: "\n").map { ($0, body) }
+            case .heading(_, let children): return [(children.map(\.plainText).joined(), .heading)]
+            case .code(_, let text): return text.components(separatedBy: "\n").map { ($0, body) }
+            case .quote(let children): return snippetLines(children, inList: inList)
+            case .list(_, let items): return items.flatMap { snippetLines($0, inList: true) }
+            case .taskItem(_, let children): return snippetLines(children, inList: true)
             case .table(let header, _, let rows):
-                return ([header] + rows).map { ($0.map { $0.map(\.plainText).joined() }.joined(separator: " "), false) }
+                return ([header] + rows).map { ($0.map { $0.map(\.plainText).joined() }.joined(separator: " "), body) }
             case .thematicBreak, .tableOfContents: return []
             }
         }

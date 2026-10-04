@@ -167,7 +167,9 @@ struct DocumentDetail: View {
                         .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12)
                         .frame(height: 24).paneStrip(hairline: .top)
                 }
-                DocumentStatusBar(session: workspace.editor, readOnlyLibrary: workspace.snapshot?.isReadOnly == true, workspace: workspace)
+                if workspace.preview.showsStatusBar {
+                    DocumentStatusBar(session: workspace.editor, readOnlyLibrary: workspace.snapshot?.isReadOnly == true, workspace: workspace)
+                }
             } else if workspace.session.selectedDocuments.count > 1 {
                 ContentUnavailableView("\(workspace.session.selectedDocuments.count) Documents Selected", systemImage: "doc.on.doc")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -225,16 +227,22 @@ struct DocumentStatusBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            HStack(spacing: 14) {}
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("statusCounts")
-            Spacer(minLength: Spacing.medium)
-            if let workspace {
-                WritingModesChip(workspace: workspace).padding(.trailing, 12 - 6)
+            DocumentStatusCounts(statistics: session.statistics,
+                                 showsSelection: workspace?.preview.mode != .preview)
+            Spacer(minLength: 8)
+            Group {
+                if let workspace {
+                    WritingModesChip(workspace: workspace).padding(.trailing, 12 - 6)
+                }
+                Text(label.rawValue)
+                    .font(.subheadline).monospacedDigit()
+                    .foregroundStyle(label == .notSaved ? AnyShapeStyle(Color.silkwebCoral) : AnyShapeStyle(.secondary))
+                    .fixedSize()
+                    .accessibilityLabel("Save state")
+                    .accessibilityValue(label.rawValue)
+                    .accessibilityIdentifier("statusSaveState")
             }
-            Text(label.rawValue)
-                .font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
-                .accessibilityIdentifier("statusSaveState")
+            .layoutPriority(1)
         }
         .padding(.horizontal, Spacing.medium)
         .frame(height: Spacing.statusBarHeight)
@@ -247,5 +255,32 @@ struct DocumentStatusBar: View {
             NSAccessibility.post(element: NSApplication.shared, notification: .announcementRequested,
                                  userInfo: [.announcement: new.rawValue, .priority: NSAccessibilityPriorityLevel.low.rawValue])
         }
+    }
+}
+
+/// Leading status-bar counts (silkweb-1.25): `1,204 words · 6,830 characters`, or the selection
+/// against the totals. Narrow strips drop the characters segment, then truncate. No animation.
+struct DocumentStatusCounts: View {
+    let statistics: DocumentStatisticsModel
+    /// Preview-only shows document totals only.
+    var showsSelection = true
+
+    var body: some View {
+        let document = statistics.document
+        let selection = showsSelection ? statistics.selection : nil
+        let full = document.map { DocumentStatisticsPresentation.label(document: $0, selection: selection) } ?? ""
+        let words = document.map { DocumentStatisticsPresentation.label(document: $0, selection: selection, includesCharacters: false) } ?? ""
+        ViewThatFits(in: .horizontal) {
+            Text(full).fixedSize()
+            Text(words).fixedSize()
+            Text(words).truncationMode(.tail)
+        }
+        .lineLimit(1)
+        .font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isStaticText)
+        .accessibilityLabel("Document statistics")
+        .accessibilityValue(document.map { DocumentStatisticsPresentation.accessibilityValue(document: $0, selection: selection) } ?? "")
+        .accessibilityIdentifier("statusCounts")
     }
 }

@@ -83,6 +83,8 @@ struct WorkspaceCommands: Commands {
             Toggle("Split Editor and Preview", isOn: Binding(get: { state.previewMode == .split }, set: { workspace.preview.mode = $0 ? .split : .editor })).keyboardShortcut("4")
             Button("Show Document Info") { workspace.showInfo() }.keyboardShortcut("8")
             Toggle("Show Outline", isOn: Binding(get: { state.showsOutline }, set: { workspace.inspectorInfo = false; workspace.preview.showsOutline = $0 })).keyboardShortcut("7")
+            Button(state.showsStatusBar ? "Hide Status Bar" : "Show Status Bar") { workspace.preview.showsStatusBar.toggle() }
+                .keyboardShortcut("/")
             Divider()
             // Per-window writing modes (1.27); disabled in Preview-only, which keeps their state.
             WritingModeItems(workspace: workspace, focus: state.focusMode, typewriter: state.typewriterMode,

@@ -3,8 +3,12 @@ import SilkwebCore
 
 extension LibraryWorkspace {
     var canTrashSelection: Bool {
-        canMutate && rename == nil && focusColumn != 2 && !(NSApp.keyWindow?.firstResponder is NSTextView)
-            && !movePaths.isEmpty
+        canMutate && rename == nil && libraryHasFocus && !movePaths.isEmpty
+    }
+    /// The sidebar or list, not the editor or a text field, has focus: Rename, Move To… and
+    /// Move to Trash act on the library selection only then (design-system §6 †).
+    var libraryHasFocus: Bool {
+        focusColumn != 2 && !(NSApp.keyWindow?.firstResponder is NSTextView)
     }
     var trashMenuTitle: String {
         guard canTrashSelection else { return "Move to Trash" }

@@ -15,6 +15,8 @@ final class PreviewCoordinator {
     var mode: DocumentViewMode { didSet { defaults.set(mode.rawValue, forKey: "Silkweb.Detail.Mode"); if mode != .preview { lastWritingMode = mode; defaults.set(mode.rawValue, forKey: "Silkweb.Detail.LastWritingMode") } } }
     var lastWritingMode: DocumentViewMode = .editor
     var showsOutline: Bool { didSet { defaults.set(showsOutline, forKey: "Silkweb.Detail.Outline") } }
+    /// View ▸ Show Status Bar (silkweb-1.25); on unless turned off.
+    var showsStatusBar: Bool { didSet { defaults.set(showsStatusBar, forKey: "Silkweb.Detail.StatusBar") } }
     var headings: [MarkdownHeading] = []
     var outlineItems: [OutlineItem] = []
     var visibleHeading: String?
@@ -64,6 +66,7 @@ final class PreviewCoordinator {
         self.defaults = defaults
         mode = DocumentViewMode(rawValue: defaults.string(forKey: "Silkweb.Detail.Mode") ?? "") ?? .editor
         showsOutline = defaults.bool(forKey: "Silkweb.Detail.Outline")
+        showsStatusBar = defaults.object(forKey: "Silkweb.Detail.StatusBar") as? Bool ?? true
         let previous = DocumentViewMode(rawValue: defaults.string(forKey: "Silkweb.Detail.LastWritingMode") ?? "") ?? .editor
         lastWritingMode = mode == .preview ? (previous == .preview ? .editor : previous) : mode
         settingsObserver = NotificationCenter.default.addObserver(forName: .writingSettingsDidChange, object: nil, queue: .main) { [weak self] _ in

@@ -46,6 +46,10 @@ struct SnapshotScenario {
     /// Turns on Focus and/or Typewriter (1.27) with the caret right after `visibleCaret`.
     var focusMode = false
     var typewriterMode = false
+    /// Selects this source text (all text when empty) so the status bar shows “N of M” counts (1.25).
+    var selectText: String? = nil
+    /// Widens the sidebar and list to their limits so the detail column (and its status bar) is narrow.
+    var narrowDetail = false
 
     static let deepFolder = "Field Notes/Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
     static let deepDocument = deepFolder + "/Settling In at the Campground.md"
@@ -132,6 +136,11 @@ struct SnapshotScenario {
         // silkweb-1.27: caret mid-document with a dimmed inline image; caret near the start at the 40% anchor.
         .init(name: "focus-mode", document: writingModes, visibleCaret: "The caret rests", focusMode: true),
         .init(name: "typewriter-mode", document: writingModes, visibleCaret: "Second paragraph", typewriterMode: true),
+        // silkweb-1.25: selection counts leading, Focus chip + “Saved” trailing; narrow detail drops the characters segment.
+        .init(name: "status-bar-counts", document: writingModes, visibleCaret: "The caret rests", focusMode: true,
+              selectText: "The caret rests in this paragraph, which stays bright"),
+        .init(name: "status-bar-counts-narrow", document: writingModes, outline: true, visibleCaret: "The caret rests", focusMode: true,
+              typewriterMode: true, selectText: "", narrowDetail: true),
     ]
     static let writingModes = "Snapshot Fixtures/Writing Modes.md"
 }
@@ -528,6 +537,12 @@ final class SnapshotHarness {
                 columns.splitView.setPosition(220 + columns.navigationController.splitView.dividerThickness + 300, ofDividerAt: 0)
                 controller.view.layoutSubtreeIfNeeded()
                 columns.navigationController.splitView.setPosition(220, ofDividerAt: 0)
+                if scenario.narrowDetail {
+                    columns.navigationController.splitView.setPosition(320, ofDividerAt: 0)
+                    controller.view.layoutSubtreeIfNeeded()
+                    columns.splitView.setPosition(320 + columns.navigationController.splitView.dividerThickness + 480, ofDividerAt: 0)
+                    controller.view.layoutSubtreeIfNeeded()
+                }
                 if scenario.resizeSidebar {
                     for width: CGFloat in [180, 320, 200, 260] + (scenario.sidebarWidth.map { [$0] } ?? []) {
                         columns.navigationController.splitView.setPosition(width, ofDividerAt: 0)
@@ -591,6 +606,14 @@ final class SnapshotHarness {
                 try await Task.sleep(for: .milliseconds(500))
                 controller.view.layoutSubtreeIfNeeded()
                 editor.writingModes.anchorCaret()
+            }
+            if let text = scenario.selectText, let editor = workspace.preview.editor {
+                // An empty marker selects the whole document (the longest “N of M” copy).
+                let found = text.isEmpty ? NSRange(location: 0, length: (editor.string as NSString).length) : (editor.string as NSString).range(of: text)
+                guard found.location != NSNotFound else { throw SnapshotFailure.error("Missing selection text") }
+                editor.setSelectedRange(found)
+                // The status bar recounts after its 300 ms debounce.
+                try await wait("selection counts") { workspace.editor.statistics.selection != nil }
             }
             controller.view.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(300))
@@ -704,7 +727,7 @@ final class SnapshotHarness {
                 // never is. Paint the production caret rect (textHeightInsertionRect) in the
                 // production insertionPointColor instead; EditorCaretTests cover the
                 // drawInsertionPoint path itself.
-                if let marker = scenario.visibleCaret, let editor = workspace.preview.editor {
+                if let marker = scenario.visibleCaret, scenario.selectText == nil, let editor = workspace.preview.editor {
                     let found = (editor.string as NSString).range(of: marker)
                     guard found.location != NSNotFound else { throw SnapshotFailure.error("Missing caret text") }
                     editor.setSelectedRange(NSRange(location: NSMaxRange(found), length: 0))

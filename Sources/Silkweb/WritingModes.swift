@@ -375,6 +375,7 @@ struct WritingModesChip: View {
             .padding(.vertical, 2).padding(.horizontal, 6)
             .background(RoundedRectangle(cornerRadius: 4).fill(hovering ? Color(nsColor: .quaternarySystemFill) : .clear))
             .onHover { hovering = $0 }
+            .help("Writing Modes")
             .accessibilityLabel("Writing modes")
             .accessibilityValue(title)
             .accessibilityIdentifier("statusWritingModes")
