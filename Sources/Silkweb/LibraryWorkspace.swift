@@ -144,10 +144,12 @@ final class LibraryWorkspace {
         return documents
     }
     func refreshSavedDocumentDates() async {
+        // One hash lookup by relative path; no URL is built per library document on the main thread.
         guard !loading, !mutating, let snapshot, let url = editor.url,
-              let document = snapshot.documents.first(where: { snapshot.rootURL.appendingPathComponent($0.relativePath) == url }) else { return }
+              url.path.hasPrefix(snapshot.rootURL.path + "/"),
+              let id = snapshot.metadata.IDsByPath[String(url.path.dropFirst(snapshot.rootURL.path.count + 1))] else { return }
         let revision = presentationRevision
-        guard let refreshed = try? await LibraryScanner.refreshingDates(in: snapshot, documentID: document.id),
+        guard let refreshed = try? await LibraryScanner.refreshingDates(in: snapshot, documentID: id),
               !loading, !mutating, presentationRevision == revision else { return }
         install(refreshed)
     }

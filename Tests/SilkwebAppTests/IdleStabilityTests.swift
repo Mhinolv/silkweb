@@ -86,6 +86,7 @@ final class IdleStabilityTests: XCTestCase {
         let builds = workspace.search.resultsBodyCount
         let revision = workspace.search.revision
         let cache = root.appendingPathComponent(".silkweb/search-index.json")
+        await workspace.search.index?.flushCache()
         let attributes = try FileManager.default.attributesOfItem(atPath: cache.path)
         for _ in 0..<30 {
             host.layoutSubtreeIfNeeded()

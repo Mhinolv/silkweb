@@ -22,6 +22,7 @@ final class SearchIndexTests: XCTestCase {
         let snapshot = try await LibraryScanner.scan(root: root)
         let initial = try await index.reconcile(snapshot)
         XCTAssertTrue(initial)
+        await index.flushCache()
         let cache = root.appendingPathComponent(".silkweb/search-index.json")
         let before = try FileManager.default.attributesOfItem(atPath: cache.path)
         for _ in 0..<5 {
@@ -37,6 +38,54 @@ final class SearchIndexTests: XCTestCase {
         try FileManager.default.removeItem(at: root.appendingPathComponent("Tea.md"))
         let removed = try await index.reconcile(LibraryScanner.scan(root: root, previousSnapshot: snapshot))
         XCTAssertTrue(removed)
+    }
+
+    /// 1.78: one autosave must not re-read or re-encode the library twice. The saved
+    /// note is searchable at once; the cache file is written once, after the debounce.
+    func testAutosaveUpdatesOneRecordAndDebouncesSingleCacheWrite() async throws {
+        for number in 0..<12 { try note("Note-\(number).md", "original body \(number)") }
+        let index = SearchIndex(root: root)
+        let snapshot = try await LibraryScanner.scan(root: root)
+        try await index.reconcile(snapshot)
+        let cache = root.appendingPathComponent(".silkweb/search-index.json")
+        func fileNumber() -> NSNumber? {
+            (try? FileManager.default.attributesOfItem(atPath: cache.path))?[.systemFileNumber] as? NSNumber
+        }
+        for _ in 0..<80 where fileNumber() == nil { try await Task.sleep(for: .milliseconds(50)) }
+        let initial = try XCTUnwrap(fileNumber())
+
+        // Autosave: atomic replace, date refresh, then the watcher's rescan.
+        let saved = try XCTUnwrap(snapshot.documents.first { $0.relativePath == "Note-3.md" })
+        try note("Note-3.md", "freshly typed zanzibar")
+        let refreshed = try await LibraryScanner.refreshingDates(in: snapshot, documentID: saved.id)
+        let changed = try await index.reconcile(refreshed)
+        XCTAssertTrue(changed)
+        let scanned = try await LibraryScanner.scan(root: root, previousSnapshot: refreshed)
+        XCTAssertEqual(scanned.documents.first { $0.id == saved.id }?.fileIdentity,
+                       refreshed.documents.first { $0.id == saved.id }?.fileIdentity, "date refresh must also refresh the file identity")
+        XCTAssertTrue(scanned.documents == refreshed.documents)
+        let rescanned = try await index.reconcile(scanned)
+        XCTAssertFalse(rescanned, "watcher rescan after a save must not re-index the saved note")
+        let hits = try await index.query(SearchQuery("zanzibar"))
+        XCTAssertEqual(hits.map(\.id), [saved.id])
+        XCTAssertEqual(fileNumber(), initial, "cache write is debounced, not done inside reconcile")
+
+        for _ in 0..<80 where fileNumber() == initial { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertNotEqual(fileNumber(), initial)
+        let written = try XCTUnwrap(fileNumber())
+        try await Task.sleep(for: .milliseconds(2500))
+        XCTAssertEqual(fileNumber(), written, "one coalesced cache write per save")
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: cache)) as? [String: Any])
+        XCTAssertEqual(json["formatVersion"] as? Int, 1)
+        let records = try XCTUnwrap(json["records"] as? [[String: Any]])
+        XCTAssertEqual(records.count, 12)
+        XCTAssertEqual(records.first { $0["path"] as? String == "Note-3.md" }?["body"] as? String, "freshly typed zanzibar")
+        // A relaunch loads the debounced cache and reads no body.
+        try FileManager.default.removeItem(at: root.appendingPathComponent("Note-3.md"))
+        let warm = SearchIndex(root: root)
+        try await warm.reconcile(scanned)
+        let warmHits = try await warm.query(SearchQuery("zanzibar"))
+        XCTAssertEqual(warmHits.map(\.id), [saved.id])
     }
 
     func testRankingLiteralMatchingAndSnippets() async throws {
@@ -171,6 +220,7 @@ final class SearchIndexTests: XCTestCase {
             XCTAssertEqual(hits.count, 1)
             let body = try String(contentsOf: root.appendingPathComponent("Old.md"), encoding: .utf8)
             XCTAssertEqual(body, "legacy body")
+            await index.flushCache()
         }
         // Warm cache reuses scan tokens: no redundant read of an unchanged body.
         let warm = SearchIndex(root: root)
