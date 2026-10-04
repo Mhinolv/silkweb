@@ -154,7 +154,7 @@ final class LibrarySearch {
                 completed = identity
             }
             if countChanged || previous?.text != queryText {
-                NSAccessibility.post(element: NSApp.keyWindow as Any, notification: .announcementRequested,
+                NSAccessibility.post(element: NSApplication.shared.keyWindow as Any, notification: .announcementRequested,
                                      userInfo: [.announcement: Self.resultCount(hits.count), .priority: NSAccessibilityPriorityLevel.medium.rawValue])
             }
         } catch is CancellationError { } catch {
@@ -168,7 +168,7 @@ final class LibrarySearch {
 
     func toggleQuickOpen() {
         if showsQuickOpen { dismissQuickOpen(); return }
-        previousWindow = NSApp.keyWindow
+        previousWindow = NSApplication.shared.keyWindow
         previousResponder = previousWindow?.firstResponder
         quickCompleted = nil
         quickText = ""
