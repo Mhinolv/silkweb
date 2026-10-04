@@ -210,6 +210,10 @@ import SilkwebCore
         positionViews()
     }
 
+    func layoutManagerDidInvalidateLayout(_ sender: NSLayoutManager) {
+        editor?.writingModes.layoutDidInvalidate()
+    }
+
     /// Moves each image to its slot from geometry TextKit has already computed, in the
     /// same pass as that layout (layout completion and the editor's viewWillDraw). Never
     /// forces layout: an image whose line is not laid out yet lies below all laid-out
