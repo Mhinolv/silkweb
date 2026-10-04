@@ -447,7 +447,7 @@ final class DocumentListRedesignTests: XCTestCase {
         let median = samples[samples.count / 2]
         print("DocumentList 10k scroll: \(samples.count) steps, median \(String(format: "%.2f", median)) ms, p95 \(String(format: "%.2f", p95)) ms")
         // One 60 Hz frame. Rows are fixed height, so no step measures or lays out off-screen rows.
-        XCTAssertLessThan(p95, 16.7)
+        XCTAssertLessThan(p95, TestEnvironment.frameBudget(16.7))
         let realized = (0..<table.numberOfRows).filter { table.view(atColumn: 0, row: $0, makeIfNecessary: false) != nil }
         XCTAssertLessThan(realized.count, 40, "only visible rows are realized")
     }

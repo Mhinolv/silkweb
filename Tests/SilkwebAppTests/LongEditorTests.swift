@@ -49,32 +49,74 @@ final class LongEditorTests: XCTestCase {
         }
         try await settle()
         let editor = try XCTUnwrap(workspace.tabs.first { $0.id == longID }?.textView as? PlainMarkdownTextView)
-        try assertReachable(editor)
+        try await assertReachable(editor)
         let openedShort = await workspace.openTab(try XCTUnwrap(documents.first { $0.relativePath == "Short.md" }), pinned: true)
         XCTAssertTrue(openedShort)
         try await settle()
         workspace.activateTab(longID, syncSelection: false)
         try await settle()
         XCTAssertTrue(workspace.preview.editor === editor)
-        try assertReachable(editor)
+        try await assertReachable(editor)
         for mode in [DocumentViewMode.split, .preview, .editor, .split, .editor] {
             workspace.preview.mode = mode
             try await settle()
-            if mode != .preview { try assertReachable(editor) }
+            if mode != .preview { try await assertReachable(editor) }
         }
         for height: CGFloat in [560, 1200, 900] {
             window.setContentSize(NSSize(width: 1400, height: height))
             try await settle()
-            try assertReachable(editor)
+            try await assertReachable(editor)
         }
         let previousHeight = editor.frame.height
         editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))
         editor.insertText("\n\n" + String(repeating: "Appended paragraph\n\n", count: 100) + "NEW FINAL LINE", replacementRange: editor.selectedRange())
         try await settle()
         XCTAssertGreaterThan(editor.frame.height, previousHeight)
-        try assertReachable(editor)
+        try await assertReachable(editor)
         await workspace.editor.flush()
         XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("Long.md"), encoding: .utf8), editor.string)
+        XCTAssertFalse(window.isVisible)
+    }
+
+    /// #51 regression: a runner too slow to finish sizing within the old 400 ms settle, simulated by giving
+    /// the editor no grace period at all. The frame extent is asserted once the editor's own sizing is done.
+    @MainActor
+    func testLongDocumentExtentWithoutSettleDelay() async throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "Silkweb.LongEditorNoSettle." + UUID().uuidString
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            defaults.removePersistentDomain(forName: suite)
+            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        try LongEditorFixture.document.write(to: root.appendingPathComponent("Long.md"), atomically: true, encoding: .utf8)
+        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        workspace.canSaveWindowSession = false
+        workspace.root = root
+        workspace.install(try await LibraryScanner.scan(root: root))
+        let documents = try XCTUnwrap(workspace.snapshot).documents
+        let opened = await workspace.openTab(try XCTUnwrap(documents.first { $0.relativePath == "Long.md" }), pinned: true)
+        XCTAssertTrue(opened)
+        let id = try XCTUnwrap(workspace.activeTabID)
+        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: suite)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
+        controller.view.setFrameSize(NSSize(width: 1400, height: 900))
+        defer { window.contentViewController = nil; window.close() }
+        controller.view.layoutSubtreeIfNeeded()
+        let editor = try XCTUnwrap(workspace.tabs.first { $0.id == id }?.textView as? PlainMarkdownTextView)
+        try await assertReachable(editor)
+        // A width change re-fits the text and the reserved image space again.
+        workspace.preview.mode = .split
+        controller.view.layoutSubtreeIfNeeded()
+        try await assertReachable(editor)
         XCTAssertFalse(window.isVisible)
     }
 
@@ -199,11 +241,24 @@ final class LongEditorTests: XCTestCase {
                        "last line plus matching bottom margin", file: file, line: line)
     }
 
+    /// #51: the frame is fitted asynchronously (restyle, inline-image pass, then a debounced fit to the full
+    /// text), which a slow CI runner did not finish within a fixed settle. Wait until the editor reports no
+    /// sizing work pending, without forcing layout; the extent check below then still sees the app's own result.
     @MainActor
-    private func assertReachable(_ editor: PlainMarkdownTextView, file: StaticString = #filePath, line: UInt = #line) throws {
+    private func waitForContentSizing(_ editor: PlainMarkdownTextView, file: StaticString = #filePath, line: UInt = #line) async throws {
+        let deadline = Date().addingTimeInterval(15)
+        while editor.isContentSizingPending, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertFalse(editor.isContentSizingPending, "editor sizing still pending after 15 s", file: file, line: line)
+    }
+
+    @MainActor
+    private func assertReachable(_ editor: PlainMarkdownTextView, file: StaticString = #filePath, line: UInt = #line) async throws {
         let container = try XCTUnwrap(editor.textContainer)
         let layout = try XCTUnwrap(editor.layoutManager)
         let scroll = try XCTUnwrap(editor.enclosingScrollView)
+        try await waitForContentSizing(editor, file: file, line: line)
         let initialHeight = editor.frame.height
         layout.ensureLayout(for: container)
         XCTAssertGreaterThanOrEqual(initialHeight, layout.usedRect(for: container).maxY + editor.textContainerOrigin.y, "extent before test forces layout", file: file, line: line)

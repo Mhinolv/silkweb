@@ -7,7 +7,7 @@ import SilkwebCore
     weak var editor: PlainMarkdownTextView?
     private var checkpoints: [Int: Bool] = [:]
     private var dirty: NSRange?
-    private var scheduled = false
+    private(set) var scheduled = false
     private(set) var lastStyledRange = NSRange(location: 0, length: 0)
 
     func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions, range editedRange: NSRange, changeInLength delta: Int) {
