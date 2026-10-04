@@ -221,7 +221,7 @@ extension LibraryWorkspace {
                     session.expandedFolders.remove(path)
                     try await refresh(LibraryChangeSet(changes: []))
                 case .rename(let item, let name):
-                    let changes = try await engine.rename(item.path, to: name)
+                    let changes = try await engine.restoreName(item.path, to: name)
                     try await refresh(changes)
                 }
                 libraryUndo.removeLast()

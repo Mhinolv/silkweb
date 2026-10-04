@@ -68,6 +68,72 @@ final class MovePlanTests: XCTestCase {
         XCTAssertTrue(MoveSelection.permits(["A", "Two.md"], destination: "B"))
     }
 
+    /// silkweb-1.73: one on-disk name that predates the new-name rules must not block other
+    /// moves, and the legacy item itself can be moved, renamed and restored.
+    func testLegacyColonNameDoesNotBlockMovesOrRenames() async throws {
+        let (root, engine) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("[two](Two.md)\n".utf8).write(to: root.appendingPathComponent("Meeting 10:04.md"))
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("Notes 9:30"), withIntermediateDirectories: false)
+        _ = try await LibraryScanner.scan(root: root)
+        // Unrelated move and rename.
+        let plan = try await engine.planMove(["Two.md"], toFolder: "B")
+        _ = try await engine.executeMove(plan)
+        XCTAssertEqual(try text(root, "Meeting 10:04.md"), "[two](B/Two.md)\n")
+        _ = try await engine.executeMove(plan.reversed)
+        let renamed = try await engine.rename("A", to: "Archive")
+        XCTAssertEqual(renamed.changes.map(\.newPath), ["Archive"])
+        // The legacy items themselves: move, Keep Both, rename, unchanged rename, undo rename.
+        let legacy = try await engine.planMove(["Meeting 10:04.md", "Notes 9:30"], toFolder: "B")
+        _ = try await engine.executeMove(legacy)
+        XCTAssertEqual(try text(root, "B/Meeting 10:04.md"), "[two](../Two.md)\n")
+        _ = try await engine.executeMove(legacy.reversed)
+        try Data().write(to: root.appendingPathComponent("B/Meeting 10:04.md"))
+        let both = try await engine.planMove(["Meeting 10:04.md"], toFolder: "B", keepBoth: true)
+        XCTAssertEqual(both.changes.changes.map(\.newPath), ["B/Meeting 10:04 2.md"])
+        try await engine.validateRename("Meeting 10:04.md", to: "Meeting 10:04.md")
+        let unchanged = try await engine.rename("Meeting 10:04.md", to: "Meeting 10:04.md")
+        XCTAssertTrue(unchanged.changes.isEmpty)
+        XCTAssertEqual(try LibraryMutations.renameFilename(" Meeting 10:04 ", for: "Meeting 10:04.md", isFolder: false), "Meeting 10:04.md")
+        XCTAssertEqual(try LibraryMutations.renameFilename("Notes 9:30", for: "Notes 9:30", isFolder: true), "Notes 9:30")
+        let fixed = try await engine.rename("Meeting 10:04.md", to: "Meeting 10-04.md")
+        XCTAssertEqual(fixed.changes.map(\.newPath), ["Meeting 10-04.md"])
+        try FileManager.default.moveItem(at: root.appendingPathComponent("Meeting 10-04.md"), to: root.appendingPathComponent("Meeting 10:04.md"))
+        // New names keep the 1.6 rules, including renaming a legacy item to another ':' name.
+        for (path, name) in [("Meeting 10:04.md", "a:b.md"), ("Archive", "a:b"), ("Notes 9:30", ".hidden"), ("Archive", "x/y")] {
+            do { _ = try await engine.rename(path, to: name); XCTFail("Accepted \(name)") }
+            catch { guard case LibraryMutationError.invalidName = error else { return XCTFail("Unexpected \(error)") } }
+            do { try await engine.validateRename(path, to: name); XCTFail("Accepted \(name)") }
+            catch { guard case LibraryMutationError.invalidName = error else { return XCTFail("Unexpected \(error)") } }
+        }
+        for input in ["a:b", "Meeting 10:05"] {
+            do { _ = try LibraryMutations.renameFilename(input, for: "Meeting 10:04.md", isFolder: false); XCTFail("Accepted \(input)") }
+            catch { guard case LibraryMutationError.invalidName(.separator) = error else { return XCTFail("Unexpected \(error)") } }
+        }
+        do { _ = try await engine.createFolder(named: "a:b"); XCTFail("Accepted a:b") }
+        catch { guard case LibraryMutationError.invalidName(.separator) = error else { return XCTFail("Unexpected \(error)") } }
+        // Structural checks still refuse escaping and hidden paths.
+        for (paths, destination) in [(["Meeting 10:04.md/.."], "B"), ([".silkweb"], "B"), (["./Two.md"], "B"), (["Two.md"], ".silkweb")] {
+            do { _ = try await engine.planMove(paths, toFolder: destination); XCTFail("Expected refusal: \(paths) → \(destination)") } catch { }
+        }
+    }
+
+    /// silkweb-1.73: Undo Rename puts back a legacy on-disk name that new names may not use.
+    func testUndoRenameRestoresLegacyColonName() async throws {
+        let (root, engine) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data().write(to: root.appendingPathComponent("Meeting 10:04.md"))
+        _ = try await LibraryScanner.scan(root: root)
+        let fixed = try await engine.rename("Meeting 10:04.md", to: "Meeting 10-04.md")
+        let restored = try await engine.restoreName("Meeting 10-04.md", to: "Meeting 10:04.md")
+        XCTAssertEqual(restored.changes.map(\.newPath), ["Meeting 10:04.md"])
+        XCTAssertEqual(restored.changes.first?.id, fixed.changes.first?.id)
+        for name in ["../x.md", ".hidden.md", "", "a/b.md"] {
+            do { _ = try await engine.restoreName("Meeting 10:04.md", to: name); XCTFail("Accepted \(name)") } catch { }
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("Meeting 10:04.md").path))
+    }
+
     func testMetadataFailureRollsBackAllMovesAndRewrites() async throws {
         let (root, engine) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }

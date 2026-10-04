@@ -51,8 +51,8 @@ public actor TrashService {
         var url = root
         try LibraryMetadataStore.rejectLink(url)
         for component in path.split(separator: "/", omittingEmptySubsequences: false) {
-            do { _ = try LibraryMutations.validateName(String(component)) }
-            catch { throw LibraryError.invalidRelativePath }
+            // Structural checks only: on-disk names may predate the rules for new names.
+            try LibraryMutations.validateExistingComponent(String(component))
             url.appendPathComponent(String(component))
             try LibraryMetadataStore.rejectLink(url)
         }
