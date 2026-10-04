@@ -176,6 +176,48 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(text.inlineImages.enabled)
     }
 
+    /// silkweb-1.76: list Tab/⇧Tab and Format › Shift Right/Left (⌘]/⌘[) use Indent with, live, one undo step each.
+    @MainActor
+    func testIndentSettingDrivesListShiftCommands() throws {
+        let settings = try makeSettings()
+        let (window, text) = try makeEditor("- a\n- b\n- c\n")
+        defer { window.close() }
+        text.isEditable = true
+        // Offscreen there is no event loop to close groups; each command must group itself.
+        let delegate = IndentUndoDelegate()
+        text.delegate = delegate
+        let undo = delegate.manager
+        undo.groupsByEvent = false
+        func caret(onLine line: Int) {
+            let lines = text.string.components(separatedBy: "\n")
+            let start = lines.prefix(line).reduce(0) { $0 + ($1 as NSString).length + 1 }
+            text.setSelectedRange(NSRange(location: start + (lines[line] as NSString).length, length: 0))
+        }
+        for indent in [WritingPreferences.Indent.tab, .twoSpaces, .fourSpaces, .tab] {
+            settings.preferences.indent = indent
+            XCTAssertEqual(text.style.indent, indent, "Applies to the next keystroke without reopening")
+            let unit = indent.text
+            caret(onLine: 1)
+            text.insertTab(nil)
+            caret(onLine: 2)
+            text.insertTab(nil)
+            text.format(.indent)
+            XCTAssertEqual(text.string, "- a\n\(unit)- b\n\(unit)\(unit)- c\n", indent.title)
+            text.insertBacktab(nil)
+            XCTAssertEqual(text.string, "- a\n\(unit)- b\n\(unit)- c\n", indent.title)
+            text.format(.outdent)
+            XCTAssertEqual(text.string, "- a\n\(unit)- b\n- c\n", indent.title)
+            undo.undo()
+            XCTAssertEqual(text.string, "- a\n\(unit)- b\n\(unit)- c\n", "⌘[ is one undo step")
+            undo.undo()
+            XCTAssertEqual(text.string, "- a\n\(unit)- b\n\(unit)\(unit)- c\n", "⇧Tab is one undo step")
+            undo.undo()
+            XCTAssertEqual(text.string, "- a\n\(unit)- b\n\(unit)- c\n", "⌘] is one undo step")
+            undo.undo(); undo.undo()
+            XCTAssertEqual(text.string, "- a\n- b\n- c\n")
+        }
+    }
+
     @MainActor
     func testColourWellsDriveTokensPerAppearance() throws {
         let settings = try makeSettings()
@@ -312,4 +354,9 @@ final class SettingsTests: XCTestCase {
     }
 
     @MainActor static func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+}
+
+@MainActor private final class IndentUndoDelegate: NSObject, NSTextViewDelegate {
+    let manager = UndoManager()
+    func undoManager(for view: NSTextView) -> UndoManager? { manager }
 }

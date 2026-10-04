@@ -38,8 +38,16 @@ public enum MarkdownParser {
         let content: String
     }
 
+    /// Leading tabs advance to the next 4-column stop so tab-indented lists nest like spaces (1.76).
+    private static func expandingLeadingTabs(_ line: String) -> String {
+        let leading = line.prefix(while: { $0 == " " || $0 == "\t" })
+        guard leading.contains("\t") else { return line }
+        let columns = leading.reduce(0) { $1 == "\t" ? $0 + 4 - $0 % 4 : $0 + 1 }
+        return String(repeating: " ", count: columns) + line.dropFirst(leading.count)
+    }
+
     private static func listMarker(_ line: String) -> ListMarker? {
-        let chars = Array(line)
+        let chars = Array(expandingLeadingTabs(line))
         let indent = chars.prefix(while: { $0 == " " }).count
         guard indent < chars.count else { return nil }
         var end = indent
@@ -188,12 +196,12 @@ public enum MarkdownParser {
                     var content = [sourceLines[index].replacingText(task?.text ?? marker.content)]
                     index += 1
                     while index < lines.count {
-                        let next = lines[index]
+                        let next = expandingLeadingTabs(lines[index])
                         let indent = next.prefix(while: { $0 == " " }).count
                         if !next.isEmpty, indent >= marker.width {
                             content.append(sourceLines[index].replacingText(String(next.dropFirst(marker.width)))); index += 1
                         } else if next.isEmpty, index + 1 < lines.count,
-                                  lines[index + 1].prefix(while: { $0 == " " }).count >= marker.width {
+                                  expandingLeadingTabs(lines[index + 1]).prefix(while: { $0 == " " }).count >= marker.width {
                             content.append(sourceLines[index].replacingText("")); index += 1
                         } else { break }
                     }

@@ -138,6 +138,29 @@ final class MarkdownParserTests: XCTestCase {
         XCTAssertEqual(HTMLRenderer.render("```\n<unclosed>"), article("<pre><code>&lt;unclosed&gt;\n</code></pre>\n"))
     }
 
+    /// silkweb-1.76: lists indented with tabs (Indent with: Tab) nest exactly like space-indented lists.
+    func testTabIndentedListsNestLikeSpaces() {
+        func nested(_ markers: [String], unit: String) -> String {
+            (0..<3).map { level in String(repeating: unit, count: level) + markers[level] + " item \(level)" }.joined(separator: "\n")
+        }
+        for markers in [["-", "-", "-"], ["*", "+", "-"], ["1.", "1.", "1."], ["- [ ]", "- [x]", "- [ ]"], ["-", "1.", "- [x]"]] {
+            let spaces = HTMLRenderer.render(nested(markers, unit: "    "))
+            let tabs = HTMLRenderer.render(nested(markers, unit: "\t"))
+            XCTAssertEqual(tabs, spaces, markers.joined())
+            XCTAssertEqual(tabs.components(separatedBy: "<li").count - 1, 3, markers.joined())
+            XCTAssertFalse(tabs.contains("<p>\t"), "Tab-indented items must not fall back to paragraphs")
+            let nestedLists = MarkdownParser.parse(nested(markers, unit: "\t")).blocks
+            XCTAssertEqual(nestedLists.count, 1, "One top-level list")
+        }
+        for (tabs, spaces) in [("- a\n\n\t- b\n\n\t\tc", "- a\n\n    - b\n\n        c"),
+                               ("- a\n  \t- b", "- a\n    - b"),
+                               ("- a\n\t- b\n\t- c\n- d", "- a\n    - b\n    - c\n- d"),
+                               ("10. a\n\t- b", "10. a\n    - b")] {
+            XCTAssertEqual(HTMLRenderer.render(tabs), HTMLRenderer.render(spaces), tabs)
+        }
+        XCTAssertEqual(HTMLRenderer.render("- a\n\t- b"), article("<ul>\n<li>\n<p>a</p>\n<ul>\n<li>\n<p>b</p>\n</li>\n</ul>\n</li>\n</ul>\n"))
+    }
+
     func testBoundedAdversarialAndUnicodeSweep() {
         for count in [0, 1, 31, 32, 33, 128, 10_000] {
             for token in ["[", "*a ", "`", "<", "> ", "👩🏽‍💻", "日", "a_"] {
