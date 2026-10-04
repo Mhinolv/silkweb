@@ -29,6 +29,27 @@ final class ScrollPerformanceTests: XCTestCase {
     /// out the document, rewrite editor geometry or publish workspace state.
     @MainActor
     func testMomentumScrollStaysWithinFrameBudgetOnLongNoteWithImages() async throws {
+        try await momentumScroll(focus: false, typewriter: false)
+    }
+
+    /// silkweb-1.27: the same budget and counters with Focus and/or Typewriter on.
+    @MainActor
+    func testMomentumScrollBudgetWithFocusMode() async throws {
+        try await momentumScroll(focus: true, typewriter: false)
+    }
+
+    @MainActor
+    func testMomentumScrollBudgetWithTypewriterMode() async throws {
+        try await momentumScroll(focus: false, typewriter: true)
+    }
+
+    @MainActor
+    func testMomentumScrollBudgetWithFocusAndTypewriterModes() async throws {
+        try await momentumScroll(focus: true, typewriter: true)
+    }
+
+    @MainActor
+    private func momentumScroll(focus: Bool, typewriter: Bool) async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "Silkweb.ScrollPerformance." + UUID().uuidString
@@ -73,6 +94,7 @@ final class ScrollPerformanceTests: XCTestCase {
         defer { window.contentViewController = nil; window.close() }
         window.setContentSize(NSSize(width: 1300, height: 900))
         window.setContentSize(NSSize(width: 1400, height: 900))
+        workspace.setWritingModes(focus: focus, typewriter: typewriter)
 
         let work = ScrollWork.shared
         var restores: [(Method, IMP, IMP)] = []
@@ -192,6 +214,9 @@ final class ScrollPerformanceTests: XCTestCase {
             XCTAssertGreaterThan(editor.visibleRect.height, 400, "the offscreen detail hierarchy must be laid out")
             XCTAssertEqual(editor.inlineImages.imageViews.count, imageCount)
             XCTAssertTrue(editor.inlineImages.imageViews.allSatisfy { $0.content.bitmap != nil }, "images decoded before scrolling")
+            XCTAssertEqual(editor.writingModes.focus, focus)
+            XCTAssertEqual(editor.writingModes.typewriter, typewriter)
+            if typewriter { XCTAssertGreaterThan(scroll.contentInsets.bottom, 0) }
             scroll.contentView.scroll(to: .zero)
             scroll.reflectScrolledClipView(scroll.contentView)
             try await settle()
@@ -225,7 +250,10 @@ final class ScrollPerformanceTests: XCTestCase {
                 wall.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6)
                 for view in editor.inlineImages.imageViews where view.frame.intersects(visible) {
                     entered.insert(ObjectIdentifier(view))
-                    if view.isHidden || view.alphaValue < 1 { faded.append(view.content.reference.alt) }
+                    // Focus Mode holds images in dimmed paragraphs at the text's opacity (1.27).
+                    let opacity = editor.writingModes.opacity(at: view.frame.midY)
+                    if focus { XCTAssertLessThan(opacity, 1) }
+                    if view.isHidden || abs(view.alphaValue - opacity) > 0.001 { faded.append(view.content.reference.alt) }
                 }
             }
             // AppKit's one-time first-scroll setup (scroller, tracking areas) is not per-frame work.
@@ -246,7 +274,7 @@ final class ScrollPerformanceTests: XCTestCase {
                 + "wall p95 \(String(format: "%.3f", wallSorted[Int(Double(wallSorted.count) * 0.95)])) ms, max \(String(format: "%.3f", wallSorted.last ?? 0)) ms, "
                 + "bitmap rasterizations \(work.bitmapRasterizations), image draws \(work.imageDraws), overlay moves \(work.overlayMoves), "
                 + "full layouts \(work.fullLayouts), sizeToFit \(work.sizeToFits), geometry \(work.geometryWrites), publishes \(publishes)"
-            print("silkweb-1.66 scroll: " + summary)
+            print("silkweb-1.66 scroll (focus \(focus), typewriter \(typewriter)): " + summary)
             XCTAssertGreaterThan(times.count, 300, "hundreds of scroll steps")
             XCTAssertEqual(entered.count, imageCount, "every image scrolled through the viewport")
             // CPU time of the main thread, so a loaded test machine descheduling the process

@@ -43,6 +43,9 @@ struct SnapshotScenario {
     var dirtyActive = false
     /// Hosts the production Settings window content on this tab (1.24) instead of the library window.
     var settingsTab: SettingsTab? = nil
+    /// Turns on Focus and/or Typewriter (1.27) with the caret right after `visibleCaret`.
+    var focusMode = false
+    var typewriterMode = false
 
     static let deepFolder = "Field Notes/Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
     static let deepDocument = deepFolder + "/Settling In at the Campground.md"
@@ -126,7 +129,11 @@ struct SnapshotScenario {
         .init(name: "settings-editor", settingsTab: .editor),
         .init(name: "settings-appearance", settingsTab: .appearance),
         .init(name: "settings-library", settingsTab: .library),
+        // silkweb-1.27: caret mid-document with a dimmed inline image; caret near the start at the 40% anchor.
+        .init(name: "focus-mode", document: writingModes, visibleCaret: "The caret rests", focusMode: true),
+        .init(name: "typewriter-mode", document: writingModes, visibleCaret: "Second paragraph", typewriterMode: true),
     ]
+    static let writingModes = "Snapshot Fixtures/Writing Modes.md"
 }
 
 struct SnapshotManifest: Codable {
@@ -337,6 +344,14 @@ final class SnapshotHarness {
         """
         try Data(hierarchy.utf8).write(to: fixtures.appendingPathComponent("Outline Hierarchy.md"), options: .atomic)
         try Data(LongEditorFixture.document.utf8).write(to: fixtures.appendingPathComponent("Long Document.md"), options: .atomic)
+        var writingModes = "# Writing Modes\n\nOpening paragraph of a long draft, with **bold**, *emphasis* and `code`.\n\nSecond paragraph sits near the start of the document.\n\n"
+        for index in 1...30 {
+            if index == 12 { writingModes += "## Middle\n\n![Landscape](fixture.png)\n\n" }
+            if index == 13 { writingModes += "The caret rests in this paragraph, which stays bright while the rest of the draft dims toward the page.\nIt continues on a second line.\n\n" }
+            writingModes += "Paragraph \(index) of the draft talks about the road, the coffee and the weather, long enough to wrap in the column.\n\n"
+            if index == 14 { writingModes += "- A list item\n- Another item\n\n```swift\nlet focused = true\n```\n\n" }
+        }
+        try Data(writingModes.utf8).write(to: fixtures.appendingPathComponent("Writing Modes.md"), options: .atomic)
         try FileManager.default.createDirectory(at: fixtures.appendingPathComponent("Empty Folder"), withIntermediateDirectories: true)
         try Data().write(to: fixtures.appendingPathComponent("Empty Document.md"), options: .atomic)
         // Exercise the app's real invalid-UTF8 read-only banner without permission tricks.
@@ -562,6 +577,20 @@ final class SnapshotHarness {
                       let editor = workspace.preview.editor else { throw SnapshotFailure.error("Missing caret heading") }
                 editor.setSelectedRange(NSRange(location: heading.sourceRange.location, length: 0))
                 workspace.editor.caretLocation = heading.sourceRange.location
+            }
+            if scenario.focusMode || scenario.typewriterMode, let editor = workspace.preview.editor, let marker = scenario.visibleCaret {
+                try await wait("inline images") {
+                    !editor.inlineImages.imageViews.isEmpty && editor.inlineImages.imageViews.allSatisfy { $0.content.bitmap != nil }
+                }
+                let found = (editor.string as NSString).range(of: marker)
+                guard found.location != NSNotFound else { throw SnapshotFailure.error("Missing caret text") }
+                editor.setSelectedRange(NSRange(location: NSMaxRange(found), length: 0))
+                editor.writingModes.reveal(NSMaxRange(found))
+                workspace.setWritingModes(focus: scenario.focusMode, typewriter: scenario.typewriterMode)
+                // Fade (150 ms), coalesced updates and the sizing pass settle before capture.
+                try await Task.sleep(for: .milliseconds(500))
+                controller.view.layoutSubtreeIfNeeded()
+                editor.writingModes.anchorCaret()
             }
             controller.view.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(300))

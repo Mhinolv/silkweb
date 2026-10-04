@@ -26,6 +26,38 @@ final class WindowSessionMetadataTests: XCTestCase {
         }
     }
 
+    /// silkweb-1.27: per-window Focus/Typewriter flags. Files from earlier builds (no keys) load
+    /// with both off; bad values fall back to off; every combination round-trips.
+    func testWritingModesBackwardCompatibilityAndRoundTrip() throws {
+        let values = ["", ":true", ":false", ":null", ":\"bad\"", ":1"]
+        for version in [1, 2, 3] {
+            for focus in values {
+                for typewriter in values {
+                    var json = "{\"formatVersion\":\(version),\"viewMode\":\"split\""
+                    if !focus.isEmpty { json += ",\"focusMode\"" + focus }
+                    if !typewriter.isEmpty { json += ",\"typewriterMode\"" + typewriter }
+                    json += "}"
+                    let value = try JSONDecoder().decode(WindowSessionMetadata.self, from: Data(json.utf8))
+                    XCTAssertEqual(value.focusMode, focus == ":true", json)
+                    XCTAssertEqual(value.typewriterMode, typewriter == ":true", json)
+                    XCTAssertEqual(value.viewMode, "split")
+                    XCTAssertEqual(value.formatVersion, 3)
+                    XCTAssertEqual(try JSONDecoder().decode(WindowSessionMetadata.self, from: JSONEncoder().encode(value)), value)
+                }
+            }
+        }
+        XCTAssertFalse(WindowSessionMetadata().focusMode)
+        XCTAssertFalse(WindowSessionMetadata().typewriterMode)
+        for (focus, typewriter) in [(false, false), (true, false), (false, true), (true, true)] {
+            var value = WindowSessionMetadata()
+            value.focusMode = focus
+            value.typewriterMode = typewriter
+            let decoded = try JSONDecoder().decode(WindowSessionMetadata.self, from: JSONEncoder().encode(value))
+            XCTAssertEqual(decoded.focusMode, focus)
+            XCTAssertEqual(decoded.typewriterMode, typewriter)
+        }
+    }
+
     func testDefaultsAndPositionModeSweep() throws {
         XCTAssertEqual(try JSONDecoder().decode(WindowSessionMetadata.self, from: Data("{}".utf8)), WindowSessionMetadata())
         let id = UUID()

@@ -174,6 +174,8 @@ extension LibraryWorkspace {
         value.viewMode = preview.mode.rawValue
         value.sidebarsHidden = sidebarsHidden
         value.tagsExpanded = tagsExpanded
+        value.focusMode = focusMode
+        value.typewriterMode = typewriterMode
         value.tabs = tabs.map { tab in
             var item = DocumentTabMetadata(documentID: tab.id,
                 relativePath: tab.editor.url.map { String($0.path.dropFirst((root?.path.count ?? 0) + 1)) } ?? "",
@@ -193,6 +195,7 @@ extension LibraryWorkspace {
         let resolved = value.resolving(in: snapshot)
         sidebarsHidden = resolved.sidebarsHidden
         tagsExpanded = resolved.tagsExpanded || session.selectedTagID != nil
+        setWritingModes(focus: resolved.focusMode, typewriter: resolved.typewriterMode)
         librarySplitController?.applySidebars(animated: false)
         for item in resolved.tabs {
             guard let document = snapshot.documents.first(where: { $0.id == item.documentID }) else { continue }

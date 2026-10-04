@@ -24,6 +24,9 @@ struct MenuCommandValues: Equatable {
     var canToggleSidebars: Bool
     var previewMode: DocumentViewMode
     var showsOutline: Bool
+    var focusMode: Bool
+    var typewriterMode: Bool
+    var canToggleWritingModes: Bool
     var listPreference: LibraryListPreference
     var includesSubfolders: Bool
     var hasSelectedFolder: Bool
@@ -50,6 +53,9 @@ struct MenuCommandValues: Equatable {
         canToggleSidebars = hasLibrary || workspace.loading
         previewMode = workspace.preview.mode
         showsOutline = workspace.preview.showsOutline
+        focusMode = workspace.focusMode
+        typewriterMode = workspace.typewriterMode
+        canToggleWritingModes = workspace.canToggleWritingModes
         listPreference = workspace.listPreference
         includesSubfolders = workspace.includesSubfolders
         hasSelectedFolder = workspace.session.selectedFolder != nil

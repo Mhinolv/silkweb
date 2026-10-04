@@ -41,6 +41,7 @@ extension LibraryWorkspace {
         guard canFind, let text = preview.editor else { return }
         text.window?.makeFirstResponder(text)
         text.scrollRangeToVisible(text.selectedRange())
+        text.writingModes.anchorCaret()
     }
 }
 
@@ -70,15 +71,8 @@ extension PlainMarkdownTextView {
     }
 
     override func showFindIndicator(for charRange: NSRange) {
-        // Match navigation uses the same upper-third anchor as outline navigation.
-        if let layout = layoutManager, textContainer != nil,
-           let scroll = enclosingScrollView, charRange.location < string.utf16.count {
-            layout.ensureLayout(forCharacterRange: charRange)
-            let glyph = layout.glyphIndexForCharacter(at: charRange.location)
-            let rect = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, rect.minY + textContainerOrigin.y - scroll.contentSize.height / 3)))
-            scroll.reflectScrolledClipView(scroll.contentView)
-        }
+        // Match navigation uses the same anchor as outline navigation: upper third, or Typewriter's 40%.
+        writingModes.reveal(charRange.location)
         super.showFindIndicator(for: charRange)
     }
 }

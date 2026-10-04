@@ -161,9 +161,11 @@ import SilkwebCore
                 // Fade once per newly decoded bitmap, never on reuse of a shown bitmap.
                 if fade, firstBitmap, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                     view.alphaValue = 0
+                    // Focus Mode (1.27): fade in to the paragraph's opacity.
+                    let target = editor.writingModes.opacity(at: view.frame.midY)
                     NSAnimationContext.runAnimationGroup { context in
                         context.duration = 0.12
-                        view.animator().alphaValue = 1
+                        view.animator().alphaValue = target
                     }
                 }
             }
@@ -227,12 +229,15 @@ import SilkwebCore
             }
             for view in views {
                 let target = NSPoint(x: origin.x, y: y)
-                if view.frame.origin != target { view.setFrameOrigin(target) }
+                // AppKit may store an origin a few 1e-11 pt off under a scroll content inset
+                // (Typewriter, 1.27); re-setting it every frame would be a needless overlay move.
+                if abs(view.frame.minX - target.x) > 0.001 || abs(view.frame.minY - target.y) > 0.001 { view.setFrameOrigin(target) }
                 if placed, view.isHidden { view.isHidden = false }
                 y += view.frame.height + 8
             }
         }
         refreshSelection()
+        editor.writingModes.applyImageAlpha()
     }
 
     func refreshSelection() {
@@ -320,6 +325,14 @@ import SilkwebCore
         needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {
+        // On screen the layer's opacity applies (Focus Mode, 1.27); offscreen captures ignore it.
+        if alphaValue < 1, let context = NSGraphicsContext.current, !context.isDrawingToScreen {
+            context.cgContext.setAlpha(alphaValue)
+            context.cgContext.beginTransparencyLayer(auxiliaryInfo: nil)
+        }
+        defer {
+            if alphaValue < 1, let context = NSGraphicsContext.current, !context.isDrawingToScreen { context.cgContext.endTransparencyLayer() }
+        }
         NSColor.silkwebPaneBackground.setFill(); bounds.fill()
         if let bitmap = content.bitmap {
             NSImage(cgImage: bitmap, size: content.size).draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)

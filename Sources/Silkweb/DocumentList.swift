@@ -167,7 +167,7 @@ struct DocumentDetail: View {
                         .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12)
                         .frame(height: 24).paneStrip(hairline: .top)
                 }
-                DocumentStatusBar(session: workspace.editor, readOnlyLibrary: workspace.snapshot?.isReadOnly == true)
+                DocumentStatusBar(session: workspace.editor, readOnlyLibrary: workspace.snapshot?.isReadOnly == true, workspace: workspace)
             } else if workspace.session.selectedDocuments.count > 1 {
                 ContentUnavailableView("\(workspace.session.selectedDocuments.count) Documents Selected", systemImage: "doc.on.doc")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -204,6 +204,8 @@ struct DocumentDetail: View {
 struct DocumentStatusBar: View {
     let session: DocumentSession
     let readOnlyLibrary: Bool
+    /// Supplies the Focus/Typewriter chip (1.27).
+    var workspace: LibraryWorkspace? = nil
 
     enum SaveLabel: String {
         case saved = "Saved", edited = "Edited", notSaved = "Not Saved", readOnly = "Read-only"
@@ -227,6 +229,9 @@ struct DocumentStatusBar: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("statusCounts")
             Spacer(minLength: Spacing.medium)
+            if let workspace {
+                WritingModesChip(workspace: workspace).padding(.trailing, 12 - 6)
+            }
             Text(label.rawValue)
                 .font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
                 .accessibilityIdentifier("statusSaveState")

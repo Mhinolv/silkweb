@@ -12,6 +12,9 @@ final class LibraryWorkspace {
     var restoringTabs = false
     /// View ▸ Bigger/Smaller (1.24): points added to the Settings editor size in this window. Never saved.
     var editorZoom = 0
+    /// View ▸ Focus Mode / Typewriter Mode (1.27): per window, saved in the window session.
+    var focusMode = false
+    var typewriterMode = false
     @ObservationIgnored lazy var menuState = MenuCommandState(workspace: self)
     @ObservationIgnored var closingTabIDs: Set<UUID> = []
     @ObservationIgnored var recoveryDirectory: URL?

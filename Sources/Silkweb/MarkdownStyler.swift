@@ -27,6 +27,9 @@ import SilkwebCore
         schedule()
     }
 
+    /// Whether the line starting at `line` begins inside a fenced block; nil until styled (Focus Mode, 1.27).
+    func fencedBefore(line: Int) -> Bool? { checkpoints[line] }
+
     func schedule() {
         guard !scheduled else { return }
         scheduled = true

@@ -84,6 +84,10 @@ struct WorkspaceCommands: Commands {
             Button("Show Document Info") { workspace.showInfo() }.keyboardShortcut("8")
             Toggle("Show Outline", isOn: Binding(get: { state.showsOutline }, set: { workspace.inspectorInfo = false; workspace.preview.showsOutline = $0 })).keyboardShortcut("7")
             Divider()
+            // Per-window writing modes (1.27); disabled in Preview-only, which keeps their state.
+            WritingModeItems(workspace: workspace, focus: state.focusMode, typewriter: state.typewriterMode,
+                             enabled: state.canToggleWritingModes)
+            Divider()
             // Temporary editor zoom for this window (1.24); Actual Size returns to the Settings size.
             Button("Bigger") { workspace.zoomEditor(by: 1) }.keyboardShortcut("+")
             Button("Smaller") { workspace.zoomEditor(by: -1) }.keyboardShortcut("-")

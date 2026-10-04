@@ -190,13 +190,8 @@ final class PreviewCoordinator {
         let location = min(range.location, editor.string.utf16.count)
         editor.setSelectedRange(NSRange(location: location, length: 0))
         editor.scrollRangeToVisible(NSRange(location: location, length: 0))
-        if let layout = editor.layoutManager, editor.textContainer != nil,
-           let scroll = editor.enclosingScrollView, location < editor.string.utf16.count {
-            let glyph = layout.glyphIndexForCharacter(at: location)
-            let rect = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, rect.minY + editor.textContainerOrigin.y - scroll.contentSize.height / 3)))
-            scroll.reflectScrolledClipView(scroll.contentView)
-        }
+        // Upper third, or Typewriter's 40% anchor while it is on (1.27).
+        editor.writingModes.reveal(location)
         if focusEditor, mode != .preview { editor.window?.makeFirstResponder(editor) }
     }
 

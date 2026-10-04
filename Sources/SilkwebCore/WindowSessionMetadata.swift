@@ -10,10 +10,14 @@ public struct WindowSessionMetadata: Codable, Equatable, Sendable {
     public var viewMode = "editor"
     public var sidebarsHidden = false
     public var tagsExpanded = true
+    /// View ▸ Focus Mode / Typewriter Mode for this window (1.27). Additive keys: version 3
+    /// files without them decode as off, and older builds ignore them.
+    public var focusMode = false
+    public var typewriterMode = false
 
     public init() {}
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, tabs, activeDocumentID, selectedFolderID, selectedFolder, viewMode, sidebarsHidden, tagsExpanded
+        case formatVersion, tabs, activeDocumentID, selectedFolderID, selectedFolder, viewMode, sidebarsHidden, tagsExpanded, focusMode, typewriterMode
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -22,6 +26,8 @@ public struct WindowSessionMetadata: Codable, Equatable, Sendable {
         formatVersion = 3
         tagsExpanded = (try? values.decodeIfPresent(Bool.self, forKey: .tagsExpanded)) ?? true
         sidebarsHidden = (try? values.decodeIfPresent(Bool.self, forKey: .sidebarsHidden)) ?? false
+        focusMode = (try? values.decodeIfPresent(Bool.self, forKey: .focusMode)) ?? false
+        typewriterMode = (try? values.decodeIfPresent(Bool.self, forKey: .typewriterMode)) ?? false
         if var entries = try? values.nestedUnkeyedContainer(forKey: .tabs) {
             while !entries.isAtEnd {
                 // Advance before decoding: one invalid value must not discard later tabs.
@@ -48,6 +54,8 @@ public struct WindowSessionMetadata: Codable, Equatable, Sendable {
         try values.encode(viewMode, forKey: .viewMode)
         try values.encode(sidebarsHidden, forKey: .sidebarsHidden)
         try values.encode(tagsExpanded, forKey: .tagsExpanded)
+        try values.encode(focusMode, forKey: .focusMode)
+        try values.encode(typewriterMode, forKey: .typewriterMode)
     }
 
     /// Resolve IDs before paths: a moved file must not bind to a replacement at its old path.

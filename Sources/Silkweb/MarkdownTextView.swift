@@ -120,6 +120,7 @@ struct MarkdownTextView: NSViewRepresentable {
         text.inlineImages.editor = text
         text.layoutManager?.delegate = text.inlineImages
         text.styler.editor = text
+        text.writingModes.editor = text
         text.textStorage?.delegate = text.styler
         scroll.contentView.postsFrameChangedNotifications = true
         text.viewportObserver = NotificationCenter.default.addObserver(
@@ -143,6 +144,7 @@ struct MarkdownTextView: NSViewRepresentable {
             text.zoom = workspace.editorZoom
             text.applySettings()
         }
+        text.writingModes.set(focus: workspace.focusMode, typewriter: workspace.typewriterMode)
         let active = workspace.editor === session
         workspace.tabs.first { $0.editor === session }?.textView = text
         if active { workspace.preview.editor = text }
@@ -228,6 +230,7 @@ final class PlainMarkdownTextView: NSTextView {
     weak var workspace: LibraryWorkspace?
     let styler = MarkdownStyler()
     let inlineImages = InlineImageLayout()
+    let writingModes = WritingModeController()
     lazy var assetHandler: EditorPasteHandler = {
         let handler = EditorPasteHandler()
         handler.editor = self
@@ -277,7 +280,9 @@ final class PlainMarkdownTextView: NSTextView {
             }
             if self.needsEndMarginAfterEdit {
                 self.needsEndMarginAfterEdit = false
-                if self.selectedRange() == NSRange(location: self.textStorage?.length ?? 0, length: 0) {
+                // Typewriter's own bottom inset already reaches the anchor; never jump past it.
+                if self.writingModes.typewriter { self.writingModes.anchorCaret() }
+                else if self.selectedRange() == NSRange(location: self.textStorage?.length ?? 0, length: 0) {
                     self.scrollToEndOfDocument(nil)
                 }
             }
@@ -309,11 +314,16 @@ final class PlainMarkdownTextView: NSTextView {
             textContainerInset = inset
             scheduleContentSizing()
         }
+        // No overscroll by default (1.48); Typewriter Mode (1.27) owns top/bottom insets while on.
         var contentInsets = scroll.contentInsets
-        contentInsets.bottom = 0
-        if scroll.contentInsets.bottom != contentInsets.bottom { scroll.contentInsets = contentInsets }
+        let overscroll = writingModes.contentInsets(viewport: viewport.height)
+        if let top = overscroll.top { contentInsets.top = top }
+        contentInsets.bottom = overscroll.bottom
+        if scroll.contentInsets.top != contentInsets.top || scroll.contentInsets.bottom != contentInsets.bottom {
+            scroll.contentInsets = contentInsets
+        }
         // AppKit applies content insets to the scroller track as well. Cancel all
-        // edges so future typewriter insets do not shorten or shift the track.
+        // edges so typewriter insets do not shorten or shift the track.
         let scrollerInsets = NSEdgeInsets(top: -contentInsets.top, left: -contentInsets.left,
                                           bottom: -contentInsets.bottom, right: -contentInsets.right)
         let current = scroll.scrollerInsets
@@ -373,6 +383,7 @@ final class PlainMarkdownTextView: NSTextView {
             styler.schedule()
             inlineImages.schedule()
         }
+        writingModes.textDidChange()
         FormattingTarget.shared.refresh()
     }
     override func unmarkText() {
@@ -401,7 +412,10 @@ final class PlainMarkdownTextView: NSTextView {
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 48, event.modifierFlags.contains(.control) {
             moveFocus?(event.modifierFlags.contains(.shift))
-        } else { super.keyDown(with: event) }
+        } else {
+            super.keyDown(with: event)
+            writingModes.keyboardDidMove()
+        }
     }
     #if DEBUG
     private(set) var fullDrawCount = 0
@@ -424,6 +438,7 @@ final class PlainMarkdownTextView: NSTextView {
         if dirtyRect.width > 10 && dirtyRect.height > 30 { fullDrawCount += 1 }
         #endif
         super.draw(dirtyRect)
+        writingModes.drawOverlay(in: dirtyRect)
     }
 
     override func drawBackground(in rect: NSRect) {
@@ -500,6 +515,7 @@ final class PlainMarkdownTextView: NSTextView {
     override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
         let old = highlightsCurrentLine ? currentLineBand() : nil
         super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        writingModes.selectionDidChange()
         guard highlightsCurrentLine else { return }
         if let old { setNeedsDisplay(old) }
         if let band = currentLineBand() { setNeedsDisplay(band) }
