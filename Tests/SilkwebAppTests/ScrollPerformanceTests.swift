@@ -254,9 +254,8 @@ final class ScrollPerformanceTests: XCTestCase {
                 wall.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6)
                 for view in editor.inlineImages.imageViews where view.frame.intersects(visible) {
                     entered.insert(ObjectIdentifier(view))
-                    // Focus Mode holds images in dimmed paragraphs at the text's opacity (1.27).
-                    let opacity = editor.writingModes.opacity(at: view.frame.midY)
-                    if focus { XCTAssertLessThan(opacity, 1) }
+                    // Focus Mode holds every image at dimmed text's opacity (1.27, 1.68).
+                    let opacity = focus ? WritingModeController.dimmedOpacity : 1
                     if view.isHidden || abs(view.alphaValue - opacity) > 0.001 { faded.append(view.content.reference.alt) }
                 }
             }
