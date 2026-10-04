@@ -304,6 +304,246 @@ final class PaneBackgroundTests: XCTestCase {
         }
     }
 
+    /// silkweb-1.67 owner report: while a library search is active the list column (field, scope, count,
+    /// results or No Results) is the flat Surface, also with a custom 1.24 Surface, never wallpaper material.
+    @MainActor
+    func testSearchStateListColumnRendersTheSurface() async throws {
+        _ = NSApplication.shared
+        // A short root name: the scope picker shows it, and a long one widens the search chrome.
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebSearchPane-" + UUID().uuidString)
+        let root = parent.appendingPathComponent("Library")
+        let suite = "Silkweb.SearchPane." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("Folder"), withIntermediateDirectories: true)
+        for index in 1...3 {
+            try Data("# Fog \(index)\n\nFog over the bay.".utf8).write(to: root.appendingPathComponent("Note \(index).md"))
+        }
+        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        workspace.canSaveWindowSession = false
+        workspace.root = root
+        workspace.install(try await LibraryScanner.scan(root: root))
+        let oldAppearance = NSApp.appearance
+        let oldPreferences = LivePreferences.shared.current
+        defer {
+            NSApp.appearance = oldAppearance
+            LivePreferences.shared.current = oldPreferences
+            ColorRevision.shared.bump()
+            defaults.removePersistentDomain(forName: suite)
+            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+            try? FileManager.default.removeItem(at: parent)
+        }
+
+        for custom in [false, true] {
+            var preferences = oldPreferences
+            preferences.colors.light.surface = custom ? HexColor(0x2E6B3A) : nil
+            preferences.colors.dark.surface = custom ? HexColor(0x163A22) : nil
+            LivePreferences.shared.current = preferences
+            ColorRevision.shared.bump()
+            for name in [NSAppearance.Name.aqua, .darkAqua] {
+                let appearance = try XCTUnwrap(NSAppearance(named: name))
+                NSApp.appearance = appearance
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+                                      styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                window.appearance = appearance
+                defer { window.contentViewController = nil; window.close() }
+                let controller = NSHostingController(rootView: LibraryWorkspaceView(workspace: workspace))
+                controller.sizingOptions = []
+                window.contentViewController = controller
+                window.setFrame(NSRect(x: 0, y: 0, width: 1400, height: 900), display: false)
+                let view = try XCTUnwrap(window.contentView)
+                for query in ["fog", "silkweb-no-matches"] {
+                    let label = "\(query) \(custom ? "custom" : "default") \(name.rawValue)"
+                    workspace.search.text = query
+                    await workspace.search.query(quick: false)
+                    for _ in 0..<3 {
+                        controller.view.layoutSubtreeIfNeeded()
+                        try await Task.sleep(for: .milliseconds(200))
+                    }
+                    XCTAssertFalse(window.isVisible)
+                    XCTAssertEqual(workspace.filteredSearchResults.isEmpty, query != "fog", label)
+                    try assertSearchColumn(in: view, appearance: appearance, results: query == "fog", label: label)
+                }
+                workspace.search.text = ""
+                workspace.search.results = []
+            }
+        }
+    }
+
+    /// silkweb-1.67 lifecycle: search with results → clear → search with no results, each across a resize
+    /// sweep, in the real workspace view. The column stays on the Surface at every size.
+    @MainActor
+    func testSearchModeLifecycleKeepsTheSurfaceAcrossResizes() async throws {
+        _ = NSApplication.shared
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebSearchLifecycle-" + UUID().uuidString)
+        let root = parent.appendingPathComponent("Library")
+        let suite = "Silkweb.SearchLifecycle." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        for index in 1...12 {
+            try Data("# Fog \(index)\n\nFog over the bay.".utf8).write(to: root.appendingPathComponent("Note \(index).md"))
+        }
+        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        workspace.canSaveWindowSession = false
+        workspace.root = root
+        workspace.install(try await LibraryScanner.scan(root: root))
+        let oldAppearance = NSApp.appearance
+        let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        NSApp.appearance = appearance
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+                              styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        defer {
+            window.contentViewController = nil
+            window.close()
+            NSApp.appearance = oldAppearance
+            defaults.removePersistentDomain(forName: suite)
+            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+            try? FileManager.default.removeItem(at: parent)
+        }
+        let controller = NSHostingController(rootView: LibraryWorkspaceView(workspace: workspace))
+        controller.sizingOptions = []
+        window.contentViewController = controller
+        let view = try XCTUnwrap(window.contentView)
+        func settle() async throws {
+            for _ in 0..<2 {
+                controller.view.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(150))
+            }
+        }
+        func sweep(_ results: Bool, _ phase: String) async throws {
+            for size in [NSSize(width: 1200, height: 800), NSSize(width: 900, height: 520), NSSize(width: 1500, height: 1000),
+                         NSSize(width: 1000, height: 400), NSSize(width: 1200, height: 800)] {
+                window.setContentSize(size)
+                try await settle()
+                try assertSearchColumn(in: view, appearance: appearance, results: results, label: "\(phase) \(size)")
+            }
+        }
+        try await settle()
+
+        workspace.search.text = "fog"
+        await workspace.search.query(quick: false)
+        try await settle()
+        XCTAssertEqual(workspace.filteredSearchResults.count, 12)
+        try await sweep(true, "results")
+
+        workspace.search.text = ""
+        workspace.search.results = []
+        try await settle()
+        let all = Self.descendants(view)
+        let column = try XCTUnwrap(all.compactMap { $0 as? DocumentTableView }.first?.enclosingScrollView)
+        let columnFrame = column.convert(column.bounds, to: view)
+        XCTAssertFalse(all.compactMap { $0 as? NSTableView }
+            .filter { !($0 is SidebarOutlineView) && !($0 is DocumentTableView) }
+            .contains { columnFrame.contains(NSPoint(x: $0.convert($0.bounds, to: view).midX, y: columnFrame.midY)) },
+                       "results list removed after clearing")
+
+        workspace.search.text = "silkweb-no-matches"
+        await workspace.search.query(quick: false)
+        try await settle()
+        XCTAssertTrue(workspace.filteredSearchResults.isEmpty)
+        try await sweep(false, "no results")
+        workspace.search.text = ""
+        workspace.search.results = []
+    }
+
+    /// Samples the list column's right gutter top to bottom and a row near its bottom edge against the token.
+    @MainActor
+    private func assertSearchColumn(in view: NSView, appearance: NSAppearance, results: Bool, label: String) throws {
+        let swatch = TokenSwatch(frame: NSRect(x: 0, y: 0, width: 4, height: 4))
+        let inactive = TokenSwatch(frame: NSRect(x: 4, y: 0, width: 4, height: 4))
+        inactive.color = .silkwebSelectionInactive
+        view.addSubview(swatch)
+        view.addSubview(inactive)
+        defer { swatch.removeFromSuperview(); inactive.removeFromSuperview() }
+        let all = Self.descendants(view)
+        // The folder list stays in the hierarchy (hidden) under the search overlay; its split-view pane is the column.
+        var column: NSView? = all.compactMap { $0 as? DocumentTableView }.first
+        while let candidate = column, !(candidate.superview is NSSplitView) { column = candidate.superview }
+        let pane = try XCTUnwrap(column, "list column pane: \(label)")
+        let listFrame = pane.convert(pane.bounds, to: view).intersection(view.bounds)
+        let resultTable = all.compactMap { $0 as? NSTableView }
+            .filter { !($0 is SidebarOutlineView) && !($0 is DocumentTableView) }
+            .first { $0.convert($0.bounds, to: view).midX > listFrame.minX && $0.convert($0.bounds, to: view).midX < listFrame.maxX }
+        XCTAssertEqual(resultTable != nil, results, "results list shown only with matches: \(label)")
+        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        appearance.performAsCurrentDrawingAppearance { view.cacheDisplay(in: view.bounds, to: bitmap) }
+        let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.cgContext.scaleBy(x: CGFloat(bitmap.pixelsWide) / view.bounds.width, y: CGFloat(bitmap.pixelsHigh) / view.bounds.height)
+        appearance.performAsCurrentDrawingAppearance {
+            NSColor.windowBackgroundColor.setFill()
+            view.bounds.fill(using: .destinationOver)
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        let scale = CGFloat(bitmap.pixelsHigh) / view.bounds.height
+        func pixel(_ sample: NSPoint) throws -> NSColor {
+            var point = sample
+            if !view.isFlipped { point.y = view.bounds.height - point.y }
+            return try XCTUnwrap(bitmap.colorAt(x: Int(point.x * scale), y: Int(point.y * scale))?.usingColorSpace(bitmap.colorSpace))
+        }
+        let token = try pixel(swatch.convert(NSPoint(x: 2, y: 2), to: view))
+        let inactiveToken = try pixel(inactive.convert(NSPoint(x: 2, y: 2), to: view))
+        // The injected custom Surfaces are greens; the defaults are near-neutral.
+        let custom = LivePreferences.shared.colors(dark: appearance.name == .darkAqua).surface != nil
+        XCTAssertEqual(token.greenComponent - max(token.redComponent, token.blueComponent) > 0.05, custom, "Surface swatch \(label): \(token)")
+        var mismatches: [String] = []
+        func off(_ actual: NSColor, _ wanted: NSColor) -> Bool {
+            [(actual.redComponent, wanted.redComponent), (actual.greenComponent, wanted.greenComponent),
+             (actual.blueComponent, wanted.blueComponent)].contains { abs($0.0 - $0.1) * 255 > 1.01 }
+        }
+        // The selected result shows the inactive capsule (an unordered window is never key), inset like the
+        // document list's, with Surface beside it. The row is skipped by the sweeps below.
+        var skipped: [NSRect] = []
+        if let resultTable {
+            let row = try XCTUnwrap(resultTable.selectedRowIndexes.first, "first result selected: \(label)")
+            XCTAssertEqual(resultTable.selectionHighlightStyle, .none, "no system highlight under the capsule: \(label)")
+            let rect = resultTable.rect(ofRow: row)
+            skipped.append(resultTable.convert(rect, to: view))
+            XCTAssertEqual(rect.height, DocumentRow.height, "1.64 row height: \(label)")
+            // Mid-row, clear of the rounded corners: the capsule edges sit ~10 pt from the table edges.
+            let width = resultTable.bounds.width
+            for (x, wanted, region) in [(Spacing.capsuleInset - 1.5, token, "outside capsule leading"),
+                                        (Spacing.capsuleInset + 1.5, inactiveToken, "capsule leading edge"),
+                                        (width - Spacing.capsuleInset - 2.5, inactiveToken, "capsule trailing edge"),
+                                        (width - Spacing.capsuleInset + 1.5, token, "outside capsule trailing")] {
+                let actual = try pixel(resultTable.convert(NSPoint(x: x, y: rect.midY), to: view))
+                if off(actual, wanted) { mismatches.append("\(region): \(actual) vs \(wanted)") }
+            }
+        }
+        func check(_ point: NSPoint, _ region: String) throws {
+            guard !skipped.contains(where: { $0.insetBy(dx: 0, dy: -2).contains(point) }) else { return }
+            let actual = try pixel(point)
+            if off(actual, token) { mismatches.append("\(region) \(point): \(actual) vs \(token)") }
+        }
+        // Top to bottom just inside the column's trailing edge: field header, scope, count, rows, below the rows.
+        // A legacy scroller (system-drawn) may take the trailing edge when results overflow; stay left of it.
+        let clip = resultTable.flatMap { $0.enclosingScrollView?.contentView }.map { $0.convert($0.bounds, to: view) }
+        let trailing = min(listFrame.maxX, clip?.maxX ?? listFrame.maxX) - 4
+        let top = view.isFlipped ? view.bounds.minY + 3 : view.bounds.maxY - 3
+        let bottom = view.isFlipped ? view.bounds.maxY - 3 : view.bounds.minY + 3
+        for y in stride(from: min(top, bottom), through: max(top, bottom), by: 4) {
+            let inList = clip.map { y >= $0.minY && y <= $0.maxY } ?? false
+            try check(NSPoint(x: inList ? trailing : listFrame.maxX - 4, y: y), "gutter")
+        }
+        // Across the column near its bottom: below the last result row or the No Results body.
+        // When results overflow the column, row text reaches the bottom; only the space past the rows counts.
+        let rows = resultTable.flatMap { table in
+            table.numberOfRows > 0 ? table.convert(table.rect(ofRow: 0).union(table.rect(ofRow: table.numberOfRows - 1)), to: view) : nil
+        }
+        for x in stride(from: listFrame.minX + 8, through: trailing, by: 8) {
+            let point = NSPoint(x: x, y: bottom + (view.isFlipped ? -8 : 8))
+            if rows?.contains(point) != true { try check(point, "bottom") }
+        }
+        XCTAssertTrue(mismatches.isEmpty, "\(label): \(mismatches.count) off-Surface samples, e.g. \(mismatches.prefix(4))")
+    }
+
     private final class TokenSwatch: NSView {
         var color = NSColor.silkwebPaneBackground
         override func draw(_ dirtyRect: NSRect) {
