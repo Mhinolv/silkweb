@@ -502,6 +502,14 @@ final class LibraryWorkspace {
 
     func waitForNavigation() async { await navigationTask?.value }
 
+    /// Queues `work` behind pending navigation; later navigation waits for it.
+    func afterNavigation(_ work: @escaping @MainActor () async -> Void) async {
+        let previous = navigationTask
+        let task = Task { await previous?.value; await work() }
+        navigationTask = task
+        await task.value
+    }
+
     func showDocument(_ url: URL) {
         guard let root else { return }
         navigate(folder: nil, documents: [String(url.path.dropFirst(root.path.count + 1))])

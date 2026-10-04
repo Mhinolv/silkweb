@@ -48,7 +48,8 @@ final class EditorTabBarView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func reload() {
-        let existing = Dictionary(uniqueKeysWithValues: buttons.map { ($0.tab.id, $0) })
+        // Tolerates a duplicate tab ID instead of trapping (silkweb-1.79).
+        let existing = Dictionary(buttons.map { ($0.tab.id, $0) }, uniquingKeysWith: { first, _ in first })
         for button in buttons { button.removeFromSuperview() }
         buttons = workspace.tabs.map { tab in
             let button = existing[tab.id] ?? EditorTabButton(tab: tab, bar: self)

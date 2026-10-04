@@ -594,4 +594,56 @@ final class PrintCommandsTests: XCTestCase {
         }
         return longest
     }
+
+    /// silkweb-1.79: a delay that elapses just as rendering finishes must not open a sheet
+    /// that nothing closes. The delay ignores cancellation, like a sleep that already returned.
+    @MainActor func testDelayedProgressNeverAppearsAfterRenderFinished() async throws {
+        let workspace = LibraryWorkspace(defaults: try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString)))
+        var release: CheckedContinuation<Void, Never>?
+        var delayFinished = false
+        let value = try await workspace.withDelayedProgress("Fast", delay: {
+            await withCheckedContinuation { release = $0 }
+            delayFinished = true
+        }, cancel: {}) {
+            while release == nil { await Task.yield() }
+            return 7
+        }
+        XCTAssertEqual(value, 7)
+        XCTAssertNil(workspace.pdfProgress)
+        release?.resume()
+        for _ in 0..<200 where !delayFinished { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(delayFinished)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertNil(workspace.pdfProgress, "the progress sheet appeared after rendering finished and would never close")
+    }
+
+    /// A slow render shows the sheet, whose Cancel reaches the render; any outcome closes it.
+    @MainActor func testDelayedProgressShowsWhileRunningAndClosesOnEveryOutcome() async throws {
+        let workspace = LibraryWorkspace(defaults: try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString)))
+        var cancelled = false
+        let value = try await workspace.withDelayedProgress("Slow", delay: {}, cancel: { cancelled = true }) {
+            for _ in 0..<200 where workspace.pdfProgress == nil { try await Task.sleep(for: .milliseconds(5)) }
+            XCTAssertEqual(workspace.pdfProgress?.message, "Slow")
+            workspace.pdfProgress?.cancel()
+            return "done"
+        }
+        XCTAssertEqual(value, "done")
+        XCTAssertTrue(cancelled)
+        XCTAssertNil(workspace.pdfProgress)
+        for error in [CancellationError() as Error, CocoaError(.fileWriteUnknown)] {
+            do {
+                _ = try await workspace.withDelayedProgress("Failing", delay: {}, cancel: {}) { () async throws -> Int in
+                    for _ in 0..<200 where workspace.pdfProgress == nil { try await Task.sleep(for: .milliseconds(5)) }
+                    XCTAssertNotNil(workspace.pdfProgress)
+                    throw error
+                }
+                XCTFail("expected an error")
+            } catch {}
+            XCTAssertNil(workspace.pdfProgress)
+        }
+        // A fast render never shows the sheet, not even briefly.
+        _ = try await workspace.withDelayedProgress("Instant", cancel: {}) { 1 }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertNil(workspace.pdfProgress)
+    }
 }

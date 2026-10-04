@@ -32,7 +32,9 @@ import SilkwebCore
     func configure(root: URL?, document: URL?) {
         guard self.root != root || self.document != document else { return }
         self.root = root; self.document = document
-        paragraphs = []
+        // Not `paragraphs = []` first: install would then see no change and keep the old views and heights.
+        generation += 1
+        task?.cancel()
         install([])
         schedule()
     }

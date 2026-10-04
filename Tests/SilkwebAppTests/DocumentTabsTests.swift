@@ -125,6 +125,55 @@ final class DocumentTabsTests: XCTestCase {
         XCTAssertEqual(saved.resolving(in: rescanned).tabs.map(\.documentID), [b.id])
     }
 
+    /// silkweb-1.79: concurrent opens of one document (launch restore vs. a click) focus a single tab.
+    @MainActor func testConcurrentOpenTabNeverDuplicatesTabIDs() async throws {
+        let workspace = try await fixture()
+        defer { try? FileManager.default.removeItem(at: workspace.root!) }
+        let documents = try XCTUnwrap(workspace.snapshot?.documents)
+        let a = try XCTUnwrap(documents.first { $0.relativePath == "A.md" })
+        let b = try XCTUnwrap(documents.first { $0.relativePath == "B.md" })
+        let bar = EditorTabBarView(workspace: workspace)
+        for pinned in [true, false] {
+            async let first = workspace.openTab(a, pinned: pinned)
+            async let second = workspace.openTab(a, pinned: pinned)
+            async let third = workspace.openTab(a, pinned: true)
+            let opened = await [first, second, third]
+            XCTAssertEqual(opened, [true, true, true])
+            XCTAssertEqual(workspace.tabs.map(\.id), [a.id], "a concurrent open created a duplicate tab")
+            XCTAssertEqual(workspace.activeTabID, a.id)
+            XCTAssertFalse(workspace.tabs[0].isPreview, "a pinned open keeps the tab")
+            bar.reload(); bar.reload()
+            XCTAssertEqual(bar.buttons.count, 1)
+            _ = await workspace.closeTab(a.id)
+        }
+
+        // Session restore racing a click on a restored document.
+        await select("A", in: workspace, pinned: true)
+        await select("B", in: workspace, pinned: true)
+        await workspace.saveSessionNow()
+        let loaded = try await WindowSessionMetadata.load(root: workspace.root!)
+        let saved = try XCTUnwrap(loaded)
+        await workspace.didCloseWindow()
+        workspace.navigate(folder: "", documents: ["B.md"])
+        async let restored: Void = workspace.restoreTabs(saved)
+        workspace.navigate(folder: "", documents: ["A.md"])
+        await restored
+        await workspace.waitForNavigation()
+        XCTAssertEqual(Set(workspace.tabs.map(\.id)).count, workspace.tabs.count)
+        XCTAssertEqual(Set(workspace.tabs.map(\.id)), [a.id, b.id])
+        XCTAssertTrue([a.id, b.id].contains(try XCTUnwrap(workspace.activeTabID)))
+        bar.reload(); bar.reload()
+        XCTAssertEqual(bar.buttons.map(\.tab.id), workspace.tabs.map(\.id))
+
+        // Even if a duplicate tab ID ever reaches the bar, reloading must not trap.
+        workspace.tabs.append(workspace.tabs[0])
+        bar.reload(); bar.reload()
+        XCTAssertEqual(bar.buttons.count, workspace.tabs.count)
+        workspace.tabs.removeLast()
+        bar.reload()
+        XCTAssertEqual(bar.buttons.count, 2)
+    }
+
     @MainActor func testEmptyRestoredTabsClearStaleListSelection() async throws {
         let workspace = try await fixture()
         defer { try? FileManager.default.removeItem(at: workspace.root!) }
