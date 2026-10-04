@@ -1,13 +1,38 @@
 name: CI
+# The macOS job is slow (~15 min), so it runs sparingly: once when a PR is opened
+# ready or leaves draft, again only when the `run-ci` label is added, and manually
+# via workflow_dispatch. Branch pushes don't run it (those commits passed on the PR).
+# PRs that touch none of the paths below get no CI run at all.
 on:
   pull_request:
-  push:
-    branches: [main, team/roadmap]
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+    types: [opened, reopened, ready_for_review, labeled]
+    paths:
+      - "Sources/**"
+      - "Tests/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - "scripts/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
 jobs:
   build-and-test:
+    # Skip drafts and labels other than `run-ci`. A skipped job still posts a check, so
+    # skipped runs are named `ci-skipped` instead: they never add a skipped
+    # `build-and-test` check (which counts as passing) on top of a real failure.
+    # Keep `name` and `if` in sync. Concurrency lives on the job, so a skipped run for
+    # another label (e.g. `qa-pass`) never cancels a real CI run.
+    name: >-
+      ${{ (github.event_name == 'workflow_dispatch' ||
+           (!github.event.pull_request.draft &&
+            (github.event.action != 'labeled' || github.event.label.name == 'run-ci')))
+          && 'build-and-test' || 'ci-skipped' }}
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (!github.event.pull_request.draft &&
+       (github.event.action != 'labeled' || github.event.label.name == 'run-ci'))
+    concurrency:
+      group: ci-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     runs-on: macos-15
     timeout-minutes: 45
     env:
