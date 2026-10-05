@@ -670,11 +670,12 @@ struct LibraryWorkspaceView: View {
                 }.pickerStyle(.segmented).labelStyle(.iconOnly).help("Editor, Split or Preview")
                     // Same glyph size; the selected segment keeps the system tint.
                     .font(.system(size: 13, weight: .regular))
-                Button("Show Outline", systemImage: "list.bullet.indent") { workspace.inspectorInfo = false; workspace.preview.showsOutline.toggle() }
-                    .help("Show Outline").toolbarGlyph()
+                Button("Show Outline", systemImage: "list.bullet.indent") { workspace.toggleInspector(.outline) }
+                    .help("Show Outline").toolbarGlyph(selected: workspace.inspectorSegment == .outline)
             }
             ToolbarItem(placement: .primaryAction) {
-                Button("Show Document Info", systemImage: "info.circle") { workspace.showInfo() }.help("Show Document Info").toolbarGlyph()
+                Button("Show Document Info", systemImage: "info.circle") { workspace.toggleInspector(.info) }
+                    .help("Show Document Info").toolbarGlyph(selected: workspace.inspectorSegment == .info)
             }
             ToolbarItem(placement: .navigation) {
                 Button(workspace.sidebarsTitle, systemImage: "sidebar.left") { workspace.toggleSidebars() }
@@ -744,9 +745,11 @@ struct LibraryWorkspaceView: View {
 }
 
 private extension View {
-    /// Smaller, lighter symbols for the compact bar (silkweb-1.65).
-    func toolbarGlyph() -> some View {
-        font(.system(size: 13, weight: .regular)).foregroundStyle(Color(nsColor: .secondaryLabelColor))
+    /// Smaller, lighter symbols for the compact bar (silkweb-1.65); a selected glyph tints sage (#69), same size.
+    func toolbarGlyph(selected: Bool = false) -> some View {
+        font(.system(size: 13, weight: .regular))
+            .foregroundStyle(selected ? Color.silkwebAccent : Color(nsColor: .secondaryLabelColor))
+            .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

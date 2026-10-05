@@ -363,6 +363,49 @@ final class WritingModesTests: XCTestCase {
         XCTAssertFalse(fixture.window.isVisible)
     }
 
+    /// #78: content sizing refits the editor's height to its text a turn after a reflow, often
+    /// after the frame has drawn (895.5 pt at one width, 895.0 at the next). A shrink draws
+    /// nothing, so strips re-measured only in viewWillDraw kept the old bottom edge; a growth
+    /// left an undimmed sliver below the last strip until something else redrew the editor.
+    @MainActor
+    func testFocusStripsFollowEditorFrameChangesWithoutADisplayPass() async throws {
+        let fixture = try await Fixture(files: ["Focus.md": Self.focusDocument], open: "Focus.md")
+        defer { fixture.close() }
+        let workspace = fixture.workspace
+        try await fixture.settle()
+        let editor = try XCTUnwrap(workspace.preview.editor)
+        editor.setSelectedRange(NSRange(location: (editor.string as NSString).range(of: "line one").location, length: 0))
+        workspace.setWritingModes(focus: true)
+        try await fixture.settle()
+        XCTAssertFalse(editor.writingModes.isFading)
+        let band = try XCTUnwrap(editor.writingModes.band(for: try XCTUnwrap(editor.writingModes.activeRange)))
+        let dimmed = WritingModeController.dimmedOpacity
+        let scale = try XCTUnwrap(editor.window?.backingScaleFactor)
+
+        func assertStripsSpanEditor(_ message: String, file: StaticString = #filePath, line: UInt = #line) {
+            let views = editor.subviews.filter { $0.identifier?.rawValue == "focus-dim" }
+            XCTAssertEqual(views.count, 2, message, file: file, line: line)
+            XCTAssertEqual(views.map(\.frame.minY).min() ?? -1, 0, accuracy: 0.001, message, file: file, line: line)
+            XCTAssertEqual(views.map(\.frame.maxY).max() ?? -1, editor.bounds.height, accuracy: 0.001,
+                           "\(message) (backing scale \(scale))", file: file, line: line)
+            for view in views { XCTAssertEqual(view.frame.width, editor.bounds.width, accuracy: 0.001, message, file: file, line: line) }
+            XCTAssertEqual(editor.writingModes.opacity(at: editor.bounds.height - 0.25), dimmed, accuracy: 0.001, message, file: file, line: line)
+            XCTAssertEqual(editor.writingModes.opacity(at: band.top + 1), 1, accuracy: 0.001, message, file: file, line: line)
+            XCTAssertEqual(editor.writingModes.opacity(at: band.bottom + 1), dimmed, accuracy: 0.001, message, file: file, line: line)
+        }
+        assertStripsSpanEditor("settled")
+
+        // Half-point and larger refits in both directions, and a width change, with no display in between.
+        let start = editor.frame.size
+        for (index, size) in [NSSize(width: start.width, height: start.height + 0.5), NSSize(width: start.width, height: start.height),
+                              NSSize(width: start.width, height: start.height + 120), NSSize(width: start.width - 200, height: start.height + 120),
+                              start].enumerated() {
+            editor.setFrameSize(size)
+            assertStripsSpanEditor("refit \(index) to \(size)")
+        }
+        XCTAssertFalse(fixture.window.isVisible)
+    }
+
     static let adjacentDocument = """
     # Adjacent Fixture
 
