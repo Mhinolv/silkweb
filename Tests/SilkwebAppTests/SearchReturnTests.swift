@@ -51,7 +51,11 @@ final class SearchReturnTests: XCTestCase {
     @MainActor
     private func waitForOpen(_ workspace: LibraryWorkspace) async throws {
         // A loaded runner can resume the open well past any fixed budget (#63).
-        try await waitUntil("Return to open a document") { !workspace.session.selectedDocuments.isEmpty }
+        // The list selects at once (#70); the open is done once the editor shows it and the search UI is dismissed.
+        try await waitUntil("Return to open a document") {
+            !workspace.session.selectedDocuments.isEmpty && workspace.editor.url != nil
+                && !workspace.search.showsQuickOpen && workspace.search.text.isEmpty
+        }
         await workspace.waitForNavigation()
     }
 
