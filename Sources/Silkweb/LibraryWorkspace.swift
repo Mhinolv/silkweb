@@ -675,6 +675,8 @@ struct LibraryWorkspaceView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Button("Show Document Info", systemImage: "info.circle") { workspace.showInfo() }.help("Show Document Info").toolbarGlyph()
+                    // The glyph ends 12 pt from the bar's edge (#68).
+                    .padding(.trailing, -CompactToolbarController.trailingOverhang)
             }
             ToolbarItem(placement: .navigation) {
                 Button(workspace.sidebarsTitle, systemImage: "sidebar.left") { workspace.toggleSidebars() }
