@@ -295,6 +295,17 @@ import SilkwebCore
         updateDim()
     }
 
+    /// The editor's frame changed, often outside a display pass: content sizing refits the height
+    /// a turn after a reflow has drawn, and a shrink draws nothing (#78). The strips span the new
+    /// frame at once; a pending re-measure still runs before the next frame draws.
+    func editorDidResize() {
+        guard let editor, focus || fadeFrom != nil || !stripViews.isEmpty,
+              measured.width != editor.bounds.width || measured.height != editor.bounds.height else { return }
+        let pending = dimNeedsUpdate
+        updateDim()
+        dimNeedsUpdate = pending
+    }
+
     /// TextKit invalidated layout (edit, restyle, width, image heights): bands may have moved.
     func layoutDidInvalidate() { if focus || !stripViews.isEmpty { dimNeedsUpdate = true } }
 
