@@ -62,7 +62,7 @@ final class AppIconTests: XCTestCase {
             XCTAssertEqual(Array(bytes.prefix(4)), [0, 0, 0, 0], name)
         }
         for name in ["icon-preview-light.png", "icon-preview-dark.png", "icon-16.png", "icon-32.png", "icon-1024.png"] {
-            let relative = ".team/qa/silkweb-1.53/" + name
+            let relative = ".build/icon-generation/preview/" + name
             XCTAssertEqual(try Data(contentsOf: first.appendingPathComponent(relative)),
                 try Data(contentsOf: second.appendingPathComponent(relative)), name)
             let source = try XCTUnwrap(CGImageSourceCreateWithURL(first.appendingPathComponent(relative) as CFURL, nil))
