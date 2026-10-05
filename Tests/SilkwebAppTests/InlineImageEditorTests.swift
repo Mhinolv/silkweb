@@ -127,9 +127,12 @@ final class InlineImageEditorTests: XCTestCase {
         editor.inlineImages.configure(root: root, document: root.appendingPathComponent("Document.md"))
         editor.string = "~~~\n![Code](large.png)\n~~~\n\n![First](large.png) ![Second](large.png)"
         editor.styler.reload(); editor.inlineImages.schedule()
+        // A resize starts a debounced chain (image pass, header load, fit, decode, fit) that a loaded CI runner
+        // did not finish within the fixed sleep, leaving the frame one fit behind (#67 CI). Wait for it to drain.
         func settle() async throws {
             editor.layoutEditor()
             try await Task.sleep(for: .milliseconds(500))
+            try await waitUntil("editor content sizing to finish") { !editor.isContentSizingPending }
             editor.inlineImages.positionViews()
         }
         for size in [NSSize(width: 120, height: 100), NSSize(width: 800, height: 600), NSSize(width: 500, height: 150)] {
