@@ -136,9 +136,14 @@ final class MenuStabilityTests: XCTestCase {
             XCTAssertEqual(state.value.previewMode, mode)
             XCTAssertEqual(state.value.canFind, workspace.canFind, "Find gating follows view mode")
         }
-        workspace.preview.showsOutline.toggle()
-        await Task.yield()
-        XCTAssertEqual(state.value.showsOutline, workspace.preview.showsOutline)
+        // ⌘7/⌘8 checkmarks follow the visible Inspector segment only (#69).
+        workspace.preview.showsOutline = false
+        for (segment, expected) in [(LibraryWorkspace.InspectorSegment.info, LibraryWorkspace.InspectorSegment?.some(.info)),
+                                    (.outline, .outline), (.outline, nil), (.outline, .outline), (.info, .info), (.info, nil)] {
+            workspace.toggleInspector(segment)
+            await Task.yield()
+            XCTAssertEqual(state.value.inspectorSegment, expected, "\(segment)")
+        }
 
         // Opening any menu resamples AppKit-owned state without needing a workspace publish.
         NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: NSMenu())

@@ -22,6 +22,17 @@ extension LibraryWorkspace {
         let count = ids.filter { metadata.tagsByDocument[$0.uuidString]?.contains(tag.id) == true }.count
         return count == 0 ? .off : count == ids.count ? .on : .mixed
     }
+    /// Outline and Info are two segments of one Inspector; `preview.showsOutline` opens the panel.
+    enum InspectorSegment { case outline, info }
+    /// The segment on screen, or nil while the Inspector is closed.
+    var inspectorSegment: InspectorSegment? { preview.showsOutline ? (inspectorInfo ? .info : .outline) : nil }
+    /// Toolbar and ⌘7/⌘8 (#69): open or switch to `segment`, or close the panel when it is already showing.
+    func toggleInspector(_ segment: InspectorSegment) {
+        if inspectorSegment == segment { preview.showsOutline = false }
+        else if segment == .info { showInfo() }
+        else { inspectorInfo = false; preview.showsOutline = true }
+    }
+    /// Opens Info with the tag field focused; never closes the panel (Edit Tags…).
     func showInfo() { inspectorInfo = true; preview.showsOutline = true; tagFocusRequest += 1 }
     func editTags(_ names: [String]) {
         let ids = tagDocumentIDs
