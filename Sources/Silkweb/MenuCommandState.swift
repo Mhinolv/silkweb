@@ -23,7 +23,7 @@ struct MenuCommandValues: Equatable {
     var sidebarsTitle: String
     var canToggleSidebars: Bool
     var previewMode: DocumentViewMode
-    var showsOutline: Bool
+    var inspectorSegment: LibraryWorkspace.InspectorSegment?
     var showsStatusBar: Bool
     var focusMode: Bool
     var typewriterMode: Bool
@@ -53,7 +53,7 @@ struct MenuCommandValues: Equatable {
         sidebarsTitle = workspace.sidebarsTitle
         canToggleSidebars = hasLibrary || workspace.loading
         previewMode = workspace.preview.mode
-        showsOutline = workspace.preview.showsOutline
+        inspectorSegment = workspace.inspectorSegment
         showsStatusBar = workspace.preview.showsStatusBar
         focusMode = workspace.focusMode
         typewriterMode = workspace.typewriterMode

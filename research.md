@@ -28,7 +28,7 @@ Local inspection establishes:
 
 Read `AGENTS.md`, `Package.swift`, all three Swift source/test files, and listed repository files including hidden paths outside build/git output. `README.md` is absent; no release/review documents were found. The initial branch is `team/roadmap` with a clean worktree.
 
-`bd list --status=open` failed because there is no `.beads` directory; `.beads/issues.jsonl` is also absent. **There are no locally inspectable issue IDs to exclude or reference.** This is not proof that another worktree or external tracker has no tickets. The PM must deduplicate again when importing this roadmap; this research creates no issues and initializes no tracker.
+Issue tracking for this project lives in GitHub Issues (Mhinolv/silkweb); this research predates the move.
 
 ## Feature Inventory
 
