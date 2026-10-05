@@ -310,6 +310,7 @@ final class PlainMarkdownTextView: NSTextView {
         // re-grew the frame on every sizing pass, leaving the last images unreachable (silkweb-1.81).
         super.setFrameSize(NSSize(width: newSize.width, height: max(newSize.height, imagesBottom)))
         layoutEditor()
+        writingModes.editorDidResize()
     }
 
     func layoutEditor() {
