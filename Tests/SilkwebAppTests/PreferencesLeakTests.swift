@@ -7,30 +7,34 @@ import SilkwebCore
 final class PreferencesLeakTests: XCTestCase {
     private static let childReportKey = "SILKWEB_PREFERENCES_CHILD_REPORT"
 
-    /// Silkweb test residue under ~/Library/Preferences: Silkweb-named or bare-UUID plists, never the app's own.
-    static func residue() -> Set<String> {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: TestPreferences.directory.path)) ?? []
-        return Set(names.filter { name in
-            guard name.hasSuffix(".plist"), name != "com.silkweb.app.plist" else { return false }
-            return name.lowercased().contains("silkweb") || UUID(uuidString: String(name.dropLast(6))) != nil
-        })
-    }
+    // Every assertion is scoped to names and values the test itself created, so another test process leaking
+    // on the same machine (a parallel lane, another checkout, CI) cannot fail it.
 
-    /// Silkweb keys in the runner's persistent domain.
-    static func runnerKeys() -> Set<String> {
+    /// Keys in the runner's persistent domain whose name contains `name`.
+    static func runnerKeys(containing name: String) -> [String: Any] {
         UserDefaults.standard.synchronize()
         let domain = UserDefaults.standard.persistentDomain(forName: TestPreferences.runnerDomain) ?? [:]
-        return Set(domain.keys.filter { $0.contains("Silkweb") })
+        return domain.filter { $0.key.contains(name) }
+    }
+
+    /// Files in ~/Library/Preferences whose name contains `name`.
+    static func preferenceFiles(containing name: String) -> [String] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: TestPreferences.directory.path)) ?? []
+        return names.filter { $0.contains(name) }
     }
 
     @MainActor
     func testLibraryColumnsBuiltByTestsLeaveNoFilesOrRunnerKeys() async throws {
         _ = NSApplication.shared
         XCTAssertNotEqual(Bundle.main.bundleIdentifier, "com.silkweb.app")
-        // A previous build's default-named frames would hide a new write.
-        TestPreferences.removeSplitAutosave(containing: "Silkweb.LibraryColumns")
-        defer { TestPreferences.removeSplitAutosave(containing: "Silkweb.LibraryColumns") }
-        let files = Self.residue(), keys = Self.runnerKeys()
+        // The production name is shared by every runner, so an odd random height no other test uses marks
+        // this test's own frames.
+        let height = Int.random(in: 950...1049) * 2 + 1
+        func ourFrames() -> [String] {
+            Self.runnerKeys(containing: "Silkweb.LibraryColumns")
+                .filter { String(describing: $0.value).contains("\(height).000000") }.map(\.key).sorted()
+        }
+        XCTAssertEqual(ourFrames(), [], "Stale frames already carry this run's height")
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -44,39 +48,42 @@ final class PreferencesLeakTests: XCTestCase {
             workspace.install(try await LibraryScanner.scan(root: root))
             for controller in [LibrarySplitViewController(workspace: workspace),
                                LibrarySplitViewController(workspace: workspace, autosaveName: workspace.columnAutosaveName)] {
-                let container = NSView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
+                let container = NSView(frame: NSRect(x: 0, y: 0, width: 1200, height: height))
                 container.addSubview(controller.view)
                 controller.view.setFrameSize(container.frame.size)
                 controller.view.layoutSubtreeIfNeeded()
                 controller.splitView.setPosition(700, ofDividerAt: 0)
                 controller.navigationController.splitView.setPosition(250, ofDividerAt: 0)
-                controller.view.setFrameSize(NSSize(width: 1400, height: 900))
                 controller.view.layoutSubtreeIfNeeded()
                 try await Task.sleep(for: .milliseconds(100))
                 controller.view.removeFromSuperview()
             }
         }
         try await Task.sleep(for: .milliseconds(100))
+        let leaked = ourFrames()
+        // Remove only this test's frames, so a failure does not leave them behind.
+        for key in leaked { UserDefaults.standard.removeObject(forKey: key) }
         preferences.remove()
-        XCTAssertEqual(Self.runnerKeys().subtracting(keys), [], "Test-built columns autosaved into \(TestPreferences.runnerDomain)")
-        XCTAssertEqual(Self.residue().subtracting(files), [], "New Silkweb preference files")
+        XCTAssertEqual(leaked, [], "Test-built columns autosaved into \(TestPreferences.runnerDomain)")
+        XCTAssertEqual(Self.preferenceFiles(containing: preferences.name), [], "Test suite written to ~/Library/Preferences")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: preferences.plist.path))
     }
 
     func testHelperRemovesSuiteFileAndSplitFrames() async throws {
-        let files = Self.residue()
         let preferences = TestPreferences("Helper")
         preferences.defaults.set(true, forKey: "Probe")
         preferences.defaults.synchronize()
         XCTAssertTrue(FileManager.default.fileExists(atPath: preferences.plist.path), "The suite was never written, so this test proves nothing")
         try await exerciseNamedColumns(preferences)
-        XCTAssertFalse(Self.runnerKeys().filter { $0.contains(preferences.name) }.isEmpty, "Autosave name was not exercised")
+        XCTAssertFalse(Self.runnerKeys(containing: preferences.name).isEmpty, "Autosave name was not exercised")
         preferences.remove()
         XCTAssertNil(preferences.defaults.object(forKey: "Probe"))
         // cfprefsd rewrites an emptied domain a moment later; that write must not leave a file anywhere.
         try await Task.sleep(for: .seconds(3))
         XCTAssertFalse(FileManager.default.fileExists(atPath: preferences.plist.path))
-        XCTAssertEqual(Self.residue().subtracting(files), [])
-        XCTAssertEqual(Self.runnerKeys().filter { $0.contains(preferences.name) }, [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: preferences.plist.deletingLastPathComponent().path))
+        XCTAssertEqual(Self.preferenceFiles(containing: preferences.name), [])
+        XCTAssertEqual(Self.runnerKeys(containing: preferences.name).keys.sorted(), [])
     }
 
     /// Where a suite's plist lives: a path suite next to itself, a named one in ~/Library/Preferences.
@@ -123,6 +130,7 @@ final class PreferencesLeakTests: XCTestCase {
         // cfprefsd rewrites an emptied domain a moment later; give that write the chance to appear.
         Thread.sleep(forTimeInterval: 3)
         XCTAssertFalse(FileManager.default.fileExists(atPath: Self.storeFile(suite).path), "\(suite).plist survived the runner's exit")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: Self.storeFile(suite).deletingLastPathComponent().path), "The suite's directory survived")
     }
 
     /// The child half of the exit test; skipped in a normal run.
