@@ -257,6 +257,116 @@ final class WritingModesTests: XCTestCase {
         XCTAssertFalse(fixture.window.isVisible)
     }
 
+    /// The editor's own drawing of its visible rect, without subviews (what its backing store holds).
+    @MainActor
+    private func ownDrawing(_ editor: PlainMarkdownTextView) throws -> Data {
+        let rect = editor.visibleRect
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(rect.width), pixelsHigh: Int(rect.height),
+                                                    bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                                    colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let bitmapContext = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+        let cg = bitmapContext.cgContext
+        cg.translateBy(x: 0, y: rect.height)
+        cg.scaleBy(x: 1, y: -1)
+        cg.translateBy(x: -rect.minX, y: -rect.minY)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: cg, flipped: true)
+        editor.effectiveAppearance.performAsCurrentDrawingAppearance { editor.draw(rect) }
+        NSGraphicsContext.restoreGraphicsState()
+        return try XCTUnwrap(bitmap.tiffRepresentation)
+    }
+
+    /// #65: Focus dimming is composited over the text by strip layers, never blended into the
+    /// editor's own drawing: a translucent fill in the editor's backing store made every
+    /// scrolled frame's Core Animation commit about 3× dearer (p95 over 4 ms under load). The
+    /// strips follow the bright band through resizes, Typewriter insets and mode switches, sit
+    /// under inline images and pass clicks through to the text.
+    @MainActor
+    func testFocusDimmingIsCompositedOverTheEditorNotDrawnIntoIt() async throws {
+        let fixture = try await Fixture(files: ["Focus.md": Self.focusDocument], open: "Focus.md")
+        defer { fixture.close() }
+        let workspace = fixture.workspace
+        try await fixture.settle()
+        var editor = try XCTUnwrap(workspace.preview.editor)
+        for _ in 0..<40 where !(editor.inlineImages.imageViews.first?.content.bitmap != nil) { try await fixture.settle(100) }
+        let source = editor.string as NSString
+        let dimmed = WritingModeController.dimmedOpacity
+        editor.setSelectedRange(NSRange(location: source.range(of: "line one").location, length: 0))
+        try await fixture.settle()
+        let plain = try ownDrawing(editor)
+
+        workspace.setWritingModes(focus: true)
+        try await fixture.settle()
+        XCTAssertFalse(editor.writingModes.isFading)
+        XCTAssertEqual(try ownDrawing(editor), plain, "Focus leaves the editor's own drawing (its backing store) untouched")
+
+        func strips() -> [NSView] { editor.subviews.filter { $0.identifier?.rawValue == "focus-dim" } }
+        func assertStripsFollowBand(_ message: String, file: StaticString = #filePath, line: UInt = #line) throws {
+            let band = try XCTUnwrap(editor.writingModes.band(for: try XCTUnwrap(editor.writingModes.activeRange)), message, file: file, line: line)
+            let views = strips()
+            XCTAssertEqual(views.count, 2, "above and below the bright unit: \(message)", file: file, line: line)
+            XCTAssertEqual(views.map(\.frame.minY).min() ?? -1, 0, accuracy: 0.001, message, file: file, line: line)
+            XCTAssertEqual(views.map(\.frame.maxY).max() ?? -1, editor.bounds.height, accuracy: 0.001, message, file: file, line: line)
+            for view in views {
+                XCTAssertEqual(view.frame.minX, 0, message, file: file, line: line)
+                XCTAssertEqual(view.frame.width, editor.bounds.width, accuracy: 0.001, message, file: file, line: line)
+                XCTAssertFalse(view.isAccessibilityElement(), message, file: file, line: line)
+            }
+            XCTAssertEqual(editor.writingModes.opacity(at: band.top - 1), dimmed, accuracy: 0.001, message, file: file, line: line)
+            XCTAssertEqual(editor.writingModes.opacity(at: band.top + 1), 1, accuracy: 0.001, message, file: file, line: line)
+            XCTAssertEqual(editor.writingModes.opacity(at: band.bottom - 1), 1, accuracy: 0.001, message, file: file, line: line)
+            XCTAssertEqual(editor.writingModes.opacity(at: band.bottom + 1), dimmed, accuracy: 0.001, message, file: file, line: line)
+            // Under inline images (dimmed on their own, 1.68) and transparent to clicks.
+            let order = editor.subviews
+            for image in editor.inlineImages.imageViews {
+                for view in views {
+                    XCTAssertLessThan(try XCTUnwrap(order.firstIndex(of: view)), try XCTUnwrap(order.firstIndex(of: image)), message, file: file, line: line)
+                }
+            }
+            let dimPoint = NSPoint(x: editor.bounds.midX, y: band.bottom + 4)
+            XCTAssertTrue(editor.hitTest(editor.convert(dimPoint, to: editor.superview)) === editor, "clicks reach the text: \(message)", file: file, line: line)
+        }
+        try assertStripsFollowBand("focus on")
+
+        // Resize sweep: the strips span the new width and the band re-measures after reflow.
+        for width in [1100, 900, 1600, 1400] {
+            fixture.window.setContentSize(NSSize(width: CGFloat(width), height: 900))
+            try await fixture.settle(150)
+            try assertStripsFollowBand("window width \(width)")
+        }
+        // Typewriter moves the text container origin; a different unit moves the band.
+        workspace.setWritingModes(typewriter: true)
+        try await fixture.settle()
+        try assertStripsFollowBand("typewriter on")
+        editor.setSelectedRange(NSRange(location: source.range(of: "item two").location, length: 0))
+        try await fixture.settle()
+        try assertStripsFollowBand("list item unit")
+        // Typing above the band shifts it before the next frame.
+        editor.setSelectedRange(NSRange(location: source.range(of: "First paragraph").location, length: 0))
+        try await fixture.settle()
+        editor.insertText("A longer opening sentence that wraps onto a second line in the column. ", replacementRange: editor.selectedRange())
+        try await fixture.settle()
+        try assertStripsFollowBand("after typing")
+        workspace.setWritingModes(typewriter: false)
+        try await fixture.settle()
+        // Mode switches keep a laid-out, dimmed editor.
+        for mode in [DocumentViewMode.split, .editor] {
+            workspace.preview.mode = mode
+            try await fixture.settle()
+            editor = try XCTUnwrap(workspace.preview.editor)
+            try assertStripsFollowBand("\(mode)")
+        }
+        let focused = try ownDrawing(editor)
+
+        // Off removes every strip; the editor's own pixels never changed.
+        workspace.setWritingModes(focus: false)
+        try await fixture.settle()
+        XCTAssertEqual(try ownDrawing(editor), focused, "Focus on and off draw the same editor pixels")
+        XCTAssertTrue(strips().isEmpty, "focus off leaves no strips behind")
+        XCTAssertEqual(editor.writingModes.opacity(at: 1), 1)
+        XCTAssertFalse(fixture.window.isVisible)
+    }
+
     static let adjacentDocument = """
     # Adjacent Fixture
 
@@ -541,9 +651,9 @@ final class WritingModesTests: XCTestCase {
 
     /// silkweb-1.80: typing in a heading never undims other paragraphs. Sampled in the
     /// editor's real draw callback (the frame the user sees, as in 1.60), after every keystroke
-    /// and again after the queued styler / Focus updates run. Invariant: the overlay that
-    /// `drawOverlay` paints over each body line leaves exactly `dimmedOpacity`
-    /// (`opacity(at:)`), and no glyphs are drawn outside `draw(_:)`, where no overlay follows.
+    /// and again after the queued styler / Focus updates run. Invariant: the dim strips laid
+    /// over each body line (#65, re-measured in viewWillDraw) leave exactly `dimmedOpacity`
+    /// (`opacity(at:)`), and no glyphs are drawn outside `draw(_:)`.
     @MainActor
     func testTypingInHeadingKeepsBodyDimmedAtEveryDisplay() async throws {
         let fixture = try await Fixture(files: ["Heading.md": Self.headingDocument], open: "Heading.md")

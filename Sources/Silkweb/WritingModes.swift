@@ -4,10 +4,11 @@ import SilkwebCore
 
 /// View ▸ Focus Mode / Typewriter Mode (silkweb-1.27) for one editor.
 ///
-/// Focus dims everything outside the active paragraph by painting the editor's own
-/// background over it after the text is drawn, so each run keeps its colour blended 70%
-/// (45% with Increase Contrast) toward the surface. Nothing touches text storage, styling
-/// or undo, and scrolling does no extra work beyond filling the newly exposed band.
+/// Focus dims everything outside the active paragraph with strips of the editor's own
+/// background laid over the text, so each run keeps its colour blended 70% (45% with
+/// Increase Contrast) toward the surface. Nothing touches text storage, styling or undo.
+/// The strips are layers composited above the text (#65): scrolling re-measures nothing and
+/// never blends dimmed pixels into the editor's backing store.
 /// Typewriter keeps the caret line's centre at 40% of the visible height while typing.
 @MainActor final class WritingModeController {
     weak var editor: PlainMarkdownTextView?
@@ -41,7 +42,24 @@ import SilkwebCore
         if typewriter != self.typewriter { setTypewriter(typewriter) }
     }
 
-    deinit { timer?.invalidate() }
+    /// Increase Contrast changes the dimmed opacity of the strips and images.
+    private var contrastObserver: NSObjectProtocol?
+
+    init() {
+        contrastObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.focus || self.fadeFrom != nil else { return }
+                self.updateDim()
+                self.applyImageAlpha()
+            }
+        }
+    }
+
+    deinit {
+        timer?.invalidate()
+        if let contrastObserver { NSWorkspace.shared.notificationCenter.removeObserver(contrastObserver) }
+    }
 
     // MARK: Focus
 
@@ -65,6 +83,7 @@ import SilkwebCore
         if let from = fadeFrom, let range = from.range {
             fadeFrom = (from.on, Self.shift(range, editedRange: editedRange, delta: delta, in: text))
         }
+        dimNeedsUpdate = true
     }
 
     /// `range` after an edit, or nil when the edit crosses its boundary (the unit itself changes).
@@ -101,11 +120,8 @@ import SilkwebCore
         let previous = activeRange
         activeRange = next
         if let previous, NSIntersectionRange(previous, next).length > 0 || previous.location == next.location {
-            // Typing or moving within the paragraph: repaint only where its edges moved.
-            if let old = band(for: previous), let new = band(for: next) {
-                invalidate(from: min(old.top, new.top), to: max(old.top, new.top))
-                invalidate(from: min(old.bottom, new.bottom), to: max(old.bottom, new.bottom))
-            } else { editor.setNeedsDisplay(editor.visibleRect) }
+            // Typing or moving within the paragraph: the strips follow its edges.
+            updateDim()
             applyImageAlpha()
             return
         }
@@ -125,13 +141,6 @@ import SilkwebCore
                                fencedBefore: { [styler = editor.styler] in styler.fencedBefore(line: $0) })
     }
 
-    private func invalidate(from top: CGFloat, to bottom: CGFloat) {
-        guard let editor, bottom > top, top.isFinite else { return }
-        let visible = editor.visibleRect
-        let rect = NSRect(x: visible.minX, y: top, width: visible.width, height: min(bottom, visible.maxY + 1) - top)
-        if rect.height > 0 { editor.setNeedsDisplay(rect) }
-    }
-
     /// Snaps any running fade, then fades from `from` to the current state over 150 ms
     /// (instantly under Reduce Motion).
     private func begin(from: (on: Bool, range: NSRange?), animated: Bool) {
@@ -148,7 +157,7 @@ import SilkwebCore
             RunLoop.main.add(timer, forMode: .common)
             self.timer = timer
         }
-        editor.setNeedsDisplay(editor.visibleRect)
+        updateDim()
         applyImageAlpha()
     }
 
@@ -158,7 +167,7 @@ import SilkwebCore
         let scrolled = editor.enclosingScrollView.map { abs($0.contentView.bounds.minY - fadeOrigin) > 0.5 } ?? true
         progress = scrolled ? 1 : min(1, CGFloat((CACurrentMediaTime() - fadeStart) / Self.fadeDuration))
         if progress >= 1 { finishFade() } else {
-            editor.setNeedsDisplay(editor.visibleRect)
+            updateDim()
             applyImageAlpha()
         }
     }
@@ -169,7 +178,7 @@ import SilkwebCore
         guard fadeFrom != nil else { return }
         fadeFrom = nil
         progress = 1
-        editor?.setNeedsDisplay(editor?.visibleRect ?? .zero)
+        updateDim()
         applyImageAlpha()
     }
 
@@ -214,32 +223,80 @@ import SilkwebCore
         (focus ? activeRange.flatMap(band(for:)) : nil, fadeFrom?.range.flatMap(band(for:)))
     }
 
-    /// Opacity for text or an image centred at `y`.
+    /// Opacity the displayed strips leave to text at `y`.
     func opacity(at y: CGFloat) -> CGFloat {
-        guard focus || fadeFrom != nil else { return 1 }
-        let bands = bands
-        return 1 - overlay(at: y, to: bands.to, from: bands.from)
+        1 - (dimmedStrips.first { y >= $0.top && y < $0.bottom }?.alpha ?? 0)
     }
 
-    /// Called after the text is drawn: one fill per strip between band edges.
-    func drawOverlay(in dirty: NSRect) {
-        guard focus || fadeFrom != nil, let editor, let context = NSGraphicsContext.current?.cgContext else { return }
-        let bands = bands
-        var edges = [dirty.minY, dirty.maxY]
-        for band in [bands.to, bands.from].compactMap({ $0 }) {
-            for edge in [band.top, band.bottom] where edge > dirty.minY && edge < dirty.maxY { edges.append(edge) }
+    // MARK: Dimming (#65)
+
+    /// The dimmed strips on screen in editor coordinates: everything outside the bright band(s).
+    private(set) var dimmedStrips: [(top: CGFloat, bottom: CGFloat, alpha: CGFloat)] = []
+    private var stripViews: [FocusDimView] = []
+    /// Set by edits and layout invalidation: the strips are re-measured before the next frame draws.
+    private var dimNeedsUpdate = false
+    /// The editor geometry the strips were measured against; `unlaid` while a band edge lay below the laid-out text.
+    private var measured: (width: CGFloat, height: CGFloat, origin: NSPoint, unlaid: Int?) = (0, 0, .zero, nil)
+
+    /// Re-measures the bright band(s) and moves the strips, which scroll with the text as
+    /// subviews. Runs on Focus, unit, fade, edit and layout changes, never on scroll alone.
+    func updateDim() {
+        dimNeedsUpdate = false
+        guard let editor else { return }
+        var strips: [(top: CGFloat, bottom: CGFloat, alpha: CGFloat)] = []
+        var incomplete = false
+        if focus || fadeFrom != nil {
+            let bands = bands
+            let height = editor.bounds.height
+            var edges: [CGFloat] = [0, height]
+            for band in [bands.to, bands.from].compactMap({ $0 }) {
+                for edge in [band.top, band.bottom] {
+                    if edge == .greatestFiniteMagnitude { incomplete = true } else if edge > 0 && edge < height { edges.append(edge) }
+                }
+            }
+            edges.sort()
+            for (top, bottom) in zip(edges, edges.dropFirst()) where bottom > top {
+                let alpha = overlay(at: (top + bottom) / 2, to: bands.to, from: bands.from)
+                guard alpha > 0.001 else { continue }
+                if let last = strips.last, last.bottom == top, last.alpha == alpha { strips[strips.count - 1].bottom = bottom }
+                else { strips.append((top, bottom, alpha)) }
+            }
         }
-        edges.sort()
-        for (top, bottom) in zip(edges, edges.dropFirst()) where bottom > top {
-            let alpha = overlay(at: (top + bottom) / 2, to: bands.to, from: bands.from)
-            guard alpha > 0.001 else { continue }
-            context.saveGState()
-            context.setAlpha(alpha)
-            editor.backgroundColor.setFill()
-            NSRect(x: dirty.minX, y: top, width: dirty.width, height: bottom - top).fill(using: .sourceOver)
-            context.restoreGState()
+        measured = (editor.bounds.width, editor.bounds.height, editor.textContainerOrigin,
+                    incomplete ? editor.layoutManager?.firstUnlaidCharacterIndex() : nil)
+        dimmedStrips = strips
+        while stripViews.count > strips.count { stripViews.removeLast().removeFromSuperview() }
+        while stripViews.count < strips.count {
+            let view = FocusDimView()
+            // Over the text, under inline images and the caret.
+            editor.addSubview(view, positioned: .below, relativeTo: nil)
+            stripViews.append(view)
+        }
+        for (view, strip) in zip(stripViews, strips) {
+            let frame = NSRect(x: 0, y: strip.top, width: editor.bounds.width, height: strip.bottom - strip.top)
+            if view.frame != frame { view.frame = frame }
+            view.dimAlpha = strip.alpha
         }
     }
+
+    /// From the editor's viewWillDraw: re-measures only when an edit, layout or geometry change
+    /// may have moved a band, so a scrolled frame costs a few comparisons.
+    func dimWillDraw() {
+        guard let editor, focus || fadeFrom != nil || !stripViews.isEmpty else { return }
+        let stale = dimNeedsUpdate || measured.width != editor.bounds.width || measured.height != editor.bounds.height
+            || measured.origin != editor.textContainerOrigin
+            || measured.unlaid.map { $0 != editor.layoutManager?.firstUnlaidCharacterIndex() } == true
+        guard stale else { return }
+        if let layout = editor.layoutManager, let container = editor.textContainer {
+            var rect = editor.visibleRect
+            rect.origin.x -= editor.textContainerOrigin.x; rect.origin.y -= editor.textContainerOrigin.y
+            layout.ensureLayout(forBoundingRect: rect, in: container)
+        }
+        updateDim()
+    }
+
+    /// TextKit invalidated layout (edit, restyle, width, image heights): bands may have moved.
+    func layoutDidInvalidate() { if focus || !stripViews.isEmpty { dimNeedsUpdate = true } }
 
     /// Inline image overlays (1.41) are never part of the bright unit (1.68): dimmed text's
     /// opacity whenever Focus is on, wherever the caret is. Only toggling Focus fades them.
@@ -345,6 +402,44 @@ import SilkwebCore
         guard abs(clip.bounds.minY - y) > 0.5 else { return }
         clip.scroll(to: NSPoint(x: clip.bounds.minX, y: y))
         scroll.reflectScrolledClipView(clip)
+    }
+}
+
+/// One Focus Mode strip (#65): the editor's surface at `dimAlpha`. On screen a plain layer
+/// colour composited over the text, so a scrolled frame commits no re-blended pixels.
+final class FocusDimView: NSView {
+    var dimAlpha: CGFloat = 0 { didSet { if dimAlpha != oldValue { needsDisplay = true } } }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        identifier = NSUserInterfaceItemIdentifier("focus-dim")
+        wantsLayer = true
+        setAccessibilityElement(false)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    private var surface: NSColor { (superview as? NSTextView)?.backgroundColor ?? .silkwebPaneBackground }
+
+    override var wantsUpdateLayer: Bool { true }
+    override func updateLayer() {
+        var color: CGColor?
+        effectiveAppearance.performAsCurrentDrawingAppearance { color = surface.cgColor }
+        layer?.backgroundColor = color.map { $0.copy(alpha: $0.alpha * dimAlpha) ?? $0 }
+    }
+    /// Offscreen captures (cacheDisplay, printing) draw the same blend.
+    override func draw(_ dirtyRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.saveGState()
+        context.setAlpha(dimAlpha)
+        surface.setFill()
+        dirtyRect.fill(using: .sourceOver)
+        context.restoreGState()
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
 }
 

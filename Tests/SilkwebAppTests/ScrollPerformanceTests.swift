@@ -17,6 +17,7 @@ import SilkwebCore
     var fullLayouts = 0
     var sizeToFits = 0
     var geometryWrites: [String: Int] = [:]
+    var bandLookups = 0
     static let shared = ScrollWork()
 }
 
@@ -126,6 +127,7 @@ final class ScrollPerformanceTests: XCTestCase {
         typealias InsetsIMP = @convention(c) (AnyObject, Selector, NSEdgeInsets) -> Void
         typealias ObjectIMP = @convention(c) (AnyObject, Selector, AnyObject) -> Void
         typealias VoidIMP = @convention(c) (AnyObject, Selector) -> Void
+        typealias FragmentIMP = @convention(c) (AnyObject, Selector, Int, UnsafeMutablePointer<NSRange>?, Bool) -> NSRect
         let draw = #selector(NSView.draw(_:))
         try hook(InlineImageView.self, draw) { old in { (view: InlineImageView, rect: NSRect) in
             if mine(view) {
@@ -141,6 +143,13 @@ final class ScrollPerformanceTests: XCTestCase {
             if mine(view), view.frame.origin != point { MainActor.assumeIsolated { work.overlayMoves += 1 } }
             unsafeBitCast(old, to: PointIMP.self)(view, origin, point)
         } as @convention(block) (InlineImageView, NSPoint) -> Void }
+        // #65: Focus Mode re-measured its band in every scrolled frame (and re-blended the dimmed
+        // text into the editor's backing store, covered by WritingModesTests).
+        let fragment = #selector(NSLayoutManager.lineFragmentRect(forGlyphAt:effectiveRange:withoutAdditionalLayout:))
+        try hook(NSLayoutManager.self, fragment) { old in { (layout: NSLayoutManager, glyph: Int, range: UnsafeMutablePointer<NSRange>?, flag: Bool) -> NSRect in
+            if Thread.isMainThread, mine(layout) { MainActor.assumeIsolated { work.bandLookups += 1 } }
+            return unsafeBitCast(old, to: FragmentIMP.self)(layout, fragment, glyph, range, flag)
+        } as @convention(block) (NSLayoutManager, Int, UnsafeMutablePointer<NSRange>?, Bool) -> NSRect }
         let ensure = #selector(NSLayoutManager.ensureLayout(for:) as (NSLayoutManager) -> (NSTextContainer) -> Void)
         try hook(NSLayoutManager.self, ensure) { old in { (layout: NSLayoutManager, container: NSTextContainer) in
             if mine(layout) { MainActor.assumeIsolated { work.fullLayouts += 1 } }
@@ -225,6 +234,7 @@ final class ScrollPerformanceTests: XCTestCase {
             work.editor = editor
             work.bitmapRasterizations = 0; work.imageDraws = 0; work.overlayMoves = 0
             work.fullLayouts = 0; work.sizeToFits = 0; work.geometryWrites = [:]
+            work.bandLookups = 0
             publishes = 0
             observing = true
             observeChrome()
@@ -276,7 +286,8 @@ final class ScrollPerformanceTests: XCTestCase {
             let summary = "mode \(mode): \(times.count) steps, main-thread CPU p95 \(String(format: "%.3f", p95)) ms, max \(String(format: "%.3f", sorted.last ?? 0)) ms, "
                 + "wall p95 \(String(format: "%.3f", wallSorted[Int(Double(wallSorted.count) * 0.95)])) ms, max \(String(format: "%.3f", wallSorted.last ?? 0)) ms, "
                 + "bitmap rasterizations \(work.bitmapRasterizations), image draws \(work.imageDraws), overlay moves \(work.overlayMoves), "
-                + "full layouts \(work.fullLayouts), sizeToFit \(work.sizeToFits), geometry \(work.geometryWrites), publishes \(publishes)"
+                + "full layouts \(work.fullLayouts), sizeToFit \(work.sizeToFits), geometry \(work.geometryWrites), publishes \(publishes), "
+                + "band lookups \(work.bandLookups)"
             print("silkweb-1.66 scroll (focus \(focus), typewriter \(typewriter)): " + summary)
             XCTAssertGreaterThan(times.count, 300, "hundreds of scroll steps")
             XCTAssertEqual(entered.count, imageCount, "every image scrolled through the viewport")
@@ -288,6 +299,7 @@ final class ScrollPerformanceTests: XCTestCase {
             XCTAssertEqual(work.fullLayouts, 0, "no full-document layout during scroll: " + summary)
             XCTAssertEqual(work.sizeToFits, 0, "no document re-sizing during scroll: " + summary)
             XCTAssertEqual(work.geometryWrites, [:], "layoutEditor must not rewrite geometry during scroll: " + summary)
+            XCTAssertEqual(work.bandLookups, 0, "#65: Focus band geometry is cached across scroll frames: " + summary)
             XCTAssertEqual(publishes, 0, "scrolling must not publish workspace/session state: " + summary)
             XCTAssertEqual(workspace.preview.renderCount, renders, "scrolling must not re-render the preview")
             XCTAssertEqual(workspace.editor.statistics.refreshCount, counts, "scrolling must not recount the document")

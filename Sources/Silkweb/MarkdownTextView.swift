@@ -447,6 +447,7 @@ final class PlainMarkdownTextView: NSTextView {
             layout.ensureLayout(forBoundingRect: rect, in: container)
             inlineImages.positionViews()
         }
+        writingModes.dimWillDraw()
         super.viewWillDraw()
     }
 
@@ -455,7 +456,6 @@ final class PlainMarkdownTextView: NSTextView {
         if dirtyRect.width > 10 && dirtyRect.height > 30 { fullDrawCount += 1 }
         #endif
         super.draw(dirtyRect)
-        writingModes.drawOverlay(in: dirtyRect)
     }
 
     override func drawBackground(in rect: NSRect) {
