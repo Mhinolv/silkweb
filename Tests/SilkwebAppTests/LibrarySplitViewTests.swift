@@ -18,9 +18,9 @@ final class LibrarySplitViewTests: XCTestCase {
     private func exerciseSidebarKeyEquivalent(requiresKeyWindow: Bool) async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let name = "Silkweb.SidebarKeys." + UUID().uuidString
+        let name = disposableAutosaveName("SidebarKeys")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root); clearAutosave(name) }
+        defer { try? FileManager.default.removeItem(at: root) }
         try Data("# Keyboard shortcut\n\nKeep the editor text intact.".utf8).write(to: root.appendingPathComponent("Note.md"))
         let workspace = LibraryWorkspace(columnAutosaveName: name)
         workspace.canSaveWindowSession = false
@@ -130,13 +130,6 @@ final class LibrarySplitViewTests: XCTestCase {
     }
 
     @MainActor
-    private func clearAutosave(_ name: String) {
-        for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(name) {
-            UserDefaults.standard.removeObject(forKey: key)
-        }
-    }
-
-    @MainActor
     func testOffscreenAutosaveRestoreAndSidebarCommands() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -146,8 +139,7 @@ final class LibrarySplitViewTests: XCTestCase {
         workspace.root = root
         let snapshot = try await LibraryScanner.scan(root: root)
         workspace.install(snapshot)
-        let name = "Silkweb.Tests." + UUID().uuidString
-        defer { clearAutosave(name) }
+        let name = disposableAutosaveName("Restore")
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
         var controller: LibrarySplitViewController? = LibrarySplitViewController(workspace: workspace, autosaveName: name)
         container.addSubview(controller!.view)
@@ -213,9 +205,9 @@ final class LibrarySplitViewTests: XCTestCase {
     func testBothSidebarsToggleInRealHierarchyWithLongDocument() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let name = "Silkweb.Sidebars." + UUID().uuidString
+        let name = disposableAutosaveName("Sidebars")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root); clearAutosave(name) }
+        defer { try? FileManager.default.removeItem(at: root) }
         try LongEditorFixture.document.write(to: root.appendingPathComponent("Long.md"), atomically: true, encoding: .utf8)
         let workspace = LibraryWorkspace(columnAutosaveName: name)
         workspace.root = root
@@ -349,8 +341,7 @@ final class LibrarySplitViewTests: XCTestCase {
         let snapshot = try await LibraryScanner.scan(root: root)
         workspace.install(snapshot)
         _ = await workspace.editor.open(root.appendingPathComponent("Note.md"), readOnly: false)
-        let name = "Silkweb.Tests." + UUID().uuidString
-        defer { clearAutosave(name) }
+        let name = disposableAutosaveName("Dividers")
         let controller = LibrarySplitViewController(workspace: workspace, autosaveName: name)
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 4096, height: 2160))
         container.addSubview(controller.view)

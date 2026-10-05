@@ -10,10 +10,9 @@ final class OutlineImageTests: XCTestCase {
     func testRealDetailImageOutlineNavigationResizeAndPersistence() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let suite = "Silkweb.OutlineImages." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("OutlineImages")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
+        defer { try? FileManager.default.removeItem(at: root) }
         let source = "![Before](landscape.png)\n# Journey\n## Places\n![Portrait](portrait.png)\n### Detail\n![Transparent](transparent.png)\n## Other\n![Missing](missing.png)\n![Remote](https://example.invalid/image.png)\n"
         let document = root.appendingPathComponent("Document.md")
         let original = Data(source.utf8)
@@ -26,13 +25,13 @@ final class OutlineImageTests: XCTestCase {
             CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
             XCTAssertTrue(CGImageDestinationFinalize(destination))
         }
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false; workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
         let opened = await workspace.openTab(try XCTUnwrap(workspace.snapshot?.documents.first), pinned: true)
         XCTAssertTrue(opened)
         workspace.preview.showsOutline = true
-        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: suite)
+        let controller = LibrarySplitViewController(workspace: workspace)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.contentViewController = controller
         defer { window.contentViewController = nil; window.close() }

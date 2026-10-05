@@ -27,7 +27,7 @@ final class NewDocumentTransitionTests: XCTestCase {
                 try FileManager.default.createDirectory(at: root.appendingPathComponent("Writing"), withIntermediateDirectories: true)
                 try Data().write(to: root.appendingPathComponent("Empty.md"))
                 defer { try? FileManager.default.removeItem(at: root) }
-                let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.NewDocument." + UUID().uuidString))
+                let defaults = disposableDefaults("NewDocument")
                 let workspace = LibraryWorkspace(defaults: defaults)
                 workspace.root = root
                 workspace.install(try await LibraryScanner.scan(root: root))

@@ -7,13 +7,30 @@ import SilkwebCore
 enum AppDefaults {
     static let store: UserDefaults = {
         guard NSClassFromString("XCTestCase") != nil else { return .standard }
+        try? FileManager.default.createDirectory(at: testDirectory, withIntermediateDirectories: true)
         let suite = UserDefaults(suiteName: testSuiteName) ?? .standard
         suite.removePersistentDomain(forName: testSuiteName)
-        atexit { UserDefaults(suiteName: AppDefaults.testSuiteName)?.removePersistentDomain(forName: AppDefaults.testSuiteName) }
+        atexit { AppDefaults.removeTestStore() }
         return suite
     }()
 
-    static let testSuiteName = "Silkweb.Tests.Preferences.\(ProcessInfo.processInfo.processIdentifier)"
+    /// Under XCTest the suite is a plist path in a per-process temporary directory, never `~/Library/Preferences`:
+    /// cfprefsd rewrites an emptied plist there after it is deleted, leaving one file per test run (#67).
+    private static let testDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("Silkweb.Tests.Preferences.\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+    static let testSuiteName = testDirectory.appendingPathComponent("Preferences").path
+
+    /// The library column autosave name. Under XCTest there is none, so test-built columns never write frames
+    /// into the runner's domain (#67); tests that check restore pass their own name.
+    static let columnAutosaveName: String? = NSClassFromString("XCTestCase") == nil ? "Silkweb.LibraryColumns" : nil
+
+    /// Registered only by the XCTest branch of `store`; runs at test-process exit.
+    private static func removeTestStore() {
+        guard let suite = UserDefaults(suiteName: testSuiteName) else { return }
+        suite.removePersistentDomain(forName: testSuiteName)
+        suite.synchronize()
+        try? FileManager.default.removeItem(at: testDirectory)
+    }
 }
 
 /// The preferences in effect, readable from any thread: dynamic colour providers resolve off the main

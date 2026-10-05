@@ -7,9 +7,7 @@ import SilkwebCore
 final class OutlineTests: XCTestCase {
     @MainActor
     func testCurrentHeadingAcrossCaretPositionsAndAllModes() throws {
-        let suite = "Silkweb.Outline." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = disposableDefaults("Outline")
         let preview = PreviewCoordinator(defaults: defaults)
         let source = "Intro 😀\n# **Title**\nBody\n### Child\nMore\n###### End\n"
         preview.headings = MarkdownParser.parse(source).headings
@@ -35,9 +33,7 @@ final class OutlineTests: XCTestCase {
     @MainActor
     func testRealOutlineLifecycleContentChangesAndResize() async throws {
         _ = NSApplication.shared
-        let suite = "Silkweb.OutlineLifecycle." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = disposableDefaults("OutlineLifecycle")
         let workspace = LibraryWorkspace(defaults: defaults)
         let source = (1...6).map { String(repeating: "#", count: $0) + " Heading \($0)" }.joined(separator: "\n")
         let headings = MarkdownParser.parse(source).headings

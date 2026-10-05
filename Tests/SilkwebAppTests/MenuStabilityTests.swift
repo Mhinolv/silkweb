@@ -29,7 +29,7 @@ final class MenuStabilityTests: XCTestCase {
     @MainActor
     func testMenuBarCommandsDuringTwoSecondsOfIdleEditingActivity() async throws {
         _ = NSApplication.shared
-        let workspace = LibraryWorkspace(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let workspace = LibraryWorkspace(defaults: disposableDefaults("MenuStability"))
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -102,7 +102,7 @@ final class MenuStabilityTests: XCTestCase {
     @MainActor
     func testCachedMenuStateFollowsRealChangesAndMenuOpen() async throws {
         _ = NSApplication.shared
-        let workspace = LibraryWorkspace(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let workspace = LibraryWorkspace(defaults: disposableDefaults("MenuStability"))
         let state = workspace.menuState
         XCTAssertFalse(state.value.hasLibrary)
         XCTAssertFalse(state.value.canPrint)

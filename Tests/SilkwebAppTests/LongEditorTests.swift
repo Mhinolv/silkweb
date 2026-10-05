@@ -15,19 +15,14 @@ final class LongEditorTests: XCTestCase {
     func testLongDocumentInRealDetailWithTabs() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let suite = "Silkweb.LongEditor." + UUID().uuidString
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("LongEditor")
         defer {
             try? FileManager.default.removeItem(at: root)
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
         }
         try LongEditorFixture.document.write(to: root.appendingPathComponent("Long.md"), atomically: true, encoding: .utf8)
         try "Short".write(to: root.appendingPathComponent("Short.md"), atomically: true, encoding: .utf8)
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
@@ -35,7 +30,7 @@ final class LongEditorTests: XCTestCase {
         let openedLong = await workspace.openTab(try XCTUnwrap(documents.first { $0.relativePath == "Long.md" }), pinned: true)
         XCTAssertTrue(openedLong)
         let longID = try XCTUnwrap(workspace.activeTabID)
-        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: suite)
+        let controller = LibrarySplitViewController(workspace: workspace)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -84,18 +79,13 @@ final class LongEditorTests: XCTestCase {
     func testLongDocumentExtentWithoutSettleDelay() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let suite = "Silkweb.LongEditorNoSettle." + UUID().uuidString
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("LongEditorNoSettle")
         defer {
             try? FileManager.default.removeItem(at: root)
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
         }
         try LongEditorFixture.document.write(to: root.appendingPathComponent("Long.md"), atomically: true, encoding: .utf8)
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
@@ -103,7 +93,7 @@ final class LongEditorTests: XCTestCase {
         let opened = await workspace.openTab(try XCTUnwrap(documents.first { $0.relativePath == "Long.md" }), pinned: true)
         XCTAssertTrue(opened)
         let id = try XCTUnwrap(workspace.activeTabID)
-        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: suite)
+        let controller = LibrarySplitViewController(workspace: workspace)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -124,19 +114,14 @@ final class LongEditorTests: XCTestCase {
     func testFullHeightScrollerAndEndMarginInRealDetail() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let suite = "Silkweb.Scroller." + UUID().uuidString
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("Scroller")
         defer {
             try? FileManager.default.removeItem(at: root)
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
         }
         try LongEditorFixture.document.write(to: root.appendingPathComponent("Long.md"), atomically: true, encoding: .utf8)
         try "Short".write(to: root.appendingPathComponent("Short.md"), atomically: true, encoding: .utf8)
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
@@ -144,7 +129,7 @@ final class LongEditorTests: XCTestCase {
         let openedLong = await workspace.openTab(try XCTUnwrap(documents.first { $0.relativePath == "Long.md" }), pinned: true)
         XCTAssertTrue(openedLong)
         let longID = try XCTUnwrap(workspace.activeTabID)
-        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: suite)
+        let controller = LibrarySplitViewController(workspace: workspace)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

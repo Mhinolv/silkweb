@@ -20,7 +20,7 @@ final class UnreadableRecoveryBannerTests: XCTestCase {
         LibraryWorkspace.unreadableRecoveryShown = false
 
         func open() async throws -> LibraryWorkspace {
-            let defaults = try XCTUnwrap(UserDefaults(suiteName: "SilkwebUnreadable-\(UUID().uuidString)"))
+            let defaults = disposableDefaults("Unreadable")
             let workspace = LibraryWorkspace(defaults: defaults)
             workspace.recoveryDirectory = recovery
             workspace.open(root)

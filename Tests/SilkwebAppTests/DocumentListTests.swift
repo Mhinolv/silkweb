@@ -36,13 +36,7 @@ final class DocumentListTests: XCTestCase {
         await workspace.editor.configure(root: root)
         workspace.session.selectedFolder = ""
         workspace.session.selectedDocuments = []
-        let name = "Silkweb.DragTests." + UUID().uuidString
-        defer {
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(name) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
-        }
-        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: name)
+        let controller = LibrarySplitViewController(workspace: workspace)
         let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 1200, height: 760),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.contentViewController = controller

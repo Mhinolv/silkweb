@@ -110,12 +110,8 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
     // MARK: Focus rules
 
     private struct Library {
-        let root: URL, suite: String, defaults: UserDefaults, workspace: LibraryWorkspace
+        let root: URL, defaults: UserDefaults, workspace: LibraryWorkspace
         func cleanUp() {
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
             try? FileManager.default.removeItem(at: root)
         }
     }
@@ -127,14 +123,13 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
         try Data("# Pour-Over\n\n## Grind\n\nMedium-fine.\n\n![Kettle](kettle.png)\n".utf8).write(to: root.appendingPathComponent("Coffee/Brewing/Pour-Over.md"))
         try Data("# Cold Brew\n\nSteep overnight.".utf8).write(to: root.appendingPathComponent("Coffee/Brewing/Cold Brew.md"))
         try Data("# Kyoto\n\nTemples.".utf8).write(to: root.appendingPathComponent("Coffee/Kyoto.md"))
-        let suite = "Silkweb.Audit." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let defaults = disposableDefaults("Audit")
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.recoveryDirectory = root.appendingPathComponent(".recovery")
         workspace.install(try await LibraryScanner.scan(root: root))
-        return Library(root: root, suite: suite, defaults: defaults, workspace: workspace)
+        return Library(root: root, defaults: defaults, workspace: workspace)
     }
 
     private func window(_ root: some View) -> (NSWindow, NSHostingController<AnyView>) {

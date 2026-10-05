@@ -87,9 +87,7 @@ final class MarkdownTableTests: XCTestCase {
         for payload in ["{}", "{\"version\":0}", "{\"alignment\":\"future\",\"rows\":null,\"columns\":\"bad\"}"] {
             XCTAssertEqual(try JSONDecoder().decode(TableOptions.self, from: Data(payload.utf8)), TableOptions())
         }
-        let suite = "TableOptionsTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = disposableDefaults("TableOptions")
         for alignment in TableAlignment.allCases {
             let options = TableOptions(columns: 20, rows: 100, alignment: alignment)
             options.save(to: defaults)

@@ -8,7 +8,7 @@ import XCTest
 final class ToolbarPathTabsTests: XCTestCase {
     static let deep = "Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
 
-    @MainActor private func library() async throws -> (LibraryWorkspace, URL, UserDefaults, String) {
+    @MainActor private func library() async throws -> (LibraryWorkspace, URL) {
         let container = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebPath-" + UUID().uuidString)
         let root = container.appendingPathComponent("Field Notes")
         for folder in ["Vanlife/East", Self.deep] {
@@ -18,14 +18,12 @@ final class ToolbarPathTabsTests: XCTestCase {
                              ("Other.md", "# Other"), (Self.deep + "/Settling In at the Campground.md", "# Campground")] {
             try Data(text.utf8).write(to: root.appendingPathComponent(path))
         }
-        let suite = "Silkweb.PathTabs." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: disposableDefaults("PathTabs"))
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.recoveryDirectory = container.appendingPathComponent("Recovery")
         workspace.install(try await LibraryScanner.scan(root: root))
-        return (workspace, container, defaults, suite)
+        return (workspace, container)
     }
 
     private static func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
@@ -51,7 +49,7 @@ final class ToolbarPathTabsTests: XCTestCase {
     @MainActor
     func testCompactBarBreadcrumbNavigatesAndFollowsWindowButtons() async throws {
         _ = NSApplication.shared
-        let (workspace, container, defaults, suite) = try await library()
+        let (workspace, container) = try await library()
         let oldAppearance = NSApp.appearance
         NSApp.appearance = NSAppearance(named: .aqua)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
@@ -61,10 +59,6 @@ final class ToolbarPathTabsTests: XCTestCase {
             window.contentViewController = nil
             window.close()
             NSApp.appearance = oldAppearance
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
             try? FileManager.default.removeItem(at: container)
         }
         let controller = NSHostingController(rootView: LibraryWorkspaceView(workspace: workspace))
@@ -175,7 +169,7 @@ final class ToolbarPathTabsTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         for name in ["A", "B", "C"] { try Data("# \(name)\n\nText.".utf8).write(to: root.appendingPathComponent(name + ".md")) }
-        let workspace = LibraryWorkspace(defaults: try XCTUnwrap(UserDefaults(suiteName: "SilkwebFolderTabs-\(UUID().uuidString)")))
+        let workspace = LibraryWorkspace(defaults: disposableDefaults("FolderTabs"))
         workspace.root = root
         workspace.recoveryDirectory = root.appendingPathComponent(".recovery")
         workspace.install(try await LibraryScanner.scan(root: root))

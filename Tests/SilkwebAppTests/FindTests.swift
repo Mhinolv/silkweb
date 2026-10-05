@@ -65,7 +65,7 @@ final class FindTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let url = root.appendingPathComponent("document.md")
         try Data("match and match".utf8).write(to: url)
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.FindTests." + UUID().uuidString))
+        let defaults = disposableDefaults("FindTests")
         let workspace = LibraryWorkspace(defaults: defaults)
         XCTAssertFalse(workspace.canFind)
         await workspace.editor.configure(root: root)

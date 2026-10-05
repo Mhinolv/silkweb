@@ -34,17 +34,14 @@ final class WritingModesTests: XCTestCase {
     @MainActor
     private final class Fixture {
         let root: URL
-        let suite: String
-        let defaults: UserDefaults
+        let preferences = TestPreferences("WritingModes")
         let workspace: LibraryWorkspace
         let controller: LibrarySplitViewController
         let window: NSWindow
         init(files: [String: String], open: String) async throws {
             _ = NSApplication.shared
             root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            suite = "Silkweb.WritingModes." + UUID().uuidString
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
             for (name, text) in files { try text.write(to: root.appendingPathComponent(name), atomically: true, encoding: .utf8) }
             let context = try XCTUnwrap(CGContext(data: nil, width: 600, height: 300, bitsPerComponent: 8, bytesPerRow: 2400,
                                                   space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
@@ -53,13 +50,13 @@ final class WritingModesTests: XCTestCase {
             let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(root.appendingPathComponent("figure.png") as CFURL, UTType.png.identifier as CFString, 1, nil))
             CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
             XCTAssertTrue(CGImageDestinationFinalize(destination))
-            workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+            workspace = LibraryWorkspace(defaults: preferences.defaults)
             workspace.canSaveWindowSession = false
             workspace.root = root
             workspace.install(try await LibraryScanner.scan(root: root))
             let opened = await workspace.openTab(try XCTUnwrap(workspace.snapshot?.documents.first { $0.relativePath == open }), pinned: true)
             XCTAssertTrue(opened)
-            controller = LibrarySplitViewController(workspace: workspace, autosaveName: suite)
+            controller = LibrarySplitViewController(workspace: workspace)
             window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.contentViewController = controller
@@ -75,8 +72,7 @@ final class WritingModesTests: XCTestCase {
             window.contentViewController = nil
             window.close()
             try? FileManager.default.removeItem(at: root)
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) { UserDefaults.standard.removeObject(forKey: key) }
+            preferences.remove()
         }
     }
 

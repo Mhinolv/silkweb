@@ -22,14 +22,9 @@ final class ThreadSidebarTests: XCTestCase {
 
     private struct Fixture {
         let root: URL
-        let suite: String
         let workspace: LibraryWorkspace
         let snapshot: LibrarySnapshot
         func cleanUp() {
-            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
             try? FileManager.default.removeItem(at: root)
         }
     }
@@ -54,15 +49,14 @@ final class ThreadSidebarTests: XCTestCase {
         let snapshot = LibrarySnapshot(rootURL: root, folders: folders, documents: scanned.documents,
             presentation: LibraryPresentation(folders: folders, documents: scanned.documents), metadata: scanned.metadata,
             recoveredMetadataURL: nil, isReadOnly: false)
-        let suite = "Silkweb.Thread." + UUID().uuidString
-        let workspace = LibraryWorkspace(defaults: try XCTUnwrap(UserDefaults(suiteName: suite)), columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: disposableDefaults("Thread"))
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.install(snapshot)
         workspace.session.selectedFolder = "Vanlife"
         workspace.session.expandedFolders = ["", "Coffee", "Travel", "Deep", "Deep/A", "Deep/A/B"]
         workspace.tagsExpanded = true
-        return Fixture(root: root, suite: suite, workspace: workspace, snapshot: snapshot)
+        return Fixture(root: root, workspace: workspace, snapshot: snapshot)
     }
 
     // MARK: Pixels
@@ -219,7 +213,7 @@ final class ThreadSidebarTests: XCTestCase {
         let fixture = try await makeFixture()
         defer { fixture.cleanUp() }
         let workspace = fixture.workspace
-        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: fixture.suite)
+        let controller = LibrarySplitViewController(workspace: workspace)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -354,7 +348,7 @@ final class ThreadSidebarTests: XCTestCase {
         defer { fixture.cleanUp() }
         let workspace = fixture.workspace
         workspace.session.expandedFolders.insert("Deep/A/B")
-        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: fixture.suite)
+        let controller = LibrarySplitViewController(workspace: workspace)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

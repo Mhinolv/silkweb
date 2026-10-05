@@ -30,7 +30,6 @@ final class DocumentListRedesignTests: XCTestCase {
     private struct Fixture {
         let root: URL
         let workspace: LibraryWorkspace
-        let suite: String
     }
 
     static let longBody = "The fog burned off around nine. I made coffee on the tailgate with the little stove and watched the valley wake up below the ridge while the dog slept in the shade of the van."
@@ -53,18 +52,16 @@ final class DocumentListRedesignTests: XCTestCase {
             try Data(text.utf8).write(to: url)
         }
         try FileManager.default.createDirectory(at: root.appendingPathComponent("Empty"), withIntermediateDirectories: true)
-        let suite = "Silkweb.ListRedesign." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("ListRedesign")
         addTeardownBlock {
             try? FileManager.default.removeItem(at: root)
-            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
         }
         let workspace = LibraryWorkspace(defaults: defaults)
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
         workspace.session.selectedFolder = "Vanlife"
         workspace.session.selectedDocuments = []
-        return Fixture(root: root, workspace: workspace, suite: suite)
+        return Fixture(root: root, workspace: workspace)
     }
 
     @MainActor
@@ -491,9 +488,7 @@ final class DocumentListRedesignTests: XCTestCase {
         for index in 0..<10_000 {
             try body.write(to: folder.appendingPathComponent(String(format: "Note %05d.md", index)))
         }
-        let suite = "Silkweb.ListScroll." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = disposableDefaults("ListScroll")
         let workspace = LibraryWorkspace(defaults: defaults)
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))

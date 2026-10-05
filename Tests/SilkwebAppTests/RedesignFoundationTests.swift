@@ -92,7 +92,7 @@ final class RedesignFoundationTests: XCTestCase {
 
     @MainActor
     func testPreviewUsesSurfaceAndSageButExportsStayPortable() async throws {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.RedesignPreview." + UUID().uuidString))
+        let defaults = disposableDefaults("RedesignPreview")
         let preview = PreviewCoordinator(defaults: defaults)
         preview.mode = .preview
         preview.schedule(text: "# Title\n\n[link](https://example.com)", document: nil, root: nil)
@@ -134,14 +134,9 @@ final class RedesignFoundationTests: XCTestCase {
 
     private struct Fixture {
         let root: URL
-        let suite: String
         let workspace: LibraryWorkspace
         let defaults: UserDefaults
         func cleanUp() {
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
             try? FileManager.default.removeItem(at: root)
         }
     }
@@ -150,8 +145,7 @@ final class RedesignFoundationTests: XCTestCase {
     private func makeFixture() async throws -> Fixture {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebRedesign-" + UUID().uuidString)
-        let suite = "Silkweb.Redesign." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("Redesign")
         for path in ["Coffee/Brewing Guides", "Travels/Japan"] {
             try FileManager.default.createDirectory(at: root.appendingPathComponent(path), withIntermediateDirectories: true)
         }
@@ -159,11 +153,11 @@ final class RedesignFoundationTests: XCTestCase {
         try Data(body.utf8).write(to: root.appendingPathComponent("Coffee/Brewing Guides/Pour-Over.md"))
         try Data("# Cold Brew\n\nSteep overnight.".utf8).write(to: root.appendingPathComponent("Coffee/Brewing Guides/Cold Brew.md"))
         try Data("# Kyoto\n\nTemples.".utf8).write(to: root.appendingPathComponent("Travels/Japan/Kyoto.md"))
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
-        return Fixture(root: root, suite: suite, workspace: workspace, defaults: defaults)
+        return Fixture(root: root, workspace: workspace, defaults: defaults)
     }
 
     @MainActor
@@ -187,7 +181,7 @@ final class RedesignFoundationTests: XCTestCase {
         let cold = try XCTUnwrap(snapshot.documents.first { $0.name == "Cold Brew.md" })
         workspace.session.selectedFolder = "Coffee/Brewing Guides"
         workspace.session.expandedFolders = ["", "Coffee"]
-        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: fixture.suite)
+        let controller = LibrarySplitViewController(workspace: workspace)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -305,21 +299,14 @@ final class RedesignFoundationTests: XCTestCase {
         let snapshot = LibrarySnapshot(rootURL: root, folders: folders, documents: documents,
             presentation: LibraryPresentation(folders: folders, documents: documents), metadata: scanned.metadata,
             recoveredMetadataURL: nil, isReadOnly: false)
-        let suite = "Silkweb.RedesignPerf." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
-        }
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let defaults = disposableDefaults("RedesignPerf")
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.session.selectedFolder = ""
         workspace.session.expandedFolders = Set(folders.map(\.relativePath))
         workspace.install(snapshot)
-        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: suite)
+        let controller = LibrarySplitViewController(workspace: workspace)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

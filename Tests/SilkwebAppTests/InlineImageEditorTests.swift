@@ -12,13 +12,10 @@ final class InlineImageEditorTests: XCTestCase {
     func testRealEditorInlineImagesAcrossResizeEditsModesAndTabs() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let suite = "Silkweb.InlineImages." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("InlineImages")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer {
             try? FileManager.default.removeItem(at: root)
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) { UserDefaults.standard.removeObject(forKey: key) }
         }
         let url = root.appendingPathComponent("Document.md")
         let source = "Before\n![Small](small.png)\nAfter\n![Remote](https://example.invalid/no.png)\n![Missing](missing.png)\n"
@@ -31,14 +28,14 @@ final class InlineImageEditorTests: XCTestCase {
         let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(root.appendingPathComponent("small.png") as CFURL, UTType.png.identifier as CFString, 1, nil))
         CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
         XCTAssertTrue(CGImageDestinationFinalize(destination))
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false; workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
         let documents = try XCTUnwrap(workspace.snapshot).documents
         let opened = await workspace.openTab(try XCTUnwrap(documents.first { $0.relativePath == "Document.md" }), pinned: true)
         XCTAssertTrue(opened)
         let tabID = try XCTUnwrap(workspace.activeTabID)
-        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: suite)
+        let controller = LibrarySplitViewController(workspace: workspace)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.contentViewController = controller
         defer { window.contentViewController = nil; window.close() }

@@ -34,11 +34,10 @@ final class PaneBackgroundTests: XCTestCase {
     func testEveryPaneRendersTheSharedBackground() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebPanes-" + UUID().uuidString)
-        let suite = "Silkweb.PaneBackground." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("PaneBackground")
         try FileManager.default.createDirectory(at: root.appendingPathComponent("Folder"), withIntermediateDirectories: true)
         try Data("# Title\n\n## Section\n\nShort body.".utf8).write(to: root.appendingPathComponent("Note.md"))
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
@@ -46,10 +45,6 @@ final class PaneBackgroundTests: XCTestCase {
         let oldAppearance = NSApp.appearance
         defer {
             NSApp.appearance = oldAppearance
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
             try? FileManager.default.removeItem(at: root)
         }
 
@@ -247,21 +242,16 @@ final class PaneBackgroundTests: XCTestCase {
     func testToolbarStripRendersThePaneSurface() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebToolbar-" + UUID().uuidString)
-        let suite = "Silkweb.ToolbarSurface." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("ToolbarSurface")
         try FileManager.default.createDirectory(at: root.appendingPathComponent("Folder"), withIntermediateDirectories: true)
         try Data("# Title\n\nBody.".utf8).write(to: root.appendingPathComponent("Note.md"))
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
         let oldAppearance = NSApp.appearance
         defer {
             NSApp.appearance = oldAppearance
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
             try? FileManager.default.removeItem(at: root)
         }
         for name in [NSAppearance.Name.aqua, .darkAqua] {
@@ -344,13 +334,12 @@ final class PaneBackgroundTests: XCTestCase {
         // A short root name: the scope picker shows it, and a long one widens the search chrome.
         let parent = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebSearchPane-" + UUID().uuidString)
         let root = parent.appendingPathComponent("Library")
-        let suite = "Silkweb.SearchPane." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("SearchPane")
         try FileManager.default.createDirectory(at: root.appendingPathComponent("Folder"), withIntermediateDirectories: true)
         for index in 1...3 {
             try Data("# Fog \(index)\n\nFog over the bay.".utf8).write(to: root.appendingPathComponent("Note \(index).md"))
         }
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
@@ -360,10 +349,6 @@ final class PaneBackgroundTests: XCTestCase {
             NSApp.appearance = oldAppearance
             LivePreferences.shared.current = oldPreferences
             ColorRevision.shared.bump()
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
             try? FileManager.default.removeItem(at: parent)
         }
 
@@ -411,13 +396,12 @@ final class PaneBackgroundTests: XCTestCase {
         _ = NSApplication.shared
         let parent = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebSearchLifecycle-" + UUID().uuidString)
         let root = parent.appendingPathComponent("Library")
-        let suite = "Silkweb.SearchLifecycle." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("SearchLifecycle")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         for index in 1...12 {
             try Data("# Fog \(index)\n\nFog over the bay.".utf8).write(to: root.appendingPathComponent("Note \(index).md"))
         }
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
@@ -432,10 +416,6 @@ final class PaneBackgroundTests: XCTestCase {
             window.contentViewController = nil
             window.close()
             NSApp.appearance = oldAppearance
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
             try? FileManager.default.removeItem(at: parent)
         }
         let controller = NSHostingController(rootView: LibraryWorkspaceView(workspace: workspace))

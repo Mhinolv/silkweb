@@ -168,16 +168,10 @@ final class FolderSidebarTests: XCTestCase {
         let snapshot = LibrarySnapshot(rootURL: root, folders: folders, documents: documents,
             presentation: LibraryPresentation(folders: folders, documents: documents), metadata: scanned.metadata,
             recoveredMetadataURL: nil, isReadOnly: false)
-        let suite = "Silkweb.SidebarTests." + UUID().uuidString
-        defer {
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
-        }
-        let workspace = LibraryWorkspace(columnAutosaveName: suite)
+        let workspace = LibraryWorkspace()
         workspace.root = root
         workspace.loading = true
-        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: suite)
+        let controller = LibrarySplitViewController(workspace: workspace)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentViewController = controller // Never ordered on screen.

@@ -9,7 +9,7 @@ final class DocumentTabsTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         for name in ["A", "B", "C", "D"] { try Data(name.utf8).write(to: root.appendingPathComponent(name + ".md")) }
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "SilkwebTabs-\(UUID().uuidString)"))
+        let defaults = disposableDefaults("Tabs")
         let workspace = LibraryWorkspace(defaults: defaults)
         workspace.root = root
         workspace.recoveryDirectory = root.appendingPathComponent(".recovery")

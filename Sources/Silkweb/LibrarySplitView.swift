@@ -29,7 +29,7 @@ final class LibrarySplitViewController: NSSplitViewController {
 
     var sidebarItem: NSSplitViewItem { navigationController.splitViewItems[0] }
 
-    init(workspace: LibraryWorkspace, autosaveName: String = "Silkweb.LibraryColumns") {
+    init(workspace: LibraryWorkspace, autosaveName: String? = AppDefaults.columnAutosaveName) {
         let navigationController = LibraryNavigationSplitViewController()
         self.navigationController = navigationController
         self.workspace = workspace
@@ -52,7 +52,7 @@ final class LibrarySplitViewController: NSSplitViewController {
 
         navigationController.addSplitViewItem(sidebar)
         navigationController.addSplitViewItem(list)
-        navigationController.splitView.autosaveName = NSSplitView.AutosaveName(autosaveName + ".Navigation")
+        if let autosaveName { navigationController.splitView.autosaveName = NSSplitView.AutosaveName(autosaveName + ".Navigation") }
 
         // Two nested native splits isolate the first divider from the editor.
         // The outer divider resizes this group; its list yields before its sidebar.
@@ -66,7 +66,7 @@ final class LibrarySplitViewController: NSSplitViewController {
         detail.holdingPriority = NSLayoutConstraint.Priority(240)
         addSplitViewItem(navigation)
         addSplitViewItem(detail)
-        splitView.autosaveName = NSSplitView.AutosaveName(autosaveName)
+        if let autosaveName { splitView.autosaveName = NSSplitView.AutosaveName(autosaveName) }
         workspace.librarySplitController = self
         navigationObserver = NotificationCenter.default.addObserver(forName: NSSplitView.didResizeSubviewsNotification,
             object: navigationController.splitView, queue: .main) { [weak self] _ in
