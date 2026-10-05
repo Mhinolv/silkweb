@@ -5,6 +5,8 @@
 GitHub is authoritative — this file is only a snapshot. Team state/logs live in `.team/` (local, ignored);
 pre-GitHub history (beads export, old-id → issue map, 2026-10-03 bug review) is in `.team/archive/`.
 `gh` runs with `GH_TOKEN=$(gh auth token -u Mhinolv)` (team.env `GH_ACCOUNT`); never switch the global gh account.
+Git identity (repo-local): `Mark Hinojosa <73273673+Mhinolv@users.noreply.github.com>`; history was rewritten to it
+before the first push (local backups `backup/pre-rewrite-main`, `backup/pre-rewrite-roadmap` — never push them).
 
 ## Team
 | Role | Model |
@@ -31,7 +33,9 @@ pre-GitHub history (beads export, old-id → issue map, 2026-10-03 bug review) i
   doc-only PRs. Required checks on `team/roadmap`: the PR-template check.
 - Parallel lanes are encouraged when there is no material overlap.
 - When the owner tests a build, say exactly which items are IN it and which are NOT yet.
-- Clean-room: behaviour only, never MWeb code/CSS/assets.
+- Ask the owner via `~/.claude/bin/claude-ask "<one line>"`.
+- Product: tags in sidecar index only; first launch = Open Folder in Place + New Library; Trash browser in v2;
+  inline editor images in v1; clean-room (behaviour only, never MWeb code/CSS/assets).
 
 ## Lessons (avoid repeating)
 - Prove regression tests fail on pre-fix code; QA "by review" is not proof.
