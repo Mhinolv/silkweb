@@ -83,6 +83,7 @@ final class SearchReturnTests: XCTestCase {
 
     /// #81: a waiter that joins the navigation while Return's open is still in flight (as `waitForOpen` does on a
     /// loaded CI runner) must already see Quick Open dismissed once navigation finishes.
+    /// #92: the list selects at once (#70); the panel closes on the editor showing the target, not on the list moving.
     @MainActor
     func testQuickOpenDismissedWhenReturnNavigationFinishes() async throws {
         let (workspace, root) = try await makeWorkspace()
@@ -100,10 +101,13 @@ final class SearchReturnTests: XCTestCase {
         try await waitUntil("Return to settle its query") {
             !workspace.search.quickHasPendingQuery && !workspace.search.quickResults.isEmpty
         }
-        XCTAssertTrue(workspace.session.selectedDocuments.isEmpty)
+        XCTAssertEqual(workspace.session.selectedDocuments, ["Coffee.md"], "the list follows Return at once (#70)")
+        XCTAssertNil(workspace.editor.url, "the held queue must still be holding the open")
+        XCTAssertTrue(workspace.search.showsQuickOpen, "the list moving alone must not dismiss Quick Open")
         release?.resume()
         await workspace.waitForNavigation()
         XCTAssertEqual(workspace.session.selectedDocuments, ["Coffee.md"])
+        XCTAssertEqual(workspace.editor.url?.lastPathComponent, "Coffee.md")
         XCTAssertFalse(workspace.search.showsQuickOpen, "Quick Open must close as part of the successful open")
         await gate.value
     }
