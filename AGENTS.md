@@ -113,16 +113,24 @@ Rules:
 - Commits: `#<n>: <summary>`. Stage only the files changed for that issue. Never `git add -A`.
 - Every PR uses `.github/pull_request_template.md` (Issue / What changed / How it was tested / Screenshots);
   the `PR template` check fails otherwise. Use `Refs #n` instead of `Closes #n` while the owner still has to check it.
-- Merge requires: `qa-pass`, green CI, a passing template check, and (bugs) the regression test proven to fail on
-  the pre-fix code. Closing keywords don't fire on `team/roadmap`, so the Orchestrator closes issues explicitly.
-- `CI / build-and-test` runs build + format lint only. `./scripts/build.sh test` is still mandatory locally (Engineer,
-  QA, Orchestrator post-merge).
-- `CI / build-and-test` runs only when a PR is opened ready or leaves draft, on the `run-ci` label, or via
-  `workflow_dispatch` — never on draft pushes, later pushes, or branch pushes — and only if the PR touches `Sources/`,
-  `Tests/`, `Package.*`, `scripts/`, `.swift-format` or `ci.yml` (doc-only PRs have no CI check and count as
-  passing). To re-run:
-  `gh pr edit <n> --remove-label run-ci; gh pr edit <n> --add-label run-ci`. Other label events and draft events show a
-  skipped `ci-skipped` check; ignore it, and judge CI only by the latest `build-and-test` check.
+- Merge requires: `qa-pass`, a passing `CI / ci-gate`, a passing `PR template / check` (these two are the required
+  checks on `team/roadmap`), and (bugs) the regression test proven to fail on the pre-fix code. Closing keywords don't
+  fire on `team/roadmap`, so the Orchestrator closes issues explicitly.
+- CI (`.github/workflows/ci.yml`) has three fixed checks: `CI / classify` lists the PR's changed files, `CI /
+  build-format` runs the pinned toolchain check, format lint and build on macOS (no tests), and `CI / ci-gate` is the
+  merge evidence. `./scripts/build.sh test` is still mandatory locally (Engineer, QA, Orchestrator post-merge).
+- CI runs on every PR into `team/roadmap` when it is opened, reopened, marked ready, or pushed to (`synchronize`).
+  Docs-only PRs (every changed file is a `*.md` outside `Sources/` and `Tests/`, under `docs/`,
+  `.github/pull_request_template.md`, `.git-blame-ignore-revs` or `LICENSE`) skip macOS:
+  `ci-gate: PASS — docs-only`. Draft PRs also skip macOS: `ci-gate: PASS — draft, macOS deferred until ready`. Every
+  other path needs macOS once the PR is ready: `ci-gate: PASS — build-format succeeded`, or
+  `ci-gate: FAIL — build-format <result> (required for ready code PRs)` if it failed, was cancelled or was skipped. A
+  failed `classify` (changed files not listed) also fails the gate.
+- To re-run a failed or cancelled run, use its run ID (shown in the gate's summary line):
+  `gh run rerun <run-id> --failed`, or "Re-run failed jobs" in the Actions UI. Find the ID with
+  `gh run list --workflow CI --branch <branch>`. Labels do not trigger CI.
+- `gh workflow run CI --ref <branch>` (`workflow_dispatch`) runs classify + build-format for manual diagnostics only;
+  it is not attached to the PR and is **not** merge evidence.
 - The Engineer does not close issues or merge. QA does not modify source. Only the Orchestrator merges and closes.
 - For this epic, **QA PASS + Orchestrator approval replaces the manual user-test gate** (delegated by the product owner).
   Product-owner decisions are recorded as issue comments and override the original acceptance wording.
