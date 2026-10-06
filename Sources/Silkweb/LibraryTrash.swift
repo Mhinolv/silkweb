@@ -108,12 +108,19 @@ extension LibraryWorkspace {
             if !result.items.isEmpty { libraryUndo.append(.trash(result.items)) }
             let removed = Set(result.items.map(\.originalPath))
             func gone(_ path: String) -> Bool { removed.contains { path == $0 || path.hasPrefix($0 + "/") } }
-            for tab in tabs
-            where tab.editor.url.map({ gone(String($0.path.dropFirst(plan.root.path.count + 1))) }) == true {
-                await tab.editor.didCloseWindow()
+            let closing = tabs.filter {
+                $0.editor.url.map({ gone(String($0.path.dropFirst(plan.root.path.count + 1))) }) == true
             }
+            // Without a list successor the active tab falls to its neighbour in tab order (closeTab rule).
+            let neighbour = tabs.firstIndex { $0.id == activeTabID }.map { index in
+                tabs[..<index].filter { tab in !closing.contains { $0 === tab } }.count
+            }
+            for tab in closing { await tab.editor.didCloseWindow() }
             tabs.removeAll { $0.editor.url == nil }
-            if !tabs.contains(where: { $0.id == activeTabID }) { activeTabID = tabs.first?.id }
+            if !tabs.contains(where: { $0.id == activeTabID }) {
+                activeTabID = nil
+                if !tabs.isEmpty { activateTab(tabs[min(neighbour ?? 0, tabs.count - 1)].id, syncSelection: false) }
+            }
             if tabs.isEmpty { _ = await editor.open(nil, readOnly: false) }
             if let selected = session.selectedFolder, gone(selected) {
                 let parent = (selected as NSString).deletingLastPathComponent
@@ -128,14 +135,17 @@ extension LibraryWorkspace {
             session.expandedFolders = session.expandedFolders.filter { !gone($0) }
             let selectedWasRemoved = session.selectedDocuments.contains(where: gone)
             session.selectedDocuments = session.selectedDocuments.filter { !gone($0) }
-            if selectedWasRemoved,
-                let next = DeletionSelection.successor(in: oldRows, removing: Set(oldRows.filter(gone)))
-            {
-                session.selectedDocuments = [next]
-            }
+            let successor =
+                selectedWasRemoved ? DeletionSelection.successor(in: oldRows, removing: Set(oldRows.filter(gone))) : nil
+            if let successor { session.selectedDocuments = [successor] }
             try await refresh(LibraryChangeSet(changes: []))
             session.selectedDocuments.formIntersection(Set(documents.map(\.relativePath)))
-            if self.editor.url == nil, let document = selectedDocument { _ = await openTab(document) }
+            // The list successor becomes the active document (#105): its tab if open, else a preview tab.
+            if let document = selectedDocument,
+                successor == document.relativePath || self.editor.url == nil
+            {
+                _ = await openTab(document)
+            }
             persistSession()
             if !result.items.isEmpty {
                 focus(pane)

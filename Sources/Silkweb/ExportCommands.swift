@@ -54,10 +54,11 @@ extension LibraryWorkspace {
     func prepareHTMLExport(path: String? = nil, printOutput: Bool = false) async throws -> HTMLExport.Result? {
         await waitForNavigation()
         guard !loading, !mutating, !editor.loading, session.selectedDocuments.count <= 1, let root else { return nil }
+        // HTML, PDF and Print all follow the active editor (#105); an explicit row path wins.
         let destination =
             path.map { root.appendingPathComponent($0) }
             ?? (printOutput
-                ? editor.url : selectedDocument.map { root.appendingPathComponent($0.relativePath) } ?? editor.url)
+                ? editor.url : editor.url ?? selectedDocument.map { root.appendingPathComponent($0.relativePath) })
         guard let destination else { return nil }
         let buffer = allEditors.first { $0.url == destination }
         if let buffer, !(await buffer.flush()) {
@@ -92,7 +93,8 @@ extension LibraryWorkspace {
             defer { exporting = false }
             let name =
                 path.map { (($0 as NSString).lastPathComponent as NSString).deletingPathExtension }
-                ?? selectedDocument.map { ($0.name as NSString).deletingPathExtension } ?? editor.name
+                ?? (editor.url == nil ? selectedDocument.map { ($0.name as NSString).deletingPathExtension } : nil)
+                ?? editor.name
             do {
                 guard let result = try await prepareHTMLExport(path: path) else { return }
                 if !result.missingAssets.isEmpty,
