@@ -262,13 +262,22 @@ final class LibraryWorkspace {
         panel.directoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         panel.begin { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
-            do {
-                // Never adopt or replace an existing item through the Create command.
-                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
-                self?.open(url)
-            } catch { self?.error = error.localizedDescription }
+            self?.createLibrary(at: url)
         }
     }
+
+    func createLibrary(at url: URL) {
+        do {
+            // Never adopt or replace an existing item through the Create command.
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+            open(url)
+        } catch {
+            // The current library, welcome or error screen stays behind the alert (#102).
+            mutationFailure(error, title: "“\(url.lastPathComponent)” couldn’t be created.")
+        }
+    }
+
+    func waitForLoad() async { await loadTask?.value }
 
     func open(_ url: URL, usesSecurityScope: Bool = false) {
         let url = url.standardizedFileURL.resolvingSymlinksInPath()
@@ -283,6 +292,8 @@ final class LibraryWorkspace {
             guard !Task.isCancelled else { return }
             await navigationTask?.value
             guard !mutating else { return }
+            // A refused switch leaves the current library exactly as it was (#102).
+            guard await flushEditors() else { return }
             tagFilters = []
             tags = []
             tagCounts = [:]
@@ -292,7 +303,6 @@ final class LibraryWorkspace {
             recentMoveFolders = []
             dragIdentity = UUID()
             rename = nil
-            guard await flushEditors() else { return }
             if let snapshot { await saveSessionNow(root: snapshot.rootURL) }
             await didCloseWindow()
             search.reset()
