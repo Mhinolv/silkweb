@@ -24,10 +24,11 @@ public enum HTMLExport {
     public static func prepare(
         markdown: String, title: String, documentURL: URL, libraryRoot: URL,
         stylesheet: String, language: String = "en",
-        lineBreaks: HTMLRenderer.LineBreaks = .standard, printOutput: Bool = false
+        lineBreaks: HTMLRenderer.LineBreaks = .standard, showsTableOfContents: Bool = true, printOutput: Bool = false
     ) -> Result {
         let document = MarkdownParser.parse(markdown)
         var options = HTMLRenderer.Options(lineBreaks: lineBreaks, libraryRoot: libraryRoot, documentURL: documentURL)
+        options.showsTableOfContents = showsTableOfContents
         options.printOutput = printOutput
         var sources: [String: String] = [:]
         var missing: [String] = []
