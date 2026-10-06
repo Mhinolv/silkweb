@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 @MainActor @Observable final class FormattingTarget {
     static let shared = FormattingTarget()
@@ -19,11 +19,27 @@ struct FormatItem {
     let key: String
     let modifiers: NSEvent.ModifierFlags
     static let groups: [[FormatItem]] = [
-        [.init(command: .bold, key: "b", modifiers: .command), .init(command: .italic, key: "i", modifiers: .command), .init(command: .strike, key: "x", modifiers: [.command, .shift]), .init(command: .inlineCode, key: "c", modifiers: [.command, .control])],
+        [
+            .init(command: .bold, key: "b", modifiers: .command),
+            .init(command: .italic, key: "i", modifiers: .command),
+            .init(command: .strike, key: "x", modifiers: [.command, .shift]),
+            .init(command: .inlineCode, key: "c", modifiers: [.command, .control]),
+        ],
         [.init(command: .link, key: "k", modifiers: .command)],
-        (1...6).map { .init(command: .heading($0), key: "\($0)", modifiers: [.command, .control]) } + [.init(command: .heading(0), key: "0", modifiers: [.command, .control])],
-        [.init(command: .quote, key: "'", modifiers: .command), .init(command: .bullet, key: "u", modifiers: [.command, .option]), .init(command: .numbered, key: "o", modifiers: [.command, .option]), .init(command: .task, key: "x", modifiers: [.command, .option]), .init(command: .codeBlock, key: "c", modifiers: [.command, .shift, .control])],
-        [.init(command: .indent, key: "]", modifiers: .command), .init(command: .outdent, key: "[", modifiers: .command)]
+        (1...6).map { .init(command: .heading($0), key: "\($0)", modifiers: [.command, .control]) } + [
+            .init(command: .heading(0), key: "0", modifiers: [.command, .control])
+        ],
+        [
+            .init(command: .quote, key: "'", modifiers: .command),
+            .init(command: .bullet, key: "u", modifiers: [.command, .option]),
+            .init(command: .numbered, key: "o", modifiers: [.command, .option]),
+            .init(command: .task, key: "x", modifiers: [.command, .option]),
+            .init(command: .codeBlock, key: "c", modifiers: [.command, .shift, .control]),
+        ],
+        [
+            .init(command: .indent, key: "]", modifiers: .command),
+            .init(command: .outdent, key: "[", modifiers: .command),
+        ],
     ]
     var title: String {
         if case .heading(let level) = command { return level == 0 ? "Body Text" : "Heading \(level)" }
@@ -45,8 +61,7 @@ struct FormatCommands: Commands {
         CommandGroup(replacing: .textFormatting) {
             ForEach(Array(FormatItem.groups.enumerated()), id: \.offset) { index, group in
                 if index > 0 { Divider() }
-                if index == 2 { Menu("Heading") { items(group) } }
-                else { items(group) }
+                if index == 2 { Menu("Heading") { items(group) } } else { items(group) }
                 if index == 1 {
                     Button("Image…") { target.editor?.assetHandler.chooseImages() }
                         .keyboardShortcut("i", modifiers: [.control, .command])
@@ -70,8 +85,11 @@ struct FormatCommands: Commands {
 extension PlainMarkdownTextView {
     func format(_ command: MarkdownCommand) {
         guard isEditable, !hasMarkedText() else { return }
-        apply(MarkdownEditing.edit(command, text: string, selection: selectedRange(), clipboard: command == .link ? NSPasteboard.general.string(forType: .string) : nil,
-                                   indent: style.indent.text), name: command.name)
+        apply(
+            MarkdownEditing.edit(
+                command, text: string, selection: selectedRange(),
+                clipboard: command == .link ? NSPasteboard.general.string(forType: .string) : nil,
+                indent: style.indent.text), name: command.name)
     }
 
     func apply(_ edit: MarkdownEdit, name: String) {
@@ -101,7 +119,9 @@ extension PlainMarkdownTextView {
                 destination = NSMenu(title: "Heading")
                 heading.submenu = destination
                 formatMenu.addItem(heading)
-            } else { destination = formatMenu }
+            } else {
+                destination = formatMenu
+            }
             for item in group {
                 let entry = NSMenuItem(title: item.title, action: #selector(performFormat(_:)), keyEquivalent: item.key)
                 entry.keyEquivalentModifierMask = item.modifiers
@@ -122,7 +142,9 @@ extension PlainMarkdownTextView {
     }
 
     override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        if menuItem.action == #selector(performFormat(_:)) || menuItem.action == #selector(showTableInsertSheet(_:)) { return window?.firstResponder === self && isEditable && !hasMarkedText() }
+        if menuItem.action == #selector(performFormat(_:)) || menuItem.action == #selector(showTableInsertSheet(_:)) {
+            return window?.firstResponder === self && isEditable && !hasMarkedText()
+        }
         return super.validateMenuItem(menuItem)
     }
 }

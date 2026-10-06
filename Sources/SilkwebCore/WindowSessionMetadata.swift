@@ -17,7 +17,8 @@ public struct WindowSessionMetadata: Codable, Equatable, Sendable {
 
     public init() {}
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, tabs, activeDocumentID, selectedFolderID, selectedFolder, viewMode, sidebarsHidden, tagsExpanded, focusMode, typewriterMode
+        case formatVersion, tabs, activeDocumentID, selectedFolderID, selectedFolder, viewMode, sidebarsHidden,
+            tagsExpanded, focusMode, typewriterMode
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -40,7 +41,8 @@ public struct WindowSessionMetadata: Codable, Equatable, Sendable {
             activeDocumentID = tabs.first?.documentID
         }
         selectedFolderID = try? values.decodeIfPresent(UUID.self, forKey: .selectedFolderID)
-        selectedFolder = values.contains(.selectedFolder) ? (try? values.decodeIfPresent(String.self, forKey: .selectedFolder)) : ""
+        selectedFolder =
+            values.contains(.selectedFolder) ? (try? values.decodeIfPresent(String.self, forKey: .selectedFolder)) : ""
         viewMode = (try? values.decodeIfPresent(String.self, forKey: .viewMode)) ?? "editor"
     }
 
@@ -103,7 +105,8 @@ public struct WindowSessionMetadata: Codable, Equatable, Sendable {
     public func save(root: URL) async throws {
         try await Task.detached {
             let file = try Self.file(root: root)
-            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(self).write(to: file, options: .atomic)
         }.value
     }

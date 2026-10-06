@@ -32,24 +32,24 @@ struct ColumnEmptyState<Content: View>: View {
 }
 
 #if DEBUG
-/// Offscreen XCTest reads anchors from the real SwiftUI hierarchy. These have
-/// no observers in the app and are omitted entirely from release builds.
-struct ColumnLayoutAnchors: PreferenceKey {
-    static var defaultValue: [String: Anchor<CGRect>] { [:] }
-    static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    /// Offscreen XCTest reads anchors from the real SwiftUI hierarchy. These have
+    /// no observers in the app and are omitted entirely from release builds.
+    struct ColumnLayoutAnchors: PreferenceKey {
+        static var defaultValue: [String: Anchor<CGRect>] { [:] }
+        static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
+            value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+        }
     }
-}
 #endif
 
 extension View {
     func columnLayoutAnchor(_ name: String) -> some View {
         #if DEBUG
-        transformAnchorPreference(key: ColumnLayoutAnchors.self, value: .bounds) { values, anchor in
-            values[name] = anchor
-        }
+            transformAnchorPreference(key: ColumnLayoutAnchors.self, value: .bounds) { values, anchor in
+                values[name] = anchor
+            }
         #else
-        self
+            self
         #endif
     }
 }

@@ -1,6 +1,6 @@
-import Foundation
 import CryptoKit
 import Darwin
+import Foundation
 
 /// Content token, independent of timestamps and stable across launches.
 public struct DocumentRevision: Codable, Equatable, Sendable {

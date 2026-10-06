@@ -10,7 +10,7 @@ public enum MarkdownTokens {
     private static let definitions: [(String, MarkdownToken.Kind)] = [
         ("(\\*\\*|__)(.+?)\\1", .bold), ("(?<![*_])(\\*|_)([^*_\\n]+)\\1(?![*_])", .italic),
         ("(~~)(.+?)\\1", .strike), ("(`+)(.+?)\\1", .code),
-        ("(\\[)([^\\]\\n]*)(\\]\\([^\\n)]*\\))", .link)
+        ("(\\[)([^\\]\\n]*)(\\]\\([^\\n)]*\\))", .link),
     ]
     private static let patterns = definitions.map { (try! NSRegularExpression(pattern: $0.0), $0.1) }
     private static let heading = try! NSRegularExpression(pattern: "^[ \\t]{0,3}(#{1,6})[ \\t]+")
@@ -34,17 +34,23 @@ public enum MarkdownTokens {
             tokens.append(MarkdownToken(range: full, kind: .quote))
             tokens.append(MarkdownToken(range: match.range, kind: .marker))
         }
-        if let prefix = MarkdownEditing.listPrefix(text) { tokens.append(MarkdownToken(range: prefix.range, kind: .marker)) }
+        if let prefix = MarkdownEditing.listPrefix(text) {
+            tokens.append(MarkdownToken(range: prefix.range, kind: .marker))
+        }
         var codeRanges: [NSRange] = []
         // Code runs take precedence over emphasis inside them.
         let ordered = patterns.sorted { $0.1 == .code && $1.1 != .code }
         for (regex, kind) in ordered {
             for match in regex.matches(in: text, range: full) {
-                if kind != .code, codeRanges.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) { continue }
+                if kind != .code, codeRanges.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {
+                    continue
+                }
                 if kind == .code { codeRanges.append(match.range) }
                 tokens.append(MarkdownToken(range: match.range(at: 2), kind: kind))
                 tokens.append(MarkdownToken(range: match.range(at: 1), kind: .marker))
-                let tail = NSRange(location: NSMaxRange(match.range(at: 2)), length: NSMaxRange(match.range) - NSMaxRange(match.range(at: 2)))
+                let tail = NSRange(
+                    location: NSMaxRange(match.range(at: 2)),
+                    length: NSMaxRange(match.range) - NSMaxRange(match.range(at: 2)))
                 tokens.append(MarkdownToken(range: tail, kind: .marker))
             }
         }

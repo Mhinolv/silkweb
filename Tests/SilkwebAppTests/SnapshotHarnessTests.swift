@@ -1,20 +1,24 @@
 import AppKit
 import XCTest
+
 @testable import Silkweb
 
 final class SnapshotHarnessTests: XCTestCase {
     @MainActor
     func testWebKitAvailabilityDetection() {
-        for policy in [-1, NSApplication.ActivationPolicy.prohibited.rawValue,
-                       NSApplication.ActivationPolicy.accessory.rawValue,
-                       NSApplication.ActivationPolicy.regular.rawValue] {
+        for policy in [
+            -1, NSApplication.ActivationPolicy.prohibited.rawValue,
+            NSApplication.ActivationPolicy.accessory.rawValue,
+            NSApplication.ActivationPolicy.regular.rawValue,
+        ] {
             for override in [nil, "", "0", "1"] as [String?] {
                 for marker in [nil, "seatbelt"] as [String?] {
                     var environment: [String: String] = [:]
                     environment["SILKWEB_SNAPSHOT_NO_WEBKIT"] = override
                     environment["CODEX_SANDBOX"] = marker
-                    XCTAssertEqual(SnapshotHarness.isWebKitUnavailable(environment: environment, activationPolicy: policy),
-                                   policy == -1 || override == "1" || marker != nil)
+                    XCTAssertEqual(
+                        SnapshotHarness.isWebKitUnavailable(environment: environment, activationPolicy: policy),
+                        policy == -1 || override == "1" || marker != nil)
                 }
             }
         }
@@ -38,8 +42,10 @@ final class SnapshotHarnessTests: XCTestCase {
             XCTAssertEqual(bitmap.pixelsHigh, Int(900 * scale))
         }
         if NSApp.activationPolicy().rawValue == -1 {
-            let automatic = try await SnapshotHarness(environment: [:]).run(output: output, names: ["preview-mode", "split-mode"])
-            XCTAssertEqual(automatic.captures.map(\.status), Array(repeating: "unavailable in this environment", count: 4))
+            let automatic = try await SnapshotHarness(environment: [:]).run(
+                output: output, names: ["preview-mode", "split-mode"])
+            XCTAssertEqual(
+                automatic.captures.map(\.status), Array(repeating: "unavailable in this environment", count: 4))
             XCTAssertTrue(automatic.captures.allSatisfy { $0.file != nil })
         }
     }
@@ -49,16 +55,20 @@ final class SnapshotHarnessTests: XCTestCase {
         guard let directory = ProcessInfo.processInfo.environment["SILKWEB_SNAPSHOT_OUTPUT"] else {
             throw XCTSkip("Run scripts/snapshot.sh to generate the QA batch")
         }
-        let names = ProcessInfo.processInfo.environment["SILKWEB_SNAPSHOT_SCENARIOS"]?
+        let names =
+            ProcessInfo.processInfo.environment["SILKWEB_SNAPSHOT_SCENARIOS"]?
             .split(separator: " ").map(String.init) ?? []
         let manifest = try await SnapshotHarness().run(output: URL(fileURLWithPath: directory), names: names)
         let failures = manifest.captures.filter { $0.status != "ok" && $0.status != "unavailable in this environment" }
-        XCTAssertTrue(failures.isEmpty, failures.map { "\($0.scenario)-\($0.appearance): \($0.status) \($0.details)" }.joined(separator: "\n"))
+        XCTAssertTrue(
+            failures.isEmpty,
+            failures.map { "\($0.scenario)-\($0.appearance): \($0.status) \($0.details)" }.joined(separator: "\n"))
     }
 
     @MainActor
     func testTwoRealScenariosProduceNonblankLightAndDarkPNGs() async throws {
-        let output = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebSnapshotTest-" + UUID().uuidString)
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SilkwebSnapshotTest-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: output) }
         let harness = SnapshotHarness()
         let manifest = try await harness.run(output: output, names: ["library-overview", "folder-selected"])
@@ -93,8 +103,9 @@ final class SnapshotHarnessTests: XCTestCase {
         }
         for name in ["library-overview", "folder-selected"] {
             XCTAssertNotEqual(dataByName[name + "-light.png"], dataByName[name + "-dark.png"])
-            XCTAssertLessThan(try XCTUnwrap(meanByName[name + "-dark.png"]),
-                              try XCTUnwrap(meanByName[name + "-light.png"]) - 0.1)
+            XCTAssertLessThan(
+                try XCTUnwrap(meanByName[name + "-dark.png"]),
+                try XCTUnwrap(meanByName[name + "-light.png"]) - 0.1)
         }
     }
 
@@ -103,7 +114,8 @@ final class SnapshotHarnessTests: XCTestCase {
     func testListScenarioRendersFromCleanCheckout() async throws {
         let output = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: output) }
-        let manifest = try await SnapshotHarness().run(output: output, names: ["redesign-list-a", "redesign-thread-sidebar"])
+        let manifest = try await SnapshotHarness().run(
+            output: output, names: ["redesign-list-a", "redesign-thread-sidebar"])
         XCTAssertEqual(manifest.captures.count, 4)
         for capture in manifest.captures {
             XCTAssertEqual(capture.status, "ok", "\(capture.scenario)-\(capture.appearance): \(capture.details)")
@@ -115,15 +127,20 @@ final class SnapshotHarnessTests: XCTestCase {
     /// #49: an owner library with its own Vanlife gets the same harness-owned rows as a clean checkout.
     @MainActor
     func testHarnessReplacesCopiedVanlife() throws {
-        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebFixture-" + UUID().uuidString)
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SilkwebFixture-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: temporary) }
         let owner = temporary.appendingPathComponent("Owner")
         try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: SnapshotHarness.repository.appendingPathComponent("Test_Library"), to: owner)
-        try FileManager.default.createDirectory(at: owner.appendingPathComponent("Vanlife/Photos"), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(
+            at: SnapshotHarness.repository.appendingPathComponent("Test_Library"), to: owner)
+        try FileManager.default.createDirectory(
+            at: owner.appendingPathComponent("Vanlife/Photos"), withIntermediateDirectories: true)
         try Data("# Settling In\n\nOwner text.".utf8).write(to: owner.appendingPathComponent("Vanlife/Settling In.md"))
         try Data("# Private\n".utf8).write(to: owner.appendingPathComponent("Vanlife/Owner Note.md"))
-        for (name, library) in [("clean", SnapshotHarness.repository.appendingPathComponent("Test_Library")), ("owner", owner)] {
+        for (name, library) in [
+            ("clean", SnapshotHarness.repository.appendingPathComponent("Test_Library")), ("owner", owner),
+        ] {
             let root = temporary.appendingPathComponent("Fixture from " + name)
             try SnapshotHarness(library: library).makeFixture(at: root)
             let vanlife = root.appendingPathComponent("Vanlife")
@@ -133,11 +150,13 @@ final class SnapshotHarnessTests: XCTestCase {
             for (file, text) in SnapshotHarness.vanlifeDocuments {
                 let url = vanlife.appendingPathComponent(file)
                 XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), text, "\(name)/\(file)")
-                dates.append(try XCTUnwrap(url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate))
+                dates.append(
+                    try XCTUnwrap(url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate))
             }
             XCTAssertEqual(dates, dates.sorted(by: >), "\(name): newest first")
             XCTAssertEqual(Set(dates).count, dates.count, "\(name): distinct dates")
-            XCTAssertEqual(dates.first, Date(timeIntervalSince1970: 1_780_000_000), "\(name): pinned, not the copy time")
+            XCTAssertEqual(
+                dates.first, Date(timeIntervalSince1970: 1_780_000_000), "\(name): pinned, not the copy time")
         }
     }
 
@@ -170,13 +189,13 @@ final class SnapshotHarnessTests: XCTestCase {
             do {
                 _ = try await SnapshotHarness(size: size).run(output: output, names: ["library-overview"])
                 XCTFail("Invalid size accepted")
-            } catch { /* Input limits rejected before allocating a window. */ }
+            } catch { /* Input limits rejected before allocating a window. */  }
         }
         let forbidden = SnapshotHarness.repository.appendingPathComponent("Test_Library/Snapshot-" + UUID().uuidString)
         do {
             _ = try await SnapshotHarness().run(output: forbidden)
             XCTFail("Owner library accepted as output")
-        } catch { }
+        } catch {}
         XCTAssertFalse(FileManager.default.fileExists(atPath: forbidden.path))
     }
 }

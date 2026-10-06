@@ -1,8 +1,9 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
+
 @testable import Silkweb
-import SilkwebCore
 
 final class TagLayoutTests: XCTestCase {
     @MainActor private func descendants(_ view: NSView) -> [NSView] {
@@ -16,7 +17,8 @@ final class TagLayoutTests: XCTestCase {
         names.map { TagChip(tag: LibraryTag(name: $0), mixed: mixed.contains($0)) }
     }
     @MainActor private func chipField(_ chips: [TagChip], enabled: Bool = true, focus: Int = 0) -> TagChipField {
-        TagChipField(chips: chips, suggestions: [], focusRequest: focus, enabled: enabled, onAdd: { _ in }, onRemove: { _ in })
+        TagChipField(
+            chips: chips, suggestions: [], focusRequest: focus, enabled: enabled, onAdd: { _ in }, onRemove: { _ in })
     }
 
     /// #72 Tags A: real SwiftUI-hosted chip field through load, appearance, count, width and focus sweeps.
@@ -24,21 +26,26 @@ final class TagLayoutTests: XCTestCase {
         _ = NSApplication.shared
         let host = NSHostingController(rootView: chipField(chips(["coffee", "research"])))
         host.sizingOptions = [] // The Inspector column sets the width; the field never sizes the window.
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 216, height: 400), styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 216, height: 400), styleMask: [.borderless], backing: .buffered,
+            defer: false)
         window.contentViewController = host
         defer { window.contentViewController = nil }
         try await settle(host.view)
         let container = try XCTUnwrap(descendants(host.view).compactMap { $0 as? TagChipContainer }.first)
         let field = container.field
         XCTAssertFalse(descendants(host.view).contains { $0 is NSTokenField }, "Tags A replaces the token field")
-        XCTAssertFalse(descendants(host.view).contains { $0 is NSScrollView }, "No bezeled viewport: the Info pane scrolls")
+        XCTAssertFalse(
+            descendants(host.view).contains { $0 is NSScrollView }, "No bezeled viewport: the Info pane scrolls")
         XCTAssertEqual(field.placeholderString, "Add tag…")
         XCTAssertFalse(field.isBezeled); XCTAssertFalse(field.isBordered); XCTAssertFalse(field.drawsBackground)
 
         for appearance in [NSAppearance.Name.aqua, .darkAqua] {
             window.appearance = NSAppearance(named: appearance)
             for count in [0, 1, 2, 20, 100] {
-                let names = (0..<count).map { $0 == 3 ? String(repeating: "long tag name ", count: 4) + "end" : "research topic \($0)" }
+                let names = (0..<count).map {
+                    $0 == 3 ? String(repeating: "long tag name ", count: 4) + "end" : "research topic \($0)"
+                }
                 host.rootView = chipField(chips(names, mixed: count > 1 ? [names[1]] : []))
                 for width: CGFloat in [180, 216, 400] {
                     host.view.setFrameSize(NSSize(width: width, height: 400))
@@ -49,18 +56,28 @@ final class TagLayoutTests: XCTestCase {
                     let frames = container.chipButtons.map(\.frame) + [field.frame]
                     for frame in frames {
                         XCTAssertGreaterThanOrEqual(frame.minX, 0)
-                        XCTAssertLessThanOrEqual(frame.maxX, container.bounds.width + 0.5, "Chips wrap within the column")
+                        XCTAssertLessThanOrEqual(
+                            frame.maxX, container.bounds.width + 0.5, "Chips wrap within the column")
                         XCTAssertLessThanOrEqual(frame.maxY, container.bounds.height)
                     }
-                    for (i, a) in frames.enumerated() { for b in frames[(i + 1)...] { XCTAssertFalse(a.intersects(b), "\(a) overlaps \(b)") } }
-                    XCTAssertGreaterThanOrEqual(field.frame.width, min(TagChipContainer.fieldMinWidth, container.bounds.width),
-                                                "“Add tag…” always stays visible")
-                    XCTAssertEqual(container.frame.height, container.measuredHeight(width: container.bounds.width), accuracy: 1,
-                                   "The hosted height follows the flow, so later rows keep their spacing")
-                    let lines = Set(frames.map { (($0.midY) / (TagChipContainer.chipHeight + TagChipContainer.spacing)).rounded(.down) }).count
-                    XCTAssertEqual(container.measuredHeight(width: container.bounds.width),
-                                   CGFloat(lines) * TagChipContainer.chipHeight + CGFloat(lines - 1) * TagChipContainer.spacing
-                                   + TagChipContainer.bottomInset + 1, accuracy: 0.5)
+                    for (i, a) in frames.enumerated() {
+                        for b in frames[(i + 1)...] { XCTAssertFalse(a.intersects(b), "\(a) overlaps \(b)") }
+                    }
+                    XCTAssertGreaterThanOrEqual(
+                        field.frame.width, min(TagChipContainer.fieldMinWidth, container.bounds.width),
+                        "“Add tag…” always stays visible")
+                    XCTAssertEqual(
+                        container.frame.height, container.measuredHeight(width: container.bounds.width), accuracy: 1,
+                        "The hosted height follows the flow, so later rows keep their spacing")
+                    let lines = Set(
+                        frames.map {
+                            (($0.midY) / (TagChipContainer.chipHeight + TagChipContainer.spacing)).rounded(.down)
+                        }
+                    ).count
+                    XCTAssertEqual(
+                        container.measuredHeight(width: container.bounds.width),
+                        CGFloat(lines) * TagChipContainer.chipHeight + CGFloat(lines - 1) * TagChipContainer.spacing
+                            + TagChipContainer.bottomInset + 1, accuracy: 0.5)
                 }
                 // Keyboard focus goes through selectText and leaves the caret in the empty field.
                 field.selectText(nil)
@@ -98,9 +115,14 @@ final class TagLayoutTests: XCTestCase {
         _ = NSApplication.shared
         var added: [[String]] = [], removed: [UUID] = []
         let tags = [LibraryTag(name: "coffee"), LibraryTag(name: "research")]
-        let host = NSHostingController(rootView: TagChipField(chips: [TagChip(tag: tags[0], mixed: false), TagChip(tag: tags[1], mixed: true)],
-            suggestions: [], focusRequest: 0, enabled: true, onAdd: { added.append($0) }, onRemove: { removed.append($0) }))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 200), styleMask: [.borderless], backing: .buffered, defer: false)
+        let host = NSHostingController(
+            rootView: TagChipField(
+                chips: [TagChip(tag: tags[0], mixed: false), TagChip(tag: tags[1], mixed: true)],
+                suggestions: [], focusRequest: 0, enabled: true, onAdd: { added.append($0) },
+                onRemove: { removed.append($0) }))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 200), styleMask: [.borderless], backing: .buffered,
+            defer: false)
         window.contentViewController = host
         defer { window.contentViewController = nil }
         try await settle(host.view)
@@ -109,10 +131,14 @@ final class TagLayoutTests: XCTestCase {
         func click(_ button: NSButton, at point: NSPoint) throws {
             let location = button.convert(point, to: nil)
             let time = ProcessInfo.processInfo.systemUptime
-            let down = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: location, modifierFlags: [], timestamp: time,
-                windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
-            let up = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseUp, location: location, modifierFlags: [], timestamp: time + 0.01,
-                windowNumber: window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0))
+            let down = try XCTUnwrap(
+                NSEvent.mouseEvent(
+                    with: .leftMouseDown, location: location, modifierFlags: [], timestamp: time,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+            let up = try XCTUnwrap(
+                NSEvent.mouseEvent(
+                    with: .leftMouseUp, location: location, modifierFlags: [], timestamp: time + 0.01,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0))
             NSApp.postEvent(up, atStart: true) // The button's tracking loop ends on this mouse-up.
             button.mouseDown(with: down)
             _ = NSApp.nextEvent(matching: .leftMouseUp, until: Date(), inMode: .default, dequeue: true)
@@ -142,23 +168,29 @@ final class TagLayoutTests: XCTestCase {
     @MainActor func testTagsAreOutlineSiblingCollapsePersistsAndSelectionRestores() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Folder/Nested"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Folder/Nested"), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try "fixture".write(to: root.appendingPathComponent("A.md"), atomically: true, encoding: .utf8)
         let initial = try await LibraryScanner.scan(root: root)
-        _ = try await TagStore.update(root: root) { TagEditor.edit(["topic 10", "topic 2"], documents: Set(initial.documents.map(\.id)), metadata: $0) }
+        _ = try await TagStore.update(root: root) {
+            TagEditor.edit(["topic 10", "topic 2"], documents: Set(initial.documents.map(\.id)), metadata: $0)
+        }
         let snapshot = try await LibraryScanner.scan(root: root)
         let workspace = LibraryWorkspace()
         workspace.root = root; workspace.install(snapshot)
         workspace.session.expandedFolders = ["", "Folder"]
         let coordinator = FolderSidebar.Coordinator(workspace: workspace, snapshot: snapshot)
         let scroll = FolderSidebar.makeScrollView(coordinator: coordinator)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 500), styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 500), styleMask: [.borderless], backing: .buffered,
+            defer: false)
         window.contentView = scroll
         defer { window.contentView = nil; workspace.search.reset() }
         try await settle(scroll)
         let outline = try XCTUnwrap(coordinator.outline)
-        let group = try XCTUnwrap(coordinator.roots.last { $0.title == "Tags" }, "Tags must belong to FolderSidebar, after the library root")
+        let group = try XCTUnwrap(
+            coordinator.roots.last { $0.title == "Tags" }, "Tags must belong to FolderSidebar, after the library root")
         XCTAssertTrue(coordinator.roots.last === group)
         XCTAssertNil(outline.parent(forItem: group))
         XCTAssertEqual(group.children.map(\.title), ["topic 2", "topic 10"])
@@ -167,9 +199,12 @@ final class TagLayoutTests: XCTestCase {
         let scope = workspace.session.selectedFolder
         outline.selectRowIndexes(IndexSet(integer: outline.row(forItem: group)), byExtendingSelection: false)
         XCTAssertEqual(workspace.session.selectedFolder, scope)
-        XCTAssertEqual((outline.view(atColumn: 0, row: outline.row(forItem: group), makeIfNecessary: true) as? SidebarFolderCell)?.accessibilityValue() as? String, "2 tags")
+        XCTAssertEqual(
+            (outline.view(atColumn: 0, row: outline.row(forItem: group), makeIfNecessary: true) as? SidebarFolderCell)?
+                .accessibilityValue() as? String, "2 tags")
         outline.collapseItem(group)
-        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(workspace.windowMetadata())) as! [String: Any]
+        let json =
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(workspace.windowMetadata())) as! [String: Any]
         XCTAssertEqual(json["tagsExpanded"] as? Bool, false)
         await workspace.saveSessionNow()
         let loaded = try await WindowSessionMetadata.load(root: root)
@@ -181,7 +216,9 @@ final class TagLayoutTests: XCTestCase {
             scroll.setFrameSize(NSSize(width: width, height: 500)); outline.expandItem(group)
             try await settle(scroll)
             for item in [group] + group.children {
-                let cell = try XCTUnwrap(outline.view(atColumn: 0, row: outline.row(forItem: item), makeIfNecessary: true) as? SidebarFolderCell)
+                let cell = try XCTUnwrap(
+                    outline.view(atColumn: 0, row: outline.row(forItem: item), makeIfNecessary: true)
+                        as? SidebarFolderCell)
                 XCTAssertEqual(cell.countBadge.stringValue, item === group ? " (2)" : " (1)")
                 XCTAssertNil(coordinator.outlineView(outline, pasteboardWriterForItem: item))
                 XCTAssertFalse(coordinator.allowsDrop(["A.md"], item: item))
@@ -191,7 +228,8 @@ final class TagLayoutTests: XCTestCase {
         workspace.session.selectedTagID = workspace.tags.first!.id
         coordinator.restore()
         XCTAssertTrue(outline.isItemExpanded(group), "Restoring a selected tag must reveal it")
-        XCTAssertEqual((outline.item(atRow: outline.selectedRow) as? FolderSidebar.Item)?.title, workspace.tags.first!.name)
+        XCTAssertEqual(
+            (outline.item(atRow: outline.selectedRow) as? FolderSidebar.Item)?.title, workspace.tags.first!.name)
         // Exercise the actual sidebar/list split with tag rows present (1.55).
         let split = LibrarySplitViewController(workspace: workspace)
         window.contentViewController = split
@@ -205,10 +243,13 @@ final class TagLayoutTests: XCTestCase {
             NSAnimationContext.endGrouping()
             try await settle(split.view)
             XCTAssertEqual(split.navigationItem.isCollapsed, hidden)
-            XCTAssertTrue(descendants(split.view).contains { view in
-                guard let tree = view as? SidebarOutlineView, let delegate = tree.delegate as? FolderSidebar.Coordinator else { return false }
-                return delegate.roots.contains { $0.title == "Tags" }
-            })
+            XCTAssertTrue(
+                descendants(split.view).contains { view in
+                    guard let tree = view as? SidebarOutlineView,
+                        let delegate = tree.delegate as? FolderSidebar.Coordinator
+                    else { return false }
+                    return delegate.roots.contains { $0.title == "Tags" }
+                })
         }
         window.contentViewController = nil
         workspace.session.selectedTagID = nil

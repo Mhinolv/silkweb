@@ -1,5 +1,5 @@
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 struct QuickOpenPanel: View {
     let workspace: LibraryWorkspace
@@ -9,8 +9,12 @@ struct QuickOpenPanel: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
-                Button { workspace.search.dismissQuickOpen() } label: { Color.clear.contentShape(Rectangle()) }
-                    .buttonStyle(.plain).accessibilityLabel("Dismiss Quick Open")
+                Button {
+                    workspace.search.dismissQuickOpen()
+                } label: {
+                    Color.clear.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).accessibilityLabel("Dismiss Quick Open")
                 panel
                     .frame(width: 560)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
@@ -23,7 +27,9 @@ struct QuickOpenPanel: View {
             await workspace.search.query(quick: true)
         }
         .onChange(of: workspace.search.quickText) { selected = nil }
-        .onChange(of: workspace.search.quickResults) { selected = SearchNavigation.selection(selected, in: workspace.search.quickResults) }
+        .onChange(of: workspace.search.quickResults) {
+            selected = SearchNavigation.selection(selected, in: workspace.search.quickResults)
+        }
         .onChange(of: workspace.search.quickResultText) { selected = workspace.search.quickResults.first?.id }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Quick Open")
@@ -42,8 +48,12 @@ struct QuickOpenPanel: View {
                         guard event.modifiers.contains(.command) else { return .ignored }
                         openSelected(pinned: true); return .handled
                     }
-                    .onKeyPress(.upArrow) { move(-1); return .handled }
-                    .onKeyPress(.downArrow) { move(1); return .handled }
+                    .onKeyPress(.upArrow) {
+                        move(-1); return .handled
+                    }
+                    .onKeyPress(.downArrow) {
+                        move(1); return .handled
+                    }
             }.padding(16)
             Divider()
             HStack(spacing: 4) {
@@ -52,8 +62,12 @@ struct QuickOpenPanel: View {
             }.font(.caption).monospacedDigit().foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 8)
             if search.quickResults.isEmpty && !search.quickHasPendingQuery {
-                Text(search.error ?? (search.quickText.isEmpty ? "No recent documents" : "No documents named “\(search.quickText)”"))
-                    .foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                Text(
+                    search.error
+                        ?? (search.quickText.isEmpty
+                            ? "No recent documents" : "No documents named “\(search.quickText)”")
+                )
+                .foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(16)
             } else {
                 ForEach(search.quickResults) { result in
                     Button {
@@ -62,7 +76,8 @@ struct QuickOpenPanel: View {
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "doc.text").foregroundStyle(.secondary)
-                            Text(SearchPresentation.highlight(result.displayName, query: search.quickResultText)).lineLimit(1)
+                            Text(SearchPresentation.highlight(result.displayName, query: search.quickResultText))
+                                .lineLimit(1)
                             Spacer(minLength: 8)
                             Text(SearchPresentation.path(result.folderPathComponents))
                                 .font(.caption).foregroundStyle(.tertiary).lineLimit(1)
@@ -71,8 +86,10 @@ struct QuickOpenPanel: View {
                         .background(selected == result.id ? Color.accentColor.opacity(0.18) : Color.clear)
                         .contentShape(Rectangle())
                     }.buttonStyle(.plain)
-                    .accessibilityLabel("\(result.displayName), in \(SearchPresentation.path(result.folderPathComponents))")
-                    .accessibilityAddTraits(selected == result.id ? .isSelected : [])
+                        .accessibilityLabel(
+                            "\(result.displayName), in \(SearchPresentation.path(result.folderPathComponents))"
+                        )
+                        .accessibilityAddTraits(selected == result.id ? .isSelected : [])
                 }
             }
         }
@@ -83,7 +100,9 @@ struct QuickOpenPanel: View {
     private func move(_ delta: Int) {
         let results = workspace.search.quickResults
         let current = results.firstIndex { $0.id == selected }
-        selected = SearchNavigation.nextIndex(current: current, count: results.count, delta: delta).map { results[$0].id }
+        selected = SearchNavigation.nextIndex(current: current, count: results.count, delta: delta).map {
+            results[$0].id
+        }
     }
 
     private func openSelected(pinned: Bool = false) {

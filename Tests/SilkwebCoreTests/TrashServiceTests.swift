@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+
 @testable import SilkwebCore
 
 final class TrashServiceTests: XCTestCase {
@@ -25,9 +26,12 @@ final class TrashServiceTests: XCTestCase {
         let root = try fixture()
         let outside = try fixture()
         defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: outside) }
-        for path in ["Folder/One.md", "Folder/Child/Two.MARKDOWN", "Folder/image.png", "Folder/.hidden"] { try write(path, root: root) }
+        for path in ["Folder/One.md", "Folder/Child/Two.MARKDOWN", "Folder/image.png", "Folder/.hidden"] {
+            try write(path, root: root)
+        }
         try write("private.md", root: outside)
-        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("Folder/link"), withDestinationURL: outside)
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("Folder/link"), withDestinationURL: outside)
         let service = try TrashService(root: root)
         let plan = try await service.plan(["Folder", "Folder/One.md", "Folder"])
         XCTAssertEqual(plan.paths, ["Folder"])
@@ -38,8 +42,11 @@ final class TrashServiceTests: XCTestCase {
         XCTAssertTrue(plan.contains("Folder/Child/Two.MARKDOWN"))
         XCTAssertFalse(plan.contains("Folder2/One.md"))
         XCTAssertEqual(plan.counts.summary, "2 documents, 1 folder, 3 other files")
-        for paths in [[], [""], ["../private.md"], ["/Folder"], ["Folder//One.md"], ["Folder", "Folder/link/private.md"], [".silkweb"]] {
-            do { _ = try await service.plan(paths); XCTFail("Accepted unsafe selection: \(paths)") } catch { }
+        for paths in [
+            [], [""], ["../private.md"], ["/Folder"], ["Folder//One.md"], ["Folder", "Folder/link/private.md"],
+            [".silkweb"],
+        ] {
+            do { _ = try await service.plan(paths); XCTFail("Accepted unsafe selection: \(paths)") } catch {}
         }
         XCTAssertEqual(try String(contentsOf: outside.appendingPathComponent("private.md"), encoding: .utf8), "text")
     }
@@ -47,7 +54,8 @@ final class TrashServiceTests: XCTestCase {
         let root = try fixture()
         let trash = try fixture()
         defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: trash) }
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Empty"), withIntermediateDirectories: false)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Empty"), withIntermediateDirectories: false)
         try write("One.md", root: root)
         let service = try service(root: root, trash: trash)
         for paths in [["Empty"], ["One.md"], ["Empty", "One.md"]] {
@@ -57,7 +65,9 @@ final class TrashServiceTests: XCTestCase {
         }
         let plan = try await service.plan(["Empty", "One.md"])
         try write("Empty/new.png", root: root)
-        do { _ = try await service.execute(plan); XCTFail("Accepted changed descendants") } catch { XCTAssertTrue(error is TrashError) }
+        do { _ = try await service.execute(plan); XCTFail("Accepted changed descendants") } catch {
+            XCTAssertTrue(error is TrashError)
+        }
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("One.md").path))
     }
     func testPartialFailureRestoreConflictAndStableIdentity() async throws {
@@ -90,7 +100,9 @@ final class TrashServiceTests: XCTestCase {
                 for end in start..<max(1, size) {
                     let removed = Set(rows.dropFirst(start).prefix(end - start + 1))
                     let next = DeletionSelection.successor(in: rows, removing: removed)
-                    let expected = removed.isEmpty ? nil : (end + 1 < size ? String(end + 1) : (start > 0 ? String(start - 1) : nil))
+                    let expected =
+                        removed.isEmpty
+                        ? nil : (end + 1 < size ? String(end + 1) : (start > 0 ? String(start - 1) : nil))
                     XCTAssertEqual(next, expected)
                 }
             }
@@ -143,9 +155,11 @@ final class TrashServiceTests: XCTestCase {
         XCTAssertEqual(after.tagRecency, [later] + before.tagRecency)
     }
     func testRestoreMergesIntoRecreatedTagNameAndPartialRecency() throws {
-        let note = UUID(), shared = LibraryTag(name: "Shared"), unique = LibraryTag(name: "Unique"), other = LibraryTag(name: "Other")
-        let tags = TrashedTags(tags: [shared, unique], tagsByDocument: [note.uuidString: [shared.id, unique.id]],
-                               tagRecency: [unique.id, other.id, shared.id])
+        let note = UUID(), shared = LibraryTag(name: "Shared"), unique = LibraryTag(name: "Unique"),
+            other = LibraryTag(name: "Other")
+        let tags = TrashedTags(
+            tags: [shared, unique], tagsByDocument: [note.uuidString: [shared.id, unique.id]],
+            tagRecency: [unique.id, other.id, shared.id])
         // After trash the user re-created "unique" (different ID) and kept using "Other".
         let recreated = LibraryTag(name: "UNIQUE")
         var current = LibraryMetadata(IDsByPath: ["Note.md": note, "X.md": UUID()])
@@ -158,13 +172,17 @@ final class TrashServiceTests: XCTestCase {
         XCTAssertEqual(merged.tagRecency, [recreated.id, other.id, shared.id])
         // Missing first anchor goes to the front; an empty payload is a no-op.
         current.tagRecency = [other.id]
-        XCTAssertEqual(TrashedTags(tags: [shared], tagsByDocument: [note.uuidString: [shared.id]], tagRecency: [shared.id, other.id])
+        XCTAssertEqual(
+            TrashedTags(
+                tags: [shared], tagsByDocument: [note.uuidString: [shared.id]], tagRecency: [shared.id, other.id]
+            )
             .merged(into: current).tagRecency, [shared.id, other.id])
         XCTAssertEqual(TrashedTags().merged(into: current), current)
     }
     func testTrashedItemWithoutTagPayloadDecodes() throws {
         let id = UUID()
-        let legacy = Data(#"{"originalPath":"A.md","trashURL":"file:///tmp/A.md","identities":{"A.md":"\#(id.uuidString)"}}"#.utf8)
+        let legacy = Data(
+            #"{"originalPath":"A.md","trashURL":"file:///tmp/A.md","identities":{"A.md":"\#(id.uuidString)"}}"#.utf8)
         let item = try JSONDecoder().decode(TrashedItem.self, from: legacy)
         XCTAssertEqual(item.identities, ["A.md": id])
         XCTAssertEqual(item.tags, TrashedTags())
@@ -189,12 +207,13 @@ final class TrashServiceTests: XCTestCase {
         _ = try await LibraryScanner.scan(root: root)
         let restored = await service.restore(result.items)
         XCTAssertEqual(restored.failures.map(\.path), [])
-        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("Notes 9:30/Inner 1:2.md"), encoding: .utf8), "text")
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("Notes 9:30/Inner 1:2.md"), encoding: .utf8), "text")
         let after = try await LibraryScanner.scan(root: root)
         XCTAssertEqual(after.metadata.IDsByPath, before.metadata.IDsByPath)
         // Structural checks still refuse paths that escape or reach hidden entries.
         for paths in [["Meeting 10:04.md/.."], [".silkweb"], ["./Other.md"], ["Notes 9:30//Inner 1:2.md"]] {
-            do { _ = try await service.plan(paths); XCTFail("Accepted unsafe selection: \(paths)") } catch { }
+            do { _ = try await service.plan(paths); XCTFail("Accepted unsafe selection: \(paths)") } catch {}
         }
     }
 }

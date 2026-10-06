@@ -123,8 +123,8 @@ public actor SearchIndex {
                 if (mutations[document.id] ?? 0) <= initialMutation {
                     entries[document.id] = Entry(record(document, body: body))
                 }
-            } catch is CancellationError { throw CancellationError() }
-            catch { /* Unreadable/removed documents remain absent, retried on next scan. */ }
+            } catch is CancellationError { throw CancellationError() } catch
+            { /* Unreadable/removed documents remain absent, retried on next scan. */  }
             guard token == generation else { throw CancellationError() }
             if Date().timeIntervalSince(lastProgress) >= 0.1 {
                 publish(.building(indexed: entries.count, total: snapshot.documents.count))
@@ -168,7 +168,10 @@ public actor SearchIndex {
         recents.opened[id] = date
         // Bound persisted navigation history, independently of the derived cache.
         if recents.opened.count > 200 {
-            recents.opened = Dictionary(uniqueKeysWithValues: recents.opened.sorted { $0.value > $1.value }.prefix(200).map { ($0.key, $0.value) })
+            recents.opened = Dictionary(
+                uniqueKeysWithValues: recents.opened.sorted { $0.value > $1.value }.prefix(200).map {
+                    ($0.key, $0.value)
+                })
         }
         if persist { try write(recents, name: "search-recents.json") }
     }
@@ -178,9 +181,15 @@ public actor SearchIndex {
         let recentEntries = entries.values.filter { recents.opened[$0.record.id] != nil }
         let folders = folders, opened = recents.opened
         let worker = Task.detached(priority: .userInitiated) {
-            try Self.search(SearchQuery("", mode: .quickOpen, limit: limit), entries: recentEntries, folders: folders, opened: opened)
+            try Self.search(
+                SearchQuery("", mode: .quickOpen, limit: limit), entries: recentEntries, folders: folders,
+                opened: opened)
         }
-        return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
     }
 
     public func query(_ query: SearchQuery) async throws -> [SearchResult] {
@@ -188,10 +197,16 @@ public actor SearchIndex {
         let worker = Task.detached(priority: .userInitiated) {
             try Self.search(query, entries: entries, folders: folders, opened: opened)
         }
-        return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
     }
 
-    private static func search(_ query: SearchQuery, entries: [Entry], folders: [UUID: LibraryFolder], opened: [UUID: Date]) throws -> [SearchResult] {
+    private static func search(
+        _ query: SearchQuery, entries: [Entry], folders: [UUID: LibraryFolder], opened: [UUID: Date]
+    ) throws -> [SearchResult] {
         try Task.checkCancellation()
         guard query.limit > 0 else { return [] }
         let text = searchFold(query.text).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
@@ -200,7 +215,9 @@ public actor SearchIndex {
         if case .folder(let id, let descendants) = query.scope {
             allowed = [id]
             if descendants, let path = folders[id]?.relativePath {
-                for folder in folders.values where path.isEmpty || folder.relativePath.hasPrefix(path + "/") { allowed?.insert(folder.id) }
+                for folder in folders.values where path.isEmpty || folder.relativePath.hasPrefix(path + "/") {
+                    allowed?.insert(folder.id)
+                }
             }
         }
         var hits: [(Entry, Int)] = []
@@ -208,15 +225,26 @@ public actor SearchIndex {
             try Task.checkCancellation()
             if let allowed, !allowed.contains(entry.record.folderID) { continue }
             let titleMatch = terms.allSatisfy { entry.title.contains($0) }
-            let matches = terms.allSatisfy { entry.title.contains($0) || (query.mode == .library && entry.body.contains($0)) }
+            let matches = terms.allSatisfy {
+                entry.title.contains($0) || (query.mode == .library && entry.body.contains($0))
+            }
             guard matches else { continue }
             let rank: Int
-            if text.isEmpty { rank = 0 }
-            else if entry.title == text { rank = 0 }
-            else if entry.title.hasPrefix(text) { rank = 1 }
-            else if terms.allSatisfy({ term in entry.title.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).contains { $0.hasPrefix(term) } }) { rank = 2 }
-            else if titleMatch { rank = 3 }
-            else { rank = 4 }
+            if text.isEmpty {
+                rank = 0
+            } else if entry.title == text {
+                rank = 0
+            } else if entry.title.hasPrefix(text) {
+                rank = 1
+            } else if terms.allSatisfy({ term in
+                entry.title.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).contains { $0.hasPrefix(term) }
+            }) {
+                rank = 2
+            } else if titleMatch {
+                rank = 3
+            } else {
+                rank = 4
+            }
             hits.append((entry, rank))
         }
         hits.sort {
@@ -234,16 +262,19 @@ public actor SearchIndex {
             try Task.checkCancellation()
             let record = entry.record
             let (snippet, ranges) = searchSnippet(record.body, terms: terms)
-            return SearchResult(id: record.id, displayName: record.name,
-                folderPathComponents: folders[record.folderID]?.relativePath.split(separator: "/").map(String.init) ?? [],
+            return SearchResult(
+                id: record.id, displayName: record.name,
+                folderPathComponents: folders[record.folderID]?.relativePath.split(separator: "/").map(String.init)
+                    ?? [],
                 modified: record.modified, matchKind: rank == 4 ? .body : .title, snippet: snippet, matchRanges: ranges)
         }
     }
 
     private func record(_ document: LibraryDocument, body: String) -> Record {
-        Record(id: document.id, folderID: document.folderID, path: document.relativePath,
-               name: (document.name as NSString).deletingPathExtension, modified: document.modified,
-               identity: document.fileIdentity, body: body)
+        Record(
+            id: document.id, folderID: document.folderID, path: document.relativePath,
+            name: (document.name as NSString).deletingPathExtension, modified: document.modified,
+            identity: document.fileIdentity, body: body)
     }
 
     private func file(_ name: String) throws -> URL {
@@ -262,11 +293,17 @@ public actor SearchIndex {
                 let cache = try JSONDecoder().decode(Cache.self, from: Data(contentsOf: cacheFile))
                 if cache.formatVersion == 1 {
                     for record in cache.records { entries[record.id] = Entry(record) }
-                } else { publish(.rebuilding(reason: .unsupportedVersion)) }
+                } else {
+                    publish(.rebuilding(reason: .unsupportedVersion))
+                }
             } catch { publish(.rebuilding(reason: .corrupt)) }
         }
         let recentFile = try file("search-recents.json")
-        if let data = try? Data(contentsOf: recentFile), let recent = try? JSONDecoder().decode(Recents.self, from: data) { recents = recent }
+        if let data = try? Data(contentsOf: recentFile),
+            let recent = try? JSONDecoder().decode(Recents.self, from: data)
+        {
+            recents = recent
+        }
     }
 
     private func write<T: Encodable>(_ value: T, name: String) throws {
@@ -296,7 +333,8 @@ public actor SearchIndex {
         let writing = Task.detached(priority: .utility) {
             await previous?.value
             // A late write must never recreate a library that was moved or deleted meanwhile.
-            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: false)
+            try? FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(), withIntermediateDirectories: false)
             if let data = try? JSONEncoder().encode(cache) { try? data.write(to: file, options: .atomic) }
         }
         cacheWriting = writing

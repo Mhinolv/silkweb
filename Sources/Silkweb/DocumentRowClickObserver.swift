@@ -1,7 +1,7 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import UniformTypeIdentifiers
-import SilkwebCore
 
 /// Shared pointer anchor without publishing state during mouse tracking.
 final class DocumentRowPointerState {
@@ -77,7 +77,8 @@ final class DocumentRowClickView: NSView, NSDraggingSource {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard workspace?.rename == nil, !isHidden,
-              clickBounds.contains(convert(point, from: superview)) else { return nil }
+            clickBounds.contains(convert(point, from: superview))
+        else { return nil }
         return self
     }
 
@@ -112,7 +113,8 @@ final class DocumentRowClickView: NSView, NSDraggingSource {
         workspace.focusColumn = 1
         // Finder's rule (#70): a plain press selects an unselected row at once. A selected row keeps the
         // selection until mouseUp, so dragging a multi-row selection still carries every row.
-        selectedOnPress = event.clickCount == 1 && event.modifierFlags.intersection([.command, .shift, .control, .option]).isEmpty
+        selectedOnPress =
+            event.clickCount == 1 && event.modifierFlags.intersection([.command, .shift, .control, .option]).isEmpty
             && !workspace.session.selectedDocuments.contains(path)
         if selectedOnPress {
             pointerState?.anchor = path
@@ -128,14 +130,16 @@ final class DocumentRowClickView: NSView, NSDraggingSource {
 
     override func mouseDragged(with event: NSEvent) {
         guard let down = mouseDownEvent, let workspace, workspace.canMutate else { return }
-        let distance = hypot(event.locationInWindow.x - down.locationInWindow.x,
-                             event.locationInWindow.y - down.locationInWindow.y)
+        let distance = hypot(
+            event.locationInWindow.x - down.locationInWindow.x,
+            event.locationInWindow.y - down.locationInWindow.y)
         guard distance >= 4 else { return }
         mouseDownEvent = nil
         pointerState?.timing.reset()
         let writer = NSPasteboardItem()
-        writer.setData(workspace.documentDragData(dragPaths),
-                       forType: NSPasteboard.PasteboardType(UTType.silkwebMove.identifier))
+        writer.setData(
+            workspace.documentDragData(dragPaths),
+            forType: NSPasteboard.PasteboardType(UTType.silkwebMove.identifier))
         let item = NSDraggingItem(pasteboardWriter: writer)
         let title = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
         let label = NSTextField(labelWithString: dragPaths.count > 1 ? "\(dragPaths.count) Documents" : title)
@@ -145,8 +149,11 @@ final class DocumentRowClickView: NSView, NSDraggingSource {
         let image = NSImage(size: size, flipped: false) { rect in
             NSColor.controlBackgroundColor.setFill()
             NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
-            label.stringValue.draw(at: NSPoint(x: 12, y: 9), withAttributes: [
-                .font: label.font!, .foregroundColor: NSColor.labelColor])
+            label.stringValue.draw(
+                at: NSPoint(x: 12, y: 9),
+                withAttributes: [
+                    .font: label.font!, .foregroundColor: NSColor.labelColor,
+                ])
             return true
         }
         let location = convert(event.locationInWindow, from: nil)
@@ -161,21 +168,29 @@ final class DocumentRowClickView: NSView, NSDraggingSource {
     override func mouseUp(with event: NSEvent) {
         guard let down = mouseDownEvent, let workspace else { return }
         mouseDownEvent = nil
-        guard clickBounds.contains(convert(event.locationInWindow, from: nil)) else { pointerState?.timing.reset(); return }
+        guard clickBounds.contains(convert(event.locationInWindow, from: nil)) else {
+            pointerState?.timing.reset(); return
+        }
         let hasModifiers = !down.modifierFlags.intersection([.command, .shift, .control, .option]).isEmpty
         let selection = DocumentPointerSelection.selection(
             path: path, orderedPaths: workspace.documents.map(\.relativePath),
             selected: workspace.session.selectedDocuments, anchor: pointerState?.anchor,
             extendRange: down.modifierFlags.contains(.shift), toggle: down.modifierFlags.contains(.command))
         if !down.modifierFlags.contains(.shift) { pointerState?.anchor = path }
-        if down.clickCount == 2, !hasModifiers { workspace.openSelectionInNewTab(path) }
-        else if !selectedOnPress { select(selection, in: workspace) }
-        if pointerState?.timing.click(path: path, timestamp: down.timestamp, clickCount: down.clickCount,
-                        wasSingleSelected: wasSingleSelected, isSingleSelected: selection == [path],
-                        hasModifiers: hasModifiers) == true {
+        if down.clickCount == 2, !hasModifiers {
+            workspace.openSelectionInNewTab(path)
+        } else if !selectedOnPress {
+            select(selection, in: workspace)
+        }
+        if pointerState?.timing.click(
+            path: path, timestamp: down.timestamp, clickCount: down.clickCount,
+            wasSingleSelected: wasSingleSelected, isSingleSelected: selection == [path],
+            hasModifiers: hasModifiers) == true
+        {
             let work = DispatchWorkItem { [weak window, weak workspace, weak pointerState, path] in
                 guard pointerState != nil, window?.contentView != nil, let workspace,
-                      workspace.session.selectedDocuments == [path], workspace.rename == nil else { return }
+                    workspace.session.selectedDocuments == [path], workspace.rename == nil
+                else { return }
                 workspace.beginRename(LibraryRename(path: path, isFolder: false))
             }
             pointerState?.renameWork = work
@@ -185,7 +200,9 @@ final class DocumentRowClickView: NSView, NSDraggingSource {
 
     override func menu(for event: NSEvent) -> NSMenu? { nativeTable?.menu(for: event) }
 
-    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext)
+        -> NSDragOperation
+    {
         context == .withinApplication ? .move : []
     }
 }

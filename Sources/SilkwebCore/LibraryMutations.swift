@@ -1,6 +1,6 @@
-import Foundation
-import Darwin
 import CryptoKit
+import Darwin
+import Foundation
 
 public enum LibraryNameFailure: Equatable, Sendable {
     case empty, separator, leadingPeriod, tooLong, controlCharacter
@@ -35,7 +35,8 @@ public enum LibraryMutationError: Error, Equatable, LocalizedError {
         case .outsideRoot: return "Silkweb can only move items within this library."
         case .sourceVanished(let name): return "“\(name)” no longer exists."
         case let .filesystemFailure(name, operation, _): return "“\(name)” couldn’t be \(operation)."
-        case .unsupportedItem(let path): return "“\((path as NSString).lastPathComponent)” isn’t a folder or Markdown document."
+        case .unsupportedItem(let path):
+            return "“\((path as NSString).lastPathComponent)” isn’t a folder or Markdown document."
         case .rollbackFailed: return "The change couldn’t be rolled back."
         }
     }
@@ -45,7 +46,8 @@ public enum LibraryMutationError: Error, Equatable, LocalizedError {
         case .libraryRoot: return "Use Finder to rename the library folder."
         case .sourceVanished: return "It may have been moved or deleted in Finder."
         case .filesystemFailure(_, _, let reason): return reason
-        case let .rollbackFailed(original, current): return "The item is preserved at “\(current)”. Its original location was “\(original)”."
+        case let .rollbackFailed(original, current):
+            return "The item is preserved at “\(current)”. Its original location was “\(original)”."
         default: return nil
         }
     }
@@ -114,7 +116,9 @@ public actor LibraryMutations {
             let (metadata, _) = try LibraryMetadataStore.load(root: root)
             // mkdir is exclusive, including when the existing item is a file or symlink.
             guard mkdir(destination.path, 0o755) == 0 else { throw operationError(path, isFolder: true) }
-            let changes = LibraryChangeSet(changes: [LibraryPathChange(id: UUID(), oldPath: nil, newPath: path, isFolder: true)])
+            let changes = LibraryChangeSet(changes: [
+                LibraryPathChange(id: UUID(), oldPath: nil, newPath: path, isFolder: true)
+            ])
             try persist(changes, metadata: metadata, original: nil, current: destination)
             return changes
         }
@@ -127,8 +131,7 @@ public actor LibraryMutations {
         guard rmdir(source.path) == 0 else { throw operationError(path, isFolder: true) }
         var updated = metadata
         updated.IDsByPath.removeValue(forKey: path)
-        do { try LibraryMetadataStore.save(updated, root: root) }
-        catch {
+        do { try LibraryMetadataStore.save(updated, root: root) } catch {
             // Restore the empty folder if its index could not be committed.
             guard mkdir(source.path, 0o755) == 0 else {
                 throw LibraryMutationError.rollbackFailed(original: path, current: path)
@@ -137,7 +140,9 @@ public actor LibraryMutations {
         }
     }
 
-    public func createDocument(named name: String, in parentPath: String = "", text: String = "") throws -> LibraryChangeSet {
+    public func createDocument(named name: String, in parentPath: String = "", text: String = "") throws
+        -> LibraryChangeSet
+    {
         let name = try Self.validateName(name)
         return try perform(operation: "created", name: LibraryMutationError.displayName(name)) {
             guard ["md", "markdown"].contains((name as NSString).pathExtension.lowercased()) else {
@@ -152,7 +157,9 @@ public actor LibraryMutations {
             defer { try? FileManager.default.removeItem(at: staging) }
             try Data(text.utf8).write(to: staging, options: .withoutOverwriting)
             try exclusiveRename(staging, destination, path: path)
-            let changes = LibraryChangeSet(changes: [LibraryPathChange(id: UUID(), oldPath: nil, newPath: path, isFolder: false)])
+            let changes = LibraryChangeSet(changes: [
+                LibraryPathChange(id: UUID(), oldPath: nil, newPath: path, isFolder: false)
+            ])
             try persist(changes, metadata: metadata, original: nil, current: destination)
             return changes
         }
@@ -160,7 +167,8 @@ public actor LibraryMutations {
 
     /// Renames rewrite incoming links in the same transaction as batch moves.
     public func rename(_ path: String, to name: String) throws -> LibraryChangeSet {
-        try perform(operation: "renamed", name: LibraryMutationError.displayName((path as NSString).lastPathComponent)) {
+        try perform(operation: "renamed", name: LibraryMutationError.displayName((path as NSString).lastPathComponent))
+        {
             try executeMove(planRename(path, to: name))
         }
     }
@@ -168,7 +176,9 @@ public actor LibraryMutations {
     /// The staged rename for the app: `executeMove` commits it and `reversed` is the exact undo.
     public func planRename(_ path: String, to name: String) throws -> MovePlan {
         let name = try Self.validateRenameTarget(name, for: path)
-        return try perform(operation: "renamed", name: LibraryMutationError.displayName((path as NSString).lastPathComponent)) {
+        return try perform(
+            operation: "renamed", name: LibraryMutationError.displayName((path as NSString).lastPathComponent)
+        ) {
             try stageRename(path, name: name)
         }
     }
@@ -176,7 +186,9 @@ public actor LibraryMutations {
     /// Used by Undo Rename when the exact undo is stale: the previous name came from disk and may
     /// predate the rules for new names (e.g. "Meeting 10:04.md"), so it gets structural checks only.
     public func restoreName(_ path: String, to name: String) throws -> LibraryChangeSet {
-        return try perform(operation: "renamed", name: LibraryMutationError.displayName((path as NSString).lastPathComponent)) {
+        return try perform(
+            operation: "renamed", name: LibraryMutationError.displayName((path as NSString).lastPathComponent)
+        ) {
             try Self.validateExistingComponent(name)
             return try executeMove(stageRename(path, name: name))
         }
@@ -187,7 +199,10 @@ public actor LibraryMutations {
         let source = try item(path)
         let values = try source.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
         let isFolder = values.isDirectory == true
-        guard isFolder || (values.isRegularFile == true && ["md", "markdown"].contains(source.pathExtension.lowercased())) else {
+        guard
+            isFolder
+                || (values.isRegularFile == true && ["md", "markdown"].contains(source.pathExtension.lowercased()))
+        else {
             throw LibraryMutationError.unsupportedItem(path)
         }
         if !isFolder && !["md", "markdown"].contains((name as NSString).pathExtension.lowercased()) {
@@ -195,7 +210,13 @@ public actor LibraryMutations {
         }
         let newPath = joined(components.dropLast().joined(separator: "/"), name)
         let (metadata, _) = try LibraryMetadataStore.load(root: root)
-        let changes = path == newPath ? [] : [LibraryPathChange(id: metadata.IDsByPath[path] ?? UUID(), oldPath: path, newPath: newPath, isFolder: isFolder)]
+        let changes =
+            path == newPath
+            ? []
+            : [
+                LibraryPathChange(
+                    id: metadata.IDsByPath[path] ?? UUID(), oldPath: path, newPath: newPath, isFolder: isFolder)
+            ]
         return try stage(LibraryChangeSet(changes: changes), metadata: metadata, collisions: [])
     }
 
@@ -212,11 +233,14 @@ public actor LibraryMutations {
         guard try entryExists(destination), source.path != destination.path else { return }
         let names = try FileManager.default.contentsOfDirectory(atPath: parent.path)
         if !names.contains(name), try sameItem(source, destination) { return }
-        throw LibraryMutationError.collision(path: destination.path, isFolder: isFolder, folderName: parent.lastPathComponent)
+        throw LibraryMutationError.collision(
+            path: destination.path, isFolder: isFolder, folderName: parent.lastPathComponent)
     }
 
     public func move(_ path: String, toFolder parentPath: String) throws -> LibraryChangeSet {
-        return try perform(operation: "moved", name: LibraryMutationError.displayName((path as NSString).lastPathComponent)) {
+        return try perform(
+            operation: "moved", name: LibraryMutationError.displayName((path as NSString).lastPathComponent)
+        ) {
             let components = try Self.components(path, allowRoot: false)
             return try relocate(path, parentPath: parentPath, name: String(components.last!))
         }
@@ -242,7 +266,8 @@ public actor LibraryMutations {
     /// index) are never library items and stay off-limits.
     static func validateExistingComponent(_ name: String) throws {
         guard !name.isEmpty, name != ".", name != "..", !name.hasPrefix("."),
-              !name.contains("/"), !name.unicodeScalars.contains(Unicode.Scalar(0)) else {
+            !name.contains("/"), !name.unicodeScalars.contains(Unicode.Scalar(0))
+        else {
             throw LibraryError.invalidRelativePath
         }
     }
@@ -259,7 +284,9 @@ public actor LibraryMutations {
     public static func renameFilename(_ input: String, for path: String, isFolder: Bool) throws -> String {
         let current = (path as NSString).lastPathComponent
         let currentBase = isFolder ? current : (current as NSString).deletingPathExtension
-        if input.trimmingCharacters(in: .whitespacesAndNewlines) == currentBase, (try? validateExistingComponent(current)) != nil {
+        if input.trimmingCharacters(in: .whitespacesAndNewlines) == currentBase,
+            (try? validateExistingComponent(current)) != nil
+        {
             return current
         }
         let base = try validateName(input)
@@ -288,24 +315,29 @@ public actor LibraryMutations {
         do {
             _ = try FileManager.default.attributesOfItem(atPath: url.path)
             return true
-        } catch let error as NSError where error.domain == NSCocoaErrorDomain
-            && (error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError) {
+        } catch let error as NSError
+            where error.domain == NSCocoaErrorDomain
+            && (error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError)
+        {
             return false
         }
     }
 
     private func perform<T>(operation: String, name: String, body: () throws -> T) throws -> T {
-        do { return try body() }
-        catch let error as LibraryMutationError { throw error }
-        catch LibraryError.invalidRelativePath { throw LibraryMutationError.outsideRoot }
-        catch LibraryError.symbolicLink { throw LibraryMutationError.outsideRoot }
-        catch {
+        do { return try body() } catch let error as LibraryMutationError { throw error } catch LibraryError
+            .invalidRelativePath
+        { throw LibraryMutationError.outsideRoot } catch LibraryError.symbolicLink {
+            throw LibraryMutationError.outsideRoot
+        } catch {
             let underlying = error as NSError
-            if (underlying.domain == NSCocoaErrorDomain && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(underlying.code))
-                || (underlying.domain == NSPOSIXErrorDomain && underlying.code == Int(ENOENT)) {
+            if (underlying.domain == NSCocoaErrorDomain
+                && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(underlying.code))
+                || (underlying.domain == NSPOSIXErrorDomain && underlying.code == Int(ENOENT))
+            {
                 throw LibraryMutationError.sourceVanished(name)
             }
-            throw LibraryMutationError.filesystemFailure(name: name, operation: operation, reason: underlying.localizedDescription)
+            throw LibraryMutationError.filesystemFailure(
+                name: name, operation: operation, reason: underlying.localizedDescription)
         }
     }
 
@@ -344,7 +376,10 @@ public actor LibraryMutations {
         let source = try item(path)
         let values = try source.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
         let isFolder = values.isDirectory == true
-        guard isFolder || (values.isRegularFile == true && ["md", "markdown"].contains(source.pathExtension.lowercased())) else {
+        guard
+            isFolder
+                || (values.isRegularFile == true && ["md", "markdown"].contains(source.pathExtension.lowercased()))
+        else {
             throw LibraryMutationError.unsupportedItem(path)
         }
         if !isFolder && !["md", "markdown"].contains((name as NSString).pathExtension.lowercased()) {
@@ -365,7 +400,10 @@ public actor LibraryMutations {
         let destination = parent.appendingPathComponent(name)
         let (metadata, _) = try LibraryMetadataStore.load(root: root)
         try relocateOnDisk(source, destination, oldPath: path, newPath: newPath)
-        let changes = LibraryChangeSet(changes: [LibraryPathChange(id: metadata.IDsByPath[path] ?? UUID(), oldPath: path, newPath: newPath, isFolder: isFolder)])
+        let changes = LibraryChangeSet(changes: [
+            LibraryPathChange(
+                id: metadata.IDsByPath[path] ?? UUID(), oldPath: path, newPath: newPath, isFolder: isFolder)
+        ])
         try persist(changes, metadata: metadata, original: source, current: destination)
         return changes
     }
@@ -375,13 +413,15 @@ public actor LibraryMutations {
         // when the destination spelling does not already have a directory entry;
         // distinct hard links must still be treated as collisions.
         if try caseAlias(source, destination) {
-            let staging = source.deletingLastPathComponent().appendingPathComponent(".silkweb-rename-\(UUID().uuidString)")
+            let staging = source.deletingLastPathComponent().appendingPathComponent(
+                ".silkweb-rename-\(UUID().uuidString)")
             try exclusiveRename(source, staging, path: oldPath)
             do {
                 try exclusiveRename(staging, destination, path: newPath)
             } catch {
-                do { try exclusiveRename(staging, source, path: oldPath) }
-                catch { throw LibraryMutationError.rollbackFailed(original: oldPath, current: staging.path) }
+                do { try exclusiveRename(staging, source, path: oldPath) } catch {
+                    throw LibraryMutationError.rollbackFailed(original: oldPath, current: staging.path)
+                }
                 throw error
             }
         } else {
@@ -436,7 +476,8 @@ public actor LibraryMutations {
         let code = errno
         if code == EEXIST {
             let parent = (path as NSString).deletingLastPathComponent
-            return LibraryMutationError.collision(path: path, isFolder: isFolder,
+            return LibraryMutationError.collision(
+                path: path, isFolder: isFolder,
                 folderName: parent.isEmpty ? root.lastPathComponent : (parent as NSString).lastPathComponent)
         }
         return NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [NSFilePathErrorKey: path])
@@ -469,7 +510,10 @@ extension LibraryMutations {
             let source = try item(path)
             let values = try source.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
             let folder = values.isDirectory == true
-            guard folder || (values.isRegularFile == true && ["md", "markdown"].contains(source.pathExtension.lowercased())) else {
+            guard
+                folder
+                    || (values.isRegularFile == true && ["md", "markdown"].contains(source.pathExtension.lowercased()))
+            else {
                 throw LibraryMutationError.unsupportedItem(path)
             }
             if folder {
@@ -487,7 +531,8 @@ extension LibraryMutations {
             let stem = ext.isEmpty ? base : (base as NSString).deletingPathExtension
             var number = 2
             func occupied(_ name: String) throws -> Bool {
-                try entryExists(parent.appendingPathComponent(name)) || reserved.contains(name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil))
+                try entryExists(parent.appendingPathComponent(name))
+                    || reserved.contains(name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil))
             }
             if try occupied(name) {
                 collisions.append(path)
@@ -500,20 +545,28 @@ extension LibraryMutations {
                 }
             }
             reserved.insert(name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil))
-            changes.append(LibraryPathChange(id: metadata.IDsByPath[path] ?? UUID(), oldPath: path,
-                                            newPath: joined(destination, name), isFolder: folder))
+            changes.append(
+                LibraryPathChange(
+                    id: metadata.IDsByPath[path] ?? UUID(), oldPath: path,
+                    newPath: joined(destination, name), isFolder: folder))
         }
         return try stage(LibraryChangeSet(changes: changes), metadata: metadata, collisions: collisions)
     }
 
     /// Reads every linking document and stages its rewrite for an immutable plan.
-    private func stage(_ changeSet: LibraryChangeSet, metadata: LibraryMetadata, collisions: [String]) throws -> MovePlan {
+    private func stage(_ changeSet: LibraryChangeSet, metadata: LibraryMetadata, collisions: [String]) throws
+        -> MovePlan
+    {
         let contents = try moveInventory()
         let inventory = contents.managed
-        let caseSensitive = try root.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]).volumeSupportsCaseSensitiveNames == true
+        let caseSensitive =
+            try root.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]).volumeSupportsCaseSensitiveNames
+            == true
         var canonicalPaths: [String: String] = [:]
         if !caseSensitive {
-            for path in contents.linkTargets { canonicalPaths[path.precomposedStringWithCanonicalMapping.lowercased()] = path }
+            for path in contents.linkTargets {
+                canonicalPaths[path.precomposedStringWithCanonicalMapping.lowercased()] = path
+            }
         }
         var before: [String: Data] = [:]
         var after: [String: Data] = [:]
@@ -526,7 +579,9 @@ extension LibraryMutations {
             let attributes = try FileManager.default.attributesOfItem(atPath: candidate.path)
             if attributes[.type] as? FileAttributeType == .typeSymbolicLink {
                 if changeSet.remapping(path) != path {
-                    unsupported.append(UnsupportedMarkdownLink(document: path, syntax: "Symbolic link destination is preserved as written."))
+                    unsupported.append(
+                        UnsupportedMarkdownLink(
+                            document: path, syntax: "Symbolic link destination is preserved as written."))
                 }
                 continue
             }
@@ -534,45 +589,59 @@ extension LibraryMutations {
             let url = try item(path)
             guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { continue }
             let data: Data
-            do { data = try Data(contentsOf: url) }
-            catch {
+            do { data = try Data(contentsOf: url) } catch {
                 unreadableDocuments[path] = UnreadableMoveDocument(attributes: attributes)
-                unsupported.append(UnsupportedMarkdownLink(document: path, syntax: "This document couldn’t be read. Its links can’t be checked and will stay as written."))
+                unsupported.append(
+                    UnsupportedMarkdownLink(
+                        document: path,
+                        syntax: "This document couldn’t be read. Its links can’t be checked and will stay as written."))
                 continue
             }
             fingerprints[path] = Data(SHA256.hash(data: data))
             newFingerprints[path] = fingerprints[path]
             guard let text = String(data: data, encoding: .utf8) else {
-                unsupported.append(UnsupportedMarkdownLink(document: path, syntax: "This document isn’t UTF-8. Its links can’t be checked and will stay as written."))
+                unsupported.append(
+                    UnsupportedMarkdownLink(
+                        document: path,
+                        syntax: "This document isn’t UTF-8. Its links can’t be checked and will stay as written."))
                 continue
             }
-            let result = MarkdownDestinations.rewrite(text, source: path, changes: changeSet, canonicalPaths: canonicalPaths)
+            let result = MarkdownDestinations.rewrite(
+                text, source: path, changes: changeSet, canonicalPaths: canonicalPaths)
             if result.text != text {
                 before[path] = data
                 let rewritten = Data(result.text.utf8)
                 after[path] = rewritten
                 newFingerprints[path] = Data(SHA256.hash(data: rewritten))
-            } else { newFingerprints[path] = fingerprints[path] }
+            } else {
+                newFingerprints[path] = fingerprints[path]
+            }
             unsupported += result.unsupported.map { UnsupportedMarkdownLink(document: path, syntax: $0) }
         }
-        return MovePlan(root: root, changes: changeSet, unsupportedLinks: unsupported, collisions: collisions,
-                        metadata: metadata, before: before, after: after, fingerprints: fingerprints, newFingerprints: newFingerprints,
-                        unreadableDocuments: unreadableDocuments, inventory: inventory)
+        return MovePlan(
+            root: root, changes: changeSet, unsupportedLinks: unsupported, collisions: collisions,
+            metadata: metadata, before: before, after: after, fingerprints: fingerprints,
+            newFingerprints: newFingerprints,
+            unreadableDocuments: unreadableDocuments, inventory: inventory)
     }
 
     /// One commit point for the index; on any error restore rewritten bodies and
     /// reverse all completed renames. An immutable plan also supplies guarded undo.
     public func executeMove(_ plan: MovePlan) throws -> LibraryChangeSet {
         guard plan.root == root, try moveInventory().managed == plan.inventory,
-              try LibraryMetadataStore.load(root: root).0 == plan.metadata else { throw MovePlanError.changed }
+            try LibraryMetadataStore.load(root: root).0 == plan.metadata
+        else { throw MovePlanError.changed }
         for (path, fingerprint) in plan.fingerprints {
-            guard try Data(SHA256.hash(data: Data(contentsOf: item(path)))) == fingerprint else { throw MovePlanError.changed }
+            guard try Data(SHA256.hash(data: Data(contentsOf: item(path)))) == fingerprint else {
+                throw MovePlanError.changed
+            }
         }
         for (path, snapshot) in plan.unreadableDocuments {
             let url = try item(path)
             let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
             guard UnreadableMoveDocument(attributes: attributes) == snapshot,
-                  (try? Data(contentsOf: url)) == nil else { throw MovePlanError.changed }
+                (try? Data(contentsOf: url)) == nil
+            else { throw MovePlanError.changed }
         }
         // Revalidate destinations on the real volume before touching any body.
         for change in plan.changes.changes {
@@ -581,8 +650,9 @@ extension LibraryMutations {
             let target = try directory((change.newPath as NSString).deletingLastPathComponent)
                 .appendingPathComponent((change.newPath as NSString).lastPathComponent)
             guard try !entryExists(target) || caseAlias(source, target) else {
-                throw LibraryMutationError.collision(path: change.newPath, isFolder: change.isFolder,
-                                                     folderName: target.deletingLastPathComponent().lastPathComponent)
+                throw LibraryMutationError.collision(
+                    path: change.newPath, isFolder: change.isFolder,
+                    folderName: target.deletingLastPathComponent().lastPathComponent)
             }
         }
         var rewritten: [String] = []
@@ -594,8 +664,10 @@ extension LibraryMutations {
             }
             for change in plan.changes.changes {
                 let parent = try directory((change.newPath as NSString).deletingLastPathComponent)
-                try relocateOnDisk(item(change.oldPath!), parent.appendingPathComponent((change.newPath as NSString).lastPathComponent),
-                                   oldPath: change.oldPath!, newPath: change.newPath)
+                try relocateOnDisk(
+                    item(change.oldPath!),
+                    parent.appendingPathComponent((change.newPath as NSString).lastPathComponent),
+                    oldPath: change.oldPath!, newPath: change.newPath)
                 moved.append(change)
             }
             try LibraryMetadataStore.save(plan.changes.applying(to: plan.metadata), root: root)
@@ -606,21 +678,24 @@ extension LibraryMutations {
             for change in moved.reversed() {
                 do {
                     let parent = try directory((change.oldPath! as NSString).deletingLastPathComponent)
-                    try relocateOnDisk(item(change.newPath), parent.appendingPathComponent((change.oldPath! as NSString).lastPathComponent),
-                                       oldPath: change.newPath, newPath: change.oldPath!)
-                }
-                catch { rollbackError = error }
+                    try relocateOnDisk(
+                        item(change.newPath),
+                        parent.appendingPathComponent((change.oldPath! as NSString).lastPathComponent),
+                        oldPath: change.newPath, newPath: change.oldPath!)
+                } catch { rollbackError = error }
             }
             for path in rewritten {
                 // If a reverse rename failed, restore text wherever it survived.
-                let current = LibraryChangeSet(changes: moved.filter {
-                    !FileManager.default.fileExists(atPath: root.appendingPathComponent($0.oldPath!).path)
-                }).remapping(path)
-                do { try plan.before[path]!.write(to: item(current), options: .atomic) }
-                catch { rollbackError = error }
+                let current = LibraryChangeSet(
+                    changes: moved.filter {
+                        !FileManager.default.fileExists(atPath: root.appendingPathComponent($0.oldPath!).path)
+                    }
+                ).remapping(path)
+                do { try plan.before[path]!.write(to: item(current), options: .atomic) } catch { rollbackError = error }
             }
             if let rollbackError {
-                throw LibraryMutationError.rollbackFailed(original: originalError.localizedDescription, current: rollbackError.localizedDescription)
+                throw LibraryMutationError.rollbackFailed(
+                    original: originalError.localizedDescription, current: rollbackError.localizedDescription)
             }
             throw originalError
         }
@@ -632,7 +707,9 @@ extension LibraryMutations {
         var pending = [(url: root, path: "", assets: false)]
         let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .isHiddenKey]
         while let parent = pending.popLast() {
-            for url in try FileManager.default.contentsOfDirectory(at: parent.url, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles]) {
+            for url in try FileManager.default.contentsOfDirectory(
+                at: parent.url, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles])
+            {
                 let values = try url.resourceValues(forKeys: keys)
                 guard values.isHidden != true, !url.lastPathComponent.hasPrefix(".") else { continue }
                 let path = joined(parent.path, url.lastPathComponent)

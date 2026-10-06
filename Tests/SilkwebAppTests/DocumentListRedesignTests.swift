@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 /// silkweb-1.64: Direction A document list rows in the real `DocumentList` hierarchy, offscreen.
@@ -32,7 +33,8 @@ final class DocumentListRedesignTests: XCTestCase {
         let workspace: LibraryWorkspace
     }
 
-    static let longBody = "The fog burned off around nine. I made coffee on the tailgate with the little stove and watched the valley wake up below the ridge while the dog slept in the shade of the van."
+    static let longBody =
+        "The fog burned off around nine. I made coffee on the tailgate with the little stove and watched the valley wake up below the ridge while the dog slept in the shade of the van."
 
     @MainActor
     private func fixture(extra: [String: String] = [:]) async throws -> Fixture {
@@ -44,14 +46,16 @@ final class DocumentListRedesignTests: XCTestCase {
             "Vanlife/Blank.md": "",
             "Travel/Lisbon.md": "# Lisbon\n\nTiles.",
             "Travel/Japan/Kyoto.md": "# Kyoto\n\nTemples.",
-            "Root Note.md": "# Root Note\n\nAt the top."
+            "Root Note.md": "# Root Note\n\nAt the top.",
         ].merging(extra) { $1 }
         for (path, text) in files {
             let url = root.appendingPathComponent(path)
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data(text.utf8).write(to: url)
         }
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Empty"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Empty"), withIntermediateDirectories: true)
         let defaults = disposableDefaults("ListRedesign")
         addTeardownBlock {
             try? FileManager.default.removeItem(at: root)
@@ -68,7 +72,9 @@ final class DocumentListRedesignTests: XCTestCase {
     private func settle(_ view: NSView, rounds: Int = 6) async throws {
         for _ in 0..<rounds {
             view.layoutSubtreeIfNeeded()
-            for table in Self.descendants(view).compactMap({ $0 as? DocumentTableView }) { table.layoutSubtreeIfNeeded() }
+            for table in Self.descendants(view).compactMap({ $0 as? DocumentTableView }) {
+                table.layoutSubtreeIfNeeded()
+            }
             try await Task.sleep(for: .milliseconds(30))
         }
     }
@@ -77,12 +83,15 @@ final class DocumentListRedesignTests: XCTestCase {
     /// `settle`'s fixed rounds. Waits until the laid-out table shows the workspace's rows with `target` selected
     /// (and on screen when `visible`).
     @MainActor
-    private func waitForList(_ host: NSView, _ workspace: LibraryWorkspace, selecting target: String, visible: Bool = false,
-                             _ step: String) async throws {
+    private func waitForList(
+        _ host: NSView, _ workspace: LibraryWorkspace, selecting target: String, visible: Bool = false,
+        _ step: String
+    ) async throws {
         try await waitUntil("\(step): table shows \(workspace.documents.count) rows with \(target) selected") {
             host.layoutSubtreeIfNeeded()
             guard let table = Self.descendants(host).compactMap({ $0 as? DocumentTableView }).first,
-                  let row = workspace.documents.firstIndex(where: { $0.relativePath == target }) else { return false }
+                let row = workspace.documents.firstIndex(where: { $0.relativePath == target })
+            else { return false }
             return table.numberOfRows == workspace.documents.count && table.selectedRowIndexes == IndexSet(integer: row)
                 && table.visibleRect.height >= 96 && (!visible || table.visibleRect.intersects(table.rect(ofRow: row)))
         }
@@ -95,7 +104,8 @@ final class DocumentListRedesignTests: XCTestCase {
 
     @MainActor
     private func cell(_ table: NSTableView, _ row: Int) throws -> NSHostingView<DocumentRow> {
-        try XCTUnwrap(table.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSHostingView<DocumentRow>, "row \(row)")
+        try XCTUnwrap(
+            table.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSHostingView<DocumentRow>, "row \(row)")
     }
 
     // MARK: Pixels
@@ -141,7 +151,9 @@ final class DocumentListRedesignTests: XCTestCase {
         }
 
         static func distance(_ a: NSColor, _ b: NSColor) -> CGFloat {
-            max(abs(a.redComponent - b.redComponent), abs(a.greenComponent - b.greenComponent), abs(a.blueComponent - b.blueComponent))
+            max(
+                abs(a.redComponent - b.redComponent), abs(a.greenComponent - b.greenComponent),
+                abs(a.blueComponent - b.blueComponent))
         }
     }
 
@@ -175,12 +187,15 @@ final class DocumentListRedesignTests: XCTestCase {
         let workspace = fixture.workspace
         workspace.session.selectedDocuments = ["Vanlife/Settling In.md"]
         let frames = Frames()
-        let host = NSHostingView(rootView: measured(DocumentList(workspace: workspace)
-            .frame(maxWidth: .infinity, maxHeight: .infinity), frames: frames))
+        let host = NSHostingView(
+            rootView: measured(
+                DocumentList(workspace: workspace)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity), frames: frames))
         host.sizingOptions = []
         for appearance in [NSAppearance.Name.aqua, .darkAqua] {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 600),
-                                  styleMask: [.titled], backing: .buffered, defer: false)
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 320, height: 600),
+                styleMask: [.titled], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.appearance = NSAppearance(named: appearance)
             window.contentView = host // Never ordered on screen.
@@ -192,7 +207,9 @@ final class DocumentListRedesignTests: XCTestCase {
             try await settle(host)
             let table = try table(in: host)
             let coordinator = try XCTUnwrap(table.delegate as? DocumentTable.Coordinator)
-            let titles = workspace.documents.map { URL(fileURLWithPath: $0.name).deletingPathExtension().lastPathComponent }
+            let titles = workspace.documents.map {
+                URL(fileURLWithPath: $0.name).deletingPathExtension().lastPathComponent
+            }
             XCTAssertEqual(Set(titles), ["Settling In", "Short", "Blank"])
 
             // Fixed 96 pt rhythm keeps 10k rows virtualized; no per-row height queries.
@@ -223,22 +240,34 @@ final class DocumentListRedesignTests: XCTestCase {
                 let label = "\(appearance.rawValue) row \(titles[row])"
                 XCTAssertGreaterThan(bitmap.ink(in: band(row, 12, 29), against: background), 20, "\(label): title line")
                 XCTAssertGreaterThan(bitmap.ink(in: band(row, 32, 47), against: background), 10, "\(label): date line")
-                XCTAssertGreaterThan(bitmap.ink(in: band(row, 50, 66), against: background), 10, "\(label): excerpt line 1")
+                XCTAssertGreaterThan(
+                    bitmap.ink(in: band(row, 50, 66), against: background), 10, "\(label): excerpt line 1")
                 let second = bitmap.ink(in: band(row, 67, 84), against: background)
-                if row == selected { XCTAssertGreaterThan(second, 10, "\(label): excerpt wraps to a second line") }
-                else { XCTAssertEqual(second, 0, "\(label): short excerpt keeps one line, row keeps its height") }
-                XCTAssertEqual(bitmap.ink(in: band(row, 85, 95), against: background), 0, "\(label): no third excerpt line")
+                if row == selected {
+                    XCTAssertGreaterThan(second, 10, "\(label): excerpt wraps to a second line")
+                } else {
+                    XCTAssertEqual(second, 0, "\(label): short excerpt keeps one line, row keeps its height")
+                }
+                XCTAssertEqual(
+                    bitmap.ink(in: band(row, 85, 95), against: background), 0, "\(label): no third excerpt line")
                 // Text sits 12 pt inside the capsule, which is 10 pt from the table edges.
-                let firstInk = try XCTUnwrap(bitmap.firstInkX(in: band(row, 12, 29).offsetBy(dx: -16, dy: 0), against: background))
+                let firstInk = try XCTUnwrap(
+                    bitmap.firstInkX(in: band(row, 12, 29).offsetBy(dx: -16, dy: 0), against: background))
                 XCTAssertEqual(firstInk - rect.minX, Spacing.capsuleInset + 12, accuracy: 2.5, label)
             }
             // Capsule selection: R1 fill inside the selected row, 2 pt pane gap between rows, plain rows unfilled.
             let selectedRect = table.rect(ofRow: selected)
-            XCTAssertLessThan(Bitmap.distance(bitmap.color(NSPoint(x: selectedRect.minX + 14, y: selectedRect.minY + 6)), capsuleFill), 0.03)
-            XCTAssertLessThan(Bitmap.distance(bitmap.color(NSPoint(x: selectedRect.minX + 14, y: selectedRect.minY + 0.25)), pane), 0.03)
-            XCTAssertLessThan(Bitmap.distance(bitmap.color(NSPoint(x: selectedRect.minX + 4, y: selectedRect.midY)), pane), 0.03)
+            XCTAssertLessThan(
+                Bitmap.distance(
+                    bitmap.color(NSPoint(x: selectedRect.minX + 14, y: selectedRect.minY + 6)), capsuleFill), 0.03)
+            XCTAssertLessThan(
+                Bitmap.distance(bitmap.color(NSPoint(x: selectedRect.minX + 14, y: selectedRect.minY + 0.25)), pane),
+                0.03)
+            XCTAssertLessThan(
+                Bitmap.distance(bitmap.color(NSPoint(x: selectedRect.minX + 4, y: selectedRect.midY)), pane), 0.03)
             let shortRect = table.rect(ofRow: short)
-            XCTAssertLessThan(Bitmap.distance(bitmap.color(NSPoint(x: shortRect.minX + 14, y: shortRect.minY + 6)), pane), 0.03)
+            XCTAssertLessThan(
+                Bitmap.distance(bitmap.color(NSPoint(x: shortRect.minX + 14, y: shortRect.minY + 6)), pane), 0.03)
             // Empty documents read “No additional text” in a quieter ink than real excerpts.
             XCTAssertGreaterThan(bitmap.ink(in: band(blank, 50, 66), against: pane), 10)
 
@@ -260,8 +289,9 @@ final class DocumentListRedesignTests: XCTestCase {
         let fixture = try await fixture()
         let workspace = fixture.workspace
         let host = NSHostingView(rootView: DocumentList(workspace: workspace))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 900), styleMask: [.borderless],
-                              backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 900), styleMask: [.borderless],
+            backing: .buffered, defer: false)
         window.contentView = host
         defer { window.contentView = nil }
         func locations() async throws -> [String: String?] {
@@ -317,8 +347,9 @@ final class DocumentListRedesignTests: XCTestCase {
         workspace.selectDocuments([target])
         await workspace.waitForNavigation()
         let host = NSHostingView(rootView: DocumentList(workspace: workspace))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 1400), styleMask: [.titled, .resizable],
-                              backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 1400), styleMask: [.titled, .resizable],
+            backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.contentView = nil; window.close() }
@@ -340,13 +371,18 @@ final class DocumentListRedesignTests: XCTestCase {
         try await settle(host)
         XCTAssertTrue(visible(), "fixture: row visible at 1400")
         XCTAssertGreaterThan(table.visibleRect.minY, 0, "fixture must scroll")
-        XCTAssertGreaterThan(table.rect(ofRow: row).minY - table.visibleRect.minY, 560, "fixture: row sits low in the tall pane")
+        XCTAssertGreaterThan(
+            table.rect(ofRow: row).minY - table.visibleRect.minY, 560, "fixture: row sits low in the tall pane")
 
         // Shrinking must not leave the visible selection off-screen; the nudge is minimal, not centring.
         try await resize(560)
-        XCTAssertTrue(visible(), "shrink 1400 → 560: selected row scrolled away: visible \(table.visibleRect), row \(table.rect(ofRow: row))")
+        XCTAssertTrue(
+            visible(),
+            "shrink 1400 → 560: selected row scrolled away: visible \(table.visibleRect), row \(table.rect(ofRow: row))"
+        )
         XCTAssertTrue(table.visibleRect.contains(table.rect(ofRow: row)), "shrink: row fully on screen")
-        XCTAssertLessThan(table.visibleRect.maxY - table.rect(ofRow: row).maxY, table.rowHeight, "shrink: minimal nudge, not centred")
+        XCTAssertLessThan(
+            table.visibleRect.maxY - table.rect(ofRow: row).maxY, table.rowHeight, "shrink: minimal nudge, not centred")
 
         // A height change that keeps the row visible anyway keeps the (top-anchored) scroll origin.
         let origin = table.visibleRect.minY
@@ -361,7 +397,8 @@ final class DocumentListRedesignTests: XCTestCase {
         XCTAssertFalse(visible(), "fixture: selection scrolled away")
         for height: CGFloat in [560, 300, 1400, 560] {
             try await resize(height)
-            XCTAssertFalse(visible(), "height \(height): scrolled-away selection was pulled back: visible \(table.visibleRect)")
+            XCTAssertFalse(
+                visible(), "height \(height): scrolled-away selection was pulled back: visible \(table.visibleRect)")
             XCTAssertEqual(table.visibleRect.minY, top, accuracy: 1, "height \(height): scroll position jumped")
         }
         XCTAssertEqual(workspace.session.selectedDocuments, [target])
@@ -371,7 +408,9 @@ final class DocumentListRedesignTests: XCTestCase {
     @MainActor
     func testFolderSortTagSearchAndResizeKeepSelectionAndScroll() async throws {
         var extra: [String: String] = [:]
-        for index in 0..<60 { extra[String(format: "Many/Note %02d.md", index)] = "# Note \(index)\n\nBody \(index) " + Self.longBody }
+        for index in 0..<60 {
+            extra[String(format: "Many/Note %02d.md", index)] = "# Note \(index)\n\nBody \(index) " + Self.longBody
+        }
         let fixture = try await fixture(extra: extra)
         let workspace = fixture.workspace
         let target = "Many/Note 45.md"
@@ -385,31 +424,41 @@ final class DocumentListRedesignTests: XCTestCase {
         workspace.selectDocuments([target])
         await workspace.waitForNavigation()
         let host = NSHostingView(rootView: DocumentList(workspace: workspace))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 560), styleMask: [.titled, .resizable],
-                              backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 560), styleMask: [.titled, .resizable],
+            backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.contentView = nil; window.close() }
         try await settle(host)
 
-        func assertStable(_ step: String, scrollOrigin: CGFloat? = nil, visible: Bool = true, file: StaticString = #filePath, line: UInt = #line) async throws {
+        func assertStable(
+            _ step: String, scrollOrigin: CGFloat? = nil, visible: Bool = true, file: StaticString = #filePath,
+            line: UInt = #line
+        ) async throws {
             try await waitForList(host, workspace, selecting: target, visible: visible, step)
             let table = try table(in: host)
             XCTAssertEqual(workspace.session.selectedDocuments, [target], step, file: file, line: line)
-            let row = try XCTUnwrap(workspace.documents.firstIndex { $0.relativePath == target }, step, file: file, line: line)
+            let row = try XCTUnwrap(
+                workspace.documents.firstIndex { $0.relativePath == target }, step, file: file, line: line)
             XCTAssertEqual(table.selectedRowIndexes, IndexSet(integer: row), step, file: file, line: line)
             XCTAssertEqual(table.rowHeight, 96, step, file: file, line: line)
             if visible, table.visibleRect.height >= 96 {
-                XCTAssertTrue(table.visibleRect.intersects(table.rect(ofRow: row)),
-                              "\(step): selected row scrolled away: visible \(table.visibleRect), row \(table.rect(ofRow: row)), host \(host.frame)", file: file, line: line)
+                XCTAssertTrue(
+                    table.visibleRect.intersects(table.rect(ofRow: row)),
+                    "\(step): selected row scrolled away: visible \(table.visibleRect), row \(table.rect(ofRow: row)), host \(host.frame)",
+                    file: file, line: line)
             }
             if let scrollOrigin {
-                XCTAssertEqual(table.visibleRect.minY, scrollOrigin, accuracy: 1, "\(step): scroll position jumped", file: file, line: line)
+                XCTAssertEqual(
+                    table.visibleRect.minY, scrollOrigin, accuracy: 1, "\(step): scroll position jumped", file: file,
+                    line: line)
             }
         }
         // Bring the selection into view the way a click or navigation does, once the table has its rows.
         try await waitForList(host, workspace, selecting: target, "fixture")
-        try table(in: host).scrollRowToVisible(try XCTUnwrap(workspace.documents.firstIndex { $0.relativePath == target }))
+        try table(in: host).scrollRowToVisible(
+            try XCTUnwrap(workspace.documents.firstIndex { $0.relativePath == target }))
         try await settle(host)
         try await assertStable("initial")
         let origin = try table(in: host).visibleRect.minY
@@ -495,8 +544,9 @@ final class DocumentListRedesignTests: XCTestCase {
         workspace.session.selectedFolder = "Big"
         XCTAssertEqual(workspace.documents.count, 10_000)
         let host = NSHostingView(rootView: DocumentList(workspace: workspace))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 900), styleMask: [.titled],
-                              backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 900), styleMask: [.titled],
+            backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.contentView = nil; window.close() }
@@ -523,10 +573,14 @@ final class DocumentListRedesignTests: XCTestCase {
         samples.sort()
         let p95 = samples[Int(Double(samples.count - 1) * 0.95)]
         let median = samples[samples.count / 2]
-        print("DocumentList 10k scroll: \(samples.count) steps, median \(String(format: "%.2f", median)) ms, p95 \(String(format: "%.2f", p95)) ms")
+        print(
+            "DocumentList 10k scroll: \(samples.count) steps, median \(String(format: "%.2f", median)) ms, p95 \(String(format: "%.2f", p95)) ms"
+        )
         // One 60 Hz frame. Rows are fixed height, so no step measures or lays out off-screen rows.
         XCTAssertLessThan(p95, TestEnvironment.frameBudget(16.7))
-        let realized = (0..<table.numberOfRows).filter { table.view(atColumn: 0, row: $0, makeIfNecessary: false) != nil }
+        let realized = (0..<table.numberOfRows).filter {
+            table.view(atColumn: 0, row: $0, makeIfNecessary: false) != nil
+        }
         XCTAssertLessThan(realized.count, 40, "only visible rows are realized")
     }
 }

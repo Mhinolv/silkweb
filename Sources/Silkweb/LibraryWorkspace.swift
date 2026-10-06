@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 @MainActor @Observable
 final class LibraryWorkspace {
@@ -60,7 +60,9 @@ final class LibraryWorkspace {
     func install(_ snapshot: LibrarySnapshot) {
         self.snapshot = snapshot
         tagFilters.formIntersection(Set(snapshot.metadata.tags.map(\.id)))
-        if let id = session.selectedTagID, !snapshot.metadata.tags.contains(where: { $0.id == id }) { session.selectedTagID = nil }
+        if let id = session.selectedTagID, !snapshot.metadata.tags.contains(where: { $0.id == id }) {
+            session.selectedTagID = nil
+        }
         tags = snapshot.metadata.tags.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         var counts: [UUID: Int] = [:]
         for ids in snapshot.metadata.tagsByDocument.values { for id in ids { counts[id, default: 0] += 1 } }
@@ -106,12 +108,16 @@ final class LibraryWorkspace {
     private var canSaveSession = true
     @ObservationIgnored var itemPathsByID: [UUID: String] = [:]
     @ObservationIgnored private var presentationRevision = 0
-    @ObservationIgnored private var documentCache: (folder: String?, preference: LibraryListPreference, tag: UUID?, documents: [LibraryDocument])?
+    @ObservationIgnored private var documentCache:
+        (folder: String?, preference: LibraryListPreference, tag: UUID?, documents: [LibraryDocument])?
 
     var selectedFolder: LibraryFolder? {
         session.selectedTagID == nil ? snapshot?.folders.first { $0.relativePath == session.selectedFolder } : nil
     }
-    private var preferenceID: String { if let id = session.selectedTagID { return "tag:" + id.uuidString }; return selectedFolder.map { "folder:" + $0.id.uuidString } ?? "all" }
+    private var preferenceID: String {
+        if let id = session.selectedTagID { return "tag:" + id.uuidString };
+        return selectedFolder.map { "folder:" + $0.id.uuidString } ?? "all"
+    }
     var listPreference: LibraryListPreference { session.listPreferences[preferenceID] ?? LibraryListPreference() }
     var includesSubfolders: Bool { selectedFolder != nil && listPreference.includeSubfolders }
     func setSortKey(_ key: DocumentSortKey) {
@@ -134,12 +140,15 @@ final class LibraryWorkspace {
     var documents: [LibraryDocument] {
         guard let snapshot else { return [] }
         let preference = listPreference
-        if let cached = documentCache, cached.folder == session.selectedFolder, cached.preference == preference, cached.tag == session.selectedTagID {
+        if let cached = documentCache, cached.folder == session.selectedFolder, cached.preference == preference,
+            cached.tag == session.selectedTagID
+        {
             return cached.documents
         }
         guard session.selectedTagID != nil || session.selectedFolder == nil || selectedFolder != nil else { return [] }
         let documents = snapshot.presentation.documents(in: selectedFolder, preference: preference).filter {
-            TagEditor.matches($0, folder: nil, includeSubfolders: false, tags: effectiveTagFilters, metadata: snapshot.metadata)
+            TagEditor.matches(
+                $0, folder: nil, includeSubfolders: false, tags: effectiveTagFilters, metadata: snapshot.metadata)
         }
         documentCache = (session.selectedFolder, preference, session.selectedTagID, documents)
         return documents
@@ -147,11 +156,13 @@ final class LibraryWorkspace {
     func refreshSavedDocumentDates() async {
         // One hash lookup by relative path; no URL is built per library document on the main thread.
         guard !loading, !mutating, let snapshot, let url = editor.url,
-              url.path.hasPrefix(snapshot.rootURL.path + "/"),
-              let id = snapshot.metadata.IDsByPath[String(url.path.dropFirst(snapshot.rootURL.path.count + 1))] else { return }
+            url.path.hasPrefix(snapshot.rootURL.path + "/"),
+            let id = snapshot.metadata.IDsByPath[String(url.path.dropFirst(snapshot.rootURL.path.count + 1))]
+        else { return }
         let revision = presentationRevision
         guard let refreshed = try? await LibraryScanner.refreshingDates(in: snapshot, documentID: id),
-              !loading, !mutating, presentationRevision == revision else { return }
+            !loading, !mutating, presentationRevision == revision
+        else { return }
         install(refreshed)
     }
     var selectedDocument: LibraryDocument? {
@@ -159,26 +170,35 @@ final class LibraryWorkspace {
         return documents.first { session.selectedDocuments.contains($0.relativePath) }
     }
     var folderName: String {
-        tags.first { $0.id == session.selectedTagID }?.name ?? snapshot?.folders.first { $0.relativePath == session.selectedFolder }?.name ?? "All Documents"
+        tags.first { $0.id == session.selectedTagID }?.name ?? snapshot?.folders.first {
+            $0.relativePath == session.selectedFolder
+        }?.name ?? "All Documents"
     }
     var subtitle: String {
-        search.text.isEmpty ? CountPresentation.label(documents.count, unit: .document) + (includesSubfolders ? " (with subfolders)" : "") : CountPresentation.label(filteredSearchResults.count, unit: .result)
+        search.text.isEmpty
+            ? CountPresentation.label(documents.count, unit: .document)
+                + (includesSubfolders ? " (with subfolders)" : "")
+            : CountPresentation.label(filteredSearchResults.count, unit: .result)
     }
     /// The toolbar path: the open document's real folder, else the list scope. Reads no document text.
     var breadcrumb: Breadcrumb {
         let rootURL = snapshot?.rootURL ?? root
-        let library = snapshot?.folders.first { $0.relativePath.isEmpty }?.name ?? rootURL?.lastPathComponent ?? "Library"
+        let library =
+            snapshot?.folders.first { $0.relativePath.isEmpty }?.name ?? rootURL?.lastPathComponent ?? "Library"
         let documentPath = editor.url.flatMap { url -> String? in
             guard let rootURL, url.path.hasPrefix(rootURL.path + "/") else { return nil }
             return String(url.path.dropFirst(rootURL.path.count + 1))
         }
-        return Breadcrumb.make(libraryName: library, documentPath: documentPath, documentTitle: editor.name,
-                               folder: session.selectedFolder, tagName: tags.first { $0.id == session.selectedTagID }?.name)
+        return Breadcrumb.make(
+            libraryName: library, documentPath: documentPath, documentTitle: editor.name,
+            folder: session.selectedFolder, tagName: tags.first { $0.id == session.selectedTagID }?.name)
     }
 
     func restore() {
         guard root == nil, loadTask == nil else { return }
-        let location = defaults.data(forKey: "libraryLocation").flatMap { try? JSONDecoder().decode(LibraryLocation.self, from: $0) }
+        let location = defaults.data(forKey: "libraryLocation").flatMap {
+            try? JSONDecoder().decode(LibraryLocation.self, from: $0)
+        }
         let legacy = defaults.data(forKey: "libraryBookmark")
         guard location != nil || legacy != nil else { return }
         loadTask = Task {
@@ -196,7 +216,8 @@ final class LibraryWorkspace {
                 let failure = error as? LibraryLocationError ?? .unreadable
                 errorTitle = failure.title
                 errorSymbol = failure == .notFound ? "externaldrive.badge.questionmark" : "lock"
-                self.error = failure == .notFound
+                self.error =
+                    failure == .notFound
                     ? "Silkweb can’t find your library. It may have been moved, renamed, or be on a disconnected drive."
                     : "Silkweb doesn’t have permission to read your library."
                 loadTask = nil
@@ -214,7 +235,8 @@ final class LibraryWorkspace {
     func zoomEditor(by step: Int?) {
         let base = Int(LivePreferences.shared.current.fontSize.rounded())
         let range = WritingPreferences.fontSizes
-        editorZoom = step.map { min(max(editorZoom + $0, Int(range.lowerBound) - base), Int(range.upperBound) - base) } ?? 0
+        editorZoom =
+            step.map { min(max(editorZoom + $0, Int(range.lowerBound) - base), Int(range.upperBound) - base) } ?? 0
         for editor in EditorRegistry.editors.allObjects where editor.workspace === self && editor.zoom != editorZoom {
             editor.zoom = editorZoom
             editor.applySettings()
@@ -299,17 +321,18 @@ final class LibraryWorkspace {
                 guard !Task.isCancelled else { return }
                 var restored = LibrarySession()
                 canSaveSession = true
-                do { restored = try await LibrarySession.load(root: url) }
-                catch LibraryError.unsupportedMetadataVersion { canSaveSession = false }
-                catch { /* A rebuildable navigation session can fall back to its defaults. */ }
+                do { restored = try await LibrarySession.load(root: url) } catch LibraryError.unsupportedMetadataVersion
+                { canSaveSession = false } catch
+                { /* A rebuildable navigation session can fall back to its defaults. */  }
                 guard !Task.isCancelled else { return }
                 install(scanned)
-                session = restored.pruningPreferences(folderIDs: Set(scanned.folders.map(\.id)), tagIDs: Set(scanned.metadata.tags.map(\.id)))
+                session = restored.pruningPreferences(
+                    folderIDs: Set(scanned.folders.map(\.id)), tagIDs: Set(scanned.metadata.tags.map(\.id)))
                 var windowSession: WindowSessionMetadata?
                 canSaveWindowSession = true
-                do { windowSession = try await WindowSessionMetadata.load(root: url) }
-                catch LibraryError.unsupportedMetadataVersion { canSaveWindowSession = false }
-                catch { /* Stale tab state never interrupts opening a library. */ }
+                do { windowSession = try await WindowSessionMetadata.load(root: url) } catch LibraryError
+                    .unsupportedMetadataVersion
+                { canSaveWindowSession = false } catch { /* Stale tab state never interrupts opening a library. */  }
                 // Settings ▸ “Reopen windows and tabs from the last session” (1.24).
                 if !LivePreferences.shared.current.reopensSession { windowSession = nil }
                 if let windowSession { await restoreTabs(windowSession) }
@@ -324,9 +347,16 @@ final class LibraryWorkspace {
                 if let draft = drafts.first(where: { $0.documentURL.path.hasPrefix(scanned.rootURL.path + "/") }) {
                     recoveryURL = draft.documentURL
                     session.selectedFolder = nil
-                    session.selectedDocuments = Set(scanned.documents.filter { scanned.rootURL.appendingPathComponent($0.relativePath) == draft.documentURL }.map(\.relativePath))
+                    session.selectedDocuments = Set(
+                        scanned.documents.filter {
+                            scanned.rootURL.appendingPathComponent($0.relativePath) == draft.documentURL
+                        }.map(\.relativePath))
                 }
-                if let recoveryURL, let document = scanned.documents.first(where: { scanned.rootURL.appendingPathComponent($0.relativePath) == recoveryURL }) {
+                if let recoveryURL,
+                    let document = scanned.documents.first(where: {
+                        scanned.rootURL.appendingPathComponent($0.relativePath) == recoveryURL
+                    })
+                {
                     _ = await openTab(document, pinned: true)
                 } else if let recoveryURL {
                     // The note was deleted outside Silkweb; its draft must stay reachable (1.70).
@@ -349,7 +379,8 @@ final class LibraryWorkspace {
                 if [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(cocoa.code) {
                     errorTitle = "Library Not Found"
                     errorSymbol = "externaldrive.badge.questionmark"
-                    self.error = "Silkweb can’t find “\(url.lastPathComponent)”. It may have been moved, renamed, or be on a disconnected drive."
+                    self.error =
+                        "Silkweb can’t find “\(url.lastPathComponent)”. It may have been moved, renamed, or be on a disconnected drive."
                 } else if cocoa.code == NSFileReadNoPermissionError {
                     errorTitle = "Can’t Open Library"
                     errorSymbol = "lock"
@@ -368,9 +399,12 @@ final class LibraryWorkspace {
         guard let file = files.first, !Self.unreadableRecoveryShown else { return }
         Self.unreadableRecoveryShown = true
         unreadableRecoveryFile = file
-        NSAccessibility.post(element: NSApplication.shared, notification: .announcementRequested,
-                             userInfo: [.announcement: UnreadableRecoveryBanner.message,
-                                        .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+        NSAccessibility.post(
+            element: NSApplication.shared, notification: .announcementRequested,
+            userInfo: [
+                .announcement: UnreadableRecoveryBanner.message,
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+            ])
     }
 
     func retryMediaMigration() {
@@ -379,7 +413,8 @@ final class LibraryWorkspace {
 
     func migrateMedia() async {
         guard !mediaMigrationRunning, let root, let snapshot, !snapshot.isReadOnly,
-              FileManager.default.fileExists(atPath: root.appendingPathComponent(".silkweb-assets").path) else { return }
+            FileManager.default.fileExists(atPath: root.appendingPathComponent(".silkweb-assets").path)
+        else { return }
         mediaMigrationRunning = true
         mediaFailures = []
         mediaBannerVisible = false
@@ -389,26 +424,33 @@ final class LibraryWorkspace {
             self.mediaBannerVisible = true
         }
         defer { delay.cancel(); mediaMigrationRunning = false; mediaProgress = nil }
-        let result = await AssetStore.shared.migrate(root: root, documents: snapshot.documents.map(\.relativePath), progress: { [weak self] name, done, total in
-            Task { @MainActor in
-                guard let self, self.root == root, self.mediaMigrationRunning else { return }
-                self.mediaDirectoryName = name
-                self.mediaProgress = (name, done, total)
-            }
-        }, beforeRewrite: { [weak self] in
-            guard let self else { return false }
-            return await self.beginMediaRewrite(root: root)
-        }, afterRewrite: { [weak self] in
-            await self?.finishMediaRewrite(root: root)
-        })
+        let result = await AssetStore.shared.migrate(
+            root: root, documents: snapshot.documents.map(\.relativePath),
+            progress: { [weak self] name, done, total in
+                Task { @MainActor in
+                    guard let self, self.root == root, self.mediaMigrationRunning else { return }
+                    self.mediaDirectoryName = name
+                    self.mediaProgress = (name, done, total)
+                }
+            },
+            beforeRewrite: { [weak self] in
+                guard let self else { return false }
+                return await self.beginMediaRewrite(root: root)
+            },
+            afterRewrite: { [weak self] in
+                await self?.finishMediaRewrite(root: root)
+            })
         guard self.root == root, !Task.isCancelled else { return }
         mediaDirectoryName = result.directoryName
         mediaFailures = result.failures
         mediaBannerVisible = !result.failures.isEmpty
         if mediaBannerVisible {
-            NSAccessibility.post(element: NSApplication.shared, notification: .announcementRequested,
-                                 userInfo: [.announcement: "Some images couldn’t be moved to the “\(mediaDirectoryName)” folder.",
-                                            .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+            NSAccessibility.post(
+                element: NSApplication.shared, notification: .announcementRequested,
+                userInfo: [
+                    .announcement: "Some images couldn’t be moved to the “\(mediaDirectoryName)” folder.",
+                    .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+                ])
         }
         if let updated = try? await LibraryScanner.scan(root: root, previousSnapshot: snapshot) { install(updated) }
     }
@@ -461,7 +503,9 @@ final class LibraryWorkspace {
                 guard let url = editor.url else { continue }
                 let path = String(url.path.dropFirst(root.path.count + 1))
                 let id = old.metadata.IDsByPath[path]
-                let destination = scanned.documents.first { $0.id == id }.map { root.appendingPathComponent($0.relativePath) }
+                let destination = scanned.documents.first { $0.id == id }.map {
+                    root.appendingPathComponent($0.relativePath)
+                }
                 await editor.reconcileExternalChange(movedTo: destination)
             }
             for tab in tabs {
@@ -469,9 +513,11 @@ final class LibraryWorkspace {
             }
             // Derived index/cache writes also reach the watcher. A no-op scan must
             // not invalidate the entire workspace and restart search presentation.
-            guard old.folders != scanned.folders || old.documents != scanned.documents
-                || old.metadata != scanned.metadata || old.isReadOnly != scanned.isReadOnly
-                || old.recoveredMetadataURL != scanned.recoveredMetadataURL else { return }
+            guard
+                old.folders != scanned.folders || old.documents != scanned.documents
+                    || old.metadata != scanned.metadata || old.isReadOnly != scanned.isReadOnly
+                    || old.recoveredMetadataURL != scanned.recoveredMetadataURL
+            else { return }
             // Finder batches are installed without row animations.
             var transaction = Transaction()
             transaction.disablesAnimations = true
@@ -487,7 +533,8 @@ final class LibraryWorkspace {
                 for editor in allEditors { await editor.libraryDisappeared() }
                 errorTitle = "Library Not Found"
                 errorSymbol = "externaldrive.badge.questionmark"
-                self.error = "Silkweb can’t find “\(root.lastPathComponent)”. It may have been moved, renamed, or be on a disconnected drive."
+                self.error =
+                    "Silkweb can’t find “\(root.lastPathComponent)”. It may have been moved, renamed, or be on a disconnected drive."
                 snapshot = nil
             } else {
                 editor.error = error.localizedDescription
@@ -498,9 +545,13 @@ final class LibraryWorkspace {
 
     func resumeEditor() async {
         guard editor.url == nil, let snapshot else { return }
-        if LivePreferences.shared.current.reopensSession, let saved = try? await WindowSessionMetadata.load(root: snapshot.rootURL) {
+        if LivePreferences.shared.current.reopensSession,
+            let saved = try? await WindowSessionMetadata.load(root: snapshot.rootURL)
+        {
             await restoreTabs(saved)
-        } else if let document = selectedDocument { _ = await openTab(document) }
+        } else if let document = selectedDocument {
+            _ = await openTab(document)
+        }
     }
 
     func waitForNavigation() async { await navigationTask?.value }
@@ -508,7 +559,9 @@ final class LibraryWorkspace {
     /// Queues `work` behind pending navigation; later navigation waits for it.
     func afterNavigation(_ work: @escaping @MainActor () async -> Void) async {
         let previous = navigationTask
-        let task = Task { await previous?.value; await work() }
+        let task = Task {
+            await previous?.value; await work()
+        }
         navigationTask = task
         await task.value
     }
@@ -526,10 +579,15 @@ final class LibraryWorkspace {
         navigate(folder: path, documents: [], tag: nil, changesScope: true)
     }
 
-    func navigate(folder: String?, documents: Set<String>, pinned: Bool = false, tag: UUID? = nil, changesScope: Bool = false) {
+    func navigate(
+        folder: String?, documents: Set<String>, pinned: Bool = false, tag: UUID? = nil, changesScope: Bool = false
+    ) {
         guard !loading, !mutating else { return }
         // The list follows the click at once (#70); the editor swaps in when the buffer has loaded.
-        let shown = (folder: session.selectedFolder, documents: session.selectedDocuments, tag: session.selectedTagID, filters: tagFilters)
+        let shown = (
+            folder: session.selectedFolder, documents: session.selectedDocuments, tag: session.selectedTagID,
+            filters: tagFilters
+        )
         var next = session
         next.selectedFolder = folder
         next.selectedDocuments = documents
@@ -544,9 +602,11 @@ final class LibraryWorkspace {
             await previous?.value
             // Rapid clicks coalesce: a navigation already replaced by a newer one opens nothing.
             guard generation == navigationGeneration else { return }
-            let document = documents.count == 1 ? documents.first.flatMap { path in
-                snapshot?.documents.first(where: { $0.relativePath == path })
-            } : nil
+            let document =
+                documents.count == 1
+                ? documents.first.flatMap { path in
+                    snapshot?.documents.first(where: { $0.relativePath == path })
+                } : nil
             if let document, !(await openTab(document, pinned: pinned)) {
                 // The editor kept its document (unsaved text): the list goes back to it.
                 guard generation == navigationGeneration else { return }
@@ -557,7 +617,8 @@ final class LibraryWorkspace {
                 return
             }
             if let path = documents.count == 1 ? documents.first : nil,
-               let id = snapshot?.metadata.IDsByPath[path], let index = search.index {
+                let id = snapshot?.metadata.IDsByPath[path], let index = search.index
+            {
                 try? await index.recordOpened(id, persist: snapshot?.isReadOnly == false)
             }
             persistSession()
@@ -580,7 +641,7 @@ final class LibraryWorkspace {
                 try Task.checkCancellation()
                 try await session.save(root: snapshot.rootURL)
                 if saveWindow { try await window.save(root: snapshot.rootURL) }
-            } catch is CancellationError { } catch {
+            } catch is CancellationError {} catch {
                 // Navigation persistence must never interrupt reading or modify document text.
                 NSLog("Silkweb could not save navigation: %@", error.localizedDescription)
             }
@@ -624,8 +685,12 @@ struct LibraryWorkspaceView: View {
             if let error = workspace.error {
                 ContentUnavailableView {
                     Label(workspace.errorTitle, systemImage: workspace.errorSymbol)
-                } description: { Text(error) } actions: {
-                    Button(workspace.errorTitle == "Library Not Found" ? "Locate…" : "Choose Folder Again…") { workspace.chooseFolder() }
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button(workspace.errorTitle == "Library Not Found" ? "Locate…" : "Choose Folder Again…") {
+                        workspace.chooseFolder()
+                    }
                     if workspace.errorTitle == "Library Not Found" {
                         Button("Open Another Folder…") { workspace.chooseFolder() }
                     }
@@ -650,7 +715,11 @@ struct LibraryWorkspaceView: View {
                 QuickOpenPanel(workspace: workspace)
             }
         }
-        .alert(workspace.mutationErrorTitle, isPresented: Binding(get: { workspace.mutationError != nil }, set: { if !$0 { workspace.mutationError = nil } })) {
+        .alert(
+            workspace.mutationErrorTitle,
+            isPresented: Binding(
+                get: { workspace.mutationError != nil }, set: { if !$0 { workspace.mutationError = nil } })
+        ) {
             if !workspace.mutationRevealURLs.isEmpty {
                 Button(workspace.mutationRevealTitle) {
                     NSWorkspace.shared.activateFileViewerSelecting(workspace.mutationRevealURLs)
@@ -658,15 +727,26 @@ struct LibraryWorkspaceView: View {
                 }
             }
             Button("OK") { workspace.mutationError = nil }
-        } message: { Text(workspace.mutationError ?? "") }
-        .alert(workspace.trashTitle, isPresented: Binding(get: { workspace.trashPlan != nil }, set: { if !$0 && workspace.trashPlan != nil { workspace.cancelTrash() } })) {
+        } message: {
+            Text(workspace.mutationError ?? "")
+        }
+        .alert(
+            workspace.trashTitle,
+            isPresented: Binding(
+                get: { workspace.trashPlan != nil },
+                set: { if !$0 && workspace.trashPlan != nil { workspace.cancelTrash() } })
+        ) {
             Button("Move to Trash", role: .destructive) { workspace.confirmTrash() }.keyboardShortcut(.defaultAction)
             Button("Cancel", role: .cancel) { workspace.cancelTrash() }.keyboardShortcut(.cancelAction)
-        } message: { Text(workspace.trashMessage) }
+        } message: {
+            Text(workspace.trashMessage)
+        }
         .sheet(item: $workspace.importRequest) { request in ImportSheet(workspace: workspace, request: request) }
         .sheet(item: $workspace.moveRequest) { request in MovePicker(workspace: workspace, request: request) }
         .sheet(item: $workspace.pdfProgress) { progress in PDFProgressSheet(progress: progress) }
-        .task { workspace.restore(); await workspace.resumeEditor() }
+        .task {
+            workspace.restore(); await workspace.resumeEditor()
+        }
         .onChange(of: workspace.session) { workspace.persistSession() }
         .onChange(of: workspace.preview.mode) { workspace.persistSession() }
         .onChange(of: workspace.editor.state) { old, new in
@@ -676,64 +756,81 @@ struct LibraryWorkspaceView: View {
 
     private var libraryColumns: some View {
         LibrarySplitView(workspace: workspace)
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Picker("View Mode", selection: Binding(get: { workspace.preview.mode }, set: { workspace.preview.mode = $0 })) {
-                    ForEach(DocumentViewMode.allCases, id: \.self) { mode in
-                        Label(mode.title, systemImage: mode.symbol).tag(mode).help(mode.title)
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Picker(
+                        "View Mode",
+                        selection: Binding(get: { workspace.preview.mode }, set: { workspace.preview.mode = $0 })
+                    ) {
+                        ForEach(DocumentViewMode.allCases, id: \.self) { mode in
+                            Label(mode.title, systemImage: mode.symbol).tag(mode).help(mode.title)
+                        }
+                    }.pickerStyle(.segmented).labelStyle(.iconOnly).help("Editor, Split or Preview")
+                        // Same glyph size; the selected segment keeps the system tint.
+                        .font(.system(size: 13, weight: .regular))
+                    Button("Show Outline", systemImage: "list.bullet.indent") { workspace.toggleInspector(.outline) }
+                        .help("Show Outline").toolbarGlyph(selected: workspace.inspectorSegment == .outline)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Show Document Info", systemImage: "info.circle") { workspace.toggleInspector(.info) }
+                        .help("Show Document Info").toolbarGlyph(selected: workspace.inspectorSegment == .info)
+                        // The glyph ends 12 pt from the bar's edge (#68).
+                        .padding(.trailing, -CompactToolbarController.trailingOverhang)
+                }
+                ToolbarItem(placement: .navigation) {
+                    Button(workspace.sidebarsTitle, systemImage: "sidebar.left") { workspace.toggleSidebars() }
+                        .help(workspace.sidebarsTitle)
+                        .accessibilityLabel(workspace.sidebarsTitle)
+                        .toolbarGlyph()
+                }
+                ToolbarItem(placement: .navigation) {
+                    Button("New Document", systemImage: "square.and.pencil") { workspace.create(folder: false) }
+                        .help("New Document").disabled(!workspace.canMutate).toolbarGlyph()
+                }
+                ToolbarItem(placement: .navigation) {
+                    Menu {
+                        DocumentSortItems(workspace: workspace)
+                        Divider()
+                        IncludeSubfoldersItem(workspace: workspace)
+                    } label: {
+                        Label("Sort By", systemImage: "arrow.up.arrow.down")
                     }
-                }.pickerStyle(.segmented).labelStyle(.iconOnly).help("Editor, Split or Preview")
-                    // Same glyph size; the selected segment keeps the system tint.
-                    .font(.system(size: 13, weight: .regular))
-                Button("Show Outline", systemImage: "list.bullet.indent") { workspace.toggleInspector(.outline) }
-                    .help("Show Outline").toolbarGlyph(selected: workspace.inspectorSegment == .outline)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button("Show Document Info", systemImage: "info.circle") { workspace.toggleInspector(.info) }
-                    .help("Show Document Info").toolbarGlyph(selected: workspace.inspectorSegment == .info)
-                    // The glyph ends 12 pt from the bar's edge (#68).
-                    .padding(.trailing, -CompactToolbarController.trailingOverhang)
-            }
-            ToolbarItem(placement: .navigation) {
-                Button(workspace.sidebarsTitle, systemImage: "sidebar.left") { workspace.toggleSidebars() }
-                    .help(workspace.sidebarsTitle)
-                    .accessibilityLabel(workspace.sidebarsTitle)
+                    .help("Sort By")
+                    .accessibilityLabel(
+                        "Sort By, \(workspace.listPreference.key.title), \(workspace.listPreference.directionTitle)"
+                    )
+                    .disabled(workspace.snapshot == nil)
                     .toolbarGlyph()
-            }
-            ToolbarItem(placement: .navigation) {
-                Button("New Document", systemImage: "square.and.pencil") { workspace.create(folder: false) }
-                    .help("New Document").disabled(!workspace.canMutate).toolbarGlyph()
-            }
-            ToolbarItem(placement: .navigation) {
-                Menu {
-                    DocumentSortItems(workspace: workspace)
-                    Divider()
-                    IncludeSubfoldersItem(workspace: workspace)
-                } label: { Label("Sort By", systemImage: "arrow.up.arrow.down") }
-                .help("Sort By")
-                .accessibilityLabel("Sort By, \(workspace.listPreference.key.title), \(workspace.listPreference.directionTitle)")
-                .disabled(workspace.snapshot == nil)
-                .toolbarGlyph()
-            }
-            ToolbarItem(placement: .navigation) {
-                Menu {
-                    ForEach(workspace.tags) { tag in
-                        Toggle(tag.name, isOn: Binding(get: { workspace.tagFilters.contains(tag.id) }, set: { on in
-                            if on { workspace.tagFilters.insert(tag.id) } else { workspace.tagFilters.remove(tag.id) }
-                        }))
+                }
+                ToolbarItem(placement: .navigation) {
+                    Menu {
+                        ForEach(workspace.tags) { tag in
+                            Toggle(
+                                tag.name,
+                                isOn: Binding(
+                                    get: { workspace.tagFilters.contains(tag.id) },
+                                    set: { on in
+                                        if on {
+                                            workspace.tagFilters.insert(tag.id)
+                                        } else {
+                                            workspace.tagFilters.remove(tag.id)
+                                        }
+                                    }))
+                        }
+                    } label: {
+                        Label("Filter by Tag", systemImage: "tag")
                     }
-                } label: { Label("Filter by Tag", systemImage: "tag") }
-                .help("Filter by Tag").disabled(workspace.tags.isEmpty).toolbarGlyph()
+                    .help("Filter by Tag").disabled(workspace.tags.isEmpty).toolbarGlyph()
+                }
+                ToolbarItem(placement: .navigation) {
+                    ToolbarBreadcrumb(workspace: workspace)
+                }
             }
-            ToolbarItem(placement: .navigation) {
-                ToolbarBreadcrumb(workspace: workspace)
-            }
-        }
-        // The compact bar has no title row; the breadcrumb replaces it. The title still feeds the
-        // Window menu, Mission Control and VoiceOver.
-        .toolbar(removing: .title)
-        .navigationTitle(workspace.editor.url == nil ? workspace.folderName : workspace.editor.name)
-        .navigationSubtitle(workspace.subtitle)
+            // The compact bar has no title row; the breadcrumb replaces it. The title still feeds the
+            // Window menu, Mission Control and VoiceOver.
+            .toolbar(removing: .title)
+            .navigationTitle(workspace.editor.url == nil ? workspace.folderName : workspace.editor.name)
+            .navigationSubtitle(workspace.subtitle)
     }
 
     private var welcome: some View {
@@ -742,9 +839,14 @@ struct LibraryWorkspaceView: View {
             Text("Silkweb").font(.largeTitle)
             Text("Write Markdown in folders you own.").font(.title3).foregroundStyle(.secondary)
             HStack(spacing: 16) {
-                welcomeCard("Open Folder in Place…", symbol: "folder", hint: "Use an existing folder of Markdown files where it is.", action: workspace.chooseFolder)
-                    .keyboardShortcut(.defaultAction)
-                welcomeCard("New Library…", symbol: "plus.rectangle.on.folder", hint: "Start an empty library in a new folder.", action: workspace.newLibrary)
+                welcomeCard(
+                    "Open Folder in Place…", symbol: "folder",
+                    hint: "Use an existing folder of Markdown files where it is.", action: workspace.chooseFolder
+                )
+                .keyboardShortcut(.defaultAction)
+                welcomeCard(
+                    "New Library…", symbol: "plus.rectangle.on.folder", hint: "Start an empty library in a new folder.",
+                    action: workspace.newLibrary)
             }
             Text("To copy files in instead, use File › Import Folder Copy…").font(.caption).foregroundStyle(.tertiary)
         }
@@ -761,9 +863,9 @@ struct LibraryWorkspaceView: View {
     }
 }
 
-private extension View {
+extension View {
     /// Smaller, lighter symbols for the compact bar (silkweb-1.65); a selected glyph tints sage (#69), same size.
-    func toolbarGlyph(selected: Bool = false) -> some View {
+    fileprivate func toolbarGlyph(selected: Bool = false) -> some View {
         font(.system(size: 13, weight: .regular))
             .foregroundStyle(selected ? Color.silkwebAccent : Color(nsColor: .secondaryLabelColor))
             .accessibilityAddTraits(selected ? .isSelected : [])
@@ -775,9 +877,16 @@ struct DelayedLibraryProgress: View {
     @State private var visible = false
     var body: some View {
         ColumnEmptyState {
-            if visible { ProgressView(count.map { "Loading library… \(CountPresentation.label($0, unit: .document))" } ?? "Loading library…").controlSize(.small) }
+            if visible {
+                ProgressView(
+                    count.map { "Loading library… \(CountPresentation.label($0, unit: .document))" }
+                        ?? "Loading library…"
+                ).controlSize(.small)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task { try? await Task.sleep(for: .milliseconds(300)); if !Task.isCancelled { visible = true } }
+        .task {
+            try? await Task.sleep(for: .milliseconds(300)); if !Task.isCancelled { visible = true }
+        }
     }
 }

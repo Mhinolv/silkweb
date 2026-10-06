@@ -9,19 +9,47 @@ public struct WritingPreferences: Codable, Equatable, Sendable {
 
     public enum Indent: String, Codable, CaseIterable, Sendable {
         case twoSpaces, fourSpaces, tab
-        public var text: String { switch self { case .twoSpaces: "  "; case .fourSpaces: "    "; case .tab: "\t" } }
-        public var title: String { switch self { case .twoSpaces: "2 Spaces"; case .fourSpaces: "4 Spaces"; case .tab: "Tab" } }
+        public var text: String {
+            switch self {
+            case .twoSpaces: "  ";
+            case .fourSpaces: "    ";
+            case .tab: "\t"
+            }
+        }
+        public var title: String {
+            switch self {
+            case .twoSpaces: "2 Spaces";
+            case .fourSpaces: "4 Spaces";
+            case .tab: "Tab"
+            }
+        }
     }
 
     public enum PreviewFont: String, Codable, CaseIterable, Sendable {
         case system, serif
-        public var title: String { switch self { case .system: "System"; case .serif: "Serif (New York)" } }
-        public var css: String { switch self { case .system: "-apple-system"; case .serif: "'New York', ui-serif, Georgia, serif" } }
+        public var title: String {
+            switch self {
+            case .system: "System";
+            case .serif: "Serif (New York)"
+            }
+        }
+        public var css: String {
+            switch self {
+            case .system: "-apple-system";
+            case .serif: "'New York', ui-serif, Georgia, serif"
+            }
+        }
     }
 
     public enum AppearanceMode: String, Codable, CaseIterable, Sendable {
         case system, light, dark
-        public var title: String { switch self { case .system: "Match System"; case .light: "Light"; case .dark: "Dark" } }
+        public var title: String {
+            switch self {
+            case .system: "Match System";
+            case .light: "Light";
+            case .dark: "Dark"
+            }
+        }
     }
 
     /// Built-in editor font choices; any other value is a custom family from the font panel.
@@ -58,8 +86,8 @@ public struct WritingPreferences: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case version, fontFamily, fontSize, lineHeight, horizontalInset, maximumWidth, indent, checksSpelling,
-             smartPunctuation, showsInlineImages, highlightsCurrentLine, reopensSession, previewFont,
-             previewFontSize, keepsLineBreaks, showsTableOfContents, appearance, colors
+            smartPunctuation, showsInlineImages, highlightsCurrentLine, reopensSession, previewFont,
+            previewFontSize, keepsLineBreaks, showsTableOfContents, appearance, colors
     }
 
     public init(from decoder: Decoder) throws {
@@ -74,8 +102,11 @@ public struct WritingPreferences: Codable, Equatable, Sendable {
         if fontFamily.trimmingCharacters(in: .whitespaces).isEmpty { fontFamily = defaults.fontFamily }
         fontSize = Self.clamp(value(.fontSize, defaults.fontSize), Self.fontSizes, fallback: defaults.fontSize)
         lineHeight = Self.snapLineHeight(value(.lineHeight, defaults.lineHeight))
-        horizontalInset = Self.clamp(value(.horizontalInset, defaults.horizontalInset), Self.horizontalInsets, fallback: defaults.horizontalInset)
-        maximumWidth = Self.clamp(value(.maximumWidth, defaults.maximumWidth), Self.maximumWidths, fallback: defaults.maximumWidth)
+        horizontalInset = Self.clamp(
+            value(.horizontalInset, defaults.horizontalInset), Self.horizontalInsets, fallback: defaults.horizontalInset
+        )
+        maximumWidth = Self.clamp(
+            value(.maximumWidth, defaults.maximumWidth), Self.maximumWidths, fallback: defaults.maximumWidth)
         indent = value(.indent, defaults.indent)
         checksSpelling = value(.checksSpelling, defaults.checksSpelling)
         smartPunctuation = value(.smartPunctuation, defaults.smartPunctuation)
@@ -83,7 +114,9 @@ public struct WritingPreferences: Codable, Equatable, Sendable {
         highlightsCurrentLine = value(.highlightsCurrentLine, defaults.highlightsCurrentLine)
         reopensSession = value(.reopensSession, defaults.reopensSession)
         previewFont = value(.previewFont, defaults.previewFont)
-        previewFontSize = Self.clamp(value(.previewFontSize, defaults.previewFontSize), Self.previewFontSizes, fallback: defaults.previewFontSize)
+        previewFontSize = Self.clamp(
+            value(.previewFontSize, defaults.previewFontSize), Self.previewFontSizes, fallback: defaults.previewFontSize
+        )
         keepsLineBreaks = value(.keepsLineBreaks, defaults.keepsLineBreaks)
         showsTableOfContents = value(.showsTableOfContents, defaults.showsTableOfContents)
         appearance = value(.appearance, defaults.appearance)
@@ -121,7 +154,8 @@ public struct WritingPreferences: Codable, Equatable, Sendable {
     /// Line spacing is one of five options; legacy values (1.5) snap to the nearest (1.6, ties go up).
     public static func snapLineHeight(_ value: Double) -> Double {
         guard value.isFinite, value > 0 else { return 1.6 }
-        return lineHeights.min { abs($0 - value) < abs($1 - value) || (abs($0 - value) == abs($1 - value) && $0 > $1) } ?? 1.6
+        return lineHeights.min { abs($0 - value) < abs($1 - value) || (abs($0 - value) == abs($1 - value) && $0 > $1) }
+            ?? 1.6
     }
 
     // MARK: Restore Defaults (one tab at a time)
@@ -158,7 +192,8 @@ public struct WritingPreferences: Codable, Equatable, Sendable {
     /// Reading does not rewrite user settings.
     public static func load(from defaults: UserDefaults = .standard) -> WritingPreferences {
         guard let data = defaults.data(forKey: defaultsKey),
-              let preferences = try? JSONDecoder().decode(Self.self, from: data) else { return Self() }
+            let preferences = try? JSONDecoder().decode(Self.self, from: data)
+        else { return Self() }
         return preferences
     }
 
@@ -171,13 +206,15 @@ public struct WritingPreferences: Codable, Equatable, Sendable {
     /// Live preview variables only; export and print never include them, so they keep portable colours.
     /// Colour variables are emitted only for slots the user changed, per appearance.
     public var previewCSS: String {
-        var css = ":root { --sw-font-family: \(previewFont.css); --sw-font-size: \(Self.number(previewFontSize))px; }\n"
+        var css =
+            ":root { --sw-font-family: \(previewFont.css); --sw-font-size: \(Self.number(previewFontSize))px; }\n"
             + "body { font-family: var(--sw-font-family); font-size: var(--sw-font-size); color: var(--sw-text, -apple-system-label); }"
         for dark in [false, true] {
             let set = colors[dark: dark]
             let rules = ColorSlot.allCases.compactMap { slot in set[slot].map { "--sw-\(slot.cssName): \($0.hex);" } }
             guard !rules.isEmpty else { continue }
-            css += "\n@media (prefers-color-scheme: \(dark ? "dark" : "light")) { :root { \(rules.joined(separator: " ")) } }"
+            css +=
+                "\n@media (prefers-color-scheme: \(dark ? "dark" : "light")) { :root { \(rules.joined(separator: " ")) } }"
         }
         return css
     }
@@ -208,7 +245,8 @@ public struct HexColor: Codable, Hashable, Sendable {
     public init(from decoder: Decoder) throws {
         let text = try decoder.singleValueContainer().decode(String.self)
         guard let value = HexColor(hex: text) else {
-            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid colour \(text)"))
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: decoder.codingPath, debugDescription: "Invalid colour \(text)"))
         }
         self = value
     }
@@ -242,7 +280,15 @@ public struct HexColor: Codable, Hashable, Sendable {
 public enum ColorSlot: String, Codable, CaseIterable, Sendable {
     case surface, text, headings, accent, coral
 
-    public var cssName: String { switch self { case .surface: "surface"; case .text: "text"; case .headings: "heading"; case .accent: "accent"; case .coral: "coral" } }
+    public var cssName: String {
+        switch self {
+        case .surface: "surface";
+        case .text: "text";
+        case .headings: "heading";
+        case .accent: "accent";
+        case .coral: "coral"
+        }
+    }
 
     /// Defaults match the 1.62 tokens; Text approximates `labelColor` over the default surface.
     public func defaultColor(dark: Bool) -> HexColor {
@@ -271,12 +317,19 @@ public struct ColorSet: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         func color(_ key: CodingKeys) -> HexColor? { (try? values.decodeIfPresent(HexColor.self, forKey: key)) ?? nil }
-        surface = color(.surface); text = color(.text); headings = color(.headings); accent = color(.accent); coral = color(.coral)
+        surface = color(.surface); text = color(.text); headings = color(.headings); accent = color(.accent);
+        coral = color(.coral)
     }
 
     public subscript(slot: ColorSlot) -> HexColor? {
         get {
-            switch slot { case .surface: surface; case .text: text; case .headings: headings; case .accent: accent; case .coral: coral }
+            switch slot {
+            case .surface: surface;
+            case .text: text;
+            case .headings: headings;
+            case .accent: accent;
+            case .coral: coral
+            }
         }
         set {
             switch slot {
@@ -314,8 +367,10 @@ public struct ColorSet: Codable, Equatable, Sendable {
 
         public var message: String {
             switch self {
-            case .text(let ratio): "Text is hard to read on this surface (\(Self.format(ratio)):1). Aim for at least 4.5:1."
-            case .headings(let ratio): "Headings are hard to read on this surface (\(Self.format(ratio)):1). Aim for at least 3:1."
+            case .text(let ratio):
+                "Text is hard to read on this surface (\(Self.format(ratio)):1). Aim for at least 4.5:1."
+            case .headings(let ratio):
+                "Headings are hard to read on this surface (\(Self.format(ratio)):1). Aim for at least 3:1."
             }
         }
 

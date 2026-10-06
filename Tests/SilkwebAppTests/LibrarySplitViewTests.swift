@@ -1,6 +1,7 @@
 import AppKit
-import XCTest
 import SilkwebCore
+import XCTest
+
 @testable import Silkweb
 
 final class LibrarySplitViewTests: XCTestCase {
@@ -21,7 +22,8 @@ final class LibrarySplitViewTests: XCTestCase {
         let name = disposableAutosaveName("SidebarKeys")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        try Data("# Keyboard shortcut\n\nKeep the editor text intact.".utf8).write(to: root.appendingPathComponent("Note.md"))
+        try Data("# Keyboard shortcut\n\nKeep the editor text intact.".utf8).write(
+            to: root.appendingPathComponent("Note.md"))
         let workspace = LibraryWorkspace(columnAutosaveName: name)
         workspace.canSaveWindowSession = false
         workspace.root = root
@@ -29,8 +31,9 @@ final class LibrarySplitViewTests: XCTestCase {
         let opened = await workspace.openTab(try XCTUnwrap(workspace.snapshot?.documents.first), pinned: true)
         XCTAssertTrue(opened)
         let controller = LibrarySplitViewController(workspace: workspace, autosaveName: name)
-        let window = SidebarKeyWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
-                                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = SidebarKeyWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentViewController = controller
         let previousMenu = NSApp.mainMenu
@@ -41,7 +44,8 @@ final class LibrarySplitViewTests: XCTestCase {
         let viewItem = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
         viewItem.submenu = viewMenu
         mainMenu.addItem(viewItem)
-        let sidebarItem = NSMenuItem(title: "Hide Sidebars", action: #selector(NSSplitViewController.toggleSidebar(_:)), keyEquivalent: "s")
+        let sidebarItem = NSMenuItem(
+            title: "Hide Sidebars", action: #selector(NSSplitViewController.toggleSidebar(_:)), keyEquivalent: "s")
         sidebarItem.keyEquivalentModifierMask = [.control, .command]
         viewMenu.addItem(sidebarItem)
         NSApp.mainMenu = mainMenu
@@ -57,10 +61,14 @@ final class LibrarySplitViewTests: XCTestCase {
         }
         try await settle()
         if requiresKeyWindow, !window.isKeyWindow {
-            throw XCTSkip("Unordered XCTest window cannot become key in this environment; native menu dispatch is covered separately")
+            throw XCTSkip(
+                "Unordered XCTest window cannot become key in this environment; native menu dispatch is covered separately"
+            )
         }
-        let sidebar = try XCTUnwrap(descendants(controller.navigationController.view).compactMap { $0 as? SidebarOutlineView }.first)
-        let list = try XCTUnwrap(descendants(controller.navigationController.view).compactMap { $0 as? DocumentTableView }.first)
+        let sidebar = try XCTUnwrap(
+            descendants(controller.navigationController.view).compactMap { $0 as? SidebarOutlineView }.first)
+        let list = try XCTUnwrap(
+            descendants(controller.navigationController.view).compactMap { $0 as? DocumentTableView }.first)
         let editor = try XCTUnwrap(workspace.preview.editor)
         let source = editor.string
         for (column, responder) in [sidebar as NSView, list as NSView, editor as NSView].enumerated() {
@@ -80,32 +88,44 @@ final class LibrarySplitViewTests: XCTestCase {
                 XCTAssertEqual(sidebarItem.title, hidden ? "Hide Sidebars" : "Show Sidebars")
                 XCTAssertTrue(sidebarItem.isEnabled)
                 let request = workspace.sidebarToggleRequest
-                let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
-                    modifierFlags: [.control, .command], timestamp: ProcessInfo.processInfo.systemUptime,
-                    windowNumber: window.windowNumber, context: nil, characters: "s",
-                    charactersIgnoringModifiers: "s", isARepeat: false, keyCode: 1))
+                let event = try XCTUnwrap(
+                    NSEvent.keyEvent(
+                        with: .keyDown, location: .zero,
+                        modifierFlags: [.control, .command], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, characters: "s",
+                        charactersIgnoringModifiers: "s", isARepeat: false, keyCode: 1))
                 // Use the native window key-equivalent path first, then normal
                 // application dispatch (which consults the installed main menu).
                 if !window.performKeyEquivalent(with: event) {
-                    if requiresKeyWindow { NSApp.sendEvent(event) }
-                    else { _ = mainMenu.performKeyEquivalent(with: event) }
+                    if requiresKeyWindow {
+                        NSApp.sendEvent(event)
+                    } else {
+                        _ = mainMenu.performKeyEquivalent(with: event)
+                    }
                 }
                 try await settle()
-                XCTAssertEqual(workspace.sidebarToggleRequest, request + 1, "one key produces exactly one workspace toggle")
-                XCTAssertEqual(controller.navigationItem.isCollapsed, hidden, "column \(column): both library columns must toggle")
-                XCTAssertEqual(workspace.sidebarsHidden, hidden, "column \(column): persisted state must follow the key")
+                XCTAssertEqual(
+                    workspace.sidebarToggleRequest, request + 1, "one key produces exactly one workspace toggle")
+                XCTAssertEqual(
+                    controller.navigationItem.isCollapsed, hidden, "column \(column): both library columns must toggle")
+                XCTAssertEqual(
+                    workspace.sidebarsHidden, hidden, "column \(column): persisted state must follow the key")
                 if hidden {
                     XCTAssertTrue(window.firstResponder === editor)
-                    XCTAssertEqual(controller.splitView.arrangedSubviews[1].frame.width, controller.view.bounds.width, accuracy: 2)
+                    XCTAssertEqual(
+                        controller.splitView.arrangedSubviews[1].frame.width, controller.view.bounds.width, accuracy: 2)
                 } else {
                     XCTAssertFalse(controller.sidebarItem.isCollapsed)
-                    for (actual, expected) in zip(widths(controller), saved) { XCTAssertEqual(actual, expected, accuracy: 1) }
+                    for (actual, expected) in zip(widths(controller), saved) {
+                        XCTAssertEqual(actual, expected, accuracy: 1)
+                    }
                 }
             }
         }
         XCTAssertEqual(editor.string, source)
         XCTAssertFalse(window.isVisible)
-        XCTAssertEqual(viewMenu.items.filter { $0.action == #selector(NSSplitViewController.toggleSidebar(_:)) }.count, 1)
+        XCTAssertEqual(
+            viewMenu.items.filter { $0.action == #selector(NSSplitViewController.toggleSidebar(_:)) }.count, 1)
         // Native validation must agree at both responder-chain entry points,
         // including an empty window and a window still loading its library.
         workspace.snapshot = nil
@@ -126,7 +146,9 @@ final class LibrarySplitViewTests: XCTestCase {
 
     @MainActor
     private func widths(_ controller: LibrarySplitViewController) -> [CGFloat] {
-        controller.navigationController.splitView.arrangedSubviews.map { $0.frame.width } + [controller.splitView.arrangedSubviews[1].frame.width]
+        controller.navigationController.splitView.arrangedSubviews.map { $0.frame.width } + [
+            controller.splitView.arrangedSubviews[1].frame.width
+        ]
     }
 
     @MainActor
@@ -141,7 +163,8 @@ final class LibrarySplitViewTests: XCTestCase {
         workspace.install(snapshot)
         let name = disposableAutosaveName("Restore")
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
-        var controller: LibrarySplitViewController? = LibrarySplitViewController(workspace: workspace, autosaveName: name)
+        var controller: LibrarySplitViewController? = LibrarySplitViewController(
+            workspace: workspace, autosaveName: name)
         container.addSubview(controller!.view)
         layout(controller!)
         await Task.yield()
@@ -178,7 +201,9 @@ final class LibrarySplitViewTests: XCTestCase {
                 restored.updateRequests()
                 XCTAssertTrue(restored.navigationItem.isCollapsed)
                 workspace.toggleSidebars()
-            } else { workspace.focus(column) }
+            } else {
+                workspace.focus(column)
+            }
             restored.updateRequests()
             layout(restored)
             XCTAssertFalse(restored.sidebarItem.isCollapsed)
@@ -208,7 +233,8 @@ final class LibrarySplitViewTests: XCTestCase {
         let name = disposableAutosaveName("Sidebars")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        try LongEditorFixture.document.write(to: root.appendingPathComponent("Long.md"), atomically: true, encoding: .utf8)
+        try LongEditorFixture.document.write(
+            to: root.appendingPathComponent("Long.md"), atomically: true, encoding: .utf8)
         let workspace = LibraryWorkspace(columnAutosaveName: name)
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
@@ -216,8 +242,9 @@ final class LibrarySplitViewTests: XCTestCase {
         XCTAssertTrue(opened)
         workspace.preview.showsOutline = true
         let controller = LibrarySplitViewController(workspace: workspace, autosaveName: name)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
-                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentViewController = controller
         defer { window.contentViewController = nil; window.close() }
@@ -228,12 +255,14 @@ final class LibrarySplitViewTests: XCTestCase {
             controller.view.layoutSubtreeIfNeeded()
         }
         try await settle()
-        controller.splitView.setPosition(640 + controller.navigationController.splitView.dividerThickness, ofDividerAt: 0)
+        controller.splitView.setPosition(
+            640 + controller.navigationController.splitView.dividerThickness, ofDividerAt: 0)
         controller.navigationController.splitView.setPosition(260, ofDividerAt: 0)
         try await settle()
         let saved = widths(controller)
         let editor = try XCTUnwrap(workspace.preview.editor)
-        let inspectorWidth = controller.splitView.arrangedSubviews[1].frame.width - (editor.enclosingScrollView?.frame.width ?? 0)
+        let inspectorWidth =
+            controller.splitView.arrangedSubviews[1].frame.width - (editor.enclosingScrollView?.frame.width ?? 0)
         XCTAssertGreaterThan(inspectorWidth, 150)
         let selection = NSRange(location: 100, length: 0)
         editor.setSelectedRange(selection)
@@ -248,7 +277,9 @@ final class LibrarySplitViewTests: XCTestCase {
         XCTAssertTrue(window.firstResponder === editor)
         XCTAssertEqual(editor.selectedRange(), selection)
         XCTAssertTrue(workspace.preview.showsOutline)
-        XCTAssertEqual(try XCTUnwrap(editor.enclosingScrollView).frame.width, controller.view.bounds.width - inspectorWidth, accuracy: 2)
+        XCTAssertEqual(
+            try XCTUnwrap(editor.enclosingScrollView).frame.width, controller.view.bounds.width - inspectorWidth,
+            accuracy: 2)
         workspace.toggleSidebars()
         try await settle()
         for (actual, expected) in zip(widths(controller), saved) { XCTAssertEqual(actual, expected, accuracy: 1) }
@@ -276,14 +307,16 @@ final class LibrarySplitViewTests: XCTestCase {
                 XCTAssertTrue(controller.splitViewItems[0].isCollapsed)
                 XCTAssertEqual(workspace.preview.mode, mode)
                 XCTAssertTrue(widths(controller).allSatisfy { $0.isFinite && $0 >= 0 })
-                XCTAssertEqual(controller.splitView.arrangedSubviews[1].frame.width, controller.view.bounds.width, accuracy: 2)
+                XCTAssertEqual(
+                    controller.splitView.arrangedSubviews[1].frame.width, controller.view.bounds.width, accuracy: 2)
                 if mode != .preview {
                     let text = try XCTUnwrap(workspace.preview.editor)
                     let scroll = try XCTUnwrap(text.enclosingScrollView)
                     let manager = try XCTUnwrap(text.layoutManager)
                     let container = try XCTUnwrap(text.textContainer)
                     manager.ensureLayout(for: container)
-                    XCTAssertGreaterThanOrEqual(text.frame.height, manager.usedRect(for: container).maxY + text.textContainerOrigin.y)
+                    XCTAssertGreaterThanOrEqual(
+                        text.frame.height, manager.usedRect(for: container).maxY + text.textContainerOrigin.y)
                     text.setSelectedRange(NSRange(location: text.string.utf16.count, length: 0))
                     text.scrollRangeToVisible(text.selectedRange())
                     XCTAssertGreaterThan(scroll.documentVisibleRect.maxY, 10000)

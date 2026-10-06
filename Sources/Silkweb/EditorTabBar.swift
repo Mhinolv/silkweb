@@ -87,7 +87,8 @@ final class EditorTabBarView: NSView {
         strip.activeFrame = buttons.first { $0.tab.id == workspace.activeTabID }?.frame
         if shownActiveID != workspace.activeTabID {
             shownActiveID = workspace.activeTabID
-            buttons.first { $0.tab.id == shownActiveID }?.scrollToVisible(NSRect(x: 0, y: 0, width: width, height: height))
+            buttons.first { $0.tab.id == shownActiveID }?.scrollToVisible(
+                NSRect(x: 0, y: 0, width: width, height: height))
         }
     }
 
@@ -104,9 +105,13 @@ final class EditorTabBarView: NSView {
         let location = strip.convert(point, from: nil)
         let gap = min(buttons.count, max(0, Int((location.x / max(1, first.frame.width) + 0.5).rounded(.down))))
         insertionGap = gap
-        indicator.frame = NSRect(x: min(strip.bounds.width - 2, CGFloat(gap) * first.frame.width), y: 0, width: 2, height: strip.bounds.height)
+        indicator.frame = NSRect(
+            x: min(strip.bounds.width - 2, CGFloat(gap) * first.frame.width), y: 0, width: 2,
+            height: strip.bounds.height)
         // Resolved when shown, so it follows the appearance and the Accent chosen in Settings.
-        effectiveAppearance.performAsCurrentDrawingAppearance { indicator.layer?.backgroundColor = NSColor.silkwebAccent.cgColor }
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            indicator.layer?.backgroundColor = NSColor.silkwebAccent.cgColor
+        }
         indicator.isHidden = false
         strip.addSubview(indicator, positioned: .above, relativeTo: nil)
     }
@@ -177,7 +182,8 @@ final class EditorTabButton: NSView {
         close.setAccessibilityLabel("Close \(tab.editor.name)")
         close.toolTip = "Close \(tab.editor.name)"
         toolTip = tab.isPreview ? "Preview — edit or double-click to keep this tab open" : tab.editor.name
-        setAccessibilityLabel(tab.editor.name + (tab.editor.state.isDirty ? ", edited" : "") + (tab.isPreview ? ", preview" : ""))
+        setAccessibilityLabel(
+            tab.editor.name + (tab.editor.state.isDirty ? ", edited" : "") + (tab.isPreview ? ", preview" : ""))
         setAccessibilityValue(active ? 1 : 0)
         setAccessibilityChildren([close])
         needsLayout = true
@@ -190,7 +196,8 @@ final class EditorTabButton: NSView {
     /// The dot sits 6 pt after the title, which gives up 12 pt of its budget while the dot shows.
     var dotRect: NSRect? {
         guard showsDirtyDot else { return nil }
-        return NSRect(x: title.frame.maxX + 6, y: (bounds.height - Self.dotSize) / 2, width: Self.dotSize, height: Self.dotSize)
+        return NSRect(
+            x: title.frame.maxX + 6, y: (bounds.height - Self.dotSize) / 2, width: Self.dotSize, height: Self.dotSize)
     }
 
     override func layout() {
@@ -210,9 +217,13 @@ final class EditorTabButton: NSView {
         let path = NSBezierPath()
         path.move(to: NSPoint(x: rect.minX, y: rect.minY))
         path.line(to: NSPoint(x: rect.minX, y: rect.maxY - r))
-        path.appendArc(withCenter: NSPoint(x: rect.minX + r, y: rect.maxY - r), radius: r, startAngle: 180, endAngle: 90, clockwise: true)
+        path.appendArc(
+            withCenter: NSPoint(x: rect.minX + r, y: rect.maxY - r), radius: r, startAngle: 180, endAngle: 90,
+            clockwise: true)
         path.line(to: NSPoint(x: rect.maxX - r, y: rect.maxY))
-        path.appendArc(withCenter: NSPoint(x: rect.maxX - r, y: rect.maxY - r), radius: r, startAngle: 90, endAngle: 0, clockwise: true)
+        path.appendArc(
+            withCenter: NSPoint(x: rect.maxX - r, y: rect.maxY - r), radius: r, startAngle: 90, endAngle: 0,
+            clockwise: true)
         path.line(to: NSPoint(x: rect.maxX, y: rect.minY))
         return path
     }
@@ -238,7 +249,8 @@ final class EditorTabButton: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        let area = NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
         addTrackingArea(area); tracking = area
     }
     override func mouseEntered(with event: NSEvent) { hovered = true; refresh() }
@@ -260,8 +272,11 @@ final class EditorTabButton: NSView {
     override func otherMouseUp(with event: NSEvent) { if event.buttonNumber == 2 { closeTab() } }
     override func accessibilityPerformPress() -> Bool { bar?.workspace.activateTab(tab.id); return true }
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 36 || event.keyCode == 49 { bar?.workspace.activateTab(tab.id) }
-        else { super.keyDown(with: event) }
+        if event.keyCode == 36 || event.keyCode == 49 {
+            bar?.workspace.activateTab(tab.id)
+        } else {
+            super.keyDown(with: event)
+        }
     }
     @objc private func closeTab() {
         guard let workspace = bar?.workspace else { return }

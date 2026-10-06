@@ -10,21 +10,29 @@ import SilkwebCore
     private(set) var scheduled = false
     private(set) var lastStyledRange = NSRange(location: 0, length: 0)
 
-    func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions, range editedRange: NSRange, changeInLength delta: Int) {
+    func textStorage(
+        _ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions,
+        range editedRange: NSRange, changeInLength delta: Int
+    ) {
         guard editedMask.contains(.editedCharacters) else { return }
         editor?.inlineImages.sourceDidChange(editedRange: editedRange, delta: delta)
         let oldEnd = NSMaxRange(editedRange) - delta
         var shifted: [Int: Bool] = [:]
         for (location, state) in checkpoints {
-            if location <= editedRange.location { shifted[location] = state }
-            else if location >= oldEnd, location + delta > editedRange.location { shifted[location + delta] = state }
+            if location <= editedRange.location {
+                shifted[location] = state
+            } else if location >= oldEnd, location + delta > editedRange.location {
+                shifted[location + delta] = state
+            }
         }
         checkpoints = shifted
         editor?.writingModes.sourceDidChange(editedRange: editedRange, delta: delta)
         if let previous = dirty {
             // Multiple edits before the coalesced pass: conservatively include their bounds.
             dirty = NSUnionRange(previous, editedRange)
-        } else { dirty = editedRange }
+        } else {
+            dirty = editedRange
+        }
         schedule()
     }
 
@@ -57,7 +65,9 @@ import SilkwebCore
         let styledStart = position
         let base = editor.style.bodyFont
         let paragraph = editor.style.paragraphStyle
-        let defaults: [NSAttributedString.Key: Any] = [.font: base, .foregroundColor: NSColor.silkwebText, .paragraphStyle: paragraph]
+        let defaults: [NSAttributedString.Key: Any] = [
+            .font: base, .foregroundColor: NSColor.silkwebText, .paragraphStyle: paragraph,
+        ]
         let undoRegistration = editor.undoManager?.isUndoRegistrationEnabled == true
         if undoRegistration { editor.undoManager?.disableUndoRegistration() }
         storage.beginEditing()
@@ -72,29 +82,42 @@ import SilkwebCore
                     switch token.kind {
                     case .marker:
                         storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: tokenRange)
-                        if result.tokens.contains(where: { if case .heading = $0.kind { return true }; return false }), token.range.location == 0 {
+                        if result.tokens.contains(where: {
+                            if case .heading = $0.kind { return true }; return false
+                        }), token.range.location == 0 {
                             storage.addAttribute(.font, value: base, range: tokenRange)
                         }
                     case .heading:
-                        storage.addAttributes([.font: NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask),
-                                               .foregroundColor: NSColor.editorHeading], range: tokenRange)
+                        storage.addAttributes(
+                            [
+                                .font: NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask),
+                                .foregroundColor: NSColor.editorHeading,
+                            ], range: tokenRange)
                     case .bold, .italic:
                         storage.addAttribute(.foregroundColor, value: NSColor.silkwebText, range: tokenRange)
                         storage.enumerateAttribute(.font, in: tokenRange) { value, subrange, _ in
                             let font = value as? NSFont ?? base
                             let trait: NSFontTraitMask = token.kind == .bold ? .boldFontMask : .italicFontMask
-                            storage.addAttribute(.font, value: NSFontManager.shared.convert(font, toHaveTrait: trait), range: subrange)
+                            storage.addAttribute(
+                                .font, value: NSFontManager.shared.convert(font, toHaveTrait: trait), range: subrange)
                         }
                     case .strike:
-                        storage.addAttributes([.strikethroughStyle: NSUnderlineStyle.single.rawValue, .foregroundColor: NSColor.secondaryLabelColor], range: tokenRange)
+                        storage.addAttributes(
+                            [
+                                .strikethroughStyle: NSUnderlineStyle.single.rawValue,
+                                .foregroundColor: NSColor.secondaryLabelColor,
+                            ], range: tokenRange)
                     case .code:
                         if fenced {
-                            storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: tokenRange)
+                            storage.addAttribute(
+                                .foregroundColor, value: NSColor.secondaryLabelColor, range: tokenRange)
                         } else {
-                            storage.addAttribute(.backgroundColor, value: NSColor.quaternarySystemFill, range: tokenRange)
+                            storage.addAttribute(
+                                .backgroundColor, value: NSColor.quaternarySystemFill, range: tokenRange)
                         }
                     case .link: storage.addAttribute(.foregroundColor, value: NSColor.linkColor, range: tokenRange)
-                    case .quote: storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: tokenRange)
+                    case .quote:
+                        storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: tokenRange)
                     }
                 }
             }
@@ -128,19 +151,20 @@ enum HeadingPalette {
 
     static func color(dark: Bool, highContrast: Bool) -> NSColor {
         let rgb = highContrast ? (dark ? highContrastDark : highContrastLight) : (dark ? self.dark : light)
-        return NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255,
-                       green: CGFloat((rgb >> 8) & 255) / 255,
-                       blue: CGFloat(rgb & 255) / 255, alpha: 1)
+        return NSColor(
+            srgbRed: CGFloat((rgb >> 16) & 255) / 255,
+            green: CGFloat((rgb >> 8) & 255) / 255,
+            blue: CGFloat(rgb & 255) / 255, alpha: 1)
     }
 
     static func hex(_ rgb: Int) -> String { String(format: "#%06X", rgb) }
 
     static let previewCSS = """
-    :root { --sw-heading: \(hex(light)); }
-    @media (prefers-color-scheme: dark) { :root { --sw-heading: \(hex(dark)); } }
-    @media (prefers-contrast: more) { :root { --sw-heading: \(hex(highContrastLight)); } }
-    @media (prefers-color-scheme: dark) and (prefers-contrast: more) { :root { --sw-heading: \(hex(highContrastDark)); } }
-    """
+        :root { --sw-heading: \(hex(light)); }
+        @media (prefers-color-scheme: dark) { :root { --sw-heading: \(hex(dark)); } }
+        @media (prefers-contrast: more) { :root { --sw-heading: \(hex(highContrastLight)); } }
+        @media (prefers-color-scheme: dark) and (prefers-contrast: more) { :root { --sw-heading: \(hex(highContrastDark)); } }
+        """
 }
 
 extension NSColor {
@@ -148,8 +172,10 @@ extension NSColor {
     static let editorHeading = NSColor(name: "SilkwebEditorHeading") { appearance in
         let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         if let custom = LivePreferences.shared.colors(dark: dark).headings { return SilkwebTokens.srgb(custom.rgb) }
-        let contrast = appearance.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua,
-                                                   .accessibilityHighContrastDarkAqua])
+        let contrast = appearance.bestMatch(from: [
+            .aqua, .darkAqua, .accessibilityHighContrastAqua,
+            .accessibilityHighContrastDarkAqua,
+        ])
         let highContrast = contrast == .accessibilityHighContrastAqua || contrast == .accessibilityHighContrastDarkAqua
         return HeadingPalette.color(dark: dark, highContrast: highContrast)
     }

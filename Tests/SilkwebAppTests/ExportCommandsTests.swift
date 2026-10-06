@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class ExportCommandsTests: XCTestCase {
@@ -25,8 +26,11 @@ final class ExportCommandsTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(result).html.contains("&lt;text&gt;"))
         XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "# Latest & <text>")
         XCTAssertTrue(workspace.canExport)
-        let host = NSHostingView(rootView: DocumentTable(workspace: workspace, documents: workspace.documents, dateReference: Date()))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 760), styleMask: [.borderless], backing: .buffered, defer: false)
+        let host = NSHostingView(
+            rootView: DocumentTable(workspace: workspace, documents: workspace.documents, dateReference: Date()))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 760), styleMask: [.borderless], backing: .buffered,
+            defer: false)
         window.contentView = host
         defer { window.contentView = nil }
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
@@ -42,19 +46,25 @@ final class ExportCommandsTests: XCTestCase {
                 XCTAssertTrue(html.isEnabled)
                 workspace.session.selectedDocuments = ["Note.md", "Other.md"]
                 XCTAssertFalse(workspace.canExport)
-                XCTAssertFalse(table.coordinator!.menu(path: "Note.md").items.first { $0.title == "Export" }!.submenu!.items[0].isEnabled)
+                XCTAssertFalse(
+                    table.coordinator!.menu(path: "Note.md").items.first { $0.title == "Export" }!.submenu!.items[0]
+                        .isEnabled)
                 workspace.session.selectedDocuments = ["Note.md"]
             }
         }
         workspace.editor.recovered = true
-        do { _ = try await workspace.prepareHTMLExport(); XCTFail("Recovery must be resolved before export") }
-        catch { XCTAssertTrue(error.localizedDescription.contains("saved")) }
+        do { _ = try await workspace.prepareHTMLExport(); XCTFail("Recovery must be resolved before export") } catch {
+            XCTAssertTrue(error.localizedDescription.contains("saved"))
+        }
         await workspace.didCloseWindow()
     }
 
     @MainActor func testNativeAlertAndStylesheet() {
         let root = URL(fileURLWithPath: "/nonexistent-export-fixture")
-        let result = HTMLExport.prepare(markdown: (1...8).map { "![alt](missing-\($0).png)" }.joined(separator: "\n\n"), title: "Note", documentURL: root.appendingPathComponent("Note.md"), libraryRoot: root, stylesheet: PreviewCoordinator.stylesheet)
+        let result = HTMLExport.prepare(
+            markdown: (1...8).map { "![alt](missing-\($0).png)" }.joined(separator: "\n\n"), title: "Note",
+            documentURL: root.appendingPathComponent("Note.md"), libraryRoot: root,
+            stylesheet: PreviewCoordinator.stylesheet)
         let alert = ExportCommands.missingImageAlert(result)
         alert.layout()
         XCTAssertEqual(alert.messageText, "8 images couldn’t be found.")

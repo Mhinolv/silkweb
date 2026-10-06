@@ -13,7 +13,7 @@ final class AppIconTests: XCTestCase {
         ("icon_32x32.png", 32), ("icon_32x32@2x.png", 64),
         ("icon_128x128.png", 128), ("icon_128x128@2x.png", 256),
         ("icon_256x256.png", 256), ("icon_256x256@2x.png", 512),
-        ("icon_512x512.png", 512), ("icon_512x512@2x.png", 1024)
+        ("icon_512x512.png", 512), ("icon_512x512@2x.png", 1024),
     ]
 
     func testBundledPlistNamesCommittedIconWithAllTenRepresentations() throws {
@@ -25,14 +25,16 @@ final class AppIconTests: XCTestCase {
         let name = try XCTUnwrap(plist["CFBundleIconFile"] as? String)
         XCTAssertEqual(name, "Silkweb.icns")
         let icon = contents.appendingPathComponent("Resources").appendingPathComponent(name)
-        XCTAssertEqual(try Data(contentsOf: icon), try Data(contentsOf: repository.appendingPathComponent("scripts/Silkweb.icns")))
+        XCTAssertEqual(
+            try Data(contentsOf: icon), try Data(contentsOf: repository.appendingPathComponent("scripts/Silkweb.icns")))
         try assertRepresentations(icon)
         XCTAssertNotNil(NSImage(contentsOf: icon), "AppKit must load the application icon")
         try run("/usr/bin/codesign", arguments: ["--verify", "--strict", "build/Silkweb.app"])
     }
 
     func testGeneratorProducesIdenticalPNGsInEverySizeAndAppearance() throws {
-        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebIcon-" + UUID().uuidString)
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SilkwebIcon-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: temporary) }
         let first = temporary.appendingPathComponent("first")
         let second = temporary.appendingPathComponent("second")
@@ -40,7 +42,8 @@ final class AppIconTests: XCTestCase {
             try run("/usr/bin/swift", arguments: ["scripts/make_icon.swift", root.path])
             try assertRepresentations(root.appendingPathComponent("scripts/Silkweb.icns"))
         }
-        let committed = try XCTUnwrap(CGImageSourceCreateWithURL(repository.appendingPathComponent("scripts/Silkweb.icns") as CFURL, nil))
+        let committed = try XCTUnwrap(
+            CGImageSourceCreateWithURL(repository.appendingPathComponent("scripts/Silkweb.icns") as CFURL, nil))
         for (name, size) in representations {
             let relative = ".build/icon-generation/Silkweb.iconset/" + name
             let a = first.appendingPathComponent(relative)
@@ -50,11 +53,13 @@ final class AppIconTests: XCTestCase {
             let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
             XCTAssertEqual(image.width, size, name)
             XCTAssertEqual(image.height, size, name)
-            let matchingIndex = try XCTUnwrap((0..<CGImageSourceGetCount(committed)).first { index in
-                CGImageSourceCreateImageAtIndex(committed, index, nil)?.width == size
-            })
+            let matchingIndex = try XCTUnwrap(
+                (0..<CGImageSourceGetCount(committed)).first { index in
+                    CGImageSourceCreateImageAtIndex(committed, index, nil)?.width == size
+                })
             let committedImage = try XCTUnwrap(CGImageSourceCreateImageAtIndex(committed, matchingIndex, nil))
-            XCTAssertEqual(image.dataProvider?.data as Data?, committedImage.dataProvider?.data as Data?,
+            XCTAssertEqual(
+                image.dataProvider?.data as Data?, committedImage.dataProvider?.data as Data?,
                 "Committed icon must match the generator: " + name)
             // All sizes retain transparent margins and visible artwork.
             let bytes = try XCTUnwrap(image.dataProvider?.data) as Data
@@ -63,7 +68,8 @@ final class AppIconTests: XCTestCase {
         }
         for name in ["icon-preview-light.png", "icon-preview-dark.png", "icon-16.png", "icon-32.png", "icon-1024.png"] {
             let relative = ".build/icon-generation/preview/" + name
-            XCTAssertEqual(try Data(contentsOf: first.appendingPathComponent(relative)),
+            XCTAssertEqual(
+                try Data(contentsOf: first.appendingPathComponent(relative)),
                 try Data(contentsOf: second.appendingPathComponent(relative)), name)
             let source = try XCTUnwrap(CGImageSourceCreateWithURL(first.appendingPathComponent(relative) as CFURL, nil))
             let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
@@ -94,7 +100,8 @@ final class AppIconTests: XCTestCase {
         environment["CLANG_MODULE_CACHE_PATH"] = repository.appendingPathComponent(".build/module-cache").path
         process.environment = environment
         // Use a file rather than a pipe to avoid blocking on compiler diagnostics.
-        let log = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebIconProcess-" + UUID().uuidString)
+        let log = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SilkwebIconProcess-" + UUID().uuidString)
         FileManager.default.createFile(atPath: log.path, contents: nil)
         defer { try? FileManager.default.removeItem(at: log) }
         let handle = try FileHandle(forWritingTo: log)

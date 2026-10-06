@@ -5,14 +5,18 @@ public enum LibraryScanner {
     /// invalidate a transaction. Symlinks are never library-owned items.
     static func isManagedItem(_ url: URL, values: URLResourceValues) -> Bool {
         guard values.isSymbolicLink != true, values.isHidden != true,
-              !url.lastPathComponent.hasPrefix(".") else { return false }
+            !url.lastPathComponent.hasPrefix(".")
+        else { return false }
         if values.isDirectory == true, MediaDirectory.isMarked(url) { return false }
-        return values.isDirectory == true || (values.isRegularFile == true
-            && ["md", "markdown"].contains(url.pathExtension.lowercased()))
+        return values.isDirectory == true
+            || (values.isRegularFile == true
+                && ["md", "markdown"].contains(url.pathExtension.lowercased()))
     }
 
     /// All enumeration, metadata IO and encoding run away from the caller's actor.
-    public static func scan(root: URL, previousSnapshot: LibrarySnapshot? = nil, progress: (@Sendable (Int) -> Void)? = nil) async throws -> LibrarySnapshot {
+    public static func scan(
+        root: URL, previousSnapshot: LibrarySnapshot? = nil, progress: (@Sendable (Int) -> Void)? = nil
+    ) async throws -> LibrarySnapshot {
         let worker = Task.detached(priority: .userInitiated) {
             try scanOnWorker(root: root, previousSnapshot: previousSnapshot, progress: progress)
         }
@@ -27,7 +31,8 @@ public enum LibraryScanner {
         try await Task.detached(priority: .userInitiated) {
             let components = document.relativePath.split(separator: "/", omittingEmptySubsequences: false)
             guard !components.isEmpty,
-                  components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+                components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." })
+            else {
                 throw LibraryError.invalidRelativePath
             }
             var url = root.standardizedFileURL.resolvingSymlinksInPath()
@@ -59,14 +64,17 @@ public enum LibraryScanner {
             documents[index].modified = values.contentModificationDate
             // An atomic save replaces the inode; match the next scan so it is not a second change.
             documents[index].fileIdentity = "\(attributes[.systemNumber] ?? ""):\(attributes[.systemFileNumber] ?? "")"
-            return LibrarySnapshot(rootURL: snapshot.rootURL, folders: snapshot.folders, documents: documents,
-                                   presentation: LibraryPresentation(folders: snapshot.folders, documents: documents),
-                                   metadata: snapshot.metadata, recoveredMetadataURL: snapshot.recoveredMetadataURL,
-                                   isReadOnly: snapshot.isReadOnly)
+            return LibrarySnapshot(
+                rootURL: snapshot.rootURL, folders: snapshot.folders, documents: documents,
+                presentation: LibraryPresentation(folders: snapshot.folders, documents: documents),
+                metadata: snapshot.metadata, recoveredMetadataURL: snapshot.recoveredMetadataURL,
+                isReadOnly: snapshot.isReadOnly)
         }.value
     }
 
-    private static func scanOnWorker(root: URL, previousSnapshot: LibrarySnapshot?, progress: (@Sendable (Int) -> Void)?) throws -> LibrarySnapshot {
+    private static func scanOnWorker(
+        root: URL, previousSnapshot: LibrarySnapshot?, progress: (@Sendable (Int) -> Void)?
+    ) throws -> LibrarySnapshot {
         precondition(!Thread.isMainThread, "Library enumeration must run off the main thread")
         try LibraryMetadataStore.rejectLink(root.standardizedFileURL)
         let root = root.standardizedFileURL.resolvingSymlinksInPath()
@@ -105,7 +113,10 @@ public enum LibraryScanner {
         var pending = [(url: root, path: "", id: rootID, folderIndex: 0)]
         var unreadablePaths = Set<String>()
         var nextProgress = Date().addingTimeInterval(1)
-        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .isHiddenKey, .creationDateKey, .contentModificationDateKey]
+        let keys: Set<URLResourceKey> = [
+            .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .isHiddenKey, .creationDateKey,
+            .contentModificationDateKey,
+        ]
         while let parent = pending.popLast() {
             try Task.checkCancellation()
             let children: [(url: URL, values: URLResourceValues)]
@@ -118,7 +129,8 @@ public enum LibraryScanner {
                 }
             } catch {
                 let cocoa = error as NSError
-                let isPermissionError = (cocoa.domain == NSCocoaErrorDomain && cocoa.code == NSFileReadNoPermissionError)
+                let isPermissionError =
+                    (cocoa.domain == NSCocoaErrorDomain && cocoa.code == NSFileReadNoPermissionError)
                     || (cocoa.domain == NSPOSIXErrorDomain && [Int(EACCES), Int(EPERM)].contains(cocoa.code))
                 guard !parent.path.isEmpty, isPermissionError else { throw error }
                 folders[parent.folderIndex].isUnreadable = true
@@ -136,14 +148,18 @@ public enum LibraryScanner {
                 let key = try fileIdentity(child)
                 if values.isDirectory == true {
                     let id = identity(for: path, key: key)
-                    folders.append(LibraryFolder(id: id, parentID: parent.id, relativePath: path, name: child.lastPathComponent))
+                    folders.append(
+                        LibraryFolder(id: id, parentID: parent.id, relativePath: path, name: child.lastPathComponent))
                     folders[folders.count - 1].fileIdentity = key
                     pending.append((child, path, id, folders.count - 1))
                 } else if values.isRegularFile == true,
-                          ["md", "markdown"].contains(child.pathExtension.lowercased()) {
-                    documents.append(LibraryDocument(id: identity(for: path, key: key), folderID: parent.id,
-                                                     relativePath: path, name: child.lastPathComponent,
-                                                     created: values.creationDate, modified: values.contentModificationDate))
+                    ["md", "markdown"].contains(child.pathExtension.lowercased())
+                {
+                    documents.append(
+                        LibraryDocument(
+                            id: identity(for: path, key: key), folderID: parent.id,
+                            relativePath: path, name: child.lastPathComponent,
+                            created: values.creationDate, modified: values.contentModificationDate))
                     documents[documents.count - 1].fileIdentity = key
                 }
             }
@@ -165,9 +181,10 @@ public enum LibraryScanner {
         }
         // Resolve identities after enumeration so a replacement at an old path
         // cannot steal the ID of the original file moved elsewhere in this batch.
-        let keysByPath = Dictionary(uniqueKeysWithValues:
-            folders.compactMap { item in item.fileIdentity.map { (item.relativePath, $0) } }
-            + documents.compactMap { item in item.fileIdentity.map { (item.relativePath, $0) } })
+        let keysByPath = Dictionary(
+            uniqueKeysWithValues:
+                folders.compactMap { item in item.fileIdentity.map { (item.relativePath, $0) } }
+                + documents.compactMap { item in item.fileIdentity.map { (item.relativePath, $0) } })
         let presentLiveIDs = Set(keysByPath.values.compactMap { liveIDs[$0] })
         var resolved: [String: UUID] = [:]
         var assigned = Set<UUID>()
@@ -180,37 +197,47 @@ public enum LibraryScanner {
         }
         metadata.IDsByPath = resolved
         folders = folders.map { folder in
-            var updated = LibraryFolder(id: resolved[folder.relativePath]!,
-                parentID: folder.parentID == nil ? nil : resolved[(folder.relativePath as NSString).deletingLastPathComponent],
+            var updated = LibraryFolder(
+                id: resolved[folder.relativePath]!,
+                parentID: folder.parentID == nil
+                    ? nil : resolved[(folder.relativePath as NSString).deletingLastPathComponent],
                 relativePath: folder.relativePath, name: folder.name)
             updated.fileIdentity = folder.fileIdentity
             updated.isUnreadable = folder.isUnreadable
             return updated
         }
         documents = documents.map { document in
-            var updated = LibraryDocument(id: resolved[document.relativePath]!,
+            var updated = LibraryDocument(
+                id: resolved[document.relativePath]!,
                 folderID: resolved[(document.relativePath as NSString).deletingLastPathComponent]!,
-                relativePath: document.relativePath, name: document.name, created: document.created, modified: document.modified)
+                relativePath: document.relativePath, name: document.name, created: document.created,
+                modified: document.modified)
             updated.fileIdentity = document.fileIdentity
             return updated
         }
         try Task.checkCancellation()
         metadata = TagEditor.pruning(metadata)
         let locations = try LibraryMetadataStore.locations(root: root)
-        let metadataTarget = FileManager.default.fileExists(atPath: locations.file.path) ? locations.file :
-            (FileManager.default.fileExists(atPath: locations.directory.path) ? locations.directory : root)
-        var isReadOnly = !FileManager.default.isWritableFile(atPath: root.path)
+        let metadataTarget =
+            FileManager.default.fileExists(atPath: locations.file.path)
+            ? locations.file
+            : (FileManager.default.fileExists(atPath: locations.directory.path) ? locations.directory : root)
+        var isReadOnly =
+            !FileManager.default.isWritableFile(atPath: root.path)
             || !FileManager.default.isWritableFile(atPath: metadataTarget.path)
         if metadata != previous && !isReadOnly {
             do {
                 try LibraryMetadataStore.save(metadata, root: root)
-            } catch let error as NSError where error.domain == NSCocoaErrorDomain
-                && [NSFileWriteNoPermissionError, NSFileWriteVolumeReadOnlyError].contains(error.code) {
+            } catch let error as NSError
+                where error.domain == NSCocoaErrorDomain
+                && [NSFileWriteNoPermissionError, NSFileWriteVolumeReadOnlyError].contains(error.code)
+            {
                 isReadOnly = true
             }
         }
-        return LibrarySnapshot(rootURL: root, folders: folders, documents: documents,
-                               presentation: LibraryPresentation(folders: folders, documents: documents),
-                               metadata: metadata, recoveredMetadataURL: recoveredURL, isReadOnly: isReadOnly)
+        return LibrarySnapshot(
+            rootURL: root, folders: folders, documents: documents,
+            presentation: LibraryPresentation(folders: folders, documents: documents),
+            metadata: metadata, recoveredMetadataURL: recoveredURL, isReadOnly: isReadOnly)
     }
 }

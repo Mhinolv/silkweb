@@ -17,7 +17,10 @@ public enum HTMLRenderer {
         /// Settings (1.24): when off, `[TOC]` stays visible as its source text.
         public var showsTableOfContents = true
 
-        public init(lineBreaks: LineBreaks = .standard, libraryRoot: URL? = nil, documentURL: URL? = nil, offlinePreview: Bool = false) {
+        public init(
+            lineBreaks: LineBreaks = .standard, libraryRoot: URL? = nil, documentURL: URL? = nil,
+            offlinePreview: Bool = false
+        ) {
             self.lineBreaks = lineBreaks
             self.libraryRoot = libraryRoot
             self.documentURL = documentURL
@@ -61,27 +64,36 @@ public enum HTMLRenderer {
         return result
     }
 
-    private static func blocks(_ values: [MarkdownBlock], options: Options, depth: Int, context: inout Context) -> String {
+    private static func blocks(_ values: [MarkdownBlock], options: Options, depth: Int, context: inout Context)
+        -> String
+    {
         // Also bound rendering of ASTs supplied directly by callers.
         guard depth <= MarkdownParser.maximumNesting else { return "" }
         return values.map { block in
             switch block {
-            case .paragraph(let children): return "<p>" + inlines(children, options: options, depth: 0, context: &context) + "</p>\n"
+            case .paragraph(let children):
+                return "<p>" + inlines(children, options: options, depth: 0, context: &context) + "</p>\n"
             case .heading(let level, let children):
                 let tag = "h\(min(6, max(1, level)))"
-                let id = context.headingIndex < context.headings.count ? context.headings[context.headingIndex].id : "section"
+                let id =
+                    context.headingIndex < context.headings.count
+                    ? context.headings[context.headingIndex].id : "section"
                 context.headingIndex += 1
-                return "<\(tag) id=\"\(escape(id))\">" + inlines(children, options: options, depth: 0, context: &context) + "</\(tag)>\n"
+                return "<\(tag) id=\"\(escape(id))\">"
+                    + inlines(children, options: options, depth: 0, context: &context) + "</\(tag)>\n"
             case .code(let language, let text):
                 let name = (language ?? "").split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
                 let sanitized = name.filter { $0.isASCII && ($0.isLetter || $0.isNumber || "_+-".contains($0)) }
                 let attribute = sanitized.isEmpty ? "" : " class=\"language-\(sanitized)\""
-                let keepsTogether = options.printOutput && text.split(separator: "\n", omittingEmptySubsequences: false).count
-                    - (text.hasSuffix("\n") ? 1 : 0) < 15
+                let keepsTogether =
+                    options.printOutput
+                    && text.split(separator: "\n", omittingEmptySubsequences: false).count
+                        - (text.hasSuffix("\n") ? 1 : 0) < 15
                 let blockClass = keepsTogether ? " class=\"sw-short-code\"" : ""
                 return "<pre\(blockClass)><code\(attribute)>" + escape(text) + "</code></pre>\n"
             case .quote(let children):
-                return "<blockquote>\n" + blocks(children, options: options, depth: depth + 1, context: &context) + "</blockquote>\n"
+                return "<blockquote>\n" + blocks(children, options: options, depth: depth + 1, context: &context)
+                    + "</blockquote>\n"
             case .list(let start, let items):
                 let tag = start == nil ? "ul" : "ol"
                 let tasks = items.contains { item in
@@ -98,7 +110,9 @@ public enum HTMLRenderer {
                 return "<\(tag)\(attribute)\(taskClass)>\n" + content + "</\(tag)>\n"
             case .thematicBreak: return "<hr>\n"
             case .taskItem(let checked, let children):
-                let checkbox = options.printOutput ? (checked ? "☑ " : "☐ ") : "<input type=\"checkbox\" disabled" + (checked ? " checked" : "") + "> "
+                let checkbox =
+                    options.printOutput
+                    ? (checked ? "☑ " : "☐ ") : "<input type=\"checkbox\" disabled" + (checked ? " checked" : "") + "> "
                 var content = children
                 var first = ""
                 if case .paragraph(let text) = content.first {
@@ -109,36 +123,43 @@ public enum HTMLRenderer {
                     + blocks(content, options: options, depth: depth + 1, context: &context) + "</li>\n"
             case .table(let header, let alignments, let rows):
                 func row(_ cells: [[MarkdownInline]], tag: String) -> String {
-                    "<tr>" + cells.enumerated().map { index, cell in
-                        let alignment = index < alignments.count ? alignments[index] : nil
-                        let attribute = alignment.map { " class=\"sw-align-\($0.rawValue)\"" } ?? ""
-                        return "<\(tag)\(attribute)>" + inlines(cell, options: options, depth: 0, context: &context) + "</\(tag)>"
-                    }.joined() + "</tr>\n"
+                    "<tr>"
+                        + cells.enumerated().map { index, cell in
+                            let alignment = index < alignments.count ? alignments[index] : nil
+                            let attribute = alignment.map { " class=\"sw-align-\($0.rawValue)\"" } ?? ""
+                            return "<\(tag)\(attribute)>" + inlines(cell, options: options, depth: 0, context: &context)
+                                + "</\(tag)>"
+                        }.joined() + "</tr>\n"
                 }
                 let head = row(header, tag: "th")
                 let body = rows.map { row($0, tag: "td") }.joined()
                 return "<div class=\"sw-table-wrap\"><table>\n<thead>\n" + head
                     + "</thead>\n<tbody>\n" + body + "</tbody>\n</table></div>\n"
-            case .tableOfContents: return options.showsTableOfContents ? tableOfContents(context.headings) : "<p>[TOC]</p>\n"
+            case .tableOfContents:
+                return options.showsTableOfContents ? tableOfContents(context.headings) : "<p>[TOC]</p>\n"
             }
         }.joined()
     }
 
-    private static func inlines(_ values: [MarkdownInline], options: Options, depth: Int, context: inout Context) -> String {
+    private static func inlines(_ values: [MarkdownInline], options: Options, depth: Int, context: inout Context)
+        -> String
+    {
         guard depth <= MarkdownParser.maximumNesting else { return "" }
         return values.map { value in
             switch value {
             case .text(let text): return escape(text)
             case .rawHTML(let text): return "<span class=\"sw-raw-html\">" + escape(text) + "</span>"
             case .code(let text): return "<code>" + escape(text) + "</code>"
-            case .emphasis(let children): return "<em>" + inlines(children, options: options, depth: depth + 1, context: &context) + "</em>"
+            case .emphasis(let children):
+                return "<em>" + inlines(children, options: options, depth: depth + 1, context: &context) + "</em>"
             case .strikethrough(let children):
                 return "<del>" + inlines(children, options: options, depth: depth + 1, context: &context) + "</del>"
             case .footnoteReference(let label):
                 guard context.definitions[label] != nil else { return escape("[^\(label)]") }
                 let number: Int
-                if let existing = context.numbers[label] { number = existing }
-                else {
+                if let existing = context.numbers[label] {
+                    number = existing
+                } else {
                     number = context.referenced.count + 1
                     context.numbers[label] = number
                     context.referenced.append(label)
@@ -146,26 +167,33 @@ public enum HTMLRenderer {
                 let count = context.referenceCounts[label, default: 0] + 1
                 context.referenceCounts[label] = count
                 let suffix = count == 1 ? "" : "-\(count)"
-                return "<sup class=\"sw-fn-ref\"><a href=\"#fn-\(number)\" id=\"fnref-\(number)\(suffix)\">\(number)</a></sup>"
-            case .strong(let children): return "<strong>" + inlines(children, options: options, depth: depth + 1, context: &context) + "</strong>"
+                return
+                    "<sup class=\"sw-fn-ref\"><a href=\"#fn-\(number)\" id=\"fnref-\(number)\(suffix)\">\(number)</a></sup>"
+            case .strong(let children):
+                return "<strong>" + inlines(children, options: options, depth: depth + 1, context: &context)
+                    + "</strong>"
             case .softBreak: return options.lineBreaks == .preserve ? "<br>\n" : "\n"
             case .hardBreak: return "<br>\n"
             case .link(let label, let destination, let title):
                 let content = inlines(label, options: options, depth: depth + 1, context: &context)
                 guard allowed(destination, image: false, options: options) else {
                     let interaction = options.offlinePreview ? " role=\"link\" tabindex=\"0\"" : ""
-                    return "<span class=\"sw-blocked-link\"" + interaction + " title=\"Link not opened: this kind of link isn’t allowed.\">" + content + "</span>"
+                    return "<span class=\"sw-blocked-link\"" + interaction
+                        + " title=\"Link not opened: this kind of link isn’t allowed.\">" + content + "</span>"
                 }
-                return "<a href=\"" + escape(localDestination(destination, options: options)) + "\"" + titleAttribute(title) + ">" + content + "</a>"
+                return "<a href=\"" + escape(localDestination(destination, options: options)) + "\""
+                    + titleAttribute(title) + ">" + content + "</a>"
             case .image(let alt, let destination, let title):
                 if let images = options.exportImages {
                     if let source = images[destination] {
-                        return "<img src=\"" + escape(source) + "\" alt=\"" + escape(alt) + "\"" + titleAttribute(title) + ">"
+                        return "<img src=\"" + escape(source) + "\" alt=\"" + escape(alt) + "\"" + titleAttribute(title)
+                            + ">"
                     }
                     let description = "Image not included: " + escape(alt)
                     let scheme = URLComponents(string: destination)?.scheme?.lowercased()
-                    if (scheme == "http" || scheme == "https"), allowed(destination, image: true, options: options) {
-                        return "<span class=\"sw-remote-image\"><a href=\"" + escape(destination) + "\">" + description + "</a></span>"
+                    if scheme == "http" || scheme == "https", allowed(destination, image: true, options: options) {
+                        return "<span class=\"sw-remote-image\"><a href=\"" + escape(destination) + "\">" + description
+                            + "</a></span>"
                     }
                     return "<span class=\"sw-missing-image\">" + description + "</span>"
                 }
@@ -173,7 +201,9 @@ public enum HTMLRenderer {
                     if options.offlinePreview {
                         return "<span class=\"sw-missing-image\">Image outside library: " + escape(alt) + "</span>"
                     }
-                    return "<span class=\"sw-blocked-link\" title=\"Link not opened: this kind of link isn’t allowed.\">" + escape(alt) + "</span>"
+                    return
+                        "<span class=\"sw-blocked-link\" title=\"Link not opened: this kind of link isn’t allowed.\">"
+                        + escape(alt) + "</span>"
                 }
                 let scheme = URLComponents(string: destination)?.scheme?.lowercased()
                 if options.offlinePreview, scheme == "http" || scheme == "https" || scheme == "data" {
@@ -181,7 +211,8 @@ public enum HTMLRenderer {
                 }
                 var source = localDestination(destination, options: options)
                 if options.offlinePreview, let root = options.libraryRoot,
-                   let url = URL(string: source), url.isFileURL {
+                    let url = URL(string: source), url.isFileURL
+                {
                     guard FileManager.default.fileExists(atPath: url.path) else {
                         return "<span class=\"sw-missing-image\">Missing image: " + escape(destination) + "</span>"
                     }
@@ -190,7 +221,8 @@ public enum HTMLRenderer {
                     }
                     source = asset.absoluteString
                 }
-                let image = "<img src=\"" + escape(source) + "\" alt=\"" + escape(alt) + "\"" + titleAttribute(title) + ">"
+                let image =
+                    "<img src=\"" + escape(source) + "\" alt=\"" + escape(alt) + "\"" + titleAttribute(title) + ">"
                 return scheme == "http" || scheme == "https"
                     ? "<span class=\"sw-remote-image\">" + image + "</span>" : image
             }
@@ -206,7 +238,9 @@ public enum HTMLRenderer {
                 let heading = headings[index]
                 index += 1
                 html += "<li><a href=\"#\(escape(heading.id))\">\(escape(heading.text))</a>"
-                if index < headings.count, headings[index].level > heading.level { html += list(parentLevel: heading.level) }
+                if index < headings.count, headings[index].level > heading.level {
+                    html += list(parentLevel: heading.level)
+                }
                 html += "</li>"
             }
             return html + "</ul>"
@@ -230,7 +264,8 @@ public enum HTMLRenderer {
         let items = rendered.map { item in
             let links = (1...context.referenceCounts[item.label, default: 1]).map { count in
                 let suffix = count == 1 ? "" : "-\(count)"
-                return "<a href=\"#fnref-\(item.number)\(suffix)\" class=\"sw-fn-back\" aria-label=\"Back to reference \(item.number)\">↩</a>"
+                return
+                    "<a href=\"#fnref-\(item.number)\(suffix)\" class=\"sw-fn-back\" aria-label=\"Back to reference \(item.number)\">↩</a>"
             }.joined(separator: " ")
             return "<li id=\"fn-\(item.number)\"><p>" + item.body + " " + links + "</p></li>\n"
         }.joined()
@@ -239,8 +274,9 @@ public enum HTMLRenderer {
 
     private static func localDestination(_ destination: String, options: Options) -> String {
         guard options.offlinePreview, !destination.hasPrefix("#"),
-              URLComponents(string: destination)?.scheme == nil,
-              let document = options.documentURL else { return destination }
+            URLComponents(string: destination)?.scheme == nil,
+            let document = options.documentURL
+        else { return destination }
         return PreviewResource.resolve(destination, relativeTo: document)?.absoluteString ?? destination
     }
 
@@ -251,11 +287,12 @@ public enum HTMLRenderer {
     static func allowed(_ destination: String, image: Bool, options: Options) -> Bool {
         // Reject controls, backslashes and malformed encodings before URL interpretation.
         guard !destination.contains("\\"),
-              !destination.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
-              let decoded = destination.removingPercentEncoding,
-              !decoded.contains("\\"),
-              !decoded.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
-              let components = URLComponents(string: destination) else { return false }
+            !destination.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+            let decoded = destination.removingPercentEncoding,
+            !decoded.contains("\\"),
+            !decoded.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+            let components = URLComponents(string: destination)
+        else { return false }
         if let scheme = components.scheme?.lowercased() {
             switch scheme {
             case "https", "http": return components.host?.isEmpty == false
@@ -263,27 +300,34 @@ public enum HTMLRenderer {
             case "data":
                 guard image, let comma = destination.firstIndex(of: ",") else { return false }
                 let header = destination[..<comma].lowercased()
-                guard ["data:image/png;base64", "data:image/jpeg;base64", "data:image/gif;base64",
-                       "data:image/webp;base64"].contains(header) else { return false }
+                guard
+                    [
+                        "data:image/png;base64", "data:image/jpeg;base64", "data:image/gif;base64",
+                        "data:image/webp;base64",
+                    ].contains(header)
+                else { return false }
                 let payload = destination[destination.index(after: comma)...]
                 // Bound embedded images and require valid base64; SVG and arbitrary data stay blocked.
                 guard !payload.isEmpty, payload.utf8.count <= 4 * 1024 * 1024 else { return false }
                 return Data(base64Encoded: String(payload)) != nil
             case "file":
                 guard let root = options.libraryRoot, root.isFileURL,
-                      let url = components.url, url.isFileURL,
-                      components.host == nil || components.host == "" || components.host == "localhost" else { return false }
+                    let url = components.url, url.isFileURL,
+                    components.host == nil || components.host == "" || components.host == "localhost"
+                else { return false }
                 return contained(url, root: root)
             default: return false
             }
         }
         // Network-path references and encoded scheme/absolute-path lookalikes are not local assets.
         guard components.host == nil, !decoded.hasPrefix("/"),
-              !decoded.hasPrefix("//"), !decoded.contains(":"),
-              !(components.percentEncodedPath.removingPercentEncoding ?? "").contains("&") else { return false }
+            !decoded.hasPrefix("//"), !decoded.contains(":"),
+            !(components.percentEncodedPath.removingPercentEncoding ?? "").contains("&")
+        else { return false }
         if let root = options.libraryRoot, let document = options.documentURL {
             guard root.isFileURL, document.isFileURL, contained(document, root: root),
-                  let resolved = PreviewResource.resolve(destination, relativeTo: document) else { return false }
+                let resolved = PreviewResource.resolve(destination, relativeTo: document)
+            else { return false }
             return contained(resolved, root: root)
         }
         return !(components.percentEncodedPath.removingPercentEncoding ?? "").split(separator: "/").contains("..")

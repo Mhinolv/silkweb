@@ -41,7 +41,9 @@ public struct OutlineItem: Equatable, Sendable, Identifiable {
     public static func parse(_ text: String, headings: [MarkdownHeading]? = nil) -> [OutlineItem] {
         let headings = headings ?? MarkdownParser.parse(text).headings
         let depths = depths(headings)
-        let headingItems = zip(headings, depths).map { OutlineItem(id: $0.id, content: .heading($0), sourceRange: $0.sourceRange, depth: $1) }
+        let headingItems = zip(headings, depths).map {
+            OutlineItem(id: $0.id, content: .heading($0), sourceRange: $0.sourceRange, depth: $1)
+        }
         guard text.contains("![") else { return headingItems }
         let source = text as NSString
         var lines: [(String, NSRange)] = []
@@ -55,7 +57,11 @@ public struct OutlineItem: Equatable, Sendable, Identifiable {
             let marker = trimmed.first
             let count = trimmed.prefix(while: { $0 == marker }).count
             if let current = fence {
-                if marker == current.0, count >= current.1, trimmed.dropFirst(count).trimmingCharacters(in: .whitespaces).isEmpty { fence = nil }
+                if marker == current.0, count >= current.1,
+                    trimmed.dropFirst(count).trimmingCharacters(in: .whitespaces).isEmpty
+                {
+                    fence = nil
+                }
                 continue
             }
             // Any indentation: nested list items may hold fences. Indented lines are not code;
@@ -67,9 +73,12 @@ public struct OutlineItem: Equatable, Sendable, Identifiable {
         }
         // Resolve the bounded single-line reference grammar before using the shared
         // inline parser, which still excludes escaped markers and inline code.
-        let definition = try! NSRegularExpression(pattern: #"^ {0,3}\[([^\]\n]+)\]:\s*(<[^>\n]+>|[^\s]+)(?:\s+[^\n]*)?$"#)
+        let definition = try! NSRegularExpression(
+            pattern: #"^ {0,3}\[([^\]\n]+)\]:\s*(<[^>\n]+>|[^\s]+)(?:\s+[^\n]*)?$"#)
         let reference = try! NSRegularExpression(pattern: #"!\[([^\]\n]*)\](?:\[([^\]\n]*)\])?(?!\()"#)
-        func key(_ value: String) -> String { value.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ").lowercased() }
+        func key(_ value: String) -> String {
+            value.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ").lowercased()
+        }
         var definitions: [String: String] = [:]
         for (line, _) in lines {
             let ns = line as NSString
@@ -93,12 +102,18 @@ public struct OutlineItem: Equatable, Sendable, Identifiable {
             let direct = InlineImages.paragraph(line)
             for image in InlineImages.paragraph(expanded as String) {
                 let parent = headings.lastIndex { $0.sourceRange.location <= range.location }
-                result.append(OutlineItem(id: "outline_image_\(imageIndex)", content: .image(image), sourceRange: range, depth: parent.map { depths[$0] + 1 } ?? 0, sourceLine: line.trimmingCharacters(in: .newlines), isInlineImage: direct.contains(image)))
+                result.append(
+                    OutlineItem(
+                        id: "outline_image_\(imageIndex)", content: .image(image), sourceRange: range,
+                        depth: parent.map { depths[$0] + 1 } ?? 0, sourceLine: line.trimmingCharacters(in: .newlines),
+                        isInlineImage: direct.contains(image)))
                 imageIndex += 1
             }
         }
         return result.sorted {
-            if $0.sourceRange.location != $1.sourceRange.location { return $0.sourceRange.location < $1.sourceRange.location }
+            if $0.sourceRange.location != $1.sourceRange.location {
+                return $0.sourceRange.location < $1.sourceRange.location
+            }
             if case .heading = $0.content { return true }
             if case .heading = $1.content { return false }
             return $0.id.localizedStandardCompare($1.id) == .orderedAscending

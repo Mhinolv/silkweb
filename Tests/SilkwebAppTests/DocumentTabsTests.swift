@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class DocumentTabsTests: XCTestCase {
@@ -64,7 +65,8 @@ final class DocumentTabsTests: XCTestCase {
         let closed = await workspace.closeTab(a.id)
         XCTAssertTrue(closed)
         XCTAssertTrue(workspace.tabs.isEmpty)
-        XCTAssertEqual(try String(contentsOf: workspace.root!.appendingPathComponent("A.md"), encoding: .utf8), "A edited")
+        XCTAssertEqual(
+            try String(contentsOf: workspace.root!.appendingPathComponent("A.md"), encoding: .utf8), "A edited")
     }
 
     @MainActor func testFailedCloseRetainsInactiveBufferAndAllTabsFlush() async throws {
@@ -89,15 +91,19 @@ final class DocumentTabsTests: XCTestCase {
         let exited = await workspace.prepareToExit()
         XCTAssertTrue(exited)
         XCTAssertEqual(try String(contentsOf: workspace.root!.appendingPathComponent("A.md"), encoding: .utf8), "mine")
-        XCTAssertEqual(try String(contentsOf: workspace.root!.appendingPathComponent("B.md"), encoding: .utf8), "B changed")
+        XCTAssertEqual(
+            try String(contentsOf: workspace.root!.appendingPathComponent("B.md"), encoding: .utf8), "B changed")
     }
 
     /// Types (plain inserts and IME marked text) through the editor delegate while `tick` runs.
     /// Returns how many keystrokes the delegate refused.
-    @MainActor private func type(into text: NSTextView, during tick: @escaping @MainActor () async -> Void) async -> Int {
+    @MainActor private func type(into text: NSTextView, during tick: @escaping @MainActor () async -> Void) async -> Int
+    {
         final class Done { var value = false }
         let done = Done()
-        let task = Task { @MainActor in await tick(); done.value = true }
+        let task = Task { @MainActor in
+            await tick(); done.value = true
+        }
         var refused = 0
         var keys = 0
         while !done.value {
@@ -110,7 +116,9 @@ final class DocumentTabsTests: XCTestCase {
                 if !text.hasMarkedText() { refused += 1 }
                 text.insertText("火", replacementRange: text.hasMarkedText() ? text.markedRange() : end)
             } else {
-                if text.delegate?.textView?(text, shouldChangeTextIn: end, replacementString: "k") == false { refused += 1 }
+                if text.delegate?.textView?(text, shouldChangeTextIn: end, replacementString: "k") == false {
+                    refused += 1
+                }
                 text.insertText("k", replacementRange: end)
             }
             await Task.yield()
@@ -136,7 +144,11 @@ final class DocumentTabsTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: session.url!, encoding: .utf8), "A saved")
         for tick in 0..<3 {
             let refused = await type(into: text) {
-                if tick == 0 { await workspace.reconcileFinderChanges() } else { await session.reconcileExternalChange() }
+                if tick == 0 {
+                    await workspace.reconcileFinderChanges()
+                } else {
+                    await session.reconcileExternalChange()
+                }
             }
             XCTAssertEqual(refused, 0, "tick \(tick): a no-op reconcile must not refuse typing or IME input")
             XCTAssertFalse(session.loading)
@@ -159,7 +171,8 @@ final class DocumentTabsTests: XCTestCase {
         let task = Task { @MainActor in await session.reconcileExternalChange() }
         var locked = false
         while !locked, session.text != "external" {
-            locked = !coordinator.textView(NSTextView(), shouldChangeTextIn: NSRange(location: 0, length: 0), replacementString: "x")
+            locked = !coordinator.textView(
+                NSTextView(), shouldChangeTextIn: NSRange(location: 0, length: 0), replacementString: "x")
             await Task.yield()
         }
         await task.value
@@ -264,8 +277,10 @@ final class DocumentTabsTests: XCTestCase {
     }
 
     @MainActor func testInvalidSessionFilesNeverBlockLibraryOpen() async throws {
-        for json in ["{", "null", "{\"tabs\":[{},null,42],\"activeDocumentID\":\"invalid\"}",
-                     "{\"tabs\":false,\"selectedFolderID\":\"invalid\",\"viewMode\":42}"] {
+        for json in [
+            "{", "null", "{\"tabs\":[{},null,42],\"activeDocumentID\":\"invalid\"}",
+            "{\"tabs\":false,\"selectedFolderID\":\"invalid\",\"viewMode\":42}",
+        ] {
             let workspace = try await fixture()
             let root = try XCTUnwrap(workspace.root)
             defer { try? FileManager.default.removeItem(at: root) }
@@ -300,8 +315,9 @@ final class DocumentTabsTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: workspace.root!) }
         let host = NSHostingView(rootView: DocumentDetail(workspace: workspace))
         host.sizingOptions = []
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 560),
-                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 560),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.contentView = nil; window.close() }
@@ -316,8 +332,9 @@ final class DocumentTabsTests: XCTestCase {
             try XCTUnwrap(descendants(host).compactMap { $0 as? EditorTabBarView }.first)
         }
         func editorFrame() throws -> NSRect {
-            let editor = try XCTUnwrap(descendants(host).compactMap { $0 as? PlainMarkdownTextView }
-                .first { $0.string == workspace.editor.text })
+            let editor = try XCTUnwrap(
+                descendants(host).compactMap { $0 as? PlainMarkdownTextView }
+                    .first { $0.string == workspace.editor.text })
             let scroll = try XCTUnwrap(editor.enclosingScrollView)
             XCTAssertEqual(editor.textContainerInset.height, 16)
             return scroll.convert(scroll.bounds, to: host)
@@ -330,7 +347,9 @@ final class DocumentTabsTests: XCTestCase {
         XCTAssertEqual(try bar().accessibilityRole(), .tabGroup)
         XCTAssertEqual(try bar().buttons[0].frame.width, 220, accuracy: 1)
         XCTAssertFalse(try bar().overflow.isHidden)
-        for size in [NSSize(width: 420, height: 300), NSSize(width: 900, height: 560), NSSize(width: 1600, height: 1000)] {
+        for size in [
+            NSSize(width: 420, height: 300), NSSize(width: 900, height: 560), NSSize(width: 1600, height: 1000),
+        ] {
             window.setContentSize(size)
             for mode in DocumentViewMode.allCases {
                 workspace.preview.mode = mode
@@ -391,7 +410,9 @@ final class DocumentTabsTests: XCTestCase {
         let probe = EditorWindowLifecycle.WindowProbe()
         let coordinator = EditorWindowLifecycle.Coordinator(workspace: workspace)
         // An unshown window exercises attachment and delegation without launching the app.
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 560), styleMask: [.titled, .closable], backing: .buffered, defer: true)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 560), styleMask: [.titled, .closable],
+            backing: .buffered, defer: true)
         probe.attached = { coordinator.attach($0) }
         window.contentView = probe
         probe.viewDidMoveToWindow()
@@ -405,14 +426,18 @@ final class DocumentTabsTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(workspace.tabs.compactMap(\.textView).count, 2)
         let active = workspace.activeTabID
-        let next = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .control,
-            timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "\t",
-            charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
+        let next = try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: .control,
+                timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "\t",
+                charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
         XCTAssertTrue(coordinator.handleTabKey(next))
         XCTAssertNotEqual(workspace.activeTabID, active)
-        let previous = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.control, .shift],
-            timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "\t",
-            charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
+        let previous = try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [.control, .shift],
+                timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "\t",
+                charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
         XCTAssertTrue(coordinator.handleTabKey(previous))
         XCTAssertEqual(workspace.activeTabID, active)
         for mode in DocumentViewMode.allCases {
@@ -445,7 +470,9 @@ final class DocumentTabsTests: XCTestCase {
         XCTAssertFalse(one.undoManager === two.undoManager)
         for text in ["", "👩🏽‍💻", String(repeating: "line\n", count: 1000)] {
             one.string = text
-            for width in [1.0, 600, 4096] { one.setFrameSize(NSSize(width: width, height: 500)); one.viewDidMoveToWindow() }
+            for width in [1.0, 600, 4096] {
+                one.setFrameSize(NSSize(width: width, height: 500)); one.viewDidMoveToWindow()
+            }
             XCTAssertEqual(one.string, text)
         }
         window.delegate = nil

@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+
 @testable import Silkweb
 
 final class FindTests: XCTestCase {
@@ -8,7 +9,9 @@ final class FindTests: XCTestCase {
         _ = NSApplication.shared
         let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
         let text = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled], backing: .buffered,
+            defer: false)
         window.contentView = scroll
         window.makeFirstResponder(text)
         XCTAssertTrue(text.usesFindBar)
@@ -71,7 +74,9 @@ final class FindTests: XCTestCase {
         await workspace.editor.configure(root: root)
         let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
         let text = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled], backing: .buffered,
+            defer: false)
         let host = NSView(frame: window.contentView!.bounds)
         let other = NSTextView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
         host.addSubview(other)
@@ -117,7 +122,9 @@ final class FindTests: XCTestCase {
         let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
         scroll.setFrameSize(NSSize(width: 900, height: 600))
         let text = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled], backing: .buffered,
+            defer: false)
         window.contentView = scroll
         window.makeFirstResponder(text)
         let delegate = FindUndoDelegate()
@@ -141,7 +148,10 @@ final class FindTests: XCTestCase {
                     text.find(action)
                     delegate.manager.endUndoGrouping()
                     let changed = text.string
-                    let expected = action == .replace ? replacement + String(original.dropFirst(3)) : Array(repeating: replacement, count: count).joined(separator: " and ")
+                    let expected =
+                        action == .replace
+                        ? replacement + String(original.dropFirst(3))
+                        : Array(repeating: replacement, count: count).joined(separator: " and ")
                     XCTAssertEqual(changed, expected)
                     if action == .replaceAll { XCTAssertEqual(delegate.manager.undoActionName, "Replace All") }
                     XCTAssertTrue(delegate.manager.canUndo)

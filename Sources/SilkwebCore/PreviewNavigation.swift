@@ -14,8 +14,9 @@ public enum PreviewNavigation {
             return .browser(url)
         }
         if url.scheme == PreviewResource.scheme,
-           var target = URLComponents(url: url, resolvingAgainstBaseURL: false),
-           var current = URLComponents(url: page, resolvingAgainstBaseURL: false) {
+            var target = URLComponents(url: url, resolvingAgainstBaseURL: false),
+            var current = URLComponents(url: page, resolvingAgainstBaseURL: false)
+        {
             let fragment = target.fragment
             target.fragment = nil
             current.fragment = nil
@@ -24,11 +25,16 @@ public enum PreviewNavigation {
         }
         guard url.isFileURL, url.host == nil || url.host == "" || url.host == "localhost" else { return .blocked }
         let path = url.standardizedFileURL.resolvingSymlinksInPath().path
-        if path == page.standardizedFileURL.path || path == document.standardizedFileURL.resolvingSymlinksInPath().path {
-            if let fragment = URLComponents(url: url, resolvingAgainstBaseURL: false)?.fragment { return .anchor(fragment) }
+        if path == page.standardizedFileURL.path || path == document.standardizedFileURL.resolvingSymlinksInPath().path
+        {
+            if let fragment = URLComponents(url: url, resolvingAgainstBaseURL: false)?.fragment {
+                return .anchor(fragment)
+            }
         }
         let base = root.standardizedFileURL.resolvingSymlinksInPath().path
-        guard path.hasPrefix(base == "/" ? "/" : base + "/"), ["md", "markdown"].contains(url.pathExtension.lowercased()) else { return .blocked }
+        guard path.hasPrefix(base == "/" ? "/" : base + "/"),
+            ["md", "markdown"].contains(url.pathExtension.lowercased())
+        else { return .blocked }
         return .document(url.standardizedFileURL)
     }
 }

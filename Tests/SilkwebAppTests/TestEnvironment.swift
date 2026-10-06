@@ -13,7 +13,9 @@ enum TestEnvironment {
 
     /// The per-step scroll budget: `local` milliseconds on a developer Mac, scaled only on hosted CI.
     /// Functional checks (realized rows, layout counters) never go through this.
-    static func frameBudget(_ local: Double, environment: [String: String] = ProcessInfo.processInfo.environment) -> Double {
+    static func frameBudget(_ local: Double, environment: [String: String] = ProcessInfo.processInfo.environment)
+        -> Double
+    {
         isHostedCI(environment) ? local * hostedCIScale : local
     }
 }

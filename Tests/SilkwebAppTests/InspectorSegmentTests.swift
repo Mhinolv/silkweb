@@ -1,8 +1,9 @@
 import AppKit
 import SwiftUI
 import XCTest
-@testable import SilkwebCore
+
 @testable import Silkweb
+@testable import SilkwebCore
 
 /// #69: Outline and Info are two segments of one Inspector. The toolbar and ⌘7/⌘8 switch to the other
 /// segment, close the one already showing, and never close the panel when switching.
@@ -13,7 +14,8 @@ final class InspectorSegmentTests: XCTestCase {
     @MainActor
     func testToolbarButtonsSwitchOrCloseTheInspectorSegment() async throws {
         _ = NSApplication.shared
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebInspector-" + UUID().uuidString)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SilkwebInspector-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try Data("# Title\n\n## Section\n".utf8).write(to: root.appendingPathComponent("A.md"))
         let suite = "Silkweb.Inspector." + UUID().uuidString
@@ -24,9 +26,10 @@ final class InspectorSegmentTests: XCTestCase {
         workspace.recoveryDirectory = root.appendingPathComponent(".recovery")
         workspace.install(try await LibraryScanner.scan(root: root))
         XCTAssertFalse(workspace.preview.showsOutline)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-                              backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.toolbarStyle = .unifiedCompact
         let controller = NSHostingController(rootView: LibraryWorkspaceView(workspace: workspace))
@@ -63,8 +66,12 @@ final class InspectorSegmentTests: XCTestCase {
         }
         typealias State = (open: Bool, info: Bool)
         func assertState(_ expected: State, _ context: String, file: StaticString = #filePath, line: UInt = #line) {
-            XCTAssertEqual(workspace.preview.showsOutline, expected.open, "\(context): inspector open", file: file, line: line)
-            if expected.open { XCTAssertEqual(workspace.inspectorInfo, expected.info, "\(context): Info segment", file: file, line: line) }
+            XCTAssertEqual(
+                workspace.preview.showsOutline, expected.open, "\(context): inspector open", file: file, line: line)
+            if expected.open {
+                XCTAssertEqual(
+                    workspace.inspectorInfo, expected.info, "\(context): Info segment", file: file, line: line)
+            }
         }
 
         // The reported path: Info, then Outline switches instead of closing the panel.

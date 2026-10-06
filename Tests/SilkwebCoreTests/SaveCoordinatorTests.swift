@@ -1,5 +1,6 @@
-import XCTest
 import Darwin
+import XCTest
+
 @testable import SilkwebCore
 
 final class SaveCoordinatorTests: XCTestCase {
@@ -61,7 +62,9 @@ final class SaveCoordinatorTests: XCTestCase {
                         case ENOSPC: expectedReason = .diskFull
                         case EACCES: expectedReason = .permission
                         case ENODEV: expectedReason = .volumeUnavailable
-                        default: expectedReason = .other(NSError(domain: NSPOSIXErrorDomain, code: Int(code)).localizedDescription)
+                        default:
+                            expectedReason = .other(
+                                NSError(domain: NSPOSIXErrorDomain, code: Int(code)).localizedDescription)
                         }
                         XCTAssertEqual(error.reason, expectedReason)
                         XCTAssertTrue(error.localizedDescription.hasSuffix("Your text is safe in this window."))
@@ -199,7 +202,8 @@ final class SaveCoordinatorTests: XCTestCase {
                     }
                     _ = try await coordinator.reconcile(url)
                     let conflict = await coordinator.state(for: url)
-                    XCTAssertEqual(conflict, .conflict(diskRevision: deleted ? nil : try DocumentStore().load(url).revision))
+                    XCTAssertEqual(
+                        conflict, .conflict(diskRevision: deleted ? nil : try DocumentStore().load(url).revision))
                     let text = bufferMode == 1 ? original + "latest draft" : original
                     try await coordinator.edit(text, at: url)
                     let stream = await coordinator.states(for: url)
@@ -341,7 +345,9 @@ final class SaveCoordinatorTests: XCTestCase {
             }
         }
         let url = try document()
-        let failed = SaveCoordinator(store: DocumentStore(fileSystem: FailingFileSystem(point: .replace, code: Int(ENOSPC))), recoveryDirectory: recovery)
+        let failed = SaveCoordinator(
+            store: DocumentStore(fileSystem: FailingFileSystem(point: .replace, code: Int(ENOSPC))),
+            recoveryDirectory: recovery)
         _ = try await failed.open(url)
         try await failed.edit("retained", at: url)
         let closed = await failed.close(url)
@@ -377,7 +383,8 @@ final class SaveCoordinatorTests: XCTestCase {
             XCTAssertEqual(drafts.map(\.text), ["recovered draft"], corrupt)
             XCTAssertFalse(FileManager.default.fileExists(atPath: bad.path), corrupt)
             let unreadable = recovery.appendingPathComponent("Unreadable", isDirectory: true)
-            let quarantined = try FileManager.default.contentsOfDirectory(at: unreadable, includingPropertiesForKeys: nil)
+            let quarantined = try FileManager.default.contentsOfDirectory(
+                at: unreadable, includingPropertiesForKeys: nil)
             XCTAssertEqual(quarantined.map(\.lastPathComponent), ["0000-corrupt.json"], corrupt)
             XCTAssertEqual(try Data(contentsOf: quarantined[0]), Data(corrupt.utf8), "Quarantine keeps the bytes")
             let opened = try await restarted.open(healthy)
@@ -456,7 +463,9 @@ final class SaveCoordinatorTests: XCTestCase {
     func testZeroDelayAndScheduledFailureKeepBuffer() async throws {
         for failing in [false, true] {
             let url = try document("\(UUID()).md")
-            let store = failing ? DocumentStore(fileSystem: FailingFileSystem(point: .stage, code: Int(EACCES))) : DocumentStore()
+            let store =
+                failing
+                ? DocumentStore(fileSystem: FailingFileSystem(point: .stage, code: Int(EACCES))) : DocumentStore()
             let coordinator = SaveCoordinator(store: store, recoveryDirectory: recovery)
             _ = try await coordinator.open(url)
             let stream = await coordinator.states(for: url)
@@ -504,7 +513,9 @@ final class SaveCoordinatorTests: XCTestCase {
         XCTAssertEqual(decoded.formatVersion, 1)
         XCTAssertNil(decoded.revision)
         XCTAssertEqual(decoded.text, "old draft")
-        let future = try JSONSerialization.data(withJSONObject: ["formatVersion": 2, "documentURL": url.absoluteString, "text": "future"])
+        let future = try JSONSerialization.data(withJSONObject: [
+            "formatVersion": 2, "documentURL": url.absoluteString, "text": "future",
+        ])
         XCTAssertThrowsError(try JSONDecoder().decode(RecoveryDraft.self, from: future))
     }
 

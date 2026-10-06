@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class MarkdownParserTests: XCTestCase {
@@ -9,27 +10,66 @@ final class MarkdownParserTests: XCTestCase {
             ("", "<article class=\"sw-doc sw-empty\"></article>"),
             (" \n\t\r\n", "<article class=\"sw-doc sw-empty\"></article>"),
             ("A paragraph\ncontinued.\n\nAnother.", article("<p>A paragraph\ncontinued.</p>\n<p>Another.</p>\n")),
-            ("# One\n## Two ##\n### Three\n#### Four\n##### Five\n###### Six", article("<h1 id=\"one\">One</h1>\n<h2 id=\"two\">Two</h2>\n<h3 id=\"three\">Three</h3>\n<h4 id=\"four\">Four</h4>\n<h5 id=\"five\">Five</h5>\n<h6 id=\"six\">Six</h6>\n")),
-            ("**Bold** and *italic* and __strong__ and _emphasis_", article("<p><strong>Bold</strong> and <em>italic</em> and <strong>strong</strong> and <em>emphasis</em></p>\n")),
-            ("***both*** and ___both___", article("<p><strong><em>both</em></strong> and <strong><em>both</em></strong></p>\n")),
+            (
+                "# One\n## Two ##\n### Three\n#### Four\n##### Five\n###### Six",
+                article(
+                    "<h1 id=\"one\">One</h1>\n<h2 id=\"two\">Two</h2>\n<h3 id=\"three\">Three</h3>\n<h4 id=\"four\">Four</h4>\n<h5 id=\"five\">Five</h5>\n<h6 id=\"six\">Six</h6>\n"
+                )
+            ),
+            (
+                "**Bold** and *italic* and __strong__ and _emphasis_",
+                article(
+                    "<p><strong>Bold</strong> and <em>italic</em> and <strong>strong</strong> and <em>emphasis</em></p>\n"
+                )
+            ),
+            (
+                "***both*** and ___both___",
+                article("<p><strong><em>both</em></strong> and <strong><em>both</em></strong></p>\n")
+            ),
             ("**bold *italic* end**", article("<p><strong>bold <em>italic</em> end</strong></p>\n")),
-            ("`<a>&` and ``inline ` code``", article("<p><code>&lt;a&gt;&amp;</code> and <code>inline ` code</code></p>\n")),
+            (
+                "`<a>&` and ``inline ` code``",
+                article("<p><code>&lt;a&gt;&amp;</code> and <code>inline ` code</code></p>\n")
+            ),
             ("\\*literal\\* & 2*3*4 snake_case", article("<p>*literal* &amp; 2*3*4 snake_case</p>\n")),
-            ("[link **text**](https://example.com/path_(part) \"Title\")", article("<p><a href=\"https://example.com/path_(part)\" title=\"Title\">link <strong>text</strong></a></p>\n")),
-            ("![local](assets/a.png 'Caption')", article("<p><img src=\"assets/a.png\" alt=\"local\" title=\"Caption\"></p>\n")),
-            ("> Quote\n>\n> > Nested", article("<blockquote>\n<p>Quote</p>\n<blockquote>\n<p>Nested</p>\n</blockquote>\n</blockquote>\n")),
-            ("- One\n  - Nested\n- Two", article("<ul>\n<li>\n<p>One</p>\n<ul>\n<li>\n<p>Nested</p>\n</li>\n</ul>\n</li>\n<li>\n<p>Two</p>\n</li>\n</ul>\n")),
-            ("3. Three\n4. Four", article("<ol start=\"3\">\n<li>\n<p>Three</p>\n</li>\n<li>\n<p>Four</p>\n</li>\n</ol>\n")),
+            (
+                "[link **text**](https://example.com/path_(part) \"Title\")",
+                article(
+                    "<p><a href=\"https://example.com/path_(part)\" title=\"Title\">link <strong>text</strong></a></p>\n"
+                )
+            ),
+            (
+                "![local](assets/a.png 'Caption')",
+                article("<p><img src=\"assets/a.png\" alt=\"local\" title=\"Caption\"></p>\n")
+            ),
+            (
+                "> Quote\n>\n> > Nested",
+                article("<blockquote>\n<p>Quote</p>\n<blockquote>\n<p>Nested</p>\n</blockquote>\n</blockquote>\n")
+            ),
+            (
+                "- One\n  - Nested\n- Two",
+                article(
+                    "<ul>\n<li>\n<p>One</p>\n<ul>\n<li>\n<p>Nested</p>\n</li>\n</ul>\n</li>\n<li>\n<p>Two</p>\n</li>\n</ul>\n"
+                )
+            ),
+            (
+                "3. Three\n4. Four",
+                article("<ol start=\"3\">\n<li>\n<p>Three</p>\n</li>\n<li>\n<p>Four</p>\n</li>\n</ol>\n")
+            ),
             ("---\n* * *\n___", article("<hr>\n<hr>\n<hr>\n")),
-            ("```swift\nlet x = a < b && c\n```", article("<pre><code class=\"language-swift\">let x = a &lt; b &amp;&amp; c\n</code></pre>\n")),
-            ("~~~~c++ extra\n<tag>\n~~~~~", article("<pre><code class=\"language-c++\">&lt;tag&gt;\n</code></pre>\n"))
+            (
+                "```swift\nlet x = a < b && c\n```",
+                article("<pre><code class=\"language-swift\">let x = a &lt; b &amp;&amp; c\n</code></pre>\n")
+            ),
+            ("~~~~c++ extra\n<tag>\n~~~~~", article("<pre><code class=\"language-c++\">&lt;tag&gt;\n</code></pre>\n")),
         ]
         for (source, expected) in fixtures { XCTAssertEqual(HTMLRenderer.render(source), expected, source) }
     }
 
     func testASTAndBlockEdges() {
-        XCTAssertEqual(MarkdownParser.parse("# **Title**").blocks,
-                       [.heading(level: 1, content: [.strong([.text("Title")])])])
+        XCTAssertEqual(
+            MarkdownParser.parse("# **Title**").blocks,
+            [.heading(level: 1, content: [.strong([.text("Title")])])])
         for start in [0, 1, 999_999_999] {
             let html = HTMLRenderer.render("\(start). Item")
             XCTAssertTrue(html.contains(start == 1 ? "<ol>" : "<ol start=\"\(start)\">"))
@@ -47,14 +87,20 @@ final class MarkdownParserTests: XCTestCase {
         for mode in HTMLRenderer.LineBreaks.allCases {
             let soft = mode == .standard ? "\n" : "<br>\n"
             for newline in ["\n", "\r\n", "\r"] {
-                XCTAssertEqual(HTMLRenderer.render("one\(newline)two  \(newline)three\\\(newline)four", options: .init(lineBreaks: mode)),
-                               article("<p>one\(soft)two<br>\nthree<br>\nfour</p>\n"))
+                XCTAssertEqual(
+                    HTMLRenderer.render(
+                        "one\(newline)two  \(newline)three\\\(newline)four", options: .init(lineBreaks: mode)),
+                    article("<p>one\(soft)two<br>\nthree<br>\nfour</p>\n"))
             }
         }
     }
 
     func testRawHTMLAttributesAndRemoteImages() {
-        XCTAssertEqual(HTMLRenderer.render("<script>alert('x')</script>"), article("<p><span class=\"sw-raw-html\">&lt;script&gt;</span>alert(&#39;x&#39;)<span class=\"sw-raw-html\">&lt;/script&gt;</span></p>\n"))
+        XCTAssertEqual(
+            HTMLRenderer.render("<script>alert('x')</script>"),
+            article(
+                "<p><span class=\"sw-raw-html\">&lt;script&gt;</span>alert(&#39;x&#39;)<span class=\"sw-raw-html\">&lt;/script&gt;</span></p>\n"
+            ))
         let source = "![\\\" onerror=\\\"evil](https://example.com/a.png \"\\\" onclick=\\\"evil\")"
         let html = HTMLRenderer.render(source)
         XCTAssertTrue(html.contains("class=\"sw-remote-image\""))
@@ -68,10 +114,12 @@ final class MarkdownParserTests: XCTestCase {
     }
 
     func testURLPolicySweep() {
-        let blocked = ["javascript:alert(1)", "JaVaScRiPt:evil", "vbscript:evil", "data:text/html,evil",
-                       "data:image/svg+xml,evil", "custom:value", "file:///etc/passwd", "//example.com/x",
-                       "../secret.md", "%2e%2e/secret.md", "/etc/passwd", "https://", "java%73cript:evil",
-                       "javascript&colon;evil", "a%00b", "a%0Ab", "a%5Cb", "a%zz", "mailto:a@example.com"]
+        let blocked = [
+            "javascript:alert(1)", "JaVaScRiPt:evil", "vbscript:evil", "data:text/html,evil",
+            "data:image/svg+xml,evil", "custom:value", "file:///etc/passwd", "//example.com/x",
+            "../secret.md", "%2e%2e/secret.md", "/etc/passwd", "https://", "java%73cript:evil",
+            "javascript&colon;evil", "a%00b", "a%0Ab", "a%5Cb", "a%zz", "mailto:a@example.com",
+        ]
         for destination in blocked {
             let html = HTMLRenderer.render("![alt](<\(destination)>)")
             XCTAssertFalse(html.contains("<img"), destination)
@@ -88,7 +136,9 @@ final class MarkdownParserTests: XCTestCase {
         XCTAssertTrue(HTMLRenderer.render("[mail](mailto:a@example.com)").contains("<a "))
         // Direct AST callers get the same filtering, including controls and backslashes.
         for destination in ["java\nscript:evil", " https://example.com", "\\\\example.com", "a\0b"] {
-            let document = MarkdownDocument(blocks: [.paragraph([.link(label: [.text("x")], destination: destination, title: nil)])])
+            let document = MarkdownDocument(blocks: [
+                .paragraph([.link(label: [.text("x")], destination: destination, title: nil)])
+            ])
             XCTAssertFalse(HTMLRenderer.render(document).contains("<a "), destination)
         }
     }
@@ -99,39 +149,57 @@ final class MarkdownParserTests: XCTestCase {
             XCTAssertTrue(HTMLRenderer.render("![alt](\(destination))").contains("<img src="))
             XCTAssertFalse(HTMLRenderer.render("[label](\(destination))").contains("<a "))
         }
-        for destination in ["data:image/svg+xml;base64,AA==", "data:text/html;base64,AA==",
-                            "data:image/png;base64,", "data:image/png;base64,invalid!",
-                            "data:image/png,raw", "data:image/png;base64," + String(repeating: "A", count: 4 * 1024 * 1024 + 4)] {
-            XCTAssertFalse(HTMLRenderer.render(MarkdownDocument(blocks: [.paragraph([.image(alt: "x", destination: destination, title: nil)])])).contains("<img "))
+        for destination in [
+            "data:image/svg+xml;base64,AA==", "data:text/html;base64,AA==",
+            "data:image/png;base64,", "data:image/png;base64,invalid!",
+            "data:image/png,raw", "data:image/png;base64," + String(repeating: "A", count: 4 * 1024 * 1024 + 4),
+        ] {
+            XCTAssertFalse(
+                HTMLRenderer.render(
+                    MarkdownDocument(blocks: [.paragraph([.image(alt: "x", destination: destination, title: nil)])])
+                ).contains("<img "))
         }
     }
 
     func testLibraryFileContainmentAndSymlinks() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("folder"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("folder"), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("escape"), withDestinationURL: root.deletingLastPathComponent())
-        let options = HTMLRenderer.Options(libraryRoot: root, documentURL: root.appendingPathComponent("folder/note.md"))
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("escape"), withDestinationURL: root.deletingLastPathComponent())
+        let options = HTMLRenderer.Options(
+            libraryRoot: root, documentURL: root.appendingPathComponent("folder/note.md"))
         for destination in ["../image.png", root.appendingPathComponent("image.png").absoluteString, "#anchor"] {
             XCTAssertTrue(HTMLRenderer.render("[x](<\(destination)>)", options: options).contains("<a "), destination)
         }
         for hasRoot in [false, true] {
             for hasDocument in [false, true] {
-                let context = HTMLRenderer.Options(libraryRoot: hasRoot ? root : nil,
-                                                   documentURL: hasDocument ? options.documentURL : nil)
-                XCTAssertEqual(HTMLRenderer.render("[x](../image.png)", options: context).contains("<a "), hasRoot && hasDocument)
-                XCTAssertEqual(HTMLRenderer.render("[x](<\(root.appendingPathComponent("image.png").absoluteString)>)", options: context).contains("<a "), hasRoot)
+                let context = HTMLRenderer.Options(
+                    libraryRoot: hasRoot ? root : nil,
+                    documentURL: hasDocument ? options.documentURL : nil)
+                XCTAssertEqual(
+                    HTMLRenderer.render("[x](../image.png)", options: context).contains("<a "), hasRoot && hasDocument)
+                XCTAssertEqual(
+                    HTMLRenderer.render(
+                        "[x](<\(root.appendingPathComponent("image.png").absoluteString)>)", options: context
+                    ).contains("<a "), hasRoot)
             }
         }
-        for destination in ["../../outside.md", "../escape/outside.md", "file:///etc/passwd",
-                            root.appendingPathComponent("escape/outside.md").absoluteString,
-                            root.absoluteString.dropLast() + "-sibling/file.md"] {
+        for destination in [
+            "../../outside.md", "../escape/outside.md", "file:///etc/passwd",
+            root.appendingPathComponent("escape/outside.md").absoluteString,
+            root.absoluteString.dropLast() + "-sibling/file.md",
+        ] {
             XCTAssertFalse(HTMLRenderer.render("[x](<\(destination)>)", options: options).contains("<a "), destination)
         }
     }
 
     func testUnsupportedAndUnclosedSyntaxStaysVisible() {
-        for source in ["| A | B |", "| --- | --- |", "[ref]: https://example.com", "####### Not heading", "[unclosed](", "*unclosed", "`unclosed"] {
+        for source in [
+            "| A | B |", "| --- | --- |", "[ref]: https://example.com", "####### Not heading", "[unclosed](",
+            "*unclosed", "`unclosed",
+        ] {
             let html = HTMLRenderer.render(source)
             XCTAssertTrue(html.contains(source), source)
         }
@@ -141,9 +209,12 @@ final class MarkdownParserTests: XCTestCase {
     /// silkweb-1.76: lists indented with tabs (Indent with: Tab) nest exactly like space-indented lists.
     func testTabIndentedListsNestLikeSpaces() {
         func nested(_ markers: [String], unit: String) -> String {
-            (0..<3).map { level in String(repeating: unit, count: level) + markers[level] + " item \(level)" }.joined(separator: "\n")
+            (0..<3).map { level in String(repeating: unit, count: level) + markers[level] + " item \(level)" }.joined(
+                separator: "\n")
         }
-        for markers in [["-", "-", "-"], ["*", "+", "-"], ["1.", "1.", "1."], ["- [ ]", "- [x]", "- [ ]"], ["-", "1.", "- [x]"]] {
+        for markers in [
+            ["-", "-", "-"], ["*", "+", "-"], ["1.", "1.", "1."], ["- [ ]", "- [x]", "- [ ]"], ["-", "1.", "- [x]"],
+        ] {
             let spaces = HTMLRenderer.render(nested(markers, unit: "    "))
             let tabs = HTMLRenderer.render(nested(markers, unit: "\t"))
             XCTAssertEqual(tabs, spaces, markers.joined())
@@ -152,13 +223,17 @@ final class MarkdownParserTests: XCTestCase {
             let nestedLists = MarkdownParser.parse(nested(markers, unit: "\t")).blocks
             XCTAssertEqual(nestedLists.count, 1, "One top-level list")
         }
-        for (tabs, spaces) in [("- a\n\n\t- b\n\n\t\tc", "- a\n\n    - b\n\n        c"),
-                               ("- a\n  \t- b", "- a\n    - b"),
-                               ("- a\n\t- b\n\t- c\n- d", "- a\n    - b\n    - c\n- d"),
-                               ("10. a\n\t- b", "10. a\n    - b")] {
+        for (tabs, spaces) in [
+            ("- a\n\n\t- b\n\n\t\tc", "- a\n\n    - b\n\n        c"),
+            ("- a\n  \t- b", "- a\n    - b"),
+            ("- a\n\t- b\n\t- c\n- d", "- a\n    - b\n    - c\n- d"),
+            ("10. a\n\t- b", "10. a\n    - b"),
+        ] {
             XCTAssertEqual(HTMLRenderer.render(tabs), HTMLRenderer.render(spaces), tabs)
         }
-        XCTAssertEqual(HTMLRenderer.render("- a\n\t- b"), article("<ul>\n<li>\n<p>a</p>\n<ul>\n<li>\n<p>b</p>\n</li>\n</ul>\n</li>\n</ul>\n"))
+        XCTAssertEqual(
+            HTMLRenderer.render("- a\n\t- b"),
+            article("<ul>\n<li>\n<p>a</p>\n<ul>\n<li>\n<p>b</p>\n</li>\n</ul>\n</li>\n</ul>\n"))
     }
 
     func testBoundedAdversarialAndUnicodeSweep() {

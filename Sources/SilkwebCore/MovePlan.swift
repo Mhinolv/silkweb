@@ -33,17 +33,22 @@ public struct MovePlan: Sendable {
     let inventory: Set<String>
 
     public var reversed: MovePlan {
-        let reverse = LibraryChangeSet(changes: changes.changes.map {
-            LibraryPathChange(id: $0.id, oldPath: $0.newPath, newPath: $0.oldPath!, isFolder: $0.isFolder)
-        })
-        return MovePlan(root: root, changes: reverse, unsupportedLinks: [], collisions: [],
-                        metadata: changes.applying(to: metadata),
-                        before: Dictionary(uniqueKeysWithValues: after.map { (changes.remapping($0.key), $0.value) }),
-                        after: Dictionary(uniqueKeysWithValues: before.map { (changes.remapping($0.key), $0.value) }),
-                        fingerprints: Dictionary(uniqueKeysWithValues: newFingerprints.map { (changes.remapping($0.key), $0.value) }),
-                        newFingerprints: Dictionary(uniqueKeysWithValues: fingerprints.map { (changes.remapping($0.key), $0.value) }),
-                        unreadableDocuments: Dictionary(uniqueKeysWithValues: unreadableDocuments.map { (changes.remapping($0.key), $0.value) }),
-                        inventory: Set(inventory.map { changes.remapping($0) }))
+        let reverse = LibraryChangeSet(
+            changes: changes.changes.map {
+                LibraryPathChange(id: $0.id, oldPath: $0.newPath, newPath: $0.oldPath!, isFolder: $0.isFolder)
+            })
+        return MovePlan(
+            root: root, changes: reverse, unsupportedLinks: [], collisions: [],
+            metadata: changes.applying(to: metadata),
+            before: Dictionary(uniqueKeysWithValues: after.map { (changes.remapping($0.key), $0.value) }),
+            after: Dictionary(uniqueKeysWithValues: before.map { (changes.remapping($0.key), $0.value) }),
+            fingerprints: Dictionary(
+                uniqueKeysWithValues: newFingerprints.map { (changes.remapping($0.key), $0.value) }),
+            newFingerprints: Dictionary(
+                uniqueKeysWithValues: fingerprints.map { (changes.remapping($0.key), $0.value) }),
+            unreadableDocuments: Dictionary(
+                uniqueKeysWithValues: unreadableDocuments.map { (changes.remapping($0.key), $0.value) }),
+            inventory: Set(inventory.map { changes.remapping($0) }))
     }
 }
 
@@ -72,9 +77,10 @@ public enum MoveSelection {
         }
     }
     public static func permits(_ paths: [String], destination: String) -> Bool {
-        !paths.isEmpty && paths.allSatisfy {
-            !$0.isEmpty && $0 != destination && !destination.hasPrefix($0 + "/")
-                && ($0 as NSString).deletingLastPathComponent != destination
-        }
+        !paths.isEmpty
+            && paths.allSatisfy {
+                !$0.isEmpty && $0 != destination && !destination.hasPrefix($0 + "/")
+                    && ($0 as NSString).deletingLastPathComponent != destination
+            }
     }
 }

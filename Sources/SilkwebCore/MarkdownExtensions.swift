@@ -22,7 +22,9 @@ public enum MarkdownExtensions {
                 if separator && !result.isEmpty { result += "-" }
                 result.append(character)
                 separator = false
-            } else { separator = true }
+            } else {
+                separator = true
+            }
         }
         return result.isEmpty ? "section" : result
     }
@@ -43,7 +45,9 @@ public enum MarkdownExtensions {
                     while used.contains(id) { id = "\(base)-\(suffix)"; suffix += 1 }
                     nextSuffix[base] = suffix
                     used.insert(id)
-                    let range = result.count < sourceRanges.count ? sourceRanges[result.count] : NSRange(location: NSNotFound, length: 0)
+                    let range =
+                        result.count < sourceRanges.count
+                        ? sourceRanges[result.count] : NSRange(location: NSNotFound, length: 0)
                     result.append(.init(level: min(6, max(1, level)), text: text, id: id, sourceRange: range))
                 case .quote(let children), .taskItem(_, let children): walk(children, depth: depth + 1)
                 case .list(_, let items): for item in items { walk(item, depth: depth + 1) }
@@ -66,10 +70,13 @@ public enum MarkdownExtensions {
             if escaped {
                 if character == "|" { pending.removeLast() }
                 pending.append(character); escaped = false
+            } else if character == "\\" {
+                pending.append(character); escaped = true
+            } else if character == "|" {
+                cells.append(pending); pending = ""; hasPipe = true
+            } else {
+                pending.append(character)
             }
-            else if character == "\\" { pending.append(character); escaped = true }
-            else if character == "|" { cells.append(pending); pending = ""; hasPipe = true }
-            else { pending.append(character) }
         }
         guard hasPipe else { return nil }
         cells.append(pending)
@@ -103,7 +110,8 @@ public enum MarkdownExtensions {
     static func footnoteDefinition(_ line: String) -> (label: String, text: String)? {
         let text = line.trimmingCharacters(in: .whitespaces)
         guard line.prefix(while: { $0 == " " }).count <= 3, text.hasPrefix("[^"),
-              let end = text.range(of: "]:") else { return nil }
+            let end = text.range(of: "]:")
+        else { return nil }
         let label = String(text[text.index(text.startIndex, offsetBy: 2)..<end.lowerBound])
         guard !label.isEmpty, !label.contains(where: { $0.isWhitespace || $0 == "[" || $0 == "]" }) else { return nil }
         return (label, String(text[end.upperBound...]).trimmingCharacters(in: .whitespaces))

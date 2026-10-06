@@ -40,7 +40,9 @@ public struct DocumentStatistics: Equatable, Sendable {
             if isWordCharacter(character) {
                 let digit = character.isNumber
                 if inWord, let joiner = pendingJoiner {
-                    let joins = digit && lastWasDigit ? numberJoiners.contains(joiner) : letterJoiners.contains(joiner) && !digit && !lastWasDigit
+                    let joins =
+                        digit && lastWasDigit
+                        ? numberJoiners.contains(joiner) : letterJoiners.contains(joiner) && !digit && !lastWasDigit
                     if !joins { words += 1 }
                 } else if !inWord {
                     words += 1
@@ -48,7 +50,7 @@ public struct DocumentStatistics: Equatable, Sendable {
                 inWord = true; lastWasDigit = digit; pendingJoiner = nil
                 continue
             }
-            if inWord, pendingJoiner == nil, (letterJoiners.contains(character) || numberJoiners.contains(character)) {
+            if inWord, pendingJoiner == nil, letterJoiners.contains(character) || numberJoiners.contains(character) {
                 pendingJoiner = character
                 continue
             }
@@ -119,7 +121,8 @@ public struct DocumentStatistics: Equatable, Sendable {
         inlines.map { inline -> String in
             switch inline {
             case .text(let text), .code(let text): return text
-            case .emphasis(let children), .strong(let children), .strikethrough(let children), .link(let children, _, _):
+            case .emphasis(let children), .strong(let children), .strikethrough(let children),
+                .link(let children, _, _):
                 return inlineText(children)
             case .image, .rawHTML, .footnoteReference: return ""
             case .softBreak, .hardBreak: return "\n"
@@ -132,16 +135,20 @@ public struct DocumentStatistics: Equatable, Sendable {
 public enum DocumentStatisticsPresentation {
     /// `1,204 words · 6,830 characters`, or `38 of 1,204 words · 212 of 6,830 characters` for a selection.
     /// Without characters (narrow widths): `1,204 words` / `38 of 1,204 words`.
-    public static func label(document: DocumentStatistics, selection: DocumentStatistics? = nil,
-                             includesCharacters: Bool = true) -> String {
+    public static func label(
+        document: DocumentStatistics, selection: DocumentStatistics? = nil,
+        includesCharacters: Bool = true
+    ) -> String {
         var parts = [segment(document.words, selection?.words, unit: "word")]
         if includesCharacters { parts.append(segment(document.characters, selection?.characters, unit: "character")) }
         return parts.joined(separator: " · ")
     }
 
     /// VoiceOver value: `1,204 words, 6,830 characters` or `Selection: 38 of 1,204 words, 212 of 6,830 characters`.
-    public static func accessibilityValue(document: DocumentStatistics, selection: DocumentStatistics? = nil) -> String {
-        let value = segment(document.words, selection?.words, unit: "word") + ", "
+    public static func accessibilityValue(document: DocumentStatistics, selection: DocumentStatistics? = nil) -> String
+    {
+        let value =
+            segment(document.words, selection?.words, unit: "word") + ", "
             + segment(document.characters, selection?.characters, unit: "character")
         return selection == nil ? value : "Selection: " + value
     }

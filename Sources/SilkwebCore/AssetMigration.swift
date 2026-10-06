@@ -29,19 +29,24 @@ private struct AssetMigrationJournal: Codable {
 extension AssetStore {
     /// All filesystem work executes on this serial asset executor. UI clients save
     /// dirty buffers in beforeRewrite, then reload them outside their undo stacks.
-    public func migrate(root: URL, documents: [String], readOnly: Bool = false,
-                        progress: @Sendable (String, Int, Int) -> Void = { _, _, _ in },
-                        beforeRewrite: @Sendable () async -> Bool = { true },
-                        afterRewrite: @Sendable () async -> Void = {}) async -> AssetMigrationResult {
-        await migrate(root: root, documents: documents, readOnly: readOnly, fileLimit: nil,
-                      progress: progress, beforeRewrite: beforeRewrite, afterRewrite: afterRewrite)
+    public func migrate(
+        root: URL, documents: [String], readOnly: Bool = false,
+        progress: @Sendable (String, Int, Int) -> Void = { _, _, _ in },
+        beforeRewrite: @Sendable () async -> Bool = { true },
+        afterRewrite: @Sendable () async -> Void = {}
+    ) async -> AssetMigrationResult {
+        await migrate(
+            root: root, documents: documents, readOnly: readOnly, fileLimit: nil,
+            progress: progress, beforeRewrite: beforeRewrite, afterRewrite: afterRewrite)
     }
 
     // A deterministic interruption boundary for offscreen Core regression tests.
-    func migrate(root: URL, documents: [String], readOnly: Bool = false, fileLimit: Int?,
-                 progress: @Sendable (String, Int, Int) -> Void = { _, _, _ in },
-                 beforeRewrite: @Sendable () async -> Bool = { true },
-                 afterRewrite: @Sendable () async -> Void = {}) async -> AssetMigrationResult {
+    func migrate(
+        root: URL, documents: [String], readOnly: Bool = false, fileLimit: Int?,
+        progress: @Sendable (String, Int, Int) -> Void = { _, _, _ in },
+        beforeRewrite: @Sendable () async -> Bool = { true },
+        afterRewrite: @Sendable () async -> Void = {}
+    ) async -> AssetMigrationResult {
         var result = AssetMigrationResult()
         let fm = FileManager.default
         let old = root.appendingPathComponent(".silkweb-assets", isDirectory: true)
@@ -64,7 +69,9 @@ extension AssetStore {
             // Validate persisted paths before using them, including every ancestor.
             func checked(_ path: String) throws -> URL {
                 let parts = path.split(separator: "/", omittingEmptySubsequences: false)
-                guard !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { throw LibraryError.invalidRelativePath }
+                guard !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+                    throw LibraryError.invalidRelativePath
+                }
                 var url = root
                 for part in parts { url.appendPathComponent(String(part)); try LibraryMetadataStore.rejectLink(url) }
                 return url
@@ -74,13 +81,19 @@ extension AssetStore {
             func saveJournal() throws { try JSONEncoder().encode(journal).write(to: journalURL, options: .atomic) }
             var files: [String] = []
             func walk(_ directory: URL, path: String) throws {
-                for url in try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey]) {
+                for url in try fm.contentsOfDirectory(
+                    at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey])
+                {
                     try LibraryMetadataStore.rejectLink(url)
                     let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
                     let relative = path + "/" + url.lastPathComponent
-                    if values.isDirectory == true { try walk(url, path: relative) }
-                    else if values.isRegularFile == true { files.append(relative) }
-                    else { throw LibraryMutationError.unsupportedItem(url.path) }
+                    if values.isDirectory == true {
+                        try walk(url, path: relative)
+                    } else if values.isRegularFile == true {
+                        files.append(relative)
+                    } else {
+                        throw LibraryMutationError.unsupportedItem(url.path)
+                    }
                 }
             }
             try walk(old, path: ".silkweb-assets")
@@ -96,12 +109,15 @@ extension AssetStore {
                         let suffix = String(path.dropFirst(".silkweb-assets/".count))
                         let base = journal.directoryName + "/" + suffix
                         let original = try checked(base)
-                        try fm.createDirectory(at: original.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        try fm.createDirectory(
+                            at: original.deletingLastPathComponent(), withIntermediateDirectories: true)
                         var candidate = base
                         let ext = (base as NSString).pathExtension
                         let stem = ext.isEmpty ? base : (base as NSString).deletingPathExtension
                         var number = 2
-                        while fm.fileExists(atPath: try checked(candidate).path) || journal.destinations.values.contains(candidate) {
+                        while fm.fileExists(atPath: try checked(candidate).path)
+                            || journal.destinations.values.contains(candidate)
+                        {
                             candidate = stem + " \(number)" + (ext.isEmpty ? "" : "." + ext)
                             number += 1
                         }
@@ -111,7 +127,8 @@ extension AssetStore {
                     }
                     let destination = try checked(journal.destinations[path]!)
                     if !fm.fileExists(atPath: destination.path) {
-                        let staging = destination.deletingLastPathComponent().appendingPathComponent(".migration-" + UUID().uuidString)
+                        let staging = destination.deletingLastPathComponent().appendingPathComponent(
+                            ".migration-" + UUID().uuidString)
                         defer { try? fm.removeItem(at: staging) }
                         try fm.copyItem(at: checked(path), to: staging)
                         try fm.moveItem(at: staging, to: destination)
@@ -132,9 +149,10 @@ extension AssetStore {
                 return result
             }
             lockedBuffers = true
-            let changes = LibraryChangeSet(changes: journal.destinations.sorted { $0.key < $1.key }.map {
-                LibraryPathChange(id: UUID(), oldPath: $0.key, newPath: $0.value, isFolder: false)
-            })
+            let changes = LibraryChangeSet(
+                changes: journal.destinations.sorted { $0.key < $1.key }.map {
+                    LibraryPathChange(id: UUID(), oldPath: $0.key, newPath: $0.value, isFolder: false)
+                })
             let current = try await LibraryScanner.scan(root: root)
             if current.folders.contains(where: \.isUnreadable) {
                 result.failures.append(AssetFailure(name: "Documents", reason: "Some documents couldn’t be read."))
@@ -148,7 +166,8 @@ extension AssetStore {
                     if rewrite.text != text { try Data(rewrite.text.utf8).write(to: url, options: .atomic) }
                     // Unknown syntax can still point at the legacy store. Retain it.
                     if !rewrite.unsupported.isEmpty && text.contains(".silkweb-assets") {
-                        result.failures.append(AssetFailure(name: path, reason: "An unsupported link still uses the old image location."))
+                        result.failures.append(
+                            AssetFailure(name: path, reason: "An unsupported link still uses the old image location."))
                     }
                 } catch { result.failures.append(AssetFailure(name: path, reason: error.localizedDescription)) }
             }

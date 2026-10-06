@@ -23,7 +23,9 @@ import SilkwebCore
     var enabled = true {
         didSet {
             guard enabled != oldValue else { return }
-            if enabled { schedule() } else {
+            if enabled {
+                schedule()
+            } else {
                 generation += 1
                 task?.cancel()
                 task = nil
@@ -89,17 +91,20 @@ import SilkwebCore
             defer { if let self, requested == self.generation { self.task = nil } }
             do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
             guard let self, let editor = self.editor, !editor.hasMarkedText(),
-                  let root = self.root, let document = self.document else { return }
+                let root = self.root, let document = self.document
+            else { return }
             let text = editor.string
             let column = editor.textContainer?.containerSize.width ?? 1
             let viewport = editor.enclosingScrollView?.contentSize.height ?? 1
             let scale = editor.window?.backingScaleFactor ?? 2
-            let headers = await self.loader.load(text: text, document: document, root: root,
-                                                column: column, viewport: viewport, scale: scale, headersOnly: true)
+            let headers = await self.loader.load(
+                text: text, document: document, root: root,
+                column: column, viewport: viewport, scale: scale, headersOnly: true)
             guard !Task.isCancelled, requested == self.generation, editor.string == text else { return }
             self.install(headers)
-            let decoded = await self.loader.load(text: text, document: document, root: root,
-                                                column: column, viewport: viewport, scale: scale)
+            let decoded = await self.loader.load(
+                text: text, document: document, root: root,
+                column: column, viewport: viewport, scale: scale)
             guard !Task.isCancelled, requested == self.generation, editor.string == text else { return }
             self.install(decoded, fade: true)
         }
@@ -107,8 +112,9 @@ import SilkwebCore
 
     func refit() {
         guard let editor else { return }
-        let size = NSSize(width: editor.textContainer?.containerSize.width ?? 1,
-                          height: editor.enclosingScrollView?.contentSize.height ?? 1)
+        let size = NSSize(
+            width: editor.textContainer?.containerSize.width ?? 1,
+            height: editor.enclosingScrollView?.contentSize.height ?? 1)
         if size != geometry {
             // Width changes (mode switch, sidebars, window) refit in place; the views move
             // in the display pass that lays out the reflowed text. Never hidden.
@@ -121,12 +127,16 @@ import SilkwebCore
     }
 
     private func install(_ updated: [InlineImageParagraph], fade: Bool = false) {
-        let equal = paragraphs.count == updated.count && zip(paragraphs, updated).allSatisfy { old, new in
-            old.range == new.range && old.contents.count == new.contents.count && zip(old.contents, new.contents).allSatisfy { a, b in
-                a.reference == b.reference && a.url == b.url && a.size == b.size && a.naturalSize == b.naturalSize
-                    && a.message == b.message && a.bitmap === b.bitmap
+        let equal =
+            paragraphs.count == updated.count
+            && zip(paragraphs, updated).allSatisfy { old, new in
+                old.range == new.range && old.contents.count == new.contents.count
+                    && zip(old.contents, new.contents).allSatisfy { a, b in
+                        a.reference == b.reference && a.url == b.url && a.size == b.size
+                            && a.naturalSize == b.naturalSize
+                            && a.message == b.message && a.bitmap === b.bitmap
+                    }
             }
-        }
         guard !equal else { positionViews(); return }
         paragraphs = updated
         let previousHeights = heightsByEnd
@@ -192,21 +202,26 @@ import SilkwebCore
     private func invalidate() {
         updateHeights()
         guard let editor, let layout = editor.layoutManager else { return }
-        layout.invalidateLayout(forCharacterRange: NSRange(location: 0, length: editor.string.utf16.count), actualCharacterRange: nil)
+        layout.invalidateLayout(
+            forCharacterRange: NSRange(location: 0, length: editor.string.utf16.count), actualCharacterRange: nil)
         editor.needsDisplay = true
         editor.scheduleContentSizing()
     }
 
-    func layoutManager(_ layoutManager: NSLayoutManager, shouldSetLineFragmentRect lineFragmentRect: UnsafeMutablePointer<NSRect>,
-                       lineFragmentUsedRect: UnsafeMutablePointer<NSRect>, baselineOffset: UnsafeMutablePointer<CGFloat>,
-                       in textContainer: NSTextContainer, forGlyphRange glyphRange: NSRange) -> Bool {
+    func layoutManager(
+        _ layoutManager: NSLayoutManager, shouldSetLineFragmentRect lineFragmentRect: UnsafeMutablePointer<NSRect>,
+        lineFragmentUsedRect: UnsafeMutablePointer<NSRect>, baselineOffset: UnsafeMutablePointer<CGFloat>,
+        in textContainer: NSTextContainer, forGlyphRange glyphRange: NSRange
+    ) -> Bool {
         let characters = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
         guard let height = heightsByEnd[NSMaxRange(characters)] else { return false }
         lineFragmentRect.pointee.size.height += height
         return true
     }
 
-    func layoutManager(_ layoutManager: NSLayoutManager, didCompleteLayoutFor textContainer: NSTextContainer?, atEnd flag: Bool) {
+    func layoutManager(
+        _ layoutManager: NSLayoutManager, didCompleteLayoutFor textContainer: NSTextContainer?, atEnd flag: Bool
+    ) {
         positionViews()
     }
 
@@ -231,7 +246,9 @@ import SilkwebCore
             let placed = end < laid
             if placed {
                 let glyph = layout.glyphIndexForCharacter(at: end)
-                y = layout.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil, withoutAdditionalLayout: true).maxY + origin.y + 6
+                y =
+                    layout.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil, withoutAdditionalLayout: true)
+                    .maxY + origin.y + 6
             } else {
                 let bottom = parked ?? layout.usedRect(for: container).maxY + origin.y + 6
                 parked = bottom
@@ -241,7 +258,9 @@ import SilkwebCore
                 let target = NSPoint(x: origin.x, y: y)
                 // AppKit may store an origin a few 1e-11 pt off under a scroll content inset
                 // (Typewriter, 1.27); re-setting it every frame would be a needless overlay move.
-                if abs(view.frame.minX - target.x) > 0.001 || abs(view.frame.minY - target.y) > 0.001 { view.setFrameOrigin(target) }
+                if abs(view.frame.minX - target.x) > 0.001 || abs(view.frame.minY - target.y) > 0.001 {
+                    view.setFrameOrigin(target)
+                }
                 if placed, view.isHidden { view.isHidden = false }
                 y += view.frame.height + 8
             }
@@ -257,7 +276,8 @@ import SilkwebCore
     }
 }
 
-@MainActor final class InlineImageView: NSView, @preconcurrency QLPreviewPanelDataSource, @preconcurrency QLPreviewPanelDelegate {
+@MainActor
+final class InlineImageView: NSView, @preconcurrency QLPreviewPanelDataSource, @preconcurrency QLPreviewPanelDelegate {
     private(set) var content: InlineImageContent
     var sourceRange: NSRange
     weak var editor: PlainMarkdownTextView?
@@ -282,8 +302,11 @@ import SilkwebCore
     /// A sharper decode or changed file updates this view in place (no remove/re-add).
     func update(content: InlineImageContent, sourceRange: NSRange) {
         self.sourceRange = sourceRange
-        guard content.bitmap !== self.content.bitmap || content.message != self.content.message || content.reference != self.content.reference
-                || content.naturalSize != self.content.naturalSize || content.size != self.content.size else { return }
+        guard
+            content.bitmap !== self.content.bitmap || content.message != self.content.message
+                || content.reference != self.content.reference
+                || content.naturalSize != self.content.naturalSize || content.size != self.content.size
+        else { return }
         // Drop layer contents set by updateLayer before falling back to draw(_:).
         if content.bitmap == nil, self.content.bitmap != nil { layer?.contents = nil }
         self.content = content
@@ -293,15 +316,28 @@ import SilkwebCore
     private func applyContent() {
         layer?.cornerRadius = content.message == nil ? 4 : 6
         setAccessibilityRole(content.message == nil ? .image : .staticText)
-        setAccessibilityLabel(content.message ?? (content.reference.alt.isEmpty ? "Image, \(content.url?.lastPathComponent ?? "")" : content.reference.alt))
+        setAccessibilityLabel(
+            content.message
+                ?? (content.reference.alt.isEmpty
+                    ? "Image, \(content.url?.lastPathComponent ?? "")" : content.reference.alt))
         setAccessibilityHelp(content.message == nil ? "Double-click to open in Quick Look" : "Select image source line")
     }
 
     func refit(column: CGFloat, viewport: CGFloat) {
         let size: NSSize
-        if content.message != nil { size = NSSize(width: max(1, min(column, CGFloat((content.message! as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13)]).width) + 40)), height: 28) }
-        else {
-            let fitted = InlineImages.fittedSize(width: content.naturalSize.width, height: content.naturalSize.height, column: column, viewport: viewport)
+        if content.message != nil {
+            size = NSSize(
+                width: max(
+                    1,
+                    min(
+                        column,
+                        CGFloat(
+                            (content.message! as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13)])
+                                .width) + 40)), height: 28)
+        } else {
+            let fitted = InlineImages.fittedSize(
+                width: content.naturalSize.width, height: content.naturalSize.height, column: column, viewport: viewport
+            )
             size = NSSize(width: fitted.width, height: fitted.height)
         }
         if frame.size != size { setFrameSize(size) }
@@ -314,7 +350,9 @@ import SilkwebCore
         layer?.borderColor = NSColor.controlAccentColor.cgColor
     }
     private var selectionRange: NSRange {
-        guard let editor, NSMaxRange(sourceRange) <= editor.string.utf16.count else { return NSRange(location: 0, length: 0) }
+        guard let editor, NSMaxRange(sourceRange) <= editor.string.utf16.count else {
+            return NSRange(location: 0, length: 0)
+        }
         let line = (editor.string as NSString).substring(with: sourceRange).trimmingCharacters(in: .newlines)
         return NSRange(location: sourceRange.location, length: line.utf16.count)
     }
@@ -341,19 +379,28 @@ import SilkwebCore
             context.cgContext.beginTransparencyLayer(auxiliaryInfo: nil)
         }
         defer {
-            if alphaValue < 1, let context = NSGraphicsContext.current, !context.isDrawingToScreen { context.cgContext.endTransparencyLayer() }
+            if alphaValue < 1, let context = NSGraphicsContext.current, !context.isDrawingToScreen {
+                context.cgContext.endTransparencyLayer()
+            }
         }
         NSColor.silkwebPaneBackground.setFill(); bounds.fill()
         if let bitmap = content.bitmap {
-            NSImage(cgImage: bitmap, size: content.size).draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            NSImage(cgImage: bitmap, size: content.size).draw(
+                in: bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         } else {
             NSColor.quaternarySystemFill.setFill(); bounds.fill()
             guard content.message != nil else { return }
             let warning = content.message?.hasPrefix("Missing") == true || content.message == "Can’t display image"
-            NSImage(systemSymbolName: warning ? "exclamationmark.triangle" : "photo", accessibilityDescription: nil)?.withSymbolConfiguration(.init(paletteColors: [.secondaryLabelColor]))?.draw(in: NSRect(x: 10, y: 8, width: 12, height: 12))
+            NSImage(systemSymbolName: warning ? "exclamationmark.triangle" : "photo", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(paletteColors: [.secondaryLabelColor]))?.draw(
+                    in: NSRect(x: 10, y: 8, width: 12, height: 12))
             let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byTruncatingMiddle
-            ((content.message ?? "") as NSString).draw(in: NSRect(x: 30, y: 6, width: max(0, bounds.width - 40), height: 20),
-                withAttributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: paragraph])
+            ((content.message ?? "") as NSString).draw(
+                in: NSRect(x: 30, y: 6, width: max(0, bounds.width - 40), height: 20),
+                withAttributes: [
+                    .font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor,
+                    .paragraphStyle: paragraph,
+                ])
         }
     }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .arrow) }
@@ -366,17 +413,29 @@ import SilkwebCore
     }
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { editor?.draggingEntered(sender) ?? [] }
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { editor?.draggingUpdated(sender) ?? [] }
-    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool { editor?.performDragOperation(sender) ?? false }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        editor?.performDragOperation(sender) ?? false
+    }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = NSMenu()
-        let actions: [(String, Selector)] = content.bitmap == nil ? [("Copy Path", #selector(copyPath(_:)))] :
-            [("Quick Look", #selector(quickLook(_:))), ("Reveal in Finder", #selector(reveal(_:))), ("Copy Image", #selector(copyImage(_:)))]
-        for (title, action) in actions { let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; menu.addItem(item) }
+        let actions: [(String, Selector)] =
+            content.bitmap == nil
+            ? [("Copy Path", #selector(copyPath(_:)))]
+            : [
+                ("Quick Look", #selector(quickLook(_:))), ("Reveal in Finder", #selector(reveal(_:))),
+                ("Copy Image", #selector(copyImage(_:))),
+            ]
+        for (title, action) in actions {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self;
+            menu.addItem(item)
+        }
         return menu
     }
     @objc private func quickLook(_ sender: Any?) {
-        guard content.bitmap != nil, content.url != nil, let panel = QLPreviewPanel.shared() else { NSSound.beep(); return }
+        guard content.bitmap != nil, content.url != nil, let panel = QLPreviewPanel.shared() else {
+            NSSound.beep(); return
+        }
         editor?.quickLookImage = self
         editor?.window?.makeFirstResponder(editor)
         panel.updateController()
@@ -384,17 +443,25 @@ import SilkwebCore
         panel.makeKeyAndOrderFront(nil)
     }
     func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { 1 }
-    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! { content.url as NSURL? }
+    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
+        content.url as NSURL?
+    }
     func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
         if event.type == .keyDown, event.keyCode == 53 || event.keyCode == 49 {
             panel.orderOut(nil); editor?.window?.makeFirstResponder(editor); return true
         }
         return false
     }
-    @objc private func reveal(_ sender: Any?) { if let url = content.url { NSWorkspace.shared.activateFileViewerSelecting([url]) } }
-    @objc private func copyPath(_ sender: Any?) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(content.reference.destination, forType: .string) }
+    @objc private func reveal(_ sender: Any?) {
+        if let url = content.url { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+    }
+    @objc private func copyPath(_ sender: Any?) {
+        NSPasteboard.general.clearContents();
+        NSPasteboard.general.setString(content.reference.destination, forType: .string)
+    }
     @objc private func copyImage(_ sender: Any?) {
         guard let bitmap = content.bitmap else { return }
-        NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects([NSImage(cgImage: bitmap, size: content.size)])
+        NSPasteboard.general.clearContents();
+        NSPasteboard.general.writeObjects([NSImage(cgImage: bitmap, size: content.size)])
     }
 }

@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class LibraryLocationTests: XCTestCase {
@@ -9,19 +10,22 @@ final class LibraryLocationTests: XCTestCase {
     func testRegularBookmarkAndStaleRefresh() throws {
         for stale in [false, true] {
             var saved = 0
-            let result = try XCTUnwrap(LibraryLocationRestore.restore(
-                LibraryLocation(bookmark: old, path: root.path),
-                resolve: { data, scoped in
-                    XCTAssertEqual(data, self.old)
-                    XCTAssertFalse(scoped)
-                    return .init(url: self.root, stale: stale)
-                }, validate: { url, scoped in
-                    XCTAssertEqual(url, self.root)
-                    XCTAssertFalse(scoped)
-                }, save: { url in
-                    saved += 1
-                    return LibraryLocation(bookmark: self.fresh, path: url.path)
-                }))
+            let result = try XCTUnwrap(
+                LibraryLocationRestore.restore(
+                    LibraryLocation(bookmark: old, path: root.path),
+                    resolve: { data, scoped in
+                        XCTAssertEqual(data, self.old)
+                        XCTAssertFalse(scoped)
+                        return .init(url: self.root, stale: stale)
+                    },
+                    validate: { url, scoped in
+                        XCTAssertEqual(url, self.root)
+                        XCTAssertFalse(scoped)
+                    },
+                    save: { url in
+                        saved += 1
+                        return LibraryLocation(bookmark: self.fresh, path: url.path)
+                    }))
             XCTAssertEqual(result.url, root)
             XCTAssertFalse(result.usesSecurityScope)
             XCTAssertEqual(saved, stale ? 1 : 0)
@@ -32,14 +36,16 @@ final class LibraryLocationTests: XCTestCase {
     func testLegacyBookmarkTriedAndMigratedWithEitherResolutionMode() throws {
         for needsScope in [false, true] {
             var attempts: [Bool] = []
-            let result = try XCTUnwrap(LibraryLocationRestore.restore(nil, legacyBookmark: old,
-                resolve: { data, scoped in
-                    XCTAssertEqual(data, self.old)
-                    attempts.append(scoped)
-                    if needsScope && !scoped { throw LibraryLocationError.unreadable }
-                    return .init(url: self.root, stale: false)
-                }, validate: { _, scoped in XCTAssertEqual(scoped, needsScope) },
-                save: { LibraryLocation(bookmark: self.fresh, path: $0.path) }))
+            let result = try XCTUnwrap(
+                LibraryLocationRestore.restore(
+                    nil, legacyBookmark: old,
+                    resolve: { data, scoped in
+                        XCTAssertEqual(data, self.old)
+                        attempts.append(scoped)
+                        if needsScope && !scoped { throw LibraryLocationError.unreadable }
+                        return .init(url: self.root, stale: false)
+                    }, validate: { _, scoped in XCTAssertEqual(scoped, needsScope) },
+                    save: { LibraryLocation(bookmark: self.fresh, path: $0.path) }))
             XCTAssertEqual(attempts, needsScope ? [false, true] : [false])
             XCTAssertEqual(result.usesSecurityScope, needsScope)
             XCTAssertEqual(result.refreshedLocation, LibraryLocation(bookmark: fresh, path: root.path))
@@ -50,11 +56,13 @@ final class LibraryLocationTests: XCTestCase {
         for bookmark in [nil, Data(), old] as [Data?] {
             for failure in [nil, .notFound, .unreadable] as [LibraryLocationError?] {
                 let restore = {
-                    try LibraryLocationRestore.restore(LibraryLocation(bookmark: bookmark, path: self.root.path),
+                    try LibraryLocationRestore.restore(
+                        LibraryLocation(bookmark: bookmark, path: self.root.path),
                         resolve: { _, scoped in
                             XCTAssertFalse(scoped)
                             throw LibraryLocationError.notFound
-                        }, validate: { url, scoped in
+                        },
+                        validate: { url, scoped in
                             XCTAssertEqual(url, self.root)
                             XCTAssertFalse(scoped)
                             if let failure { throw failure }
@@ -76,10 +84,13 @@ final class LibraryLocationTests: XCTestCase {
             }
         }
         var attempts: [Bool] = []
-        XCTAssertThrowsError(try LibraryLocationRestore.restore(nil, legacyBookmark: old, resolve: { _, scoped in
-            attempts.append(scoped)
-            throw LibraryLocationError.notFound
-        }))
+        XCTAssertThrowsError(
+            try LibraryLocationRestore.restore(
+                nil, legacyBookmark: old,
+                resolve: { _, scoped in
+                    attempts.append(scoped)
+                    throw LibraryLocationError.notFound
+                }))
         XCTAssertEqual(attempts, [false, true])
     }
 
@@ -120,7 +131,8 @@ final class LibraryLocationTests: XCTestCase {
 
     func testTolerantDecodingAndMovedBookmarkPreference() throws {
         XCTAssertEqual(try JSONDecoder().decode(LibraryLocation.self, from: Data("{}".utf8)), LibraryLocation())
-        let result = try LibraryLocationRestore.restore(LibraryLocation(bookmark: old, path: "/missing"),
+        let result = try LibraryLocationRestore.restore(
+            LibraryLocation(bookmark: old, path: "/missing"),
             resolve: { _, _ in .init(url: self.root, stale: false) }, validate: { _, _ in },
             save: { LibraryLocation(bookmark: self.fresh, path: $0.path) })
         XCTAssertEqual(result?.refreshedLocation?.path, root.path)

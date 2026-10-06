@@ -1,5 +1,5 @@
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 struct SearchView<Content: View>: View {
     let workspace: LibraryWorkspace
@@ -11,7 +11,7 @@ struct SearchView<Content: View>: View {
 
     var body: some View {
         #if DEBUG
-        let _ = { search.resultsBodyCount += 1 }()
+            let _ = { search.resultsBodyCount += 1 }()
         #endif
         let results = workspace.filteredSearchResults
         return PinnedColumn {
@@ -29,8 +29,12 @@ struct SearchView<Content: View>: View {
                         return .handled
                     }
                 if !search.text.isEmpty {
-                    Button { search.text = ""; search.results = [] } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).help("Clear Search").accessibilityLabel("Clear Search")
+                    Button {
+                        search.text = ""; search.results = []
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain).help("Clear Search").accessibilityLabel("Clear Search")
                 }
             }.padding(.horizontal, Spacing.small).padding(.vertical, 10)
         } content: {
@@ -52,7 +56,9 @@ struct SearchView<Content: View>: View {
                             if search.isSearching { ProgressView().controlSize(.small) }
                             Text(LibrarySearch.resultCount(results.count))
                         }
-                            .font(.caption).monospacedDigit().foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 8)
+                        .font(.caption).monospacedDigit().foregroundStyle(.secondary).frame(
+                            maxWidth: .infinity, alignment: .leading
+                        ).padding(.horizontal, 8)
                     } content: {
                         VStack(spacing: 0) {
                             if results.isEmpty && !search.hasPendingQuery {
@@ -74,8 +80,13 @@ struct SearchView<Content: View>: View {
                                         SearchResultRow(result: result, query: search.resultText)
                                             .padding(.horizontal, 12)
                                             .frame(maxWidth: .infinity, alignment: .leading)
-                                            .background { if selected == result.id { SearchResultCapsule(focused: resultsFocused) } }
-                                            .padding(.horizontal, Spacing.capsuleInset - SearchResultCapsule.cellInset).padding(.vertical, 1)
+                                            .background {
+                                                if selected == result.id {
+                                                    SearchResultCapsule(focused: resultsFocused)
+                                                }
+                                            }
+                                            .padding(.horizontal, Spacing.capsuleInset - SearchResultCapsule.cellInset)
+                                            .padding(.vertical, 1)
                                             .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
@@ -89,10 +100,13 @@ struct SearchView<Content: View>: View {
                                 .scrollContentBackground(.hidden)
                                 .background(Color.silkwebPaneBackground)
                                 .focused($resultsFocused)
-                                .onKeyPress(.return) { openSelected(); return .handled }
+                                .onKeyPress(.return) {
+                                    openSelected(); return .handled
+                                }
                             }
                             if let note = search.error ?? search.indexingNote {
-                                Text(note).font(.caption).foregroundStyle(.secondary).padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                                Text(note).font(.caption).foregroundStyle(.secondary).padding(8).frame(
+                                    maxWidth: .infinity, alignment: .leading)
                             }
                         }
                     }
@@ -110,7 +124,9 @@ struct SearchView<Content: View>: View {
         .onChange(of: workspace.session.selectedFolder) { search.folderScope = workspace.selectedFolder?.id }
         .onChange(of: results) { selected = SearchNavigation.selection(selected, in: results) }
         .onChange(of: search.resultText) { selected = results.first?.id }
-        .onExitCommand { search.text = ""; search.results = [] }
+        .onExitCommand {
+            search.text = ""; search.results = []
+        }
         .task(id: SearchRequestIdentity(text: search.text, scope: search.folderScope, revision: search.revision)) {
             if !search.text.isEmpty { await search.query(quick: false) }
         }
@@ -135,8 +151,11 @@ struct SearchResultRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(SearchPresentation.highlight(result.displayName, query: query, font: .system(size: 13, weight: .semibold)))
-                .font(.system(size: 13, weight: .semibold)).lineLimit(1).frame(height: 17)
+            Text(
+                SearchPresentation.highlight(
+                    result.displayName, query: query, font: .system(size: 13, weight: .semibold))
+            )
+            .font(.system(size: 13, weight: .semibold)).lineLimit(1).frame(height: 17)
             HStack(spacing: 0) {
                 if let modified = result.modified {
                     Text(DocumentRowPresentation.dateLabel(modified, locale: locale)).fixedSize().layoutPriority(1)
@@ -164,8 +183,9 @@ struct SearchResultCapsule: View {
     @Environment(\.appearsActive) private var appearsActive
 
     var body: some View {
-        let style = CapsuleStyle.fill(isKey: appearsActive, isFocused: focused,
-                                      contrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
+        let style = CapsuleStyle.fill(
+            isKey: appearsActive, isFocused: focused,
+            contrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
         let shape = RoundedRectangle(cornerRadius: 8)
         shape.fill(style.tintsAccessories ? Color.silkwebSelection : Color.silkwebSelectionInactive)
             .overlay { if style.stroke != nil { shape.strokeBorder(Color.silkwebAccent, lineWidth: 1) } }
@@ -186,7 +206,9 @@ private struct SelectionHighlightSuppressor: NSViewRepresentable {
         func suppress() {
             var ancestor = superview
             while let view = ancestor, !(view is NSTableView) { ancestor = view.superview }
-            if let table = ancestor as? NSTableView, table.selectionHighlightStyle != .none { table.selectionHighlightStyle = .none }
+            if let table = ancestor as? NSTableView, table.selectionHighlightStyle != .none {
+                table.selectionHighlightStyle = .none
+            }
         }
     }
 }
@@ -205,7 +227,8 @@ enum SearchPresentation {
         var value = AttributedString(text)
         for range in ranges {
             guard let stringRange = Range(range, in: text),
-                  let attributedRange = Range(stringRange, in: value) else { continue }
+                let attributedRange = Range(stringRange, in: value)
+            else { continue }
             value[attributedRange].font = font.weight(.semibold)
             value[attributedRange].foregroundColor = .primary
         }

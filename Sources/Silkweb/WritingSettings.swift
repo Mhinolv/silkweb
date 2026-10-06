@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 /// The app's preferences domain. Under XCTest (unit tests, snapshot harness) it is an empty suite private
 /// to the process, so tests start from defaults and never read or write the runner's real domain (silkweb-1.81).
@@ -17,7 +17,8 @@ enum AppDefaults {
     /// Under XCTest the suite is a plist path in a per-process temporary directory, never `~/Library/Preferences`:
     /// cfprefsd rewrites an emptied plist there after it is deleted, leaving one file per test run (#67).
     private static let testDirectory = FileManager.default.temporaryDirectory
-        .appendingPathComponent("Silkweb.Tests.Preferences.\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+        .appendingPathComponent(
+            "Silkweb.Tests.Preferences.\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
     static let testSuiteName = testDirectory.appendingPathComponent("Preferences").path
 
     /// The library column autosave name. Under XCTest there is none, so test-built columns never write frames

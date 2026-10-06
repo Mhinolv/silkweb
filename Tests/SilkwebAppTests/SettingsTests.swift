@@ -1,8 +1,9 @@
 import AppKit
 import SwiftUI
 import XCTest
-@testable import SilkwebCore
+
 @testable import Silkweb
+@testable import SilkwebCore
 
 /// silkweb-1.24: the real Settings window and live apply to editors, preview CSS and colour tokens.
 final class SettingsTests: XCTestCase {
@@ -31,7 +32,9 @@ final class SettingsTests: XCTestCase {
     }
 
     @MainActor private func makeEditor(_ source: String) throws -> (NSWindow, PlainMarkdownTextView) {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 700), styleMask: [.titled, .resizable], backing: .buffered, defer: true)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 700), styleMask: [.titled, .resizable],
+            backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
         scroll.frame = window.contentView!.bounds
@@ -45,10 +48,13 @@ final class SettingsTests: XCTestCase {
 
     private static func srgb(_ color: NSColor, dark: Bool) -> Int {
         var resolved: NSColor?
-        NSAppearance(named: dark ? .darkAqua : .aqua)!.performAsCurrentDrawingAppearance { resolved = color.usingColorSpace(.sRGB) }
+        NSAppearance(named: dark ? .darkAqua : .aqua)!.performAsCurrentDrawingAppearance {
+            resolved = color.usingColorSpace(.sRGB)
+        }
         guard let resolved else { return -1 }
         func channel(_ value: CGFloat) -> Int { Int((value * 255).rounded()) }
-        return channel(resolved.redComponent) << 16 | channel(resolved.greenComponent) << 8 | channel(resolved.blueComponent)
+        return channel(resolved.redComponent) << 16 | channel(resolved.greenComponent) << 8
+            | channel(resolved.blueComponent)
     }
 
     @MainActor
@@ -56,7 +62,8 @@ final class SettingsTests: XCTestCase {
         let settings = try makeSettings(live: false)
         let workspace = LibraryWorkspace(defaults: settings.defaults)
         workspace.canSaveWindowSession = false
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebSettingsLibrary-" + UUID().uuidString)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SilkwebSettingsLibrary-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         workspace.root = root
@@ -64,10 +71,13 @@ final class SettingsTests: XCTestCase {
         settings.editingDark = false
         for tab in SettingsTab.allCases {
             for dark in [false, true] {
-                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 900), styleMask: [.titled, .closable], backing: .buffered, defer: true)
+                let window = NSWindow(
+                    contentRect: NSRect(x: 0, y: 0, width: 520, height: 900), styleMask: [.titled, .closable],
+                    backing: .buffered, defer: true)
                 window.isReleasedWhenClosed = false
                 window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-                let host = NSHostingController(rootView: SettingsView(settings: settings, workspace: workspace, tab: tab))
+                let host = NSHostingController(
+                    rootView: SettingsView(settings: settings, workspace: workspace, tab: tab))
                 window.contentViewController = host
                 host.view.layoutSubtreeIfNeeded()
                 try await Task.sleep(for: .milliseconds(50))
@@ -76,7 +86,8 @@ final class SettingsTests: XCTestCase {
                 XCTAssertFalse(window.isVisible)
                 switch tab {
                 case .editor:
-                    XCTAssertGreaterThanOrEqual(views.compactMap { $0 as? NSSlider }.count, 4, "Size, spacing, insets, width")
+                    XCTAssertGreaterThanOrEqual(
+                        views.compactMap { $0 as? NSSlider }.count, 4, "Size, spacing, insets, width")
                     let sample = try XCTUnwrap(views.compactMap { $0 as? PlainMarkdownTextView }.first)
                     XCTAssertEqual(sample.string, EditorSample.text)
                     XCTAssertEqual(sample.accessibilityLabel(), "Editor sample text")
@@ -99,7 +110,8 @@ final class SettingsTests: XCTestCase {
                 window.close()
             }
         }
-        XCTAssertEqual(settings.editedColors.contrastWarning(dark: false).map { if case .text = $0 { true } else { false } }, true)
+        XCTAssertEqual(
+            settings.editedColors.contrastWarning(dark: false).map { if case .text = $0 { true } else { false } }, true)
     }
 
     @MainActor
@@ -116,7 +128,10 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(undo.canUndo)
         text.setSelectedRange(NSRange(location: 10, length: 4))
 
-        for (family, size, spacing) in [("Serif", 20.0, 2.0), ("System", 10, 1.2), ("Monospaced", 32, 1.35), ("Missing Font Family", 15, 1.75), ("Menlo", 15, 1.6)] {
+        for (family, size, spacing) in [
+            ("Serif", 20.0, 2.0), ("System", 10, 1.2), ("Monospaced", 32, 1.35), ("Missing Font Family", 15, 1.75),
+            ("Menlo", 15, 1.6),
+        ] {
             settings.preferences.fontFamily = family
             settings.preferences.fontSize = size
             settings.preferences.lineHeight = spacing
@@ -127,8 +142,11 @@ final class SettingsTests: XCTestCase {
             let font = try XCTUnwrap(storage.attribute(.font, at: 12, effectiveRange: nil) as? NSFont)
             XCTAssertEqual(font.pointSize, size)
             XCTAssertEqual(text.style.bodyFont.pointSize, size)
-            if family == "Missing Font Family" { XCTAssertEqual(font.fontName, "Menlo-Regular", "Unknown fonts fall back to Menlo") }
-            let paragraph = try XCTUnwrap(storage.attribute(.paragraphStyle, at: 12, effectiveRange: nil) as? NSParagraphStyle)
+            if family == "Missing Font Family" {
+                XCTAssertEqual(font.fontName, "Menlo-Regular", "Unknown fonts fall back to Menlo")
+            }
+            let paragraph = try XCTUnwrap(
+                storage.attribute(.paragraphStyle, at: 12, effectiveRange: nil) as? NSParagraphStyle)
             XCTAssertEqual(paragraph.lineHeightMultiple, spacing)
         }
         for width in [480.0, 660, 1200] {
@@ -167,7 +185,9 @@ final class SettingsTests: XCTestCase {
             text.setSelectedRange(NSRange(location: 9, length: 0))
             let before = text.string
             text.insertTab(nil)
-            XCTAssertEqual(text.string, (before as NSString).replacingCharacters(in: NSRange(location: 9, length: 0), with: indent.text))
+            XCTAssertEqual(
+                text.string,
+                (before as NSString).replacingCharacters(in: NSRange(location: 9, length: 0), with: indent.text))
             text.undoManager?.undo()
         }
 
@@ -242,13 +262,17 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(Self.srgb(.silkwebSelectionInactive, dark: false), set.selectionInactive(dark: false).rgb)
         XCTAssertEqual(Self.srgb(.silkwebHairline, dark: false), set.hairline(dark: false).rgb)
         XCTAssertEqual(Self.srgb(.silkwebThread, dark: false), set.hairline(dark: false).rgb)
-        XCTAssertEqual(Self.srgb(.silkwebHairline, dark: true), Self.srgb(.separatorColor, dark: true), "Default set keeps the system separator")
+        XCTAssertEqual(
+            Self.srgb(.silkwebHairline, dark: true), Self.srgb(.separatorColor, dark: true),
+            "Default set keeps the system separator")
 
         // The editor's body text and headings use the slots without a restyle.
         let (window, text) = try makeEditor("# Heading\nBody")
         defer { window.close() }
-        XCTAssertEqual(text.textStorage?.attribute(.foregroundColor, at: 10, effectiveRange: nil) as? NSColor, .silkwebText)
-        XCTAssertEqual(text.textStorage?.attribute(.foregroundColor, at: 2, effectiveRange: nil) as? NSColor, .editorHeading)
+        XCTAssertEqual(
+            text.textStorage?.attribute(.foregroundColor, at: 10, effectiveRange: nil) as? NSColor, .silkwebText)
+        XCTAssertEqual(
+            text.textStorage?.attribute(.foregroundColor, at: 2, effectiveRange: nil) as? NSColor, .editorHeading)
 
         settings.editingDark = false
         settings.restoreEditedColors()
@@ -289,7 +313,8 @@ final class SettingsTests: XCTestCase {
         settings.preferences.previewFontSize = 20
         settings.preferences.previewFont = .serif
         settings.preferences.colors.dark.surface = HexColor(0x010203)
-        XCTAssertTrue(preview.html.contains("--sw-font-size: 20px"), "CSS-only changes patch the page without a re-parse")
+        XCTAssertTrue(
+            preview.html.contains("--sw-font-size: 20px"), "CSS-only changes patch the page without a re-parse")
         XCTAssertTrue(preview.html.contains("'New York'"))
         XCTAssertTrue(preview.html.contains("--sw-surface: #010203"))
         XCTAssertEqual(preview.html.components(separatedBy: "id=\"sw-settings\"").count, 2)

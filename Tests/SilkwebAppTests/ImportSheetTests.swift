@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class ImportSheetTests: XCTestCase {
@@ -11,7 +12,8 @@ final class ImportSheetTests: XCTestCase {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let root = base.appendingPathComponent("Library")
         let source = base.appendingPathComponent("Notes")
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Parent/Target"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Parent/Target"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: base) }
@@ -31,7 +33,8 @@ final class ImportSheetTests: XCTestCase {
         XCTAssertNil(review.message)
         XCTAssertEqual(review.plan?.documentCount, 1)
         let sheet = NSHostingView(rootView: ImportSheet(workspace: workspace, request: request))
-        let picker = NSHostingView(rootView: MovePicker(workspace: workspace, request: MoveRequest(paths: []), importChoice: { _ in }))
+        let picker = NSHostingView(
+            rootView: MovePicker(workspace: workspace, request: MoveRequest(paths: []), importChoice: { _ in }))
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 4096, height: 2160))
         host.addSubview(sheet); host.addSubview(picker)
         for width: CGFloat in [0, 1, 440, 540, 4096] {
@@ -69,8 +72,11 @@ final class ImportSheetTests: XCTestCase {
                 if review.plan != nil || review.message != nil { break }
                 try await Task.sleep(for: .milliseconds(10))
             }
-            if url == source { XCTAssertEqual(review.plan?.documentCount, 0); XCTAssertNil(review.message) }
-            else { XCTAssertNotNil(review.message); XCTAssertNil(review.plan) }
+            if url == source {
+                XCTAssertEqual(review.plan?.documentCount, 0); XCTAssertNil(review.message)
+            } else {
+                XCTAssertNotNil(review.message); XCTAssertNil(review.plan)
+            }
         }
     }
 }

@@ -50,7 +50,9 @@ public enum TagEditor {
     /// itself, so queued edits never resurrect or drop a tag committed just before.
     public static func add(_ names: [String], documents: Set<UUID>, metadata: LibraryMetadata) -> LibraryMetadata {
         let common = commonTags(documents: documents, metadata: metadata)
-        return edit(metadata.tags.filter { common.contains($0.id) }.map(\.name) + names, documents: documents, metadata: metadata)
+        return edit(
+            metadata.tags.filter { common.contains($0.id) }.map(\.name) + names, documents: documents,
+            metadata: metadata)
     }
     /// Removes the tag from every document, including a multi-selection where only some carry it.
     public static func remove(_ id: UUID, documents: Set<UUID>, metadata: LibraryMetadata) -> LibraryMetadata {
@@ -67,7 +69,9 @@ public enum TagEditor {
         return counts.mapValues { $0 == documents.count }
     }
     public static func rename(_ id: UUID, to input: String, metadata: LibraryMetadata) -> LibraryMetadata {
-        guard let name = normalize(input), let index = metadata.tags.firstIndex(where: { $0.id == id }) else { return metadata }
+        guard let name = normalize(input), let index = metadata.tags.firstIndex(where: { $0.id == id }) else {
+            return metadata
+        }
         var result = metadata
         if let existing = existing(name, in: result.tags), existing.id != id {
             for key in result.tagsByDocument.keys where result.tagsByDocument[key]?.contains(id) == true {
@@ -75,7 +79,9 @@ public enum TagEditor {
             }
             result.tagRecency = result.tagRecency.map { $0 == id ? existing.id : $0 }
             result.tags.remove(at: index)
-        } else { result.tags[index].name = name }
+        } else {
+            result.tags[index].name = name
+        }
         return pruning(result)
     }
     public static func delete(_ id: UUID, metadata: LibraryMetadata) -> LibraryMetadata {
@@ -87,7 +93,9 @@ public enum TagEditor {
         var result = metadata
         let live = Set(result.IDsByPath.values.map(\.uuidString))
         let known = Set(result.tags.map(\.id))
-        result.tagsByDocument = result.tagsByDocument.filter { live.contains($0.key) }.mapValues { $0.intersection(known) }.filter { !$0.value.isEmpty }
+        result.tagsByDocument = result.tagsByDocument.filter { live.contains($0.key) }.mapValues {
+            $0.intersection(known)
+        }.filter { !$0.value.isEmpty }
         let used = result.tagsByDocument.values.reduce(into: Set<UUID>()) { $0.formUnion($1) }
         result.tags.removeAll { !used.contains($0.id) }
         var seen = Set<UUID>()
@@ -110,19 +118,27 @@ public enum TagEditor {
             .filter { seen.insert($0.id).inserted }.prefix(limit)
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
-    public static func matches(_ document: LibraryDocument, folder: LibraryFolder?, includeSubfolders: Bool,
-                               tags: Set<UUID>, metadata: LibraryMetadata, searchIDs: Set<UUID>? = nil) -> Bool {
+    public static func matches(
+        _ document: LibraryDocument, folder: LibraryFolder?, includeSubfolders: Bool,
+        tags: Set<UUID>, metadata: LibraryMetadata, searchIDs: Set<UUID>? = nil
+    ) -> Bool {
         if let folder {
-            let inFolder = document.folderID == folder.id || (includeSubfolders && (folder.relativePath.isEmpty || document.relativePath.hasPrefix(folder.relativePath + "/")))
+            let inFolder =
+                document.folderID == folder.id
+                || (includeSubfolders
+                    && (folder.relativePath.isEmpty || document.relativePath.hasPrefix(folder.relativePath + "/")))
             if !inFolder { return false }
         }
-        return tags.isSubset(of: metadata.tagsByDocument[document.id.uuidString] ?? []) && (searchIDs?.contains(document.id) ?? true)
+        return tags.isSubset(of: metadata.tagsByDocument[document.id.uuidString] ?? [])
+            && (searchIDs?.contains(document.id) ?? true)
     }
 }
 
 public enum TagStore {
     /// Read-modify-write against the current identity index, never a stale scan snapshot.
-    public static func update(root: URL, transform: @escaping @Sendable (LibraryMetadata) -> LibraryMetadata) async throws -> LibraryMetadata {
+    public static func update(root: URL, transform: @escaping @Sendable (LibraryMetadata) -> LibraryMetadata)
+        async throws -> LibraryMetadata
+    {
         try await Task.detached(priority: .userInitiated) {
             let current = try LibraryMetadataStore.load(root: root).0
             let updated = TagEditor.pruning(transform(current))

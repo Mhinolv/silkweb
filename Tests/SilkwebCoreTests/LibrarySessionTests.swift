@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class LibrarySessionTests: XCTestCase {
@@ -12,7 +13,8 @@ final class LibrarySessionTests: XCTestCase {
                     session.selectedFolder = folder
                     session.selectedDocuments = Set((0..<count).map { "Writing/\($0).md" })
                     session.expandedFolders = expanded
-                    XCTAssertEqual(try JSONDecoder().decode(LibrarySession.self, from: JSONEncoder().encode(session)), session)
+                    XCTAssertEqual(
+                        try JSONDecoder().decode(LibrarySession.self, from: JSONEncoder().encode(session)), session)
                 }
             }
         }

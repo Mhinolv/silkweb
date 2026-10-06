@@ -60,15 +60,20 @@ struct WorkspaceCommands: Commands {
         TabCommands(workspace: workspace)
         CommandGroup(replacing: .undoRedo) {
             Button(state.undoTitle) {
-                if workspace.usesTextUndo { NSApp.sendAction(Selector(("undo:")), to: nil, from: nil) }
-                else { workspace.undoLibrary() }
+                if workspace.usesTextUndo {
+                    NSApp.sendAction(Selector(("undo:")), to: nil, from: nil)
+                } else {
+                    workspace.undoLibrary()
+                }
             }.keyboardShortcut("z").disabled(!state.canUndo)
             Button("Redo") { NSApp.sendAction(Selector(("redo:")), to: nil, from: nil) }
                 .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!state.canRedo)
         }
         CommandGroup(after: .pasteboard) {
-            Button("Paste and Match Style") { NSApp.sendAction(#selector(NSTextView.pasteAsPlainText(_:)), to: nil, from: nil) }
-                .keyboardShortcut("v", modifiers: [.command, .option, .shift])
+            Button("Paste and Match Style") {
+                NSApp.sendAction(#selector(NSTextView.pasteAsPlainText(_:)), to: nil, from: nil)
+            }
+            .keyboardShortcut("v", modifiers: [.command, .option, .shift])
             FindMenu(workspace: workspace, state: state)
         }
         TextEditingCommands()
@@ -79,19 +84,34 @@ struct WorkspaceCommands: Commands {
                 .disabled(!state.canToggleSidebars)
         }
         CommandGroup(after: .sidebar) {
-            Button(state.previewMode == .preview ? "Show Editor" : "Show Preview") { workspace.preview.togglePreview() }.keyboardShortcut("r")
-            Toggle("Split Editor and Preview", isOn: Binding(get: { state.previewMode == .split }, set: { workspace.preview.mode = $0 ? .split : .editor })).keyboardShortcut("4")
+            Button(state.previewMode == .preview ? "Show Editor" : "Show Preview") { workspace.preview.togglePreview() }
+                .keyboardShortcut("r")
+            Toggle(
+                "Split Editor and Preview",
+                isOn: Binding(
+                    get: { state.previewMode == .split }, set: { workspace.preview.mode = $0 ? .split : .editor })
+            ).keyboardShortcut("4")
             // Checked only for the visible Inspector segment; same switch-or-close rules as the toolbar (#69).
-            Toggle("Show Document Info", isOn: Binding(get: { state.inspectorSegment == .info }, set: { _ in workspace.toggleInspector(.info) }))
-                .keyboardShortcut("8")
-            Toggle("Show Outline", isOn: Binding(get: { state.inspectorSegment == .outline }, set: { _ in workspace.toggleInspector(.outline) }))
-                .keyboardShortcut("7")
-            Button(state.showsStatusBar ? "Hide Status Bar" : "Show Status Bar") { workspace.preview.showsStatusBar.toggle() }
-                .keyboardShortcut("/")
+            Toggle(
+                "Show Document Info",
+                isOn: Binding(get: { state.inspectorSegment == .info }, set: { _ in workspace.toggleInspector(.info) })
+            )
+            .keyboardShortcut("8")
+            Toggle(
+                "Show Outline",
+                isOn: Binding(
+                    get: { state.inspectorSegment == .outline }, set: { _ in workspace.toggleInspector(.outline) })
+            )
+            .keyboardShortcut("7")
+            Button(state.showsStatusBar ? "Hide Status Bar" : "Show Status Bar") {
+                workspace.preview.showsStatusBar.toggle()
+            }
+            .keyboardShortcut("/")
             Divider()
             // Per-window writing modes (1.27); disabled in Preview-only, which keeps their state.
-            WritingModeItems(workspace: workspace, focus: state.focusMode, typewriter: state.typewriterMode,
-                             enabled: state.canToggleWritingModes)
+            WritingModeItems(
+                workspace: workspace, focus: state.focusMode, typewriter: state.typewriterMode,
+                enabled: state.canToggleWritingModes)
             Divider()
             // Temporary editor zoom for this window (1.24); Actual Size returns to the Settings size.
             Button("Bigger") { workspace.zoomEditor(by: 1) }.keyboardShortcut("+")
@@ -114,36 +134,39 @@ struct WorkspaceCommands: Commands {
 struct TabCommands: Commands {
     let workspace: LibraryWorkspace
     var body: some Commands {
-            CommandGroup(after: .windowArrangement) {
-                Button("Show Next Tab") { workspace.cycleTab(1) }
-                    .keyboardShortcut("]", modifiers: [.command, .shift]).disabled(workspace.tabs.isEmpty)
-                Button("Show Previous Tab") { workspace.cycleTab(-1) }
-                    .keyboardShortcut("[", modifiers: [.command, .shift]).disabled(workspace.tabs.isEmpty)
-                Button("Keep Open") {
-                    if let id = workspace.activeTabID { workspace.keepTab(id) }
-                }.disabled(workspace.tabs.first { $0.id == workspace.activeTabID }?.isPreview != true)
-                Button("Reveal in Library") {
-                    if let id = workspace.activeTabID { workspace.search.text = ""; workspace.activateTab(id) }
-                }.disabled(workspace.tabs.isEmpty)
-                Button("Move Tab Left") { workspace.moveActiveTab(-1) }.disabled(workspace.tabs.count < 2)
-                Button("Move Tab Right") { workspace.moveActiveTab(1) }.disabled(workspace.tabs.count < 2)
-                Button("Close Other Tabs") {
-                    if let id = workspace.activeTabID { Task { await workspace.closeTabs(otherThan: id) } }
-                }.keyboardShortcut("w", modifiers: [.command, .option]).disabled(workspace.tabs.count < 2)
-                Button("Close Tabs to the Right") {
-                    if let id = workspace.activeTabID { Task { await workspace.closeTabs(otherThan: id, toRight: true) } }
-                }.disabled(workspace.tabs.last?.id == workspace.activeTabID)
-            }
-            CommandGroup(replacing: .saveItem) {
-                Button(workspace.tabs.isEmpty ? "Close Window" : "Close Tab") {
-                    if let id = workspace.activeTabID { Task { await workspace.closeTab(id) } }
-                    else { NSApp.keyWindow?.performClose(nil) }
-                }.keyboardShortcut("w")
-                Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
-                    .keyboardShortcut("w", modifiers: [.command, .shift])
-                Divider()
-                Button("Save") { Task { await workspace.editor.save() } }
-                    .keyboardShortcut("s").disabled(workspace.editor.url == nil || workspace.editor.readOnly)
-            }
+        CommandGroup(after: .windowArrangement) {
+            Button("Show Next Tab") { workspace.cycleTab(1) }
+                .keyboardShortcut("]", modifiers: [.command, .shift]).disabled(workspace.tabs.isEmpty)
+            Button("Show Previous Tab") { workspace.cycleTab(-1) }
+                .keyboardShortcut("[", modifiers: [.command, .shift]).disabled(workspace.tabs.isEmpty)
+            Button("Keep Open") {
+                if let id = workspace.activeTabID { workspace.keepTab(id) }
+            }.disabled(workspace.tabs.first { $0.id == workspace.activeTabID }?.isPreview != true)
+            Button("Reveal in Library") {
+                if let id = workspace.activeTabID { workspace.search.text = ""; workspace.activateTab(id) }
+            }.disabled(workspace.tabs.isEmpty)
+            Button("Move Tab Left") { workspace.moveActiveTab(-1) }.disabled(workspace.tabs.count < 2)
+            Button("Move Tab Right") { workspace.moveActiveTab(1) }.disabled(workspace.tabs.count < 2)
+            Button("Close Other Tabs") {
+                if let id = workspace.activeTabID { Task { await workspace.closeTabs(otherThan: id) } }
+            }.keyboardShortcut("w", modifiers: [.command, .option]).disabled(workspace.tabs.count < 2)
+            Button("Close Tabs to the Right") {
+                if let id = workspace.activeTabID { Task { await workspace.closeTabs(otherThan: id, toRight: true) } }
+            }.disabled(workspace.tabs.last?.id == workspace.activeTabID)
+        }
+        CommandGroup(replacing: .saveItem) {
+            Button(workspace.tabs.isEmpty ? "Close Window" : "Close Tab") {
+                if let id = workspace.activeTabID {
+                    Task { await workspace.closeTab(id) }
+                } else {
+                    NSApp.keyWindow?.performClose(nil)
+                }
+            }.keyboardShortcut("w")
+            Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
+            Divider()
+            Button("Save") { Task { await workspace.editor.save() } }
+                .keyboardShortcut("s").disabled(workspace.editor.url == nil || workspace.editor.readOnly)
+        }
     }
 }

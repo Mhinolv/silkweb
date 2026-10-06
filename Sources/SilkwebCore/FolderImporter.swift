@@ -18,7 +18,11 @@ public struct ImportPlan: Sendable {
     public let outsideLinks: [String]
     public let emptyFolders: Int
     public var documentCount: Int { entries.filter(\.isDocument).count }
-    public var assetCount: Int { entries.filter { !$0.isFolder && !$0.isDocument && ($0.sourcePath as NSString).lastPathComponent != MediaDirectory.marker }.count }
+    public var assetCount: Int {
+        entries.filter {
+            !$0.isFolder && !$0.isDocument && ($0.sourcePath as NSString).lastPathComponent != MediaDirectory.marker
+        }.count
+    }
     public var folderCount: Int { entries.filter(\.isFolder).count }
 }
 
@@ -42,18 +46,28 @@ public enum FolderImporter {
     }
     private static func checked(_ root: URL, _ path: String) throws -> URL {
         guard root.standardizedFileURL.resolvingSymlinksInPath() == root,
-              try root.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else { throw FolderImportError.destinationChanged }
+            try root.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+        else { throw FolderImportError.destinationChanged }
         var url = root
-        guard path.isEmpty || path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { throw LibraryError.invalidRelativePath }
+        guard
+            path.isEmpty
+                || path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy({
+                    !$0.isEmpty && $0 != "." && $0 != ".."
+                })
+        else { throw LibraryError.invalidRelativePath }
         for part in path.split(separator: "/") {
             url.appendPathComponent(String(part))
-            if try url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true { throw LibraryError.symbolicLink(url) }
+            if try url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true {
+                throw LibraryError.symbolicLink(url)
+            }
         }
         return url
     }
     private static func safeName(_ input: String, folder: Bool) -> String {
         var name = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        name = String(name.unicodeScalars.map { CharacterSet.controlCharacters.contains($0) || $0 == ":" ? "_" : String($0) }.joined())
+        name = String(
+            name.unicodeScalars.map { CharacterSet.controlCharacters.contains($0) || $0 == ":" ? "_" : String($0) }
+                .joined())
         while name.hasPrefix(".") { name.removeFirst() }
         if name.isEmpty { name = "Untitled" }
         let ext = folder ? "" : (name as NSString).pathExtension
@@ -84,8 +98,12 @@ public enum FolderImporter {
         if inside(source, library) { throw FolderImportError.alreadyInLibrary }
         if inside(library, source) { throw FolderImportError.containsLibrary }
         let target = try checked(library, destination)
-        var used = Set(try fm.contentsOfDirectory(atPath: target.path).map { $0.precomposedStringWithCanonicalMapping.lowercased() })
-        let folderNameCollision = used.contains(safeName(source.lastPathComponent, folder: true).precomposedStringWithCanonicalMapping.lowercased())
+        var used = Set(
+            try fm.contentsOfDirectory(atPath: target.path).map {
+                $0.precomposedStringWithCanonicalMapping.lowercased()
+            })
+        let folderNameCollision = used.contains(
+            safeName(source.lastPathComponent, folder: true).precomposedStringWithCanonicalMapping.lowercased())
         let folderName = unique(source.lastPathComponent, used: &used, folder: true)
         var items: [(String, Bool)] = []
         var documents: [String: String] = [:]
@@ -94,52 +112,85 @@ public enum FolderImporter {
             try Task.checkCancellation()
             let directory = source.appendingPathComponent(path)
             let children: [URL]
-            do { children = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isHiddenKey, .isRegularFileKey]) }
-            catch { if path.isEmpty { throw error }; skipped.append(path + " — Couldn’t be read"); return }
+            do {
+                children = try fm.contentsOfDirectory(
+                    at: directory,
+                    includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isHiddenKey, .isRegularFileKey])
+            } catch { if path.isEmpty { throw error }; skipped.append(path + " — Couldn’t be read"); return }
             for url in children.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
                 try Task.checkCancellation()
                 let relative = path.isEmpty ? url.lastPathComponent : path + "/" + url.lastPathComponent
                 do {
-                    let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isHiddenKey, .isRegularFileKey])
+                    let values = try url.resourceValues(forKeys: [
+                        .isDirectoryKey, .isSymbolicLinkKey, .isHiddenKey, .isRegularFileKey,
+                    ])
                     if values.isSymbolicLink == true { skipped.append(relative + " — Symbolic link"); continue }
-                    if assets && url.lastPathComponent == MediaDirectory.marker { items.append((relative, false)); continue }
-                    if values.isHidden == true || url.lastPathComponent.hasPrefix(".") { skipped.append(relative + " — Hidden item"); continue }
-                    if values.isDirectory == true { items.append((relative, true)); try walk(relative, assets: assets || MediaDirectory.isMarked(url)) }
-                    else if values.isRegularFile == true {
+                    if assets && url.lastPathComponent == MediaDirectory.marker {
+                        items.append((relative, false)); continue
+                    }
+                    if values.isHidden == true || url.lastPathComponent.hasPrefix(".") {
+                        skipped.append(relative + " — Hidden item"); continue
+                    }
+                    if values.isDirectory == true {
+                        items.append((relative, true));
+                        try walk(relative, assets: assets || MediaDirectory.isMarked(url))
+                    } else if values.isRegularFile == true {
                         if !assets && ["md", "markdown"].contains(url.pathExtension.lowercased()) {
                             documents[relative] = try String(contentsOf: url, encoding: .utf8)
                         }
                         items.append((relative, false))
-                    } else { skipped.append(relative + " — Not a Markdown document or a linked image") }
-                } catch is CancellationError { throw CancellationError() }
-                catch { skipped.append(relative + " — Couldn’t be read") }
+                    } else {
+                        skipped.append(relative + " — Not a Markdown document or a linked image")
+                    }
+                } catch is CancellationError { throw CancellationError() } catch {
+                    skipped.append(relative + " — Couldn’t be read")
+                }
             }
         }
         try walk("", assets: MediaDirectory.isMarked(source))
         let files = Set(items.filter { !$0.1 }.map { $0.0 })
         var canonicalFiles: [String: String] = [:]
-        for path in files.sorted().reversed() { canonicalFiles[path.precomposedStringWithCanonicalMapping.lowercased()] = path }
+        for path in files.sorted().reversed() {
+            canonicalFiles[path.precomposedStringWithCanonicalMapping.lowercased()] = path
+        }
         var linked: Set<String> = []
         var outside: [String] = []
         for path in documents.keys.sorted() {
             try Task.checkCancellation()
-            let parsed = MarkdownDestinations.rewrite(documents[path]!, source: path, changes: LibraryChangeSet(changes: []), visit: { link in
-                guard !link.hasPrefix("#"), !link.isEmpty else { return }
-                if link.contains(":") && !link.lowercased().hasPrefix("file:") { return }
-                if link.hasPrefix("/") || link.lowercased().hasPrefix("file:") { outside.append(path + " › " + link); return }
-                let raw = String(link.prefix(while: { $0 != "#" && $0 != "?" }))
-                guard let decoded = raw.removingPercentEncoding else { return }
-                let url: URL
-                if decoded.lowercased().hasPrefix("file:"), let absolute = URL(string: decoded) { url = absolute }
-                else if decoded.hasPrefix("/") { url = URL(fileURLWithPath: decoded) }
-                else { url = source.appendingPathComponent(path).deletingLastPathComponent().appendingPathComponent(decoded) }
-                let normalized = url.standardizedFileURL
-                guard inside(normalized, source), inside(normalized.resolvingSymlinksInPath(), source) else { outside.append(path + " › " + link); return }
-                let relative = String(normalized.path.dropFirst(source.path.count + 1))
-                if files.contains(relative) { linked.insert(relative) }
-                else if let canonical = canonicalFiles[relative.precomposedStringWithCanonicalMapping.lowercased()] { linked.insert(canonical) }
-                else { skipped.append(path + " › " + link + " — Couldn’t be read") }
-            })
+            let parsed = MarkdownDestinations.rewrite(
+                documents[path]!, source: path, changes: LibraryChangeSet(changes: []),
+                visit: { link in
+                    guard !link.hasPrefix("#"), !link.isEmpty else { return }
+                    if link.contains(":") && !link.lowercased().hasPrefix("file:") { return }
+                    if link.hasPrefix("/") || link.lowercased().hasPrefix("file:") {
+                        outside.append(path + " › " + link); return
+                    }
+                    let raw = String(link.prefix(while: { $0 != "#" && $0 != "?" }))
+                    guard let decoded = raw.removingPercentEncoding else { return }
+                    let url: URL
+                    if decoded.lowercased().hasPrefix("file:"), let absolute = URL(string: decoded) {
+                        url = absolute
+                    } else if decoded.hasPrefix("/") {
+                        url = URL(fileURLWithPath: decoded)
+                    } else {
+                        url = source.appendingPathComponent(path).deletingLastPathComponent().appendingPathComponent(
+                            decoded)
+                    }
+                    let normalized = url.standardizedFileURL
+                    guard inside(normalized, source), inside(normalized.resolvingSymlinksInPath(), source) else {
+                        outside.append(path + " › " + link); return
+                    }
+                    let relative = String(normalized.path.dropFirst(source.path.count + 1))
+                    if files.contains(relative) {
+                        linked.insert(relative)
+                    } else if let canonical = canonicalFiles[
+                        relative.precomposedStringWithCanonicalMapping.lowercased()]
+                    {
+                        linked.insert(canonical)
+                    } else {
+                        skipped.append(path + " › " + link + " — Couldn’t be read")
+                    }
+                })
             skipped += parsed.unsupported.map { path + " › " + $0 + " — Unsupported link; stays as written" }
         }
         var mapped: [String: String] = ["": ""]
@@ -147,33 +198,54 @@ public enum FolderImporter {
         var entries: [ImportPlan.Entry] = []
         var renamed: [String] = []
         for (path, folder) in items {
-            guard folder || documents[path] != nil || linked.contains(path) || (path as NSString).lastPathComponent == MediaDirectory.marker else { skipped.append(path + " — Not a Markdown document or a linked image"); continue }
+            guard
+                folder || documents[path] != nil || linked.contains(path)
+                    || (path as NSString).lastPathComponent == MediaDirectory.marker
+            else { skipped.append(path + " — Not a Markdown document or a linked image"); continue }
             let parent = (path as NSString).deletingLastPathComponent
             var siblingNames = names[parent] ?? []
-            let name = (path as NSString).lastPathComponent == MediaDirectory.marker ? MediaDirectory.marker : unique((path as NSString).lastPathComponent, used: &siblingNames, folder: folder)
+            let name =
+                (path as NSString).lastPathComponent == MediaDirectory.marker
+                ? MediaDirectory.marker
+                : unique((path as NSString).lastPathComponent, used: &siblingNames, folder: folder)
             names[parent] = siblingNames
             let mappedParent = mapped[parent] ?? parent
             let copy = mappedParent.isEmpty ? name : mappedParent + "/" + name
             mapped[path] = copy
             if copy != path { renamed.append(path + " → " + copy) }
-            entries.append(.init(sourcePath: path, copyPath: copy, isFolder: folder, isDocument: documents[path] != nil))
+            entries.append(
+                .init(sourcePath: path, copyPath: copy, isFolder: folder, isDocument: documents[path] != nil))
         }
         let parents = Set(items.map { ($0.0 as NSString).deletingLastPathComponent })
-        return ImportPlan(source: source, library: library, destination: destination, folderName: folderName, folderNameCollision: folderNameCollision, entries: entries, renamed: renamed, skipped: skipped, outsideLinks: outside, emptyFolders: entries.filter { $0.isFolder && !parents.contains($0.sourcePath) }.count)
+        return ImportPlan(
+            source: source, library: library, destination: destination, folderName: folderName,
+            folderNameCollision: folderNameCollision, entries: entries, renamed: renamed, skipped: skipped,
+            outsideLinks: outside,
+            emptyFolders: entries.filter { $0.isFolder && !parents.contains($0.sourcePath) }.count)
     }
 
     public static func copy(_ plan: ImportPlan, progress: @Sendable (Int, Int) -> Void = { _, _ in }) throws -> String {
         guard plan.documentCount > 0 else { throw FolderImportError.noDocuments }
         let target = try checked(plan.library, plan.destination)
         let final = target.appendingPathComponent(plan.folderName)
-        guard !(try fm.contentsOfDirectory(atPath: target.path)).contains(where: { $0.precomposedStringWithCanonicalMapping.lowercased() == plan.folderName.precomposedStringWithCanonicalMapping.lowercased() }) else { throw FolderImportError.destinationChanged }
+        guard
+            !(try fm.contentsOfDirectory(atPath: target.path)).contains(where: {
+                $0.precomposedStringWithCanonicalMapping.lowercased()
+                    == plan.folderName.precomposedStringWithCanonicalMapping.lowercased()
+            })
+        else { throw FolderImportError.destinationChanged }
         let staging = target.appendingPathComponent(".silkweb-import-" + UUID().uuidString)
         try fm.createDirectory(at: staging, withIntermediateDirectories: false)
         defer { try? fm.removeItem(at: staging) }
-        let changes = LibraryChangeSet(changes: plan.entries.filter { $0.sourcePath != $0.copyPath }.map { LibraryPathChange(id: UUID(), oldPath: $0.sourcePath, newPath: $0.copyPath, isFolder: $0.isFolder) })
+        let changes = LibraryChangeSet(
+            changes: plan.entries.filter { $0.sourcePath != $0.copyPath }.map {
+                LibraryPathChange(id: UUID(), oldPath: $0.sourcePath, newPath: $0.copyPath, isFolder: $0.isFolder)
+            })
         let total = plan.documentCount
         var canonicalPaths: [String: String] = [:]
-        for entry in plan.entries.reversed() { canonicalPaths[entry.sourcePath.precomposedStringWithCanonicalMapping.lowercased()] = entry.sourcePath }
+        for entry in plan.entries.reversed() {
+            canonicalPaths[entry.sourcePath.precomposedStringWithCanonicalMapping.lowercased()] = entry.sourcePath
+        }
         for entry in plan.entries { canonicalPaths[entry.sourcePath] = entry.sourcePath }
         var count = 0
         var lastProgress = Date.distantPast
@@ -181,20 +253,30 @@ public enum FolderImporter {
             try Task.checkCancellation()
             let source = try checked(plan.source, entry.sourcePath)
             let output = staging.appendingPathComponent(entry.copyPath)
-            if entry.isFolder { try fm.createDirectory(at: output, withIntermediateDirectories: false) }
-            else if entry.isDocument {
+            if entry.isFolder {
+                try fm.createDirectory(at: output, withIntermediateDirectories: false)
+            } else if entry.isDocument {
                 let text = try String(contentsOf: source, encoding: .utf8)
-                let rewritten = MarkdownDestinations.rewrite(text, source: entry.sourcePath, changes: changes, canonicalPaths: canonicalPaths).text
+                let rewritten = MarkdownDestinations.rewrite(
+                    text, source: entry.sourcePath, changes: changes, canonicalPaths: canonicalPaths
+                ).text
                 try Data(rewritten.utf8).write(to: output, options: .atomic)
                 count += 1
-            } else { try fm.copyItem(at: source, to: output) }
+            } else {
+                try fm.copyItem(at: source, to: output)
+            }
             if Date().timeIntervalSince(lastProgress) >= 0.1 || count == total && entry.isDocument {
                 progress(count, total); lastProgress = Date()
             }
         }
         try Task.checkCancellation()
         guard try checked(plan.library, plan.destination) == target else { throw FolderImportError.destinationChanged }
-        guard !(try fm.contentsOfDirectory(atPath: target.path)).contains(where: { $0.precomposedStringWithCanonicalMapping.lowercased() == plan.folderName.precomposedStringWithCanonicalMapping.lowercased() }) else { throw FolderImportError.destinationChanged }
+        guard
+            !(try fm.contentsOfDirectory(atPath: target.path)).contains(where: {
+                $0.precomposedStringWithCanonicalMapping.lowercased()
+                    == plan.folderName.precomposedStringWithCanonicalMapping.lowercased()
+            })
+        else { throw FolderImportError.destinationChanged }
         try fm.moveItem(at: staging, to: final)
         return plan.destination.isEmpty ? plan.folderName : plan.destination + "/" + plan.folderName
     }

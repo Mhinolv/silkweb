@@ -1,18 +1,37 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import WebKit
-import SilkwebCore
 
 enum DocumentViewMode: String, CaseIterable {
     case editor, split, preview
-    var title: String { switch self { case .editor: "Editor"; case .split: "Split Editor and Preview"; case .preview: "Preview" } }
-    var symbol: String { switch self { case .editor: "doc.plaintext"; case .split: "rectangle.split.2x1"; case .preview: "eye" } }
+    var title: String {
+        switch self {
+        case .editor: "Editor";
+        case .split: "Split Editor and Preview";
+        case .preview: "Preview"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .editor: "doc.plaintext";
+        case .split: "rectangle.split.2x1";
+        case .preview: "eye"
+        }
+    }
 }
 
 /// Window-owned presentation state. Rendering has no access to the mutable editor buffer.
 @MainActor @Observable
 final class PreviewCoordinator {
-    var mode: DocumentViewMode { didSet { defaults.set(mode.rawValue, forKey: "Silkweb.Detail.Mode"); if mode != .preview { lastWritingMode = mode; defaults.set(mode.rawValue, forKey: "Silkweb.Detail.LastWritingMode") } } }
+    var mode: DocumentViewMode {
+        didSet {
+            defaults.set(mode.rawValue, forKey: "Silkweb.Detail.Mode");
+            if mode != .preview {
+                lastWritingMode = mode; defaults.set(mode.rawValue, forKey: "Silkweb.Detail.LastWritingMode")
+            }
+        }
+    }
     var lastWritingMode: DocumentViewMode = .editor
     var showsOutline: Bool { didSet { defaults.set(showsOutline, forKey: "Silkweb.Detail.Outline") } }
     /// View ▸ Show Status Bar (silkweb-1.25); on unless turned off.
@@ -30,7 +49,7 @@ final class PreviewCoordinator {
     @ObservationIgnored private var finishedDocument: URL?
     @ObservationIgnored private var input: RenderInput?
     #if DEBUG
-    @ObservationIgnored private(set) var renderCount = 0
+        @ObservationIgnored private(set) var renderCount = 0
     #endif
 
     private struct RenderInput: Equatable {
@@ -67,9 +86,12 @@ final class PreviewCoordinator {
         mode = DocumentViewMode(rawValue: defaults.string(forKey: "Silkweb.Detail.Mode") ?? "") ?? .editor
         showsOutline = defaults.bool(forKey: "Silkweb.Detail.Outline")
         showsStatusBar = defaults.object(forKey: "Silkweb.Detail.StatusBar") as? Bool ?? true
-        let previous = DocumentViewMode(rawValue: defaults.string(forKey: "Silkweb.Detail.LastWritingMode") ?? "") ?? .editor
+        let previous =
+            DocumentViewMode(rawValue: defaults.string(forKey: "Silkweb.Detail.LastWritingMode") ?? "") ?? .editor
         lastWritingMode = mode == .preview ? (previous == .preview ? .editor : previous) : mode
-        settingsObserver = NotificationCenter.default.addObserver(forName: .writingSettingsDidChange, object: nil, queue: .main) { [weak self] _ in
+        settingsObserver = NotificationCenter.default.addObserver(
+            forName: .writingSettingsDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
             MainActor.assumeIsolated { self?.settingsDidChange() }
         }
     }
@@ -86,16 +108,23 @@ final class PreviewCoordinator {
     func settingsDidChange() {
         let preferences = LivePreferences.shared.current
         webView?.underPageBackgroundColor = .silkwebPaneBackground
-        if let input, input.keepsLineBreaks != preferences.keepsLineBreaks || input.showsTableOfContents != preferences.showsTableOfContents {
+        if let input,
+            input.keepsLineBreaks != preferences.keepsLineBreaks
+                || input.showsTableOfContents != preferences.showsTableOfContents
+        {
             schedule(text: input.text, document: input.document, root: input.root)
         }
         let style = Self.settingsStyle(preferences)
-        if let start = html.range(of: "<style id=\"sw-settings\">"), let end = html.range(of: "</style>", range: start.upperBound..<html.endIndex) {
+        if let start = html.range(of: "<style id=\"sw-settings\">"),
+            let end = html.range(of: "</style>", range: start.upperBound..<html.endIndex)
+        {
             let updated = html.replacingCharacters(in: start.lowerBound..<end.upperBound, with: style)
             if updated != html { html = updated }
         }
-        webView?.callAsyncJavaScript("const style = document.getElementById('sw-settings'); if (style) style.textContent = css;",
-                                     arguments: ["css": preferences.previewCSS], in: nil, in: .defaultClient) { _ in }
+        webView?.callAsyncJavaScript(
+            "const style = document.getElementById('sw-settings'); if (style) style.textContent = css;",
+            arguments: ["css": preferences.previewCSS], in: nil, in: .defaultClient
+        ) { _ in }
     }
 
     func togglePreview() { mode = mode == .preview ? lastWritingMode : .preview }
@@ -103,31 +132,38 @@ final class PreviewCoordinator {
 
     func schedule(text: String, document: URL?, root: URL?) {
         let preferences = LivePreferences.shared.current
-        let next = RenderInput(text: text, document: document, root: root, html: mode != .editor, outline: showsOutline,
-                               keepsLineBreaks: preferences.keepsLineBreaks, showsTableOfContents: preferences.showsTableOfContents)
+        let next = RenderInput(
+            text: text, document: document, root: root, html: mode != .editor, outline: showsOutline,
+            keepsLineBreaks: preferences.keepsLineBreaks, showsTableOfContents: preferences.showsTableOfContents)
         let settings = Self.settingsStyle(preferences)
         guard next != input else { return }
         input = next
         revision += 1
         let request = revision
         task?.cancel()
-        if document != renderedURL { headings = []; outlineItems = []; html = ""; scrollAnchor = nil; scrollRatio = 0; pendingAnchor = nil }
+        if document != renderedURL {
+            headings = []; outlineItems = []; html = ""; scrollAnchor = nil; scrollRatio = 0; pendingAnchor = nil
+        }
         guard next.html || next.outline else { endLoading(); return }
         if next.html { beginLoading(document: document) } else { endLoading() }
         task = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             #if DEBUG
-            self?.renderCount += 1
+                self?.renderCount += 1
             #endif
             let result = await Task.detached(priority: .userInitiated) {
                 let parsed = MarkdownParser.parse(text)
                 let items = OutlineItem.parse(text, headings: parsed.headings)
                 guard next.html else { return (parsed.headings, "", items) }
-                var options = HTMLRenderer.Options(lineBreaks: next.keepsLineBreaks ? .preserve : .standard, libraryRoot: root, documentURL: document, offlinePreview: true)
+                var options = HTMLRenderer.Options(
+                    lineBreaks: next.keepsLineBreaks ? .preserve : .standard, libraryRoot: root, documentURL: document,
+                    offlinePreview: true)
                 options.showsTableOfContents = next.showsTableOfContents
                 let fragment = HTMLRenderer.render(parsed, options: options)
                 let css = Self.stylesheet + "\n" + SilkwebTokens.previewCSS
-                let page = "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src silkweb-preview:; style-src 'unsafe-inline'; script-src 'none'\"><style>" + css + "</style>" + settings + "</head><body>" + fragment + "</body></html>"
+                let page =
+                    "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src silkweb-preview:; style-src 'unsafe-inline'; script-src 'none'\"><style>"
+                    + css + "</style>" + settings + "</head><body>" + fragment + "</body></html>"
                 return (parsed.headings, page, items)
             }.value
             guard !Task.isCancelled, let self, request == self.revision else { return }
@@ -173,7 +209,9 @@ final class PreviewCoordinator {
         if let image = outlineItems.first(where: {
             if case .image = $0.content { return NSLocationInRange(caret, $0.sourceRange) }
             return false
-        }) { return image.id }
+        }) {
+            return image.id
+        }
         return currentHeading(caret: caret)
     }
 
@@ -200,6 +238,10 @@ final class PreviewCoordinator {
 
     func scrollPreview(to anchor: String) {
         if webView?.isLoading == false { pendingAnchor = nil }
-        webView?.callAsyncJavaScript("document.getElementById(anchor)?.scrollIntoView({behavior: reduceMotion ? 'instant' : 'smooth'});", arguments: ["anchor": anchor, "reduceMotion": NSWorkspace.shared.accessibilityDisplayShouldReduceMotion], in: nil, in: .defaultClient) { _ in }
+        webView?.callAsyncJavaScript(
+            "document.getElementById(anchor)?.scrollIntoView({behavior: reduceMotion ? 'instant' : 'smooth'});",
+            arguments: ["anchor": anchor, "reduceMotion": NSWorkspace.shared.accessibilityDisplayShouldReduceMotion],
+            in: nil, in: .defaultClient
+        ) { _ in }
     }
 }

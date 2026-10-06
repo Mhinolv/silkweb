@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class DocumentRowPresentationTests: XCTestCase {
@@ -35,25 +36,38 @@ final class DocumentRowPresentationTests: XCTestCase {
 
     func testDayBoundaryDSTAndLocale() {
         let modified = date(2026, 10, 10, 23, 58)
-        XCTAssertTrue(DocumentRowPresentation.dateLabel(modified, now: date(2026, 10, 10, 23, 59),
-                                                       calendar: calendar, locale: locale).contains("11:58"))
-        XCTAssertEqual(DocumentRowPresentation.dateLabel(modified, now: date(2026, 10, 11, 0, 0),
-                                                        calendar: calendar, locale: locale), "Yesterday")
+        XCTAssertTrue(
+            DocumentRowPresentation.dateLabel(
+                modified, now: date(2026, 10, 10, 23, 59),
+                calendar: calendar, locale: locale
+            ).contains("11:58"))
+        XCTAssertEqual(
+            DocumentRowPresentation.dateLabel(
+                modified, now: date(2026, 10, 11, 0, 0),
+                calendar: calendar, locale: locale), "Yesterday")
         for (month, day) in [(3, 8), (11, 1)] {
             let now = date(2026, month, day, 23, 59)
             let previous = date(2026, month, day - 1, 0, 1)
-            XCTAssertEqual(DocumentRowPresentation.dateLabel(previous, now: now, calendar: calendar, locale: locale), "Yesterday")
+            XCTAssertEqual(
+                DocumentRowPresentation.dateLabel(previous, now: now, calendar: calendar, locale: locale), "Yesterday")
         }
         let french = Locale(identifier: "fr_FR")
-        XCTAssertEqual(DocumentRowPresentation.dateLabel(date(2026, 10, 9), now: date(2026, 10, 10),
-                                                        calendar: calendar, locale: french), "Hier")
-        XCTAssertEqual(DocumentRowPresentation.dateLabel(date(2026, 10, 8), now: date(2026, 10, 10),
-                                                        calendar: calendar, locale: french), "jeudi")
+        XCTAssertEqual(
+            DocumentRowPresentation.dateLabel(
+                date(2026, 10, 9), now: date(2026, 10, 10),
+                calendar: calendar, locale: french), "Hier")
+        XCTAssertEqual(
+            DocumentRowPresentation.dateLabel(
+                date(2026, 10, 8), now: date(2026, 10, 10),
+                calendar: calendar, locale: french), "jeudi")
         var utc = calendar
         utc.timeZone = TimeZone(secondsFromGMT: 0)!
         // The same instant is yesterday in New York but still today in UTC.
-        XCTAssertTrue(DocumentRowPresentation.dateLabel(modified, now: date(2026, 10, 11, 0, 0),
-                                                       calendar: utc, locale: locale).contains("3:58"))
+        XCTAssertTrue(
+            DocumentRowPresentation.dateLabel(
+                modified, now: date(2026, 10, 11, 0, 0),
+                calendar: utc, locale: locale
+            ).contains("3:58"))
     }
 
     func testSnippetMarkupAndLeadingTitle() {
@@ -64,7 +78,10 @@ final class DocumentRowPresentationTests: XCTestCase {
             ("Title\nBody", "Title"),
             ("# Title\n## Title\nBody", "Title"),
             ("###### Heading ####", "Heading"),
-            ("**Bold** and *italic* with __strong__ and _emphasis_ and ~~deleted~~", "Bold and italic with strong and emphasis and deleted"),
+            (
+                "**Bold** and *italic* with __strong__ and _emphasis_ and ~~deleted~~",
+                "Bold and italic with strong and emphasis and deleted"
+            ),
             ("- Item", "Item"), ("+ Item", "Item"), ("* Item", "Item"),
             ("1. Item", "Item"), ("42) Item", "Item"),
             ("> > Quoted", "Quoted"),
@@ -79,7 +96,7 @@ final class DocumentRowPresentationTests: XCTestCase {
             ("---\n***\n___", "No additional text"),
             ("\r\n\t\r\n> 日本語 👩🏽‍💻 ☕️ **文章**", "日本語 👩🏽‍💻 ☕️ 文章"),
             ("", "No additional text"), (" \n\t\r\n", "No additional text"),
-            ("# Title\n\n", "No additional text")
+            ("# Title\n\n", "No additional text"),
         ]
         for (source, expected) in cases {
             XCTAssertEqual(DocumentRowPresentation.snippet(source, title: "Title"), expected, source)
@@ -91,9 +108,11 @@ final class DocumentRowPresentationTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
         let url = root.appendingPathComponent("Title.md")
-        for source in ["# Title\n\n> - [x] **Body** [link](https://example.com) `code`",
-                       String(repeating: " ", count: 4094) + "日本語",
-                       "# Title\n" + String(repeating: "👩🏽‍💻", count: 1000), ""] {
+        for source in [
+            "# Title\n\n> - [x] **Body** [link](https://example.com) `code`",
+            String(repeating: " ", count: 4094) + "日本語",
+            "# Title\n" + String(repeating: "👩🏽‍💻", count: 1000), "",
+        ] {
             try Data(source.utf8).write(to: url)
             let snapshot = try await LibraryScanner.scan(root: root)
             let summary = await DocumentSummary.load(document: snapshot.documents[0], root: root)
@@ -112,10 +131,14 @@ final class DocumentRowPresentationTests: XCTestCase {
     func testSnippetSizeSweepPreservesGraphemes() {
         for character in ["a", "日", "☕️", "👩🏽‍💻"] {
             for count in [0, 1, 127, 128, 511, 512, 513, 10_000] {
-                let snippet = DocumentRowPresentation.snippet(String(repeating: character, count: count), title: "Title")
+                let snippet = DocumentRowPresentation.snippet(
+                    String(repeating: character, count: count), title: "Title")
                 XCTAssertLessThanOrEqual(snippet.utf8.count, 512)
-                if count == 0 { XCTAssertEqual(snippet, "No additional text") }
-                else { XCTAssertTrue(snippet.allSatisfy { String($0) == character }) }
+                if count == 0 {
+                    XCTAssertEqual(snippet, "No additional text")
+                } else {
+                    XCTAssertTrue(snippet.allSatisfy { String($0) == character })
+                }
             }
         }
     }
@@ -129,7 +152,7 @@ final class DocumentRowPresentationTests: XCTestCase {
             ("# Other\nBody", "Other · Body"),
             ("# Title\n## Title\nBody", "Title · Body"),
             ("# Title", "No additional text"), ("", "No additional text"), ("---\n***", "No additional text"),
-            ("# Title\n日本語 👩🏽‍💻\n☕️", "日本語 👩🏽‍💻 ☕️")
+            ("# Title\n日本語 👩🏽‍💻\n☕️", "日本語 👩🏽‍💻 ☕️"),
         ]
         for (source, expected) in cases {
             XCTAssertEqual(DocumentRowPresentation.excerpt(source, title: "Title"), expected, source)
@@ -139,11 +162,15 @@ final class DocumentRowPresentationTests: XCTestCase {
     func testExcerptLimitSweepPreservesGraphemes() {
         for character in ["a", "日", "👩🏽‍💻"] {
             for count in [0, 1, 239, 240, 241, 10_000] {
-                let lines = String(repeating: character, count: count) + "\n" + String(repeating: character, count: count)
+                let lines =
+                    String(repeating: character, count: count) + "\n" + String(repeating: character, count: count)
                 let excerpt = DocumentRowPresentation.excerpt(lines, title: "Title")
                 XCTAssertLessThanOrEqual(excerpt.count, 240)
-                if count == 0 { XCTAssertEqual(excerpt, "No additional text") }
-                else { XCTAssertTrue(excerpt.allSatisfy { String($0) == character || $0 == " " }) }
+                if count == 0 {
+                    XCTAssertEqual(excerpt, "No additional text")
+                } else {
+                    XCTAssertTrue(excerpt.allSatisfy { String($0) == character || $0 == " " })
+                }
                 if count >= 240 { XCTAssertEqual(excerpt.count, 240) }
             }
         }
@@ -154,14 +181,25 @@ final class DocumentRowPresentationTests: XCTestCase {
     /// silkweb-1.25: the fixtures named in the 1.64 snapshot review.
     func testExcerptSkipsTitleHeadingAndSeparatesMergedSegments() {
         let cases: [(String, String, String)] = [
-            ("Ten Days in Kyoto", "# Ten Days in Kyoto（京都の十日間）\n\n*Posted November 12*\n\nKyoto rewards slowness.\n\n## Day by day",
-             "Posted November 12 Kyoto rewards slowness. · Day by day"),
-            ("Cold Brew Basics", "# Cold Brew Basics\n\nCold brew is forgiving.\n\n- Ratio: `1:8`\n- Steep: 14–18 hours\n\nFilter twice.",
-             "Cold brew is forgiving. · Ratio: 1:8 · Steep: 14–18 hours · Filter twice."),
-            ("Untitled Idea", "# Untitled idea\n\nHalf-formed thought about *paper notebooks*.\n\n- ...",
-             "Half-formed thought about paper notebooks. · ..."),
-            ("Pour-Over in Five Steps", "# Pour-Over in Five Steps\n\n[TOC]\n# Header\n## What you need\n\n#### Test\n- [x] Dripper (V60 or similar)\n- [ ] Patience\n",
-             "Header · What you need · Test · Dripper (V60 or similar) · Patience"),
+            (
+                "Ten Days in Kyoto",
+                "# Ten Days in Kyoto（京都の十日間）\n\n*Posted November 12*\n\nKyoto rewards slowness.\n\n## Day by day",
+                "Posted November 12 Kyoto rewards slowness. · Day by day"
+            ),
+            (
+                "Cold Brew Basics",
+                "# Cold Brew Basics\n\nCold brew is forgiving.\n\n- Ratio: `1:8`\n- Steep: 14–18 hours\n\nFilter twice.",
+                "Cold brew is forgiving. · Ratio: 1:8 · Steep: 14–18 hours · Filter twice."
+            ),
+            (
+                "Untitled Idea", "# Untitled idea\n\nHalf-formed thought about *paper notebooks*.\n\n- ...",
+                "Half-formed thought about paper notebooks. · ..."
+            ),
+            (
+                "Pour-Over in Five Steps",
+                "# Pour-Over in Five Steps\n\n[TOC]\n# Header\n## What you need\n\n#### Test\n- [x] Dripper (V60 or similar)\n- [ ] Patience\n",
+                "Header · What you need · Test · Dripper (V60 or similar) · Patience"
+            ),
             // Case and whitespace differences still count as the title.
             ("Title", "#   TITLE  \nBody", "Body"),
             // A heading that only shares a prefix inside a word is real content.
@@ -170,7 +208,7 @@ final class DocumentRowPresentationTests: XCTestCase {
             ("Title", "Intro\n\n# Title\n\nBody", "Intro · Title · Body"),
             // Body paragraphs keep a plain space; the separator never doubles.
             ("Title", "# Title\n\nOne.\n\nTwo.\n\n## A\n## B\n\nThree.", "One. Two. · A · B · Three."),
-            ("", "# \nBody", "Body")
+            ("", "# \nBody", "Body"),
         ]
         for (title, source, expected) in cases {
             XCTAssertEqual(DocumentRowPresentation.excerpt(source, title: title), expected, title)
@@ -189,7 +227,7 @@ final class DocumentRowPresentationTests: XCTestCase {
             ("Travel/Japan/Kyoto.md", "Travel", "Travel", "Japan"),
             ("Travel/Japan/Deep/Kyoto.md", "Travel", "Travel", "Japan › Deep"),
             ("Travelogue/Note.md", "Travel", "Travel", "Travelogue"),
-            ("日本/旅/メモ.md", "日本", "日本", "旅")
+            ("日本/旅/メモ.md", "日本", "日本", "旅"),
         ]
         for (path, scope, name, expected) in cases {
             XCTAssertEqual(DocumentRowPresentation.location(for: path, scope: scope, scopeName: name), expected, path)

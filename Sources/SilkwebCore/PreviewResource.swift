@@ -7,7 +7,8 @@ public enum PreviewResource {
     /// Keep existing escapes intact when a readable Markdown path mixes Unicode
     /// and percent-encoded punctuation. Foundation otherwise escapes '%' again.
     public static func resolve(_ destination: String, relativeTo document: URL) -> URL? {
-        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~:/?#[]@!$&'()*+,;=%")
+        let allowed = CharacterSet(
+            charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~:/?#[]@!$&'()*+,;=%")
         guard let encoded = destination.addingPercentEncoding(withAllowedCharacters: allowed) else { return nil }
         return URL(string: encoded, relativeTo: document)?.absoluteURL
     }
@@ -25,11 +26,12 @@ public enum PreviewResource {
 
     public static func fileURL(for asset: URL, root: URL) -> URL? {
         guard asset.scheme == scheme, asset.host == "asset", asset.user == nil,
-              asset.password == nil, asset.port == nil, asset.query == nil,
-              let components = URLComponents(url: asset, resolvingAgainstBaseURL: false),
-              let path = components.percentEncodedPath.removingPercentEncoding,
-              path.hasPrefix("/"), !path.contains("\\"),
-              !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return nil }
+            asset.password == nil, asset.port == nil, asset.query == nil,
+            let components = URLComponents(url: asset, resolvingAgainstBaseURL: false),
+            let path = components.percentEncodedPath.removingPercentEncoding,
+            path.hasPrefix("/"), !path.contains("\\"),
+            !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+        else { return nil }
         let file = root.appendingPathComponent(String(path.dropFirst())).standardizedFileURL
         guard HTMLRenderer.contained(file, root: root) else { return nil }
         return file

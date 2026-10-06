@@ -55,9 +55,13 @@ struct TrashedTags: Codable, Equatable, Sendable {
         var result = metadata
         var mapped: [UUID: UUID] = [:]
         for tag in tags {
-            if result.tags.contains(where: { $0.id == tag.id }) { mapped[tag.id] = tag.id }
-            else if let current = TagEditor.existing(tag.name, in: result.tags) { mapped[tag.id] = current.id }
-            else { result.tags.append(tag); mapped[tag.id] = tag.id }
+            if result.tags.contains(where: { $0.id == tag.id }) {
+                mapped[tag.id] = tag.id
+            } else if let current = TagEditor.existing(tag.name, in: result.tags) {
+                mapped[tag.id] = current.id
+            } else {
+                result.tags.append(tag); mapped[tag.id] = tag.id
+            }
         }
         for (document, ids) in tagsByDocument {
             result.tagsByDocument[document, default: []].formUnion(ids.compactMap { mapped[$0] })
@@ -70,7 +74,9 @@ struct TrashedTags: Codable, Equatable, Sendable {
             if mapped[old] != nil, !result.tagRecency.contains(id) {
                 let next = tagRecency[(offset + 1)...].lazy.map { mapped[$0] ?? $0 }
                     .compactMap { result.tagRecency.firstIndex(of: $0) }.first
-                let index = next ?? anchor.flatMap { result.tagRecency.firstIndex(of: $0) }.map { $0 + 1 } ?? result.tagRecency.endIndex
+                let index =
+                    next ?? anchor.flatMap { result.tagRecency.firstIndex(of: $0) }.map { $0 + 1 }
+                    ?? result.tagRecency.endIndex
                 result.tagRecency.insert(id, at: index)
             }
             if result.tagRecency.contains(id) { anchor = id }
@@ -94,8 +100,11 @@ public enum TrashError: Error, LocalizedError {
     case occupied(String)
     public var errorDescription: String? {
         switch self {
-        case .changed: return "Items changed while preparing to move them to the Trash. Try again to review their contents."
-        case .occupied(let path): return "“\((path as NSString).lastPathComponent)” can’t be put back because an item with that name now exists."
+        case .changed:
+            return "Items changed while preparing to move them to the Trash. Try again to review their contents."
+        case .occupied(let path):
+            return
+                "“\((path as NSString).lastPathComponent)” can’t be put back because an item with that name now exists."
         }
     }
 }
@@ -106,16 +115,21 @@ public actor TrashService {
     private let root: URL
     private let trash: @Sendable (URL) throws -> URL
 
-    public init(root: URL, trash: @escaping @Sendable (URL) throws -> URL = { url in
-        var destination: NSURL?
-        try FileManager.default.trashItem(at: url, resultingItemURL: &destination)
-        guard let destination else { throw TrashError.changed }
-        return destination as URL
-    }) throws {
+    public init(
+        root: URL,
+        trash: @escaping @Sendable (URL) throws -> URL = { url in
+            var destination: NSURL?
+            try FileManager.default.trashItem(at: url, resultingItemURL: &destination)
+            guard let destination else { throw TrashError.changed }
+            return destination as URL
+        }
+    ) throws {
         guard root.isFileURL else { throw LibraryError.invalidRoot }
         try LibraryMetadataStore.rejectLink(root.standardizedFileURL)
         self.root = root.standardizedFileURL.resolvingSymlinksInPath()
-        guard try self.root.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else { throw LibraryError.invalidRoot }
+        guard try self.root.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else {
+            throw LibraryError.invalidRoot
+        }
         self.trash = trash
     }
 
@@ -143,7 +157,10 @@ public actor TrashService {
         for path in paths {
             let url = try item(path)
             let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
-            guard values.isDirectory == true || (values.isRegularFile == true && ["md", "markdown"].contains(url.pathExtension.lowercased())) else {
+            guard
+                values.isDirectory == true
+                    || (values.isRegularFile == true && ["md", "markdown"].contains(url.pathExtension.lowercased()))
+            else {
                 throw LibraryError.invalidRelativePath
             }
             inventory.insert(path + (values.isDirectory == true ? "/directory" : "/document"))
@@ -163,7 +180,9 @@ public actor TrashService {
                         pending.append(child)
                     } else if type == .typeRegular && ["md", "markdown"].contains(child.pathExtension.lowercased()) {
                         counts.documents += 1
-                    } else { counts.otherFiles += 1 }
+                    } else {
+                        counts.otherFiles += 1
+                    }
                 }
             }
             if hasChildren { nonempty.append(path) }
@@ -180,8 +199,10 @@ public actor TrashService {
                 let url = try item(path)
                 let destination = try trash(url)
                 let identities = metadata.IDsByPath.filter { $0.key == path || $0.key.hasPrefix(path + "/") }
-                result.items.append(TrashedItem(originalPath: path, trashURL: destination, identities: identities,
-                    tags: TrashedTags(documents: Set(identities.values.map(\.uuidString)), metadata: metadata)))
+                result.items.append(
+                    TrashedItem(
+                        originalPath: path, trashURL: destination, identities: identities,
+                        tags: TrashedTags(documents: Set(identities.values.map(\.uuidString)), metadata: metadata)))
             } catch { result.failures.append(TrashFailure(path: path, reason: error.localizedDescription)) }
         }
         return result
@@ -193,7 +214,9 @@ public actor TrashService {
         for record in items {
             do {
                 let destination = try item(record.originalPath)
-                guard !FileManager.default.fileExists(atPath: destination.path) else { throw TrashError.occupied(record.originalPath) }
+                guard !FileManager.default.fileExists(atPath: destination.path) else {
+                    throw TrashError.occupied(record.originalPath)
+                }
                 try LibraryMetadataStore.rejectLink(record.trashURL)
                 var metadata = try LibraryMetadataStore.load(root: root).0
                 try FileManager.default.moveItem(at: record.trashURL, to: destination)
@@ -203,7 +226,9 @@ public actor TrashService {
                 // A rebuildable index failure must not report a restored file as
                 // still in Trash. The next scan can reconstruct its identity.
                 try? LibraryMetadataStore.save(metadata, root: root)
-            } catch { result.failures.append(TrashFailure(path: record.originalPath, reason: error.localizedDescription)) }
+            } catch {
+                result.failures.append(TrashFailure(path: record.originalPath, reason: error.localizedDescription))
+            }
         }
         return result
     }

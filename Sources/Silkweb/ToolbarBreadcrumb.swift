@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 /// Toolbar geometry for the one-line breadcrumb (silkweb-1.65). Only the breadcrumb observes it.
 @MainActor @Observable
@@ -73,31 +73,45 @@ final class ToolbarMetrics {
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
             let center = NotificationCenter.default
             // Resize updates at once, so the breadcrumb shrinks with the window instead of after it.
-            observers = [center.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.update() }
-            }] + [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification].map { name in
-                center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.scheduleUpdate() }
-                }
-            } + [
-                // Sidebar and Outline columns move the toolbar's sections without resizing the window.
-                center.addObserver(forName: NSSplitView.didResizeSubviewsNotification, object: nil, queue: .main) { [weak self] note in
-                    let view = note.object as? NSView
-                    MainActor.assumeIsolated {
-                        guard let self, let window = self.window, view?.window === window else { return }
-                        self.scheduleUpdate()
+            observers =
+                [
+                    center.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) {
+                        [weak self] _ in
+                        MainActor.assumeIsolated { self?.update() }
                     }
-                },
-            ]
+                ]
+                + [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification].map { name in
+                    center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                        MainActor.assumeIsolated { self?.scheduleUpdate() }
+                    }
+                } + [
+                    // Sidebar and Outline columns move the toolbar's sections without resizing the window.
+                    center.addObserver(forName: NSSplitView.didResizeSubviewsNotification, object: nil, queue: .main) {
+                        [weak self] note in
+                        let view = note.object as? NSView
+                        MainActor.assumeIsolated {
+                            guard let self, let window = self.window, view?.window === window else { return }
+                            self.scheduleUpdate()
+                        }
+                    }
+                ]
             // macOS shows the buttons again when the full-screen titlebar is revealed (hover at the top edge), so
             // follow the buttons themselves, and their titlebar view, rather than the window's full-screen state.
-            let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { window.standardWindowButton($0) }
+            let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap {
+                window.standardWindowButton($0)
+            }
             let changed: (NSView) -> Void = { [weak self] _ in MainActor.assumeIsolated { self?.scheduleUpdate() } }
-            buttonObservations = buttons.flatMap { button in
-                [button.observe(\.isHidden) { view, _ in changed(view) },
-                 button.observe(\.alphaValue) { view, _ in changed(view) },
-                 button.observe(\.superview) { view, _ in changed(view) }]
-            } + Set(buttons.compactMap(\.superview)).map { titlebar in titlebar.observe(\.isHidden) { view, _ in changed(view) } }
+            buttonObservations =
+                buttons.flatMap { button in
+                    [
+                        button.observe(\.isHidden) { view, _ in changed(view) },
+                        button.observe(\.alphaValue) { view, _ in changed(view) },
+                        button.observe(\.superview) { view, _ in changed(view) },
+                    ]
+                }
+                + Set(buttons.compactMap(\.superview)).map { titlebar in
+                    titlebar.observe(\.isHidden) { view, _ in changed(view) }
+                }
         }
         scheduleUpdate()
     }
@@ -129,25 +143,34 @@ final class ToolbarMetrics {
 
     var windowButtonsAbsent: Bool {
         guard let window else { return false }
-        return Self.windowButtonsAbsent(buttonsShown: [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].map {
-            Self.isShown(window.standardWindowButton($0))
-        })
+        return Self.windowButtonsAbsent(
+            buttonsShown: [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].map {
+                Self.isShown(window.standardWindowButton($0))
+            })
     }
 
     func update() {
         guard let window, let anchor, let toolbar = window.toolbar,
-              let crumbItem = toolbar.items.first(where: { $0.view.map { anchor.isDescendant(of: $0) } == true }),
-              let crumb = crumbItem.view else { return }
+            let crumbItem = toolbar.items.first(where: { $0.view.map { anchor.isDescendant(of: $0) } == true }),
+            let crumb = crumbItem.view
+        else { return }
         for item in toolbar.items {
-            let priority = item === crumbItem ? Self.breadcrumbPriority
+            let priority =
+                item === crumbItem
+                ? Self.breadcrumbPriority
                 : Self.overflowPriorities[item.label] ?? NSToolbarItem.VisibilityPriority.user.rawValue
-            if item.visibilityPriority.rawValue != priority { item.visibilityPriority = NSToolbarItem.VisibilityPriority(rawValue: priority) }
+            if item.visibilityPriority.rawValue != priority {
+                item.visibilityPriority = NSToolbarItem.VisibilityPriority(rawValue: priority)
+            }
         }
         // Items in the » menu have no window; the sidebar toggle never overflows, so something is always placed.
         let views = toolbar.items.compactMap(\.view)
-        let placed = views.filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor && $0.superview?.superview?.superview != nil }
+        let placed = views.filter {
+            $0.window != nil && !$0.isHiddenOrHasHiddenAncestor && $0.superview?.superview?.superview != nil
+        }
         guard let toolbarView = placed.first?.superview?.superview, let bar = toolbarView.superview,
-              placed.allSatisfy({ $0.superview?.superview === toolbarView }) else { return }
+            placed.allSatisfy({ $0.superview?.superview === toolbarView })
+        else { return }
         for view in placed { slotWidths[ObjectIdentifier(view)] = view.superview!.frame.width }
         let padding = placed.first.map { $0.superview!.frame.width - $0.frame.width } ?? 8
         // The breadcrumb's viewer may pad it differently from the buttons'; the row's end depends on its own.
@@ -168,18 +191,22 @@ final class ToolbarMetrics {
         let naturalLeading = natural.minX + firstViewer
         let regions = Self.reservedRegions(in: bar)
         let buttonsAbsent = windowButtonsAbsent
-        if !buttonsAbsent { shiftGrowthFailed = false }        // The slide is worth it only while the row also takes the freed room; otherwise the trailing items would
+        // The slide is worth it only while the row also takes the freed room; otherwise the trailing items would
         // leave the edge (#54). AppKit never grows the row into a section it keeps for the sidebar column, so
         // after one the items stay where AppKit put them, as they do once AppKit refuses the wider row.
+        if !buttonsAbsent { shiftGrowthFailed = false }
         let buttonsEnd = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
             .compactMap { window.standardWindowButton($0) }.filter { $0.window === bar.window }
             .map { $0.convert($0.bounds, to: bar).maxX }.max()
-        let slides = buttonsAbsent && !shiftGrowthFailed
-            && !(Self.predictsSections && Self.rowFollowsSection(naturalLeading: naturalLeading, regions: regions, buttonsEnd: buttonsEnd))
+        let slides =
+            buttonsAbsent && !shiftGrowthFailed
+            && !(Self.predictsSections
+                && Self.rowFollowsSection(naturalLeading: naturalLeading, regions: regions, buttonsEnd: buttonsEnd))
         var target = natural
         if slides {
             let shift = min(0, Self.leadingInset - (natural.minX + firstItem))
-            target = NSRect(x: natural.minX + shift, y: natural.minY, width: natural.width - shift, height: natural.height)
+            target = NSRect(
+                x: natural.minX + shift, y: natural.minY, width: natural.width - shift, height: natural.height)
         }
         if target != toolbarView.frame {
             if target == natural {
@@ -211,7 +238,8 @@ final class ToolbarMetrics {
         }
         // Once the breadcrumb has its width, a row that still stops short of its end wasn't given the room.
         let rowEnd = toolbarView.frame.minX + (placed.map { $0.superview!.frame.maxX }.max() ?? 0)
-        let rowShort = grows && !animating && toolbarView.frame == target && !changed && placed.count == views.count
+        let rowShort =
+            grows && !animating && toolbarView.frame == target && !changed && placed.count == views.count
             && available >= Self.minimumBreadcrumbWidth
             && abs(crumb.frame.width - width) < 1 && rowEnd < limit - Self.rowEndInset - Self.rowEndSlack
         if grows, rowShort || (placed.count < views.count && nudges >= Self.nudgeLimit) {
@@ -230,7 +258,8 @@ final class ToolbarMetrics {
     /// Whether AppKit starts the row after a section it keeps for the sidebar column (a blocking view before the
     /// row, or a start well past the traffic lights). The row never grows into that section.
     static func rowFollowsSection(naturalLeading: CGFloat, regions: [NSRect], buttonsEnd: CGFloat?) -> Bool {
-        regions.contains { $0.maxX <= naturalLeading + 1 } || buttonsEnd.map { naturalLeading > $0 + sectionSlack } == true
+        regions.contains { $0.maxX <= naturalLeading + 1 }
+            || buttonsEnd.map { naturalLeading > $0 + sectionSlack } == true
     }
 
     /// Where AppKit keeps the titlebar clear for a split view's trailing column (the Outline inspector). AppKit
@@ -238,8 +267,10 @@ final class ToolbarMetrics {
     /// for plain dividers, don't stop items); without them the row runs to the bar's edge.
     static func reservedRegions(in bar: NSView) -> [NSRect] {
         guard let container = bar.superview else { return [] }
-        return container.subviews.filter { $0 !== bar && NSStringFromClass(type(of: $0)).contains("Blocking") && !$0.isHidden }
-            .map { $0.convert($0.bounds, to: bar) }.filter { $0.width > 0 }
+        return container.subviews.filter {
+            $0 !== bar && NSStringFromClass(type(of: $0)).contains("Blocking") && !$0.isHidden
+        }
+        .map { $0.convert($0.bounds, to: bar) }.filter { $0.width > 0 }
     }
 
     private func move(_ toolbarView: NSView, to target: NSRect, in window: NSWindow) {
@@ -299,7 +330,9 @@ struct ToolbarBreadcrumb: View {
 private struct BreadcrumbRepresentable: NSViewRepresentable {
     let workspace: LibraryWorkspace
     func makeNSView(context: Context) -> BreadcrumbView {
-        BreadcrumbView(controller: workspace.toolbarMetrics.controller) { [weak workspace] in workspace?.selectFolder($0) }
+        BreadcrumbView(controller: workspace.toolbarMetrics.controller) { [weak workspace] in
+            workspace?.selectFolder($0)
+        }
     }
     func updateNSView(_ view: BreadcrumbView, context: Context) {
         // Observes navigation and counts only; the path never depends on document text.
@@ -393,11 +426,12 @@ final class BreadcrumbView: NSView {
     override func layout() {
         super.layout()
         let ellipsisWidth = Self.textWidth("…", Self.crumbFont) + 2 * Self.padding
-        let fit = Breadcrumb.fit(crumbs: path.crumbs.map { Double(Self.textWidth($0.title, Self.crumbFont) + 2 * Self.padding) },
-                                 current: Double(Self.textWidth(path.current, Self.currentFont) + 2 * Self.padding),
-                                 count: count.isEmpty ? 0 : Double(Self.countGap - Self.padding + Self.textWidth(count, Self.countFont)),
-                                 available: Double(bounds.width - Self.leadingGap),
-                                 metrics: .init(separator: Double(Self.separatorWidth), ellipsis: Double(ellipsisWidth)))
+        let fit = Breadcrumb.fit(
+            crumbs: path.crumbs.map { Double(Self.textWidth($0.title, Self.crumbFont) + 2 * Self.padding) },
+            current: Double(Self.textWidth(path.current, Self.currentFont) + 2 * Self.padding),
+            count: count.isEmpty ? 0 : Double(Self.countGap - Self.padding + Self.textWidth(count, Self.countFont)),
+            available: Double(bounds.width - Self.leadingGap),
+            metrics: .init(separator: Double(Self.separatorWidth), ellipsis: Double(ellipsisWidth)))
         self.fit = fit
         // The `…` pull-down exists only while ancestors are folded.
         if fit.collapsed.isEmpty {
@@ -412,7 +446,9 @@ final class BreadcrumbView: NSView {
                 guard let self, let button else { return }
                 let menu = NSMenu()
                 for crumb in hidden {
-                    let item = NSMenuItem(title: crumb.title, action: crumb.folderPath == nil ? nil : #selector(self.chooseHidden(_:)), keyEquivalent: "")
+                    let item = NSMenuItem(
+                        title: crumb.title, action: crumb.folderPath == nil ? nil : #selector(self.chooseHidden(_:)),
+                        keyEquivalent: "")
                     item.target = self
                     item.representedObject = crumb.folderPath
                     item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
@@ -423,10 +459,13 @@ final class BreadcrumbView: NSView {
         }
         // Crumbs, the current crumb and the count share one text baseline.
         let height = bounds.height
-        let baseline = floor((height - Self.crumbFont.ascender + Self.crumbFont.descender) / 2 - Self.crumbFont.descender)
+        let baseline = floor(
+            (height - Self.crumbFont.ascender + Self.crumbFont.descender) / 2 - Self.crumbFont.descender)
         func place(_ view: NSView, x: CGFloat, width: CGFloat) {
             let size = view.fittingSize
-            view.frame = NSRect(x: x, y: baseline + view.firstBaselineOffsetFromTop - size.height, width: max(0, width), height: size.height)
+            view.frame = NSRect(
+                x: x, y: baseline + view.firstBaselineOffsetFromTop - size.height, width: max(0, width),
+                height: size.height)
         }
         var x = Self.leadingGap
         var separatorIndex = 0
@@ -475,7 +514,8 @@ final class CrumbButton: NSButton {
         isLink = link
         super.init(frame: .zero)
         isBordered = false
-        attributedTitle = NSAttributedString(string: title, attributes: [.font: BreadcrumbView.crumbFont, .foregroundColor: NSColor.secondaryLabelColor])
+        attributedTitle = NSAttributedString(
+            string: title, attributes: [.font: BreadcrumbView.crumbFont, .foregroundColor: NSColor.secondaryLabelColor])
         toolTip = title
         target = self
         action = #selector(activateCrumb)
@@ -489,7 +529,9 @@ final class CrumbButton: NSButton {
     @objc private func activateCrumb() { activate?() }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: BreadcrumbView.textWidth(attributedTitle.string, BreadcrumbView.crumbFont) + 2 * BreadcrumbView.padding, height: Self.height)
+        NSSize(
+            width: BreadcrumbView.textWidth(attributedTitle.string, BreadcrumbView.crumbFont) + 2
+                * BreadcrumbView.padding, height: Self.height)
     }
     override var fittingSize: NSSize { intrinsicContentSize }
     override var firstBaselineOffsetFromTop: CGFloat {
@@ -506,12 +548,15 @@ final class CrumbButton: NSButton {
         let style = NSMutableParagraphStyle()
         style.lineBreakMode = .byTruncatingTail
         let font = BreadcrumbView.crumbFont
-        let text = NSAttributedString(string: attributedTitle.string,
-                                      attributes: [.font: font, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: style])
+        let text = NSAttributedString(
+            string: attributedTitle.string,
+            attributes: [.font: font, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: style])
         let lineHeight = ceil(font.ascender - font.descender)
-        text.draw(with: NSRect(x: BreadcrumbView.padding, y: (bounds.height - lineHeight) / 2,
-                               width: max(0, bounds.width - 2 * BreadcrumbView.padding), height: lineHeight),
-                  options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        text.draw(
+            with: NSRect(
+                x: BreadcrumbView.padding, y: (bounds.height - lineHeight) / 2,
+                width: max(0, bounds.width - 2 * BreadcrumbView.padding), height: lineHeight),
+            options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
     }
     override var isFlipped: Bool { false }
     override var focusRingMaskBounds: NSRect { bounds }
@@ -523,7 +568,8 @@ final class CrumbButton: NSButton {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        let area = NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
         addTrackingArea(area)
         tracking = area
     }

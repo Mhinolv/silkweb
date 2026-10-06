@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class IdleStabilityTests: XCTestCase {
@@ -33,8 +34,9 @@ final class IdleStabilityTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let host = NSHostingView(rootView: DocumentDetail(workspace: workspace))
         host.sizingOptions = []
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
+            styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = host // never ordered on screen
         defer { window.contentView = nil }
         for mode in DocumentViewMode.allCases {
@@ -71,8 +73,9 @@ final class IdleStabilityTests: XCTestCase {
         workspace.search.text = "coffee"
         let host = NSHostingView(rootView: DocumentList(workspace: workspace))
         host.sizingOptions = []
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 700),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 700),
+            styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = host
         defer { window.contentView = nil }
         host.layoutSubtreeIfNeeded()
@@ -135,9 +138,11 @@ final class IdleStabilityTests: XCTestCase {
         scroll.tile()
         let editor = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
         editor.layoutEditor()
-        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 900, pixelsHigh: 500,
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let bitmap = try XCTUnwrap(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 900, pixelsHigh: 500,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
         let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
@@ -151,7 +156,8 @@ final class IdleStabilityTests: XCTestCase {
         XCTAssertEqual(before, after, "caret clearing erased placeholder pixels")
         editor.insertText("a", replacementRange: NSRange(location: 0, length: 0))
         XCTAssertEqual(editor.string, "a")
-        editor.setMarkedText("あ", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: 0, length: 1))
+        editor.setMarkedText(
+            "あ", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: 0, length: 1))
         XCTAssertFalse(editor.string.isEmpty)
         editor.unmarkText()
         editor.string = ""

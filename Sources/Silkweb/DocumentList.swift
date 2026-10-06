@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 struct DocumentList: View {
     @Bindable var workspace: LibraryWorkspace
@@ -12,18 +12,26 @@ struct DocumentList: View {
                 TagFilterBar(workspace: workspace)
                 if workspace.includesSubfolders {
                     HStack {
-                        Text("Including subfolders · \(CountPresentation.label(workspace.documents.count, unit: .document))")
+                        Text(
+                            "Including subfolders · \(CountPresentation.label(workspace.documents.count, unit: .document))"
+                        )
                         Spacer()
-                        Button("Show Only This Folder") { workspace.setIncludeSubfolders(false) }.buttonStyle(.borderless)
+                        Button("Show Only This Folder") { workspace.setIncludeSubfolders(false) }.buttonStyle(
+                            .borderless)
                     }
-                    .font(.caption).monospacedDigit().padding(.horizontal, Spacing.small).frame(height: 28).paneStrip(hairline: .bottom)
+                    .font(.caption).monospacedDigit().padding(.horizontal, Spacing.small).frame(height: 28).paneStrip(
+                        hairline: .bottom
+                    )
                     .accessibilityElement(children: .contain).accessibilityLabel("Including subfolders")
                 }
             } content: {
-                if workspace.snapshot?.folders.first(where: { $0.relativePath == workspace.session.selectedFolder })?.isUnreadable == true {
+                if workspace.snapshot?.folders.first(where: { $0.relativePath == workspace.session.selectedFolder })?
+                    .isUnreadable == true
+                {
                     ColumnEmptyState {
-                        ContentUnavailableView("Folder Unavailable", systemImage: "lock",
-                                           description: Text("You don't have permission to view this folder."))
+                        ContentUnavailableView(
+                            "Folder Unavailable", systemImage: "lock",
+                            description: Text("You don't have permission to view this folder."))
                     }
                 } else if workspace.documents.isEmpty && !workspace.effectiveTagFilters.isEmpty {
                     ColumnEmptyState {
@@ -32,15 +40,21 @@ struct DocumentList: View {
                         } description: {
                             Text("No documents in “\(workspace.folderName)” have all of these tags.")
                         } actions: {
-                            Button("Clear Filters") { workspace.tagFilters = []; workspace.session.selectedTagID = nil }
+                            Button("Clear Filters") {
+                                workspace.tagFilters = []; workspace.session.selectedTagID = nil
+                            }
                         }
                     }
                 } else if workspace.documents.isEmpty {
                     ColumnEmptyState {
                         ContentUnavailableView {
-                            Label(workspace.snapshot?.documents.isEmpty == true ? "No Documents Yet" : "No Documents", systemImage: "doc.text")
+                            Label(
+                                workspace.snapshot?.documents.isEmpty == true ? "No Documents Yet" : "No Documents",
+                                systemImage: "doc.text")
                         } description: {
-                            Text(workspace.snapshot?.documents.isEmpty == true ? "Create a document or folder to get started." : "This folder is empty.")
+                            Text(
+                                workspace.snapshot?.documents.isEmpty == true
+                                    ? "Create a document or folder to get started." : "This folder is empty.")
                         } actions: {
                             Button("New Document") { workspace.create(folder: false) }.disabled(!workspace.canMutate)
                             if workspace.snapshot?.documents.isEmpty == true {
@@ -49,14 +63,18 @@ struct DocumentList: View {
                         }
                     }
                 } else {
-                    DocumentTable(workspace: workspace, documents: workspace.documents,
-                                  dateReference: dateReference, makeDragProvider: makeDragProvider)
+                    DocumentTable(
+                        workspace: workspace, documents: workspace.documents,
+                        dateReference: dateReference, makeDragProvider: makeDragProvider)
                 }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in dateReference = Date() }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in dateReference = Date() }
-        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in dateReference = Date() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            dateReference = Date()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in dateReference = Date()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemClockDidChange)) { _ in dateReference = Date() }
     }
 }
@@ -83,7 +101,10 @@ struct DocumentRow: View {
     private var sortsByCreated: Bool { workspace.listPreference.key == .created }
     private var date: Date? { sortsByCreated ? document.created : document.modified }
     private var dateText: String? {
-        date.map { (sortsByCreated ? "Created " : "") + DocumentRowPresentation.dateLabel($0, now: dateReference, locale: locale) }
+        date.map {
+            (sortsByCreated ? "Created " : "")
+                + DocumentRowPresentation.dateLabel($0, now: dateReference, locale: locale)
+        }
     }
     private var excerpt: String { summary?.excerpt ?? "" }
     private var isEmpty: Bool { summary.map { $0.excerpt == "No additional text" } ?? false }
@@ -114,7 +135,9 @@ struct DocumentRow: View {
         .padding(.horizontal, Self.horizontalPadding)
         .padding(.vertical, 12)
         .contentShape([.interaction, .dragPreview], Rectangle())
-        .overlay(DocumentRowClickObserver(path: document.relativePath, workspace: workspace, pointerState: pointerState))
+        .overlay(
+            DocumentRowClickObserver(path: document.relativePath, workspace: workspace, pointerState: pointerState)
+        )
         .listRowInsets(EdgeInsets())
         .accessibilityElement(children: workspace.rename?.path == document.relativePath ? .contain : .ignore)
         .accessibilityLabel(title)
@@ -129,7 +152,9 @@ struct DocumentRow: View {
     var accessibilityValue: String {
         var parts: [String] = []
         if let date {
-            parts.append((sortsByCreated ? "created " : "modified ") + DocumentRowPresentation.dateLabel(date, now: dateReference, locale: locale))
+            parts.append(
+                (sortsByCreated ? "created " : "modified ")
+                    + DocumentRowPresentation.dateLabel(date, now: dateReference, locale: locale))
         }
         if let location { parts.append("in " + location) }
         var value = parts.joined(separator: ", ")
@@ -155,38 +180,53 @@ struct DocumentDetail: View {
             MediaMigrationBanner(workspace: workspace)
             UnreadableRecoveryBanner(workspace: workspace)
             if workspace.snapshot?.isReadOnly == true {
-                Label("This library is read-only. Documents can be viewed, but changes can’t be saved.", systemImage: "lock")
-                    .font(.callout).frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-                    .padding(.horizontal, 12).paneStrip(hairline: .bottom)
+                Label(
+                    "This library is read-only. Documents can be viewed, but changes can’t be saved.",
+                    systemImage: "lock"
+                )
+                .font(.callout).frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                .padding(.horizontal, 12).paneStrip(hairline: .bottom)
             }
             EditorBanner(session: workspace.editor, workspace: workspace)
             AssetErrorBanner(session: workspace.editor)
             if workspace.editor.url != nil {
                 DocumentPanes(workspace: workspace)
                 if let progress = workspace.editor.assetProgress {
-                    HStack { Text(progress); Spacer() }
-                        .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12)
-                        .frame(height: 24).paneStrip(hairline: .top)
+                    HStack {
+                        Text(progress); Spacer()
+                    }
+                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12)
+                    .frame(height: 24).paneStrip(hairline: .top)
                 }
                 if workspace.preview.showsStatusBar {
-                    DocumentStatusBar(session: workspace.editor, readOnlyLibrary: workspace.snapshot?.isReadOnly == true, workspace: workspace)
+                    DocumentStatusBar(
+                        session: workspace.editor, readOnlyLibrary: workspace.snapshot?.isReadOnly == true,
+                        workspace: workspace)
                 }
             } else if workspace.session.selectedDocuments.count > 1 {
-                ContentUnavailableView("\(workspace.session.selectedDocuments.count) Documents Selected", systemImage: "doc.on.doc")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ContentUnavailableView(
+                    "\(workspace.session.selectedDocuments.count) Documents Selected", systemImage: "doc.on.doc"
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ContentUnavailableView("No Document Selected", systemImage: "doc.text", description: Text("Select a document in the list."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ContentUnavailableView(
+                    "No Document Selected", systemImage: "doc.text", description: Text("Select a document in the list.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.silkwebPaneBackground.ignoresSafeArea())
-        .inspector(isPresented: Binding(get: { workspace.preview.showsOutline }, set: { workspace.preview.showsOutline = $0 })) {
+        .inspector(
+            isPresented: Binding(get: { workspace.preview.showsOutline }, set: { workspace.preview.showsOutline = $0 })
+        ) {
             InspectorView(workspace: workspace).inspectorColumnWidth(min: 200, ideal: 240, max: 320)
         }
         .onChange(of: workspace.editor.text, initial: true) { render() }
         .onChange(of: workspace.editor.url) { render() }
-        .onGeometryChange(for: Bool.self) { $0.size.width < 600 } action: { narrow in
+        .onGeometryChange(for: Bool.self) {
+            $0.size.width < 600
+        } action: { narrow in
             isNarrow = narrow
             if narrow, workspace.preview.mode == .split { workspace.preview.showsOutline = false }
         }
@@ -228,8 +268,9 @@ struct DocumentStatusBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            DocumentStatusCounts(statistics: session.statistics,
-                                 showsSelection: workspace?.preview.mode != .preview)
+            DocumentStatusCounts(
+                statistics: session.statistics,
+                showsSelection: workspace?.preview.mode != .preview)
             Spacer(minLength: 8)
             Group {
                 if let workspace {
@@ -253,8 +294,9 @@ struct DocumentStatusBar: View {
         // Saved ⇄ Edited follows typing; announce only failures and their recovery.
         .onChange(of: label) { old, new in
             guard new == .notSaved || old == .notSaved else { return }
-            NSAccessibility.post(element: NSApplication.shared, notification: .announcementRequested,
-                                 userInfo: [.announcement: new.rawValue, .priority: NSAccessibilityPriorityLevel.low.rawValue])
+            NSAccessibility.post(
+                element: NSApplication.shared, notification: .announcementRequested,
+                userInfo: [.announcement: new.rawValue, .priority: NSAccessibilityPriorityLevel.low.rawValue])
         }
     }
 }
@@ -270,7 +312,10 @@ struct DocumentStatusCounts: View {
         let document = statistics.document
         let selection = showsSelection ? statistics.selection : nil
         let full = document.map { DocumentStatisticsPresentation.label(document: $0, selection: selection) } ?? ""
-        let words = document.map { DocumentStatisticsPresentation.label(document: $0, selection: selection, includesCharacters: false) } ?? ""
+        let words =
+            document.map {
+                DocumentStatisticsPresentation.label(document: $0, selection: selection, includesCharacters: false)
+            } ?? ""
         ViewThatFits(in: .horizontal) {
             Text(full).fixedSize()
             Text(words).fixedSize()
@@ -281,7 +326,9 @@ struct DocumentStatusCounts: View {
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isStaticText)
         .accessibilityLabel("Document statistics")
-        .accessibilityValue(document.map { DocumentStatisticsPresentation.accessibilityValue(document: $0, selection: selection) } ?? "")
+        .accessibilityValue(
+            document.map { DocumentStatisticsPresentation.accessibilityValue(document: $0, selection: selection) } ?? ""
+        )
         .accessibilityIdentifier("statusCounts")
     }
 }

@@ -1,6 +1,7 @@
 import AppKit
-import XCTest
 import SilkwebCore
+import XCTest
+
 @testable import Silkweb
 
 final class DocumentPaneTransitionTests: XCTestCase {
@@ -27,8 +28,9 @@ final class DocumentPaneTransitionTests: XCTestCase {
         let documentID = try XCTUnwrap(workspace.activeTabID)
         workspace.preview.mode = .editor
         let controller = DocumentPanesController(workspace: workspace)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
-                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentViewController = controller
         defer { window.contentViewController = nil; window.close() }
@@ -48,7 +50,8 @@ final class DocumentPaneTransitionTests: XCTestCase {
             let views = items.map { $0.viewController.view }
             let visible = views.map { !$0.isHiddenOrHasHiddenAncestor && $0.frame.width > 0 }
             let placeholder = editor.string.isEmpty && editor.placeholderEnabled
-            let log = "\(mode) \(phase): collapsed=\(items.map(\.isCollapsed)), visible=\(visible), frames=\(views.map(\.frame)), placeholder=\(placeholder)"
+            let log =
+                "\(mode) \(phase): collapsed=\(items.map(\.isCollapsed)), visible=\(visible), frames=\(views.map(\.frame)), placeholder=\(placeholder)"
             frames.append(log)
             let expected = [mode != .preview, mode != .editor]
             XCTAssertEqual(items.map { !$0.isCollapsed }, expected, log)
@@ -64,8 +67,10 @@ final class DocumentPaneTransitionTests: XCTestCase {
             XCTAssertTrue(editor.undoManager === undo, log)
         }
         // Include both reported transitions into Editor, then every mode pair.
-        let modes: [DocumentViewMode] = [.preview, .editor, .split, .preview, .editor, .split, .editor,
-                                         .preview, .split, .preview]
+        let modes: [DocumentViewMode] = [
+            .preview, .editor, .split, .preview, .editor, .split, .editor,
+            .preview, .split, .preview,
+        ]
         for width: CGFloat in [1, 420, 600, 1000, 4096] {
             window.setContentSize(NSSize(width: width, height: 700))
             controller.view.layoutSubtreeIfNeeded()

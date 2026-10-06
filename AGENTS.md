@@ -25,6 +25,11 @@ Do **not** open or read the product owner's personal MWeb library/notes content 
 ## Build & Test
 - Build (also bundles `build/Silkweb.app`): `./scripts/build.sh`
 - Unit tests: `./scripts/build.sh test`
+- Toolchain: pinned in `.toolchain-versions` (Xcode 26.2 / 17C52, Swift 6.2.3, swift-format 6.2.3); `./scripts/check_toolchain.sh`
+  verifies it and CI selects the same Xcode via `DEVELOPER_DIR`. Bump all versions together in one PR, then re-run the formatter.
+- Format: `./scripts/format.sh` (formats `Sources/` and `Tests/` in place with the root `.swift-format`) and
+  `./scripts/format.sh --check` (strict lint, exits 1 on violations; the same check CI runs). Run the check before
+  handing off any Swift change and report it in "How it was tested".
 - Offscreen UI PNGs: `./scripts/snapshot.sh <out-dir> [scenario ...]` (all scenarios by default).
   This runs an XCTest host with activation prohibited and windows never ordered on screen; it does
   not launch Silkweb. Captures are 1400×900 points at the host's backing scale, in light and dark.
@@ -110,9 +115,12 @@ Rules:
   the `PR template` check fails otherwise. Use `Refs #n` instead of `Closes #n` while the owner still has to check it.
 - Merge requires: `qa-pass`, green CI, a passing template check, and (bugs) the regression test proven to fail on
   the pre-fix code. Closing keywords don't fire on `team/roadmap`, so the Orchestrator closes issues explicitly.
+- `CI / build-and-test` runs build + format lint only. `./scripts/build.sh test` is still mandatory locally (Engineer,
+  QA, Orchestrator post-merge).
 - `CI / build-and-test` runs only when a PR is opened ready or leaves draft, on the `run-ci` label, or via
   `workflow_dispatch` — never on draft pushes, later pushes, or branch pushes — and only if the PR touches `Sources/`,
-  `Tests/`, `Package.*`, `scripts/` or `ci.yml` (doc-only PRs have no CI check and count as passing). To re-run:
+  `Tests/`, `Package.*`, `scripts/`, `.swift-format` or `ci.yml` (doc-only PRs have no CI check and count as
+  passing). To re-run:
   `gh pr edit <n> --remove-label run-ci; gh pr edit <n> --add-label run-ci`. Other label events and draft events show a
   skipped `ci-skipped` check; ignore it, and judge CI only by the latest `build-and-test` check.
 - The Engineer does not close issues or merge. QA does not modify source. Only the Orchestrator merges and closes.

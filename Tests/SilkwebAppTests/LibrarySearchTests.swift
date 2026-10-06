@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class LibrarySearchTests: XCTestCase {
@@ -9,9 +10,12 @@ final class LibrarySearchTests: XCTestCase {
     func testScopesTitleOnlyOpeningRecentsAndSaveRefresh() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Writing/Drafts"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Writing/Drafts"), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        for (path, text) in [("Writing/Café.md", "body needle"), ("Writing/Drafts/Plan.md", "other needle"), ("Else.md", "needle")] {
+        for (path, text) in [
+            ("Writing/Café.md", "body needle"), ("Writing/Drafts/Plan.md", "other needle"), ("Else.md", "needle"),
+        ] {
             try text.write(to: root.appendingPathComponent(path), atomically: true, encoding: .utf8)
         }
         let snapshot = try await LibraryScanner.scan(root: root)
@@ -26,7 +30,10 @@ final class LibrarySearchTests: XCTestCase {
         workspace.search.folderScope = snapshot.folders.first { $0.relativePath == "Writing" }?.id
         await workspace.search.query(quick: false)
         XCTAssertEqual(workspace.search.results.count, 2)
-        XCTAssertTrue(workspace.search.results.contains { $0.folderPathComponents == ["Writing", "Drafts"] && $0.snippet.contains("needle") })
+        XCTAssertTrue(
+            workspace.search.results.contains {
+                $0.folderPathComponents == ["Writing", "Drafts"] && $0.snippet.contains("needle")
+            })
         workspace.search.quickText = "needle"
         await workspace.search.query(quick: true)
         XCTAssertTrue(workspace.search.quickResults.isEmpty)
@@ -37,14 +44,17 @@ final class LibrarySearchTests: XCTestCase {
         let previousFind = pasteboard.string(forType: .string)
         let probe = UUID().uuidString
         pasteboard.clearContents()
-        let pasteboardAvailable = pasteboard.setString(probe, forType: .string) && pasteboard.string(forType: .string) == probe
+        let pasteboardAvailable =
+            pasteboard.setString(probe, forType: .string) && pasteboard.string(forType: .string) == probe
         defer {
             pasteboard.clearContents()
             if let previousFind { pasteboard.setString(previousFind, forType: .string) }
         }
         let editorHost = NSHostingView(rootView: TabEditorContent(workspace: workspace))
         editorHost.sizingOptions = []
-        let editorWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 560), styleMask: [.titled], backing: .buffered, defer: false)
+        let editorWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 560), styleMask: [.titled], backing: .buffered,
+            defer: false)
         editorWindow.contentView = editorHost
         defer { editorWindow.contentView = nil }
         editorHost.layoutSubtreeIfNeeded()
@@ -54,7 +64,9 @@ final class LibrarySearchTests: XCTestCase {
         if pasteboardAvailable {
             XCTAssertEqual(pasteboard.string(forType: .string), "needle")
         } else {
-            print("Find-pasteboard assertion unavailable: independent write/read probe failed in this sandbox; selected editor match was verified.")
+            print(
+                "Find-pasteboard assertion unavailable: independent write/read probe failed in this sandbox; selected editor match was verified."
+            )
         }
         XCTAssertEqual(workspace.session.selectedFolder, "Writing")
         XCTAssertEqual(workspace.session.selectedDocuments, ["Writing/Café.md"])
@@ -86,7 +98,8 @@ final class LibrarySearchTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         for number in 0..<100 {
-            try "body needle".write(to: root.appendingPathComponent("Plan \(number).md"), atomically: true, encoding: .utf8)
+            try "body needle".write(
+                to: root.appendingPathComponent("Plan \(number).md"), atomically: true, encoding: .utf8)
         }
         let workspace = LibraryWorkspace()
         workspace.root = root
@@ -95,7 +108,9 @@ final class LibrarySearchTests: XCTestCase {
         await workspace.search.waitForIndex()
         let host = NSHostingView(rootView: DocumentList(workspace: workspace))
         host.sizingOptions = []
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 560), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 560), styleMask: [.titled], backing: .buffered,
+            defer: false)
         window.contentView = host
         defer { window.contentView = nil }
         func nativeTable(in view: NSView) -> DocumentTableView? {

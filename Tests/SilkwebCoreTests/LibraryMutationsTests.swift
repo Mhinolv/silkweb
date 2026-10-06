@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class LibraryMutationsTests: XCTestCase {
@@ -19,7 +20,9 @@ final class LibraryMutationsTests: XCTestCase {
         try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
     }
 
-    private func rejects(_ expected: LibraryMutationError? = nil, _ operation: () async throws -> LibraryChangeSet) async {
+    private func rejects(_ expected: LibraryMutationError? = nil, _ operation: () async throws -> LibraryChangeSet)
+        async
+    {
         do {
             _ = try await operation()
             XCTFail("Expected rejection")
@@ -42,7 +45,7 @@ final class LibraryMutationsTests: XCTestCase {
             (" ", .empty, "A name can’t be empty."),
             (".a/b", .separator, "Names can’t contain “/” or “:”."),
             (".silkweb-assets", .leadingPeriod, "Names can’t begin with a period."),
-            (String(repeating: "é", count: 128), .tooLong, "That name is too long.")
+            (String(repeating: "é", count: 128), .tooLong, "That name is too long."),
         ]
         for (name, reason, message) in failures {
             XCTAssertThrowsError(try LibraryMutations.validateName(name)) { error in
@@ -61,13 +64,16 @@ final class LibraryMutationsTests: XCTestCase {
             _ = try await engine.createDocument(named: " Plan.md ")
             XCTFail("Expected collision")
         } catch let error as LibraryMutationError {
-            XCTAssertEqual(error.errorDescription, "A document named “Plan” already exists in “\(root.lastPathComponent)”.")
+            XCTAssertEqual(
+                error.errorDescription, "A document named “Plan” already exists in “\(root.lastPathComponent)”.")
         }
         await rejects(.libraryRoot) { try await self.engine.rename("", to: "Renamed") }
         await rejects(.outsideRoot) { try await self.engine.move("Plan.md", toFolder: "../escape") }
         await rejects(.sourceVanished("Missing")) { try await self.engine.rename("Missing.md", to: "New.md") }
         XCTAssertEqual(LibraryMutationError.libraryRoot.recoverySuggestion, "Use Finder to rename the library folder.")
-        XCTAssertEqual(LibraryMutationError.sourceVanished("Missing").recoverySuggestion, "It may have been moved or deleted in Finder.")
+        XCTAssertEqual(
+            LibraryMutationError.sourceVanished("Missing").recoverySuggestion,
+            "It may have been moved or deleted in Finder.")
     }
 
     func testUniqueNamesUseSpaceNumberAndKeepExtensions() async throws {
@@ -83,7 +89,9 @@ final class LibraryMutationsTests: XCTestCase {
         XCTAssertEqual(document, "Untitled 3.md")
         let available = try await engine.uniqueName(base: "Free.markdown", in: "Untitled")
         XCTAssertEqual(available, "Free.markdown")
-        try FileManager.default.createSymbolicLink(atPath: root.appendingPathComponent("Dangling").path, withDestinationPath: root.appendingPathComponent("missing").path)
+        try FileManager.default.createSymbolicLink(
+            atPath: root.appendingPathComponent("Dangling").path,
+            withDestinationPath: root.appendingPathComponent("missing").path)
         let dangling = try await engine.uniqueName(base: "Dangling")
         XCTAssertEqual(dangling, "Dangling 2")
         if FileManager.default.fileExists(atPath: root.appendingPathComponent("UNTITLED.md").path) {
@@ -102,11 +110,17 @@ final class LibraryMutationsTests: XCTestCase {
         XCTAssertNil(created.changes.first?.oldPath)
         let before = try await LibraryScanner.scan(root: root)
         let renamed = try await engine.rename("Parent", to: "Renamed")
-        XCTAssertEqual(renamed.changes, [LibraryPathChange(id: before.metadata.IDsByPath["Parent"]!, oldPath: "Parent", newPath: "Renamed", isFolder: true)])
+        XCTAssertEqual(
+            renamed.changes,
+            [
+                LibraryPathChange(
+                    id: before.metadata.IDsByPath["Parent"]!, oldPath: "Parent", newPath: "Renamed", isFolder: true)
+            ])
         _ = try await engine.move("Renamed/Child", toFolder: "")
         let after = try await LibraryScanner.scan(root: root)
         for suffix in ["", "/Empty", "/Note.markdown"] {
-            XCTAssertEqual(before.metadata.IDsByPath["Parent/Child" + suffix], after.metadata.IDsByPath["Child" + suffix])
+            XCTAssertEqual(
+                before.metadata.IDsByPath["Parent/Child" + suffix], after.metadata.IDsByPath["Child" + suffix])
         }
         XCTAssertEqual(try contents("Child/Note.markdown"), "# 日本語 Café\n")
         let unchanged = try await engine.rename("Child/Note.markdown", to: "Note.markdown")
@@ -165,7 +179,8 @@ final class LibraryMutationsTests: XCTestCase {
     func testSymlinksIncludingDanglingDestinationsAreRejectedWithoutTraversal() async throws {
         _ = try await engine.createDocument(named: "Note.md", text: "safe")
         for (name, target) in [("Alias", root.path), ("Dangling.md", root.appendingPathComponent("Missing").path)] {
-            try FileManager.default.createSymbolicLink(atPath: root.appendingPathComponent(name).path, withDestinationPath: target)
+            try FileManager.default.createSymbolicLink(
+                atPath: root.appendingPathComponent(name).path, withDestinationPath: target)
         }
         await rejects { try await self.engine.move("Note.md", toFolder: "Alias") }
         await rejects { try await self.engine.rename("Alias", to: "Changed") }
@@ -202,7 +217,8 @@ final class LibraryMutationsTests: XCTestCase {
 
     func testHardLinkCollisionIsNotMistakenForCaseAlias() async throws {
         _ = try await engine.createDocument(named: "Source.md", text: "original")
-        try FileManager.default.linkItem(at: root.appendingPathComponent("Source.md"), to: root.appendingPathComponent("Target.md"))
+        try FileManager.default.linkItem(
+            at: root.appendingPathComponent("Source.md"), to: root.appendingPathComponent("Target.md"))
         await rejectsCollision("Target.md") { try await self.engine.rename("Source.md", to: "Target.md") }
         XCTAssertEqual(try contents("Source.md"), "original")
         XCTAssertEqual(try contents("Target.md"), "original")
@@ -233,7 +249,8 @@ final class LibraryMutationsTests: XCTestCase {
         XCTAssertTrue(try contents("Contended.md").hasPrefix("writer-"))
         let snapshot = try await LibraryScanner.scan(root: root)
         XCTAssertEqual(snapshot.documents.count, 1)
-        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path).sorted(), [".silkweb", "Contended.md"])
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: root.path).sorted(), [".silkweb", "Contended.md"])
     }
 
     func testMetadataFailureRollsBackCreateAndMove() async throws {

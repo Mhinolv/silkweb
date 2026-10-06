@@ -3,7 +3,11 @@ import Foundation
 public enum DocumentSortKey: String, Codable, CaseIterable, Sendable {
     case name, modified, created
     public var title: String {
-        switch self { case .name: return "Name"; case .modified: return "Date Modified"; case .created: return "Date Created" }
+        switch self {
+        case .name: return "Name";
+        case .modified: return "Date Modified";
+        case .created: return "Date Created"
+        }
     }
 }
 
@@ -36,8 +40,12 @@ public struct FolderDocumentCount: Equatable, Sendable {
     /// Shared visible suffix for sidebar folder rows and future tag rows, including zero.
     public var inlineSuffix: String { " (\(direct.formatted()))" }
     public var badge: String { direct == 0 ? "" : direct.formatted() }
-    public var accessibilityValue: String { "\(CountPresentation.label(direct, unit: .document)), \(recursive.formatted()) including subfolders" }
-    public var tooltip: String { "\(CountPresentation.label(direct, unit: .document)) · \(recursive.formatted()) including subfolders" }
+    public var accessibilityValue: String {
+        "\(CountPresentation.label(direct, unit: .document)), \(recursive.formatted()) including subfolders"
+    }
+    public var tooltip: String {
+        "\(CountPresentation.label(direct, unit: .document)) · \(recursive.formatted()) including subfolders"
+    }
 }
 
 /// Built once on the scan worker. Views never sort or read file attributes.
@@ -65,7 +73,9 @@ public struct LibraryPresentation: Sendable {
         }
         self.counts = counts
         children = Dictionary(grouping: folders.filter { $0.parentID != nil }, by: { $0.parentID! })
-            .mapValues { $0.sorted { Self.naturalOrder($0.name, $1.name, pathA: $0.relativePath, pathB: $1.relativePath) } }
+            .mapValues {
+                $0.sorted { Self.naturalOrder($0.name, $1.name, pathA: $0.relativePath, pathB: $1.relativePath) }
+            }
         var ordered: [DocumentSortKey: [[LibraryDocument]]] = [:]
         var direct: [DocumentSortKey: [[UUID: [LibraryDocument]]]] = [:]
         for key in DocumentSortKey.allCases {
@@ -77,7 +87,9 @@ public struct LibraryPresentation: Sendable {
                     case .modified: result = Self.compare(a.modified, b.modified)
                     case .created: result = Self.compare(a.created, b.created)
                     }
-                    if result != .orderedSame { return descending ? result == .orderedDescending : result == .orderedAscending }
+                    if result != .orderedSame {
+                        return descending ? result == .orderedDescending : result == .orderedAscending
+                    }
                     return Self.naturalOrder(a.name, b.name, pathA: a.relativePath, pathB: b.relativePath)
                 }
             }

@@ -1,6 +1,7 @@
 import AppKit
-import XCTest
 import SilkwebCore
+import XCTest
+
 @testable import Silkweb
 
 /// Tests must leave no preference files or runner-domain split keys behind (#67).
@@ -46,8 +47,10 @@ final class PreferencesLeakTests: XCTestCase {
             workspace.canSaveWindowSession = false
             workspace.root = root
             workspace.install(try await LibraryScanner.scan(root: root))
-            for controller in [LibrarySplitViewController(workspace: workspace),
-                               LibrarySplitViewController(workspace: workspace, autosaveName: workspace.columnAutosaveName)] {
+            for controller in [
+                LibrarySplitViewController(workspace: workspace),
+                LibrarySplitViewController(workspace: workspace, autosaveName: workspace.columnAutosaveName),
+            ] {
                 let container = NSView(frame: NSRect(x: 0, y: 0, width: 1200, height: height))
                 container.addSubview(controller.view)
                 controller.view.setFrameSize(container.frame.size)
@@ -65,7 +68,8 @@ final class PreferencesLeakTests: XCTestCase {
         for key in leaked { UserDefaults.standard.removeObject(forKey: key) }
         preferences.remove()
         XCTAssertEqual(leaked, [], "Test-built columns autosaved into \(TestPreferences.runnerDomain)")
-        XCTAssertEqual(Self.preferenceFiles(containing: preferences.name), [], "Test suite written to ~/Library/Preferences")
+        XCTAssertEqual(
+            Self.preferenceFiles(containing: preferences.name), [], "Test suite written to ~/Library/Preferences")
         XCTAssertFalse(FileManager.default.fileExists(atPath: preferences.plist.path))
     }
 
@@ -73,7 +77,9 @@ final class PreferencesLeakTests: XCTestCase {
         let preferences = TestPreferences("Helper")
         preferences.defaults.set(true, forKey: "Probe")
         preferences.defaults.synchronize()
-        XCTAssertTrue(FileManager.default.fileExists(atPath: preferences.plist.path), "The suite was never written, so this test proves nothing")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: preferences.plist.path),
+            "The suite was never written, so this test proves nothing")
         try await exerciseNamedColumns(preferences)
         XCTAssertFalse(Self.runnerKeys(containing: preferences.name).isEmpty, "Autosave name was not exercised")
         preferences.remove()
@@ -94,7 +100,8 @@ final class PreferencesLeakTests: XCTestCase {
     @MainActor
     private func exerciseNamedColumns(_ preferences: TestPreferences) async throws {
         _ = NSApplication.shared
-        let controller = LibrarySplitViewController(workspace: LibraryWorkspace(defaults: preferences.defaults), autosaveName: preferences.name)
+        let controller = LibrarySplitViewController(
+            workspace: LibraryWorkspace(defaults: preferences.defaults), autosaveName: preferences.name)
         controller.view.setFrameSize(NSSize(width: 1200, height: 760))
         controller.view.layoutSubtreeIfNeeded()
         controller.splitView.setPosition(700, ofDividerAt: 0)
@@ -108,12 +115,17 @@ final class PreferencesLeakTests: XCTestCase {
     func testAppDefaultsSuiteIsDeletedWhenTheRunnerExits() throws {
         let bundle = Bundle(for: Self.self).bundleURL
         let runner = URL(fileURLWithPath: ProcessInfo.processInfo.arguments[0])
-        guard runner.lastPathComponent == "xctest" else { throw XCTSkip("Not running under the xctest runner: \(runner.path)") }
-        let report = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebPreferencesChild-\(UUID().uuidString).txt")
+        guard runner.lastPathComponent == "xctest" else {
+            throw XCTSkip("Not running under the xctest runner: \(runner.path)")
+        }
+        let report = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SilkwebPreferencesChild-\(UUID().uuidString).txt")
         defer { try? FileManager.default.removeItem(at: report) }
         let process = Process()
         process.executableURL = runner
-        process.arguments = ["-XCTest", "SilkwebAppTests.PreferencesLeakTests/testChildRunnerWritesAppDefaults", bundle.path]
+        process.arguments = [
+            "-XCTest", "SilkwebAppTests.PreferencesLeakTests/testChildRunnerWritesAppDefaults", bundle.path,
+        ]
         process.environment = ProcessInfo.processInfo.environment.merging([Self.childReportKey: report.path]) { $1 }
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
@@ -129,8 +141,12 @@ final class PreferencesLeakTests: XCTestCase {
         XCTAssertEqual(lines.last, "true", "The child never wrote its suite to disk, so this test proves nothing")
         // cfprefsd rewrites an emptied domain a moment later; give that write the chance to appear.
         Thread.sleep(forTimeInterval: 3)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: Self.storeFile(suite).path), "\(suite).plist survived the runner's exit")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: Self.storeFile(suite).deletingLastPathComponent().path), "The suite's directory survived")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: Self.storeFile(suite).path),
+            "\(suite).plist survived the runner's exit")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: Self.storeFile(suite).deletingLastPathComponent().path),
+            "The suite's directory survived")
     }
 
     /// The child half of the exit test; skipped in a normal run.
@@ -141,6 +157,7 @@ final class PreferencesLeakTests: XCTestCase {
         AppDefaults.store.set(true, forKey: "PreferencesLeakProbe")
         AppDefaults.store.synchronize()
         let written = FileManager.default.fileExists(atPath: Self.storeFile(AppDefaults.testSuiteName).path)
-        try "\(AppDefaults.testSuiteName)\n\(written)".write(to: URL(fileURLWithPath: report), atomically: true, encoding: .utf8)
+        try "\(AppDefaults.testSuiteName)\n\(written)".write(
+            to: URL(fileURLWithPath: report), atomically: true, encoding: .utf8)
     }
 }

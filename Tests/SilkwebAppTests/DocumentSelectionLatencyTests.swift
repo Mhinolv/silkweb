@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 import XCTest
-@testable import SilkwebCore
+
 @testable import Silkweb
+@testable import SilkwebCore
 
 /// #70: clicking through the library list must move the capsule at once, with the editor following when its
 /// buffer loads. The real library window (sidebar, list, compact toolbar with the breadcrumb, editor), opened
@@ -33,7 +34,9 @@ final class DocumentSelectionLatencyTests: XCTestCase {
             self.window = window; self.workspace = workspace; self.root = root; self.cleanUp = cleanUp
         }
         var content: NSView { window.contentView! }
-        var table: DocumentTableView? { DocumentSelectionLatencyTests.descendants(content).compactMap { $0 as? DocumentTableView }.first }
+        var table: DocumentTableView? {
+            DocumentSelectionLatencyTests.descendants(content).compactMap { $0 as? DocumentTableView }.first
+        }
         var paths: [String] { workspace.documents.map(\.relativePath) }
         func url(_ row: Int) -> URL { root.appendingPathComponent(paths[row]).standardizedFileURL }
         var editorURL: URL? { workspace.editor.url?.standardizedFileURL }
@@ -55,19 +58,24 @@ final class DocumentSelectionLatencyTests: XCTestCase {
 
         /// Press and release events at the row's centre, with the row view the press lands on, hit-tested like a
         /// real click (hidden windows don't dispatch events).
-        func click(_ row: Int, modifiers: NSEvent.ModifierFlags = []) throws -> (source: DocumentRowClickView, down: NSEvent, up: NSEvent) {
+        func click(_ row: Int, modifiers: NSEvent.ModifierFlags = []) throws -> (
+            source: DocumentRowClickView, down: NSEvent, up: NSEvent
+        ) {
             let table = try XCTUnwrap(self.table)
             let rect = table.rect(ofRow: row)
             let point = table.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
             let now = ProcessInfo.processInfo.systemUptime
             func event(_ type: NSEvent.EventType, _ timestamp: TimeInterval) throws -> NSEvent {
                 eventNumber += 1
-                return try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: modifiers, timestamp: timestamp,
-                    windowNumber: window.windowNumber, context: nil, eventNumber: eventNumber, clickCount: 1,
-                    pressure: type == .leftMouseUp ? 0 : 1))
+                return try XCTUnwrap(
+                    NSEvent.mouseEvent(
+                        with: type, location: point, modifierFlags: modifiers, timestamp: timestamp,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: eventNumber, clickCount: 1,
+                        pressure: type == .leftMouseUp ? 0 : 1))
             }
             let frame = try XCTUnwrap(content.superview)
-            let source = try XCTUnwrap(frame.hitTest(frame.convert(point, from: nil)) as? DocumentRowClickView, "row source at \(point)")
+            let source = try XCTUnwrap(
+                frame.hitTest(frame.convert(point, from: nil)) as? DocumentRowClickView, "row source at \(point)")
             XCTAssertEqual(source.path, paths[row])
             return (source, try event(.leftMouseDown, now), try event(.leftMouseUp, now + 0.01))
         }
@@ -75,7 +83,8 @@ final class DocumentSelectionLatencyTests: XCTestCase {
 
     @MainActor private func makeHarness() async throws -> Harness {
         _ = NSApplication.shared
-        let container = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebSelection-" + UUID().uuidString)
+        let container = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SilkwebSelection-" + UUID().uuidString)
         let root = container.appendingPathComponent("Library")
         let folder = root.appendingPathComponent(Self.folder)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -84,8 +93,12 @@ final class DocumentSelectionLatencyTests: XCTestCase {
             var text = "# Day \(index + 1) on the Road\n\n"
             for section in 0..<6 {
                 text += "## Stop \(section + 1)\n\n"
-                text += String(repeating: "We pulled in after a long drive and set up camp before the light went. ", count: 8) + "\n\n"
-                text += "- Water at the trailhead\n- Firewood from the ranger station\n- [Map](https://example.com/\(index)/\(section))\n\n"
+                text +=
+                    String(
+                        repeating: "We pulled in after a long drive and set up camp before the light went. ", count: 8)
+                    + "\n\n"
+                text +=
+                    "- Water at the trailhead\n- Firewood from the ranger station\n- [Map](https://example.com/\(index)/\(section))\n\n"
             }
             try Data(text.utf8).write(to: folder.appendingPathComponent(String(format: "Note %02d.md", index + 1)))
         }
@@ -95,9 +108,10 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         workspace.recoveryDirectory = container.appendingPathComponent("Recovery")
         let oldAppearance = NSApp.appearance
         NSApp.appearance = NSAppearance(named: .aqua)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-                              backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.toolbarStyle = .unifiedCompact
         let controller = NSHostingController(rootView: LibraryWorkspaceView(workspace: workspace))
@@ -116,12 +130,16 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         }
         // The app's own open path: scan, session, search index and the Finder watcher.
         workspace.open(root)
-        try await waitUntil("the library opens", timeout: .seconds(10)) { workspace.snapshot != nil && !workspace.loading }
+        try await waitUntil("the library opens", timeout: .seconds(10)) {
+            workspace.snapshot != nil && !workspace.loading
+        }
         workspace.selectFolder(Self.folder)
         await workspace.waitForNavigation()
         try await waitUntil("the list realizes its rows", timeout: .seconds(10)) {
             harness.content.superview?.layoutSubtreeIfNeeded()
-            return harness.table.map { $0.numberOfRows == Self.documentCount && $0.rows(in: $0.visibleRect).length >= 8 } == true
+            return harness.table.map {
+                $0.numberOfRows == Self.documentCount && $0.rows(in: $0.visibleRect).length >= 8
+            } == true
         }
         XCTAssertNotNil(window.toolbar, "the compact toolbar with the breadcrumb is part of the measured window")
         return harness
@@ -136,9 +154,10 @@ final class DocumentSelectionLatencyTests: XCTestCase {
             return sorted.isEmpty ? 0 : sorted[Int((Double(sorted.count - 1) * p).rounded())]
         }
         func summary(_ name: String) -> String {
-            String(format: "%@: list p50 %.2f ms p95 %.2f ms; editor p50 %.2f ms p95 %.2f ms; selected on press %d/%d",
-                   name, Self.percentile(list, 0.5), Self.percentile(list, 0.95),
-                   Self.percentile(editor, 0.5), Self.percentile(editor, 0.95), selectedOnPress, list.count)
+            String(
+                format: "%@: list p50 %.2f ms p95 %.2f ms; editor p50 %.2f ms p95 %.2f ms; selected on press %d/%d",
+                name, Self.percentile(list, 0.5), Self.percentile(list, 0.95),
+                Self.percentile(editor, 0.5), Self.percentile(editor, 0.95), selectedOnPress, list.count)
         }
     }
 
@@ -177,9 +196,12 @@ final class DocumentSelectionLatencyTests: XCTestCase {
             run.editor.append(Self.milliseconds(editorDone))
             if h.workspace.focusMode {
                 // The new document's text view is dimmed from the moment it exists.
-                func textView() -> PlainMarkdownTextView? { h.workspace.tabs.first { $0.id == h.workspace.activeTabID }?.textView }
+                func textView() -> PlainMarkdownTextView? {
+                    h.workspace.tabs.first { $0.id == h.workspace.activeTabID }?.textView
+                }
                 try await waitUntil("click \(index): the swapped-in text view") { textView() != nil }
-                XCTAssertEqual(textView()?.writingModes.focus, true, "click \(index): Focus Mode on the swapped-in editor")
+                XCTAssertEqual(
+                    textView()?.writingModes.focus, true, "click \(index): Focus Mode on the swapped-in editor")
             }
             // Let this document's debounced styling, sizing and autosave land before the next click.
             try await Task.sleep(for: .milliseconds(20))
@@ -208,13 +230,17 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         for (focus, run) in runs {
             let mode = focus ? "Focus on" : "Focus off"
             // Finder's rule: the press itself selects the row, before any run-loop turn.
-            XCTAssertEqual(run.selectedOnPress, run.list.count, "\(mode) — rows selected by the press: \(run.summary(mode))")
-            XCTAssertLessThanOrEqual(Run.percentile(run.list, 0.95), Self.listBudget, "\(mode) — list p95 over one frame: \(run.summary(mode))")
+            XCTAssertEqual(
+                run.selectedOnPress, run.list.count, "\(mode) — rows selected by the press: \(run.summary(mode))")
+            XCTAssertLessThanOrEqual(
+                Run.percentile(run.list, 0.95), Self.listBudget,
+                "\(mode) — list p95 over one frame: \(run.summary(mode))")
         }
         if let off = runs[false], let on = runs[true] {
             let base = Run.percentile(off.editor, 0.95)
-            XCTAssertLessThanOrEqual(Run.percentile(on.editor, 0.95), max(base * Self.focusMargin, base + TestEnvironment.frameBudget(16)),
-                                     "Focus Mode must not slow the editor swap: \(on.summary("on")) vs \(off.summary("off"))")
+            XCTAssertLessThanOrEqual(
+                Run.percentile(on.editor, 0.95), max(base * Self.focusMargin, base + TestEnvironment.frameBudget(16)),
+                "Focus Mode must not slow the editor swap: \(on.summary("on")) vs \(off.summary("off"))")
         }
     }
 
@@ -242,11 +268,15 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         await h.workspace.waitForNavigation()
         let drained = Self.milliseconds(ContinuousClock.now - clicked)
         let open = Run.percentile(single.editor, 0.95)
-        print(String(format: "DocumentSelectionLatency rapid: %d clicks in %.1f ms, list behind on %d, editor settled %.1f ms after the last click (single open p95 %.1f ms)",
-                     rows.count, Self.milliseconds(clicked - start), behind, drained, open))
+        print(
+            String(
+                format:
+                    "DocumentSelectionLatency rapid: %d clicks in %.1f ms, list behind on %d, editor settled %.1f ms after the last click (single open p95 %.1f ms)",
+                rows.count, Self.milliseconds(clicked - start), behind, drained, open))
         XCTAssertEqual(behind, 0, "the capsule must track every click")
         // A coalesced queue finishes the open in flight and then the latest target: two opens, not one per click.
-        XCTAssertLessThanOrEqual(drained, 2 * open + TestEnvironment.frameBudget(16), "the editor must coalesce to the latest click")
+        XCTAssertLessThanOrEqual(
+            drained, 2 * open + TestEnvironment.frameBudget(16), "the editor must coalesce to the latest click")
         XCTAssertTrue(h.shows(last))
         XCTAssertEqual(h.editorURL, h.url(last))
     }
@@ -263,7 +293,9 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         let table = try XCTUnwrap(h.table)
         table.startDraggingSession = { items, _, _ in
             let type = NSPasteboard.PasteboardType(UTType.silkwebMove.identifier)
-            guard let data = (items.first?.item as? NSPasteboardItem)?.data(forType: type) else { return XCTFail("Missing move payload") }
+            guard let data = (items.first?.item as? NSPasteboardItem)?.data(forType: type) else {
+                return XCTFail("Missing move payload")
+            }
             dragged.append(h.workspace.pathsForDrag(data) ?? [])
         }
         // The first press opens the editor; the second swaps it. Either way the pressed row survives the swap, so a
@@ -276,9 +308,14 @@ final class DocumentSelectionLatencyTests: XCTestCase {
             for _ in 0..<5 { try await h.pump() }
             XCTAssertEqual(h.editorURL, h.url(row))
             let point = NSPoint(x: plain.down.locationInWindow.x - 12, y: plain.down.locationInWindow.y)
-            plain.source.mouseDragged(with: try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDragged, location: point, modifierFlags: [],
-                timestamp: plain.up.timestamp, windowNumber: h.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
-            XCTAssertEqual(dragged.last, [paths[row]], "row \(row): the drag after the editor swap carries the pressed row")
+            plain.source.mouseDragged(
+                with: try XCTUnwrap(
+                    NSEvent.mouseEvent(
+                        with: .leftMouseDragged, location: point, modifierFlags: [],
+                        timestamp: plain.up.timestamp, windowNumber: h.window.windowNumber, context: nil,
+                        eventNumber: 0, clickCount: 1, pressure: 1)))
+            XCTAssertEqual(
+                dragged.last, [paths[row]], "row \(row): the drag after the editor swap carries the pressed row")
             plain.source.mouseUp(with: plain.up)
             XCTAssertTrue(h.shows(row))
         }

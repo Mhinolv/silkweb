@@ -2,10 +2,15 @@ import Foundation
 
 /// Static list-row text. Calendar days, rather than elapsed hours, determine recency.
 public enum DocumentRowPresentation {
-    public static func dateLabel(_ date: Date, now: Date = Date(),
-                                 calendar: Calendar = .current, locale: Locale = .current) -> String {
-        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date),
-                                           to: calendar.startOfDay(for: now)).day ?? 0
+    public static func dateLabel(
+        _ date: Date, now: Date = Date(),
+        calendar: Calendar = .current, locale: Locale = .current
+    ) -> String {
+        let days =
+            calendar.dateComponents(
+                [.day], from: calendar.startOfDay(for: date),
+                to: calendar.startOfDay(for: now)
+            ).day ?? 0
         let style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
         switch days {
         case 0:
@@ -95,9 +100,13 @@ public enum DocumentRowPresentation {
         let base = scope ?? ""
         let parent = (relativePath as NSString).deletingLastPathComponent
         let relative: String
-        if parent == base { relative = "" }
-        else if !base.isEmpty, parent.hasPrefix(base + "/") { relative = String(parent.dropFirst(base.count + 1)) }
-        else { relative = parent }
+        if parent == base {
+            relative = ""
+        } else if !base.isEmpty, parent.hasPrefix(base + "/") {
+            relative = String(parent.dropFirst(base.count + 1))
+        } else {
+            relative = parent
+        }
         return relative.isEmpty ? scopeName : relative.split(separator: "/").joined(separator: " › ")
     }
 

@@ -9,13 +9,20 @@ public enum MarkdownDestinations {
         public let unsupported: [String]
     }
 
-    private static let pattern = #"!?\[(?:\\.|[^\]\\\n])*\]\((<[^>\n]*>|[^\s()]+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\)|^ {0,3}\[(?!\^)[^\]\n]+\]:\s*(<[^>\n]*>|[^\s()]+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*$"#
+    private static let pattern =
+        #"!?\[(?:\\.|[^\]\\\n])*\]\((<[^>\n]*>|[^\s()]+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\)|^ {0,3}\[(?!\^)[^\]\n]+\]:\s*(<[^>\n]*>|[^\s()]+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*$"#
     private static let regex = try! NSRegularExpression(pattern: pattern)
-    private static let candidates = try! NSRegularExpression(pattern: #"!?\[(?:\\.|[^\]\\\n])*\]\([^\n]*?(?:\)|$)|^ {0,3}\[(?!\^)[^\]\n]+\]:[^\n]*|!?\[\[[^\]\n]+\]\]|<[^>\n]+(?:href|src)\s*=[^>\n]*>"#, options: .caseInsensitive)
+    private static let candidates = try! NSRegularExpression(
+        pattern:
+            #"!?\[(?:\\.|[^\]\\\n])*\]\([^\n]*?(?:\)|$)|^ {0,3}\[(?!\^)[^\]\n]+\]:[^\n]*|!?\[\[[^\]\n]+\]\]|<[^>\n]+(?:href|src)\s*=[^>\n]*>"#,
+        options: .caseInsensitive)
     private static let delimiters = try! NSRegularExpression(pattern: #"\]\("#)
     private static let code = try! NSRegularExpression(pattern: #"(`+).*?\1"#)
 
-    public static func rewrite(_ text: String, source: String, changes: LibraryChangeSet, canonicalPaths: [String: String] = [:], visit: ((String) -> Void)? = nil) -> Result {
+    public static func rewrite(
+        _ text: String, source: String, changes: LibraryChangeSet, canonicalPaths: [String: String] = [:],
+        visit: ((String) -> Void)? = nil
+    ) -> Result {
         let newSource = changes.remapping(source)
         var output = ""
         var unsupported: [String] = []
@@ -29,11 +36,17 @@ public enum MarkdownDestinations {
             offset = NSMaxRange(lineRange)
             var contentsEnd = 0
             body.getLineStart(nil, end: nil, contentsEnd: &contentsEnd, for: lineRange)
-            let line = body.substring(with: NSRange(location: lineRange.location, length: contentsEnd - lineRange.location))
-            let terminator = body.substring(with: NSRange(location: contentsEnd, length: NSMaxRange(lineRange) - contentsEnd))
+            let line = body.substring(
+                with: NSRange(location: lineRange.location, length: contentsEnd - lineRange.location))
+            let terminator = body.substring(
+                with: NSRange(location: contentsEnd, length: NSMaxRange(lineRange) - contentsEnd))
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if let marker = fence {
-                if trimmed.hasPrefix(marker), trimmed.drop(while: { $0 == marker.first! }).trimmingCharacters(in: .whitespaces).isEmpty { fence = nil }
+                if trimmed.hasPrefix(marker),
+                    trimmed.drop(while: { $0 == marker.first! }).trimmingCharacters(in: .whitespaces).isEmpty
+                {
+                    fence = nil
+                }
                 output += line + terminator
                 continue
             }
@@ -60,9 +73,11 @@ public enum MarkdownDestinations {
                 let destination = angled ? String(original.dropFirst().dropLast()) : original
                 visit?(destination)
                 guard !destination.hasPrefix("#"), !destination.hasPrefix("/"),
-                      !destination.contains(":") else { continue }
+                    !destination.contains(":")
+                else { continue }
                 guard !destination.contains("\\"), !destination.contains("("), !destination.contains(")"),
-                      destination.removingPercentEncoding != nil else {
+                    destination.removingPercentEncoding != nil
+                else {
                     unsupported.append(ns.substring(with: match.range)); continue
                 }
                 let suffixStart = destination.firstIndex(where: { $0 == "#" || $0 == "?" }) ?? destination.endIndex
@@ -75,7 +90,9 @@ public enum MarkdownDestinations {
                     unsupported.append(ns.substring(with: match.range)); continue
                 }
                 let relativeTarget = String(target.dropFirst("/silkweb-root/".count))
-                let actualTarget = canonicalPaths[relativeTarget] ?? canonicalPaths[relativeTarget.precomposedStringWithCanonicalMapping.lowercased()] ?? relativeTarget
+                let actualTarget =
+                    canonicalPaths[relativeTarget] ?? canonicalPaths[
+                        relativeTarget.precomposedStringWithCanonicalMapping.lowercased()] ?? relativeTarget
                 let mappedTarget = changes.remapping(actualTarget)
                 let newTarget = mappedTarget == actualTarget ? relativeTarget : mappedTarget
                 guard newSource != source || newTarget != relativeTarget else { continue }
@@ -83,12 +100,15 @@ public enum MarkdownDestinations {
                 let components = newTarget.split(separator: "/").map(String.init)
                 var common = 0
                 while common < min(parent.count, components.count), parent[common] == components[common] { common += 1 }
-                let relative = (Array(repeating: "..", count: parent.count - common) + components.dropFirst(common)).joined(separator: "/")
+                let relative = (Array(repeating: "..", count: parent.count - common) + components.dropFirst(common))
+                    .joined(separator: "/")
                 var allowed = CharacterSet.urlPathAllowed
                 allowed.remove(charactersIn: "?#%()<>\\")
                 let normalized = relative.isEmpty ? "." : relative
                 let trailingSlash = path.hasSuffix("/") ? "/" : ""
-                let replacement = (normalized.addingPercentEncoding(withAllowedCharacters: allowed) ?? normalized) + trailingSlash + suffix
+                let replacement =
+                    (normalized.addingPercentEncoding(withAllowedCharacters: allowed) ?? normalized) + trailingSlash
+                    + suffix
                 mutable.replaceCharacters(in: range, with: angled ? "<" + replacement + ">" : replacement)
             }
             let candidateMatches = candidates.matches(in: line, range: full)
@@ -99,7 +119,8 @@ public enum MarkdownDestinations {
             }
             for delimiter in delimiters.matches(in: line, range: full) where !inCode(delimiter.range) {
                 if !matches.contains(where: { NSLocationInRange(delimiter.range.location, $0.range) })
-                    && !candidateMatches.contains(where: { NSLocationInRange(delimiter.range.location, $0.range) }) {
+                    && !candidateMatches.contains(where: { NSLocationInRange(delimiter.range.location, $0.range) })
+                {
                     unsupported.append(line)
                 }
             }

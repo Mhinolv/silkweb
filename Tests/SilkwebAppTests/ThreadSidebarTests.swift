@@ -2,8 +2,9 @@ import AppKit
 import QuartzCore
 import UniformTypeIdentifiers
 import XCTest
-@testable import SilkwebCore
+
 @testable import Silkweb
+@testable import SilkwebCore
 
 /// silkweb-1.63 (Redesign R2): thread guides in the real sidebar. The coral “you are here” node was removed in 1.65
 /// (owner decision): the selection capsule marks the scope, and the row's AX value still says “current folder”.
@@ -32,11 +33,15 @@ final class ThreadSidebarTests: XCTestCase {
     @MainActor private func makeFixture() async throws -> Fixture {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebThread-" + UUID().uuidString)
-        for path in ["Coffee/Brewing Guides", "Travel/Japan", "Vanlife", "Deep/A/B/C", Self.longName, Self.privateName] {
-            try FileManager.default.createDirectory(at: root.appendingPathComponent(path), withIntermediateDirectories: true)
+        for path in ["Coffee/Brewing Guides", "Travel/Japan", "Vanlife", "Deep/A/B/C", Self.longName, Self.privateName]
+        {
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent(path), withIntermediateDirectories: true)
         }
-        for path in ["Root.md", "Vanlife/Settling In.md", "Coffee/Brewing Guides/Pour-Over.md", "Travel/Japan/Kyoto.md",
-                     "Deep/A/B/C/Leaf.md", Self.longName + "/Note.md"] {
+        for path in [
+            "Root.md", "Vanlife/Settling In.md", "Coffee/Brewing Guides/Pour-Over.md", "Travel/Japan/Kyoto.md",
+            "Deep/A/B/C/Leaf.md", Self.longName + "/Note.md",
+        ] {
             try Data("# Fixture\n".utf8).write(to: root.appendingPathComponent(path))
         }
         let initial = try await LibraryScanner.scan(root: root)
@@ -46,8 +51,10 @@ final class ThreadSidebarTests: XCTestCase {
         let scanned = try await LibraryScanner.scan(root: root)
         var folders = scanned.folders
         folders[try XCTUnwrap(folders.firstIndex { $0.relativePath == Self.privateName })].isUnreadable = true
-        let snapshot = LibrarySnapshot(rootURL: root, folders: folders, documents: scanned.documents,
-            presentation: LibraryPresentation(folders: folders, documents: scanned.documents), metadata: scanned.metadata,
+        let snapshot = LibrarySnapshot(
+            rootURL: root, folders: folders, documents: scanned.documents,
+            presentation: LibraryPresentation(folders: folders, documents: scanned.documents),
+            metadata: scanned.metadata,
             recoveredMetadataURL: nil, isReadOnly: false)
         let workspace = LibraryWorkspace(defaults: disposableDefaults("Thread"))
         workspace.canSaveWindowSession = false
@@ -67,9 +74,12 @@ final class ThreadSidebarTests: XCTestCase {
     static let renderScale: CGFloat = 2
 
     @MainActor private func pixel(_ row: NSView, at point: NSPoint, scale: CGFloat = renderScale) throws -> Pixel {
-        let rep = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int((row.bounds.width * scale).rounded(.up)),
-            pixelsHigh: Int((row.bounds.height * scale).rounded(.up)), bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
-            isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let rep = try XCTUnwrap(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: Int((row.bounds.width * scale).rounded(.up)),
+                pixelsHigh: Int((row.bounds.height * scale).rounded(.up)), bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
         rep.size = row.bounds.size
         row.cacheDisplay(in: row.bounds, to: rep)
         let top = row.isFlipped ? point.y : row.bounds.height - point.y
@@ -93,13 +103,16 @@ final class ThreadSidebarTests: XCTestCase {
         NSGraphicsContext.restoreGraphicsState()
         let actual = try XCTUnwrap(pixel.color.usingColorSpace(.sRGB))
         let resolved = try XCTUnwrap(swatch.colorAt(x: 1, y: swatch.pixelsHigh - 2)?.usingColorSpace(.sRGB))
-        let distance = max(abs(actual.redComponent - resolved.redComponent), abs(actual.greenComponent - resolved.greenComponent),
-                           abs(actual.blueComponent - resolved.blueComponent))
+        let distance = max(
+            abs(actual.redComponent - resolved.redComponent), abs(actual.greenComponent - resolved.greenComponent),
+            abs(actual.blueComponent - resolved.blueComponent))
         return (distance, "\(actual) vs \(resolved)")
     }
 
-    @MainActor private func assertColor(_ pixel: Pixel, _ expected: NSColor, in view: NSView, _ message: String,
-                                        file: StaticString = #filePath, line: UInt = #line) throws {
+    @MainActor private func assertColor(
+        _ pixel: Pixel, _ expected: NSColor, in view: NSView, _ message: String,
+        file: StaticString = #filePath, line: UInt = #line
+    ) throws {
         let (distance, colors) = try distance(pixel, expected, in: view)
         XCTAssertLessThan(distance, 0.03, "\(message): \(colors)", file: file, line: line)
     }
@@ -113,36 +126,44 @@ final class ThreadSidebarTests: XCTestCase {
 
     /// Checks every row against AppKit's own tree and frames; returns the number of rows marked as the scope.
     @MainActor @discardableResult
-    private func verifyRows(_ outline: NSOutlineView, _ coordinator: FolderSidebar.Coordinator, _ context: String) throws -> Int {
+    private func verifyRows(_ outline: NSOutlineView, _ coordinator: FolderSidebar.Coordinator, _ context: String)
+        throws -> Int
+    {
         var scopes = 0
         for row in 0..<outline.numberOfRows {
             let item = try XCTUnwrap(outline.item(atRow: row) as? FolderSidebar.Item)
             let where_ = "\(item.title) \(context)"
             let rowView = try XCTUnwrap(outline.rowView(atRow: row, makeIfNecessary: true) as? ThreadRowView, where_)
-            let cell = try XCTUnwrap(outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? SidebarFolderCell, where_)
+            let cell = try XCTUnwrap(
+                outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? SidebarFolderCell, where_)
             cell.layoutSubtreeIfNeeded()
             let thread = try XCTUnwrap(rowView.thread, where_)
             let level = outline.level(forRow: row)
             XCTAssertEqual(thread.level, level, where_)
             let parent = outline.parent(forItem: item)
-            XCTAssertEqual(thread.isLastChild, outline.childIndex(forItem: item) == outline.numberOfChildren(ofItem: parent) - 1, where_)
+            XCTAssertEqual(
+                thread.isLastChild, outline.childIndex(forItem: item) == outline.numberOfChildren(ofItem: parent) - 1,
+                where_)
             XCTAssertEqual(thread.hasChildren, outline.isExpandable(item), where_)
             XCTAssertEqual(thread.ancestorContinues.count, max(0, level - 1), where_)
             let metrics = try XCTUnwrap(rowView.metrics, where_)
             XCTAssertEqual(metrics.indentation, 16)
-            let segments = ThreadGuides.segments(level: level, isLastChild: thread.isLastChild, ancestorContinues: thread.ancestorContinues,
-                                                 hasChildren: thread.hasChildren, metrics: metrics)
+            let segments = ThreadGuides.segments(
+                level: level, isLastChild: thread.isLastChild, ancestorContinues: thread.ancestorContinues,
+                hasChildren: thread.hasChildren, metrics: metrics)
             XCTAssertEqual(segments.isEmpty, level == 0, where_)
             if let parent, case let .elbow(guide, _, _, end)? = segments.last {
                 let x = CGFloat(guide), endX = CGFloat(end)
                 // The guide is the centre of the parent's real disclosure button.
                 let parentRow = outline.row(forItem: parent)
                 let parentView = try XCTUnwrap(outline.rowView(atRow: parentRow, makeIfNecessary: true))
-                let chevron = try XCTUnwrap(parentView.subviews.first { $0.identifier == NSOutlineView.disclosureButtonIdentifier }, where_)
+                let chevron = try XCTUnwrap(
+                    parentView.subviews.first { $0.identifier == NSOutlineView.disclosureButtonIdentifier }, where_)
                 XCTAssertEqual(parentView.convert(chevron.frame, to: outline).midX, x, accuracy: 0.5, where_)
                 // The horizontal stops before this row's chevron glyph or icon.
                 if thread.hasChildren {
-                    let own = try XCTUnwrap(rowView.subviews.first { $0.identifier == NSOutlineView.disclosureButtonIdentifier }, where_)
+                    let own = try XCTUnwrap(
+                        rowView.subviews.first { $0.identifier == NSOutlineView.disclosureButtonIdentifier }, where_)
                     XCTAssertLessThan(endX, rowView.convert(own.frame, to: outline).midX - 3, where_)
                 } else {
                     let icon = try XCTUnwrap(cell.imageView)
@@ -150,7 +171,9 @@ final class ThreadSidebarTests: XCTestCase {
                 }
                 XCTAssertGreaterThan(endX, x, where_)
             }
-            XCTAssertNil(rowView.layer?.sublayers?.first { !($0.delegate is NSView) }, "threads draw in draw(_:), no extra layers")
+            XCTAssertNil(
+                rowView.layer?.sublayers?.first { !($0.delegate is NSView) },
+                "threads draw in draw(_:), no extra layers")
             // 1.49 suffix glued to the title; lock rows unchanged.
             let text = try XCTUnwrap(cell.textField)
             let titleRect = text.alignmentRect(forFrame: text.frame)
@@ -183,29 +206,37 @@ final class ThreadSidebarTests: XCTestCase {
     }
 
     @MainActor private func row(_ outline: NSOutlineView, _ item: FolderSidebar.Item) throws -> ThreadRowView {
-        try XCTUnwrap(outline.rowView(atRow: outline.row(forItem: item), makeIfNecessary: true) as? ThreadRowView, item.title)
+        try XCTUnwrap(
+            outline.rowView(atRow: outline.row(forItem: item), makeIfNecessary: true) as? ThreadRowView, item.title)
     }
 
     /// Threads draw over the capsule, and a plain row shows its elbow.
-    @MainActor private func verifyPixels(_ outline: NSOutlineView, _ coordinator: FolderSidebar.Coordinator, current: FolderSidebar.Item,
-                                         plain: FolderSidebar.Item, _ context: String) throws {
+    @MainActor private func verifyPixels(
+        _ outline: NSOutlineView, _ coordinator: FolderSidebar.Coordinator, current: FolderSidebar.Item,
+        plain: FolderSidebar.Item, _ context: String
+    ) throws {
         let scope = try row(outline, current)
         if let metrics = scope.metrics, scope.thread?.level ?? 0 > 0 {
             let x = ThreadGuides.guideX(level: scope.thread!.level - 1, metrics: metrics) - scope.frame.minX
             if scope.isSelected {
-                try assertColor(try pixel(scope, at: point(scope, x: x, below: 3)), .silkwebThread, in: scope, "thread over capsule \(context)")
+                try assertColor(
+                    try pixel(scope, at: point(scope, x: x, below: 3)), .silkwebThread, in: scope,
+                    "thread over capsule \(context)")
             }
         }
         let other = try row(outline, plain)
         let metrics = try XCTUnwrap(other.metrics)
         let x = ThreadGuides.guideX(level: other.thread!.level - 1, metrics: metrics) - other.frame.minX
-        try assertColor(try pixel(other, at: point(other, x: x, below: 3)), .silkwebThread, in: other, "elbow \(context)")
+        try assertColor(
+            try pixel(other, at: point(other, x: x, below: 3)), .silkwebThread, in: other, "elbow \(context)")
         // The elbow's horizontal, past the arc.
-        try assertColor(try pixel(other, at: point(other, x: x + metrics.radius + 1, below: metrics.rowHeight / 2)), .silkwebThread,
-                        in: other, "horizontal \(context)")
+        try assertColor(
+            try pixel(other, at: point(other, x: x + metrics.radius + 1, below: metrics.rowHeight / 2)), .silkwebThread,
+            in: other, "horizontal \(context)")
         // Nothing drawn in the empty space right of the guide above the corner.
-        try assertColor(try pixel(other, at: point(other, x: x + metrics.radius + 1, below: 3)), .silkwebPaneBackground,
-                        in: other, "background \(context)")
+        try assertColor(
+            try pixel(other, at: point(other, x: x + metrics.radius + 1, below: 3)), .silkwebPaneBackground,
+            in: other, "background \(context)")
     }
 
     @MainActor
@@ -214,8 +245,9 @@ final class ThreadSidebarTests: XCTestCase {
         defer { fixture.cleanUp() }
         let workspace = fixture.workspace
         let controller = LibrarySplitViewController(workspace: workspace)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
-                              styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+            styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: .aqua)
         window.contentViewController = controller // Never ordered on screen.
@@ -241,12 +273,15 @@ final class ThreadSidebarTests: XCTestCase {
         for width: CGFloat in [180, 220, 260, 320, 180] {
             navigation.setPosition(width, ofDividerAt: 0)
             try await settle(controller)
-            XCTAssertEqual(navigation.arrangedSubviews[0].frame.width, width, accuracy: 1, "navigation \(navigation.bounds.width)")
+            XCTAssertEqual(
+                navigation.arrangedSubviews[0].frame.width, width, accuracy: 1, "navigation \(navigation.bounds.width)")
             try verifyRows(outline, coordinator, "at \(width)")
             try verifyPixels(outline, coordinator, current: vanlife, plain: japan, "at \(width)")
             // Tag rows hang from the Tags chevron with the same rules.
             let tag = try row(outline, group.children[0])
-            XCTAssertEqual(tag.thread, ThreadRowView.Thread(level: 1, isLastChild: false, ancestorContinues: [], hasChildren: false))
+            XCTAssertEqual(
+                tag.thread,
+                ThreadRowView.Thread(level: 1, isLastChild: false, ancestorContinues: [], hasChildren: false))
             XCTAssertEqual(try row(outline, group.children[1]).thread?.isLastChild, true)
             try verifyPixels(outline, coordinator, current: vanlife, plain: group.children[1], "tag at \(width)")
         }
@@ -272,7 +307,8 @@ final class ThreadSidebarTests: XCTestCase {
         workspace.rename = LibraryRename(path: "Vanlife", isFolder: true)
         FolderSidebar.update(scroll, coordinator: coordinator, snapshot: fixture.snapshot)
         try await settle(controller)
-        let editing = try XCTUnwrap(outline.view(atColumn: 0, row: outline.row(forItem: vanlife), makeIfNecessary: true) as? SidebarFolderCell)
+        let editing = try XCTUnwrap(
+            outline.view(atColumn: 0, row: outline.row(forItem: vanlife), makeIfNecessary: true) as? SidebarFolderCell)
         XCTAssertNotNil(editing.renameField)
         XCTAssertTrue(editing.countBadge.isHidden)
         try verifyRows(outline, coordinator, "renaming")
@@ -288,11 +324,17 @@ final class ThreadSidebarTests: XCTestCase {
         let target = try row(outline, japan)
         target.isTargetForDropOperation = true
         let capsule = target.capsuleRect
-        try assertColor(try pixel(target, at: NSPoint(x: capsule.maxX - 0.75, y: capsule.midY)), .silkwebAccent, in: target, "drop outline")
-        try assertColor(try pixel(target, at: NSPoint(x: capsule.maxX - 12, y: capsule.midY)), .silkwebSelection, in: target, "drop fill")
+        try assertColor(
+            try pixel(target, at: NSPoint(x: capsule.maxX - 0.75, y: capsule.midY)), .silkwebAccent, in: target,
+            "drop outline")
+        try assertColor(
+            try pixel(target, at: NSPoint(x: capsule.maxX - 12, y: capsule.midY)), .silkwebSelection, in: target,
+            "drop fill")
         let targetMetrics = try XCTUnwrap(target.metrics)
         let guide = ThreadGuides.guideX(level: 1, metrics: targetMetrics) - target.frame.minX
-        try assertColor(try pixel(target, at: point(target, x: guide, below: 3)), .silkwebThread, in: target, "thread over drop capsule")
+        try assertColor(
+            try pixel(target, at: point(target, x: guide, below: 3)), .silkwebThread, in: target,
+            "thread over drop capsule")
         target.isTargetForDropOperation = false
 
         // Tag A → tag B moves the scope directly, never via All Documents (1.21 guard).
@@ -334,8 +376,9 @@ final class ThreadSidebarTests: XCTestCase {
             XCTAssertGreaterThan(navigation.arrangedSubviews[0].frame.width, 0)
             XCTAssertGreaterThan(navigation.arrangedSubviews[1].frame.width, 0)
             try verifyRows(shown, shownCoordinator, "after show")
-            try verifyPixels(shown, shownCoordinator, current: try XCTUnwrap(shownCoordinator.currentItem),
-                             plain: try XCTUnwrap(shownCoordinator.itemsByPath["Travel/Japan"]), "after show")
+            try verifyPixels(
+                shown, shownCoordinator, current: try XCTUnwrap(shownCoordinator.currentItem),
+                plain: try XCTUnwrap(shownCoordinator.itemsByPath["Travel/Japan"]), "after show")
         }
         XCTAssertFalse(window.isVisible)
     }
@@ -349,8 +392,9 @@ final class ThreadSidebarTests: XCTestCase {
         let workspace = fixture.workspace
         workspace.session.expandedFolders.insert("Deep/A/B")
         let controller = LibrarySplitViewController(workspace: workspace)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
-                              styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+            styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentViewController = controller // Never ordered on screen.
         defer { window.contentViewController = nil; window.close(); workspace.search.reset() }
@@ -360,7 +404,8 @@ final class ThreadSidebarTests: XCTestCase {
         let coordinator = try XCTUnwrap(outline.delegate as? FolderSidebar.Coordinator)
         let scroll = try XCTUnwrap(outline.enclosingScrollView)
         let group = try XCTUnwrap(coordinator.tagsGroup)
-        let items: [FolderSidebar.Item] = try ["", "Vanlife", "Travel/Japan", "Deep/A/B/C", Self.longName]
+        let items: [FolderSidebar.Item] =
+            try ["", "Vanlife", "Travel/Japan", "Deep/A/B/C", Self.longName]
             .map { try XCTUnwrap(coordinator.itemsByPath[$0], $0) } + group.children + [group]
         for appearance in [NSAppearance.Name.aqua, .darkAqua] {
             window.appearance = NSAppearance(named: appearance)
@@ -388,13 +433,18 @@ final class ThreadSidebarTests: XCTestCase {
                     for y in 0..<rep.pixelsHigh {
                         for x in 0..<rep.pixelsWide {
                             guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
-                            let distance = max(abs(color.redComponent - coral.redComponent), abs(color.greenComponent - coral.greenComponent),
-                                               abs(color.blueComponent - coral.blueComponent))
+                            let distance = max(
+                                abs(color.redComponent - coral.redComponent),
+                                abs(color.greenComponent - coral.greenComponent),
+                                abs(color.blueComponent - coral.blueComponent))
                             if distance < 0.06 { hits.append("row \(row) (\(x), \(y))") }
                         }
                     }
                 }
-                XCTAssertTrue(hits.isEmpty, "\(hits.count) coral pixels in the sidebar with \(item.title) selected (\(appearance.rawValue)): \(hits.prefix(3))")
+                XCTAssertTrue(
+                    hits.isEmpty,
+                    "\(hits.count) coral pixels in the sidebar with \(item.title) selected (\(appearance.rawValue)): \(hits.prefix(3))"
+                )
             }
         }
         XCTAssertFalse(window.isVisible)
@@ -409,7 +459,9 @@ final class ThreadSidebarTests: XCTestCase {
         let coordinator = FolderSidebar.Coordinator(workspace: fixture.workspace, snapshot: fixture.snapshot)
         let scroll = FolderSidebar.makeScrollView(coordinator: coordinator)
         defer { FolderSidebar.dismantleNSView(scroll, coordinator: coordinator) }
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 260, height: 700), styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 260, height: 700), styleMask: [.borderless], backing: .buffered,
+            defer: false)
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: .aqua)
         window.contentView = scroll
@@ -431,9 +483,12 @@ final class ThreadSidebarTests: XCTestCase {
         try assertColor(try pixel(japan, at: horizontal), .silkwebThread, in: japan, "horizontal")
         try assertColor(try pixel(japan, at: background), .silkwebPaneBackground, in: japan, "background")
         for wrong: NSColor in [.silkwebAccent, .silkwebCoral, .labelColor, .silkwebPaneBackground] {
-            XCTAssertGreaterThanOrEqual(try distance(try pixel(japan, at: horizontal), wrong, in: japan).0, 0.03, "horizontal is not \(wrong)")
+            XCTAssertGreaterThanOrEqual(
+                try distance(try pixel(japan, at: horizontal), wrong, in: japan).0, 0.03, "horizontal is not \(wrong)")
         }
-        XCTAssertGreaterThanOrEqual(try distance(try pixel(japan, at: background), .silkwebThread, in: japan).0, 0.03, "no thread right of the guide")
+        XCTAssertGreaterThanOrEqual(
+            try distance(try pixel(japan, at: background), .silkwebThread, in: japan).0, 0.03,
+            "no thread right of the guide")
     }
 
     /// The drop path through the real delegate lands on a folder row and leaves its guides alone.
@@ -444,10 +499,13 @@ final class ThreadSidebarTests: XCTestCase {
         let workspace = fixture.workspace
         let id = try XCTUnwrap(fixture.snapshot.metadata.IDsByPath["Vanlife/Settling In.md"])
         let payload = try JSONEncoder().encode(InternalMove(library: workspace.dragIdentity, ids: [id]))
-        let coordinator = FolderSidebar.Coordinator(workspace: workspace, snapshot: fixture.snapshot, readDragData: { _ in payload })
+        let coordinator = FolderSidebar.Coordinator(
+            workspace: workspace, snapshot: fixture.snapshot, readDragData: { _ in payload })
         let scroll = FolderSidebar.makeScrollView(coordinator: coordinator)
         defer { FolderSidebar.dismantleNSView(scroll, coordinator: coordinator) }
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 260, height: 700), styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 260, height: 700), styleMask: [.borderless], backing: .buffered,
+            defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = scroll
         defer { window.contentView = nil; window.close() }
@@ -458,11 +516,15 @@ final class ThreadSidebarTests: XCTestCase {
         let board = NSPasteboard.withUniqueName()
         defer { board.releaseGlobally() }
         let info = ThreadDraggingInfo(pasteboard: board, window: window)
-        XCTAssertEqual(coordinator.outlineView(outline, validateDrop: info, proposedItem: japan,
-                                               proposedChildIndex: NSOutlineViewDropOnItemIndex), .move)
+        XCTAssertEqual(
+            coordinator.outlineView(
+                outline, validateDrop: info, proposedItem: japan,
+                proposedChildIndex: NSOutlineViewDropOnItemIndex), .move)
         XCTAssertTrue(coordinator.hovered === japan)
-        XCTAssertEqual(coordinator.outlineView(outline, validateDrop: info, proposedItem: coordinator.tagsGroup!.children[0],
-                                               proposedChildIndex: NSOutlineViewDropOnItemIndex), [])
+        XCTAssertEqual(
+            coordinator.outlineView(
+                outline, validateDrop: info, proposedItem: coordinator.tagsGroup!.children[0],
+                proposedChildIndex: NSOutlineViewDropOnItemIndex), [])
         coordinator.finishDrag(accepted: false)
         scroll.layoutSubtreeIfNeeded()
         XCTAssertEqual(try row(outline, japan).thread, before)
@@ -473,25 +535,32 @@ final class ThreadSidebarTests: XCTestCase {
     @MainActor
     func testThousandFolderScrollAndExpandStayPerRow() async throws {
         _ = NSApplication.shared
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebThreadPerf-" + UUID().uuidString)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SilkwebThreadPerf-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let scanned = try await LibraryScanner.scan(root: root)
         let rootFolder = try XCTUnwrap(scanned.folders.first)
         var folders = [rootFolder]
         for parent in 0..<40 {
-            let p = LibraryFolder(id: UUID(), parentID: rootFolder.id, relativePath: "P\(parent)", name: "Parent \(parent)")
+            let p = LibraryFolder(
+                id: UUID(), parentID: rootFolder.id, relativePath: "P\(parent)", name: "Parent \(parent)")
             folders.append(p)
             for child in 0..<4 {
-                let c = LibraryFolder(id: UUID(), parentID: p.id, relativePath: "P\(parent)/C\(child)", name: "Child \(child)")
+                let c = LibraryFolder(
+                    id: UUID(), parentID: p.id, relativePath: "P\(parent)/C\(child)", name: "Child \(child)")
                 folders.append(c)
                 for leaf in 0..<5 {
-                    folders.append(LibraryFolder(id: UUID(), parentID: c.id, relativePath: "P\(parent)/C\(child)/L\(leaf)", name: "Leaf \(leaf)"))
+                    folders.append(
+                        LibraryFolder(
+                            id: UUID(), parentID: c.id, relativePath: "P\(parent)/C\(child)/L\(leaf)",
+                            name: "Leaf \(leaf)"))
                 }
             }
         }
         XCTAssertGreaterThanOrEqual(folders.count, 1_000)
-        let snapshot = LibrarySnapshot(rootURL: root, folders: folders, documents: [],
+        let snapshot = LibrarySnapshot(
+            rootURL: root, folders: folders, documents: [],
             presentation: LibraryPresentation(folders: folders, documents: []), metadata: scanned.metadata,
             recoveredMetadataURL: nil, isReadOnly: false)
         let workspace = LibraryWorkspace()
@@ -502,7 +571,9 @@ final class ThreadSidebarTests: XCTestCase {
         let coordinator = FolderSidebar.Coordinator(workspace: workspace, snapshot: snapshot)
         let start = CACurrentMediaTime()
         let scroll = FolderSidebar.makeScrollView(coordinator: coordinator)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 260, height: 800), styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 260, height: 800), styleMask: [.borderless], backing: .buffered,
+            defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = scroll
         defer { window.contentView = nil; window.close() }
@@ -525,7 +596,9 @@ final class ThreadSidebarTests: XCTestCase {
             worst = max(worst, CACurrentMediaTime() - begin)
             let visible = outline.rows(in: scroll.contentView.bounds)
             for row in visible.location..<NSMaxRange(visible) {
-                guard let rowView = outline.rowView(atRow: row, makeIfNecessary: false) as? ThreadRowView else { continue }
+                guard let rowView = outline.rowView(atRow: row, makeIfNecessary: false) as? ThreadRowView else {
+                    continue
+                }
                 drawnRows += 1
                 XCTAssertEqual(rowView.thread?.level, outline.level(forRow: row))
                 XCTAssertNil(rowView.layer?.sublayers?.first { !($0.delegate is NSView) })
@@ -534,7 +607,8 @@ final class ThreadSidebarTests: XCTestCase {
                 }
             }
         }
-        print("R2 thread scroll benchmark: worst \(String(format: "%.2f", worst * 1000)) ms over \(drawnRows) row checks")
+        print(
+            "R2 thread scroll benchmark: worst \(String(format: "%.2f", worst * 1000)) ms over \(drawnRows) row checks")
         XCTAssertLessThan(worst, 2, "main-thread hang")
         XCTAssertGreaterThan(drawnRows, 0)
         // Expanding one parent keeps every visible row view and only adds the inserted rows.
@@ -548,7 +622,8 @@ final class ThreadSidebarTests: XCTestCase {
         scroll.layoutSubtreeIfNeeded()
         XCTAssertLessThan(CACurrentMediaTime() - begin, 2)
         XCTAssertTrue(outline.rowView(atRow: outline.row(forItem: parent), makeIfNecessary: false) === above)
-        let firstChild = try XCTUnwrap(outline.rowView(atRow: outline.row(forItem: parent) + 1, makeIfNecessary: true) as? ThreadRowView)
+        let firstChild = try XCTUnwrap(
+            outline.rowView(atRow: outline.row(forItem: parent) + 1, makeIfNecessary: true) as? ThreadRowView)
         XCTAssertEqual(firstChild.thread?.level, 2)
         XCTAssertEqual(firstChild.thread?.ancestorContinues, [true])
     }
@@ -576,7 +651,9 @@ private final class ThreadDraggingInfo: NSObject, NSDraggingInfo {
     func slideDraggedImage(to screenPoint: NSPoint) {}
     override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
     func resetSpringLoading() {}
-    func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions, for view: NSView?,
-                                classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any],
-                                using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
+    func enumerateDraggingItems(
+        options enumOpts: NSDraggingItemEnumerationOptions, for view: NSView?,
+        classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any],
+        using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
+    ) {}
 }

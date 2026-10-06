@@ -1,8 +1,9 @@
 import AppKit
 import SwiftUI
 import XCTest
-@testable import SilkwebCore
+
 @testable import Silkweb
+@testable import SilkwebCore
 
 /// silkweb-1.65 attempt 2: the compact bar in a real titled, resizable window shaped like the one SwiftUI's
 /// `Window` scene builds (full-size content, compact style before the toolbar exists), never ordered on screen.
@@ -11,10 +12,13 @@ import XCTest
 final class ToolbarRealWindowTests: XCTestCase {
     static let repository = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    static let deep = "Travel/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle"
+    static let deep =
+        "Travel/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle"
     static let document = deep + "/Settling In at Presque Isle State Park After a Long Week on the Road.md"
     /// Every control in the bar; none may overflow into the » menu at 900 pt or wider.
-    static let controls = ["Hide Sidebars", "New Document", "Sort By", "Filter by Tag", "View Mode", "Show Outline", "Show Document Info"]
+    static let controls = [
+        "Hide Sidebars", "New Document", "Sort By", "Filter by Tag", "View Mode", "Show Outline", "Show Document Info",
+    ]
     /// AppKit's own gap after the zoom button is 10 pt; items must start at least this far past it.
     static let buttonSpacing: CGFloat = 8
 
@@ -31,17 +35,29 @@ final class ToolbarRealWindowTests: XCTestCase {
         }
         var toolbar: NSToolbar { window.toolbar! }
         func frame(_ view: NSView) -> NSRect { view.convert(view.bounds, to: nil) }
-        var placed: [NSToolbarItem] { toolbar.items.filter { $0.view?.window === window && $0.view?.isHiddenOrHasHiddenAncestor == false } }
+        var placed: [NSToolbarItem] {
+            toolbar.items.filter { $0.view?.window === window && $0.view?.isHiddenOrHasHiddenAncestor == false }
+        }
         func view(_ label: String) -> NSView? {
             // The sidebar toggle reads Show Sidebars while they are hidden.
             let label = label == "Hide Sidebars" ? workspace.sidebarsTitle : label
             return toolbar.items.first { $0.label == label }?.view
         }
         var crumbItem: NSToolbarItem? {
-            toolbar.items.first { item in item.view.map { ToolbarRealWindowTests.descendants($0).contains { $0 is BreadcrumbView } } == true }
+            toolbar.items.first { item in
+                item.view.map { ToolbarRealWindowTests.descendants($0).contains { $0 is BreadcrumbView } } == true
+            }
         }
-        var breadcrumb: BreadcrumbView? { crumbItem?.view.flatMap { ToolbarRealWindowTests.descendants($0).compactMap { $0 as? BreadcrumbView }.first } }
-        var buttons: [NSButton] { [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { window.standardWindowButton($0) } }
+        var breadcrumb: BreadcrumbView? {
+            crumbItem?.view.flatMap {
+                ToolbarRealWindowTests.descendants($0).compactMap { $0 as? BreadcrumbView }.first
+            }
+        }
+        var buttons: [NSButton] {
+            [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap {
+                window.standardWindowButton($0)
+            }
+        }
         func settle() async throws {
             for _ in 0..<6 {
                 window.contentView?.superview?.layoutSubtreeIfNeeded()
@@ -56,21 +72,26 @@ final class ToolbarRealWindowTests: XCTestCase {
         var geometry: String {
             toolbar.items.map { item in
                 "\(item.label.isEmpty ? "breadcrumb" : item.label): placed=\(item.view?.window === window) frame=\(item.view.map(frame) ?? .zero)"
-            }.joined(separator: "; ") + "; breadcrumbWidth=\(workspace.toolbarMetrics.breadcrumbWidth) window=\(window.frame.width)"
+            }.joined(separator: "; ")
+                + "; breadcrumbWidth=\(workspace.toolbarMetrics.breadcrumbWidth) window=\(window.frame.width)"
         }
     }
 
     /// A temp copy of `Test_Library` plus a deep folder holding a document with a long title.
     @MainActor private func makeHarness(width: CGFloat, outline: Bool) async throws -> Harness {
         _ = NSApplication.shared
-        let container = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebRealWindow-" + UUID().uuidString)
+        let container = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SilkwebRealWindow-" + UUID().uuidString)
         let root = container.appendingPathComponent("Field Notes")
         try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: Self.repository.appendingPathComponent("Test_Library"), to: root)
         try? FileManager.default.removeItem(at: root.appendingPathComponent(".silkweb"))
-        try FileManager.default.createDirectory(at: root.appendingPathComponent(Self.deep), withIntermediateDirectories: true)
-        try Data("# Settling In\n\nThe first night by the lake.\n".utf8).write(to: root.appendingPathComponent(Self.document))
-        try FileManager.default.createDirectory(at: root.appendingPathComponent(Self.short), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(Self.deep), withIntermediateDirectories: true)
+        try Data("# Settling In\n\nThe first night by the lake.\n".utf8).write(
+            to: root.appendingPathComponent(Self.document))
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(Self.short), withIntermediateDirectories: true)
         try Data("# Notes\n".utf8).write(to: root.appendingPathComponent(Self.shortDocument))
         let defaults = disposableDefaults("RealWindow")
         defaults.set(outline, forKey: "Silkweb.Detail.Outline")
@@ -82,9 +103,10 @@ final class ToolbarRealWindowTests: XCTestCase {
         XCTAssertEqual(workspace.preview.showsOutline, outline)
         let oldAppearance = NSApp.appearance
         NSApp.appearance = NSAppearance(named: .aqua)
-        let window = SimulatedFullScreenWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 900),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-                              backing: .buffered, defer: false)
+        let window = SimulatedFullScreenWindow(
+            contentRect: NSRect(x: 0, y: 0, width: width, height: 900),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.toolbarStyle = .unifiedCompact
         let controller = NSHostingController(rootView: LibraryWorkspaceView(workspace: workspace))
@@ -101,45 +123,63 @@ final class ToolbarRealWindowTests: XCTestCase {
     }
 
     /// (a) no item touches a traffic light and the first starts past the zoom button; (b) the buttons are visible.
-    @MainActor private func assertClearOfWindowButtons(_ h: Harness, _ context: String, file: StaticString = #filePath, line: UInt = #line) throws {
+    @MainActor private func assertClearOfWindowButtons(
+        _ h: Harness, _ context: String, file: StaticString = #filePath, line: UInt = #line
+    ) throws {
         XCTAssertEqual(h.window.toolbarStyle, .unifiedCompact, context, file: file, line: line)
         XCTAssertFalse(h.window.styleMask.contains(.fullScreen))
-        let titlebar = NSRect(x: 0, y: h.window.contentLayoutRect.maxY, width: h.window.frame.width,
-                              height: h.window.frame.height - h.window.contentLayoutRect.maxY)
+        let titlebar = NSRect(
+            x: 0, y: h.window.contentLayoutRect.maxY, width: h.window.frame.width,
+            height: h.window.frame.height - h.window.contentLayoutRect.maxY)
         XCTAssertEqual(h.buttons.count, 3, context, file: file, line: line)
         for button in h.buttons {
             XCTAssertTrue(button.window === h.window, "\(context): window button in the window", file: file, line: line)
-            XCTAssertFalse(button.isHiddenOrHasHiddenAncestor, "\(context): window button visible", file: file, line: line)
-            XCTAssertEqual(button.alphaValue, 1, accuracy: 0.01, "\(context): window button opaque", file: file, line: line)
-            XCTAssertTrue(titlebar.insetBy(dx: -0.5, dy: -0.5).contains(h.frame(button)),
-                          "\(context): window button \(h.frame(button)) inside the titlebar \(titlebar)", file: file, line: line)
+            XCTAssertFalse(
+                button.isHiddenOrHasHiddenAncestor, "\(context): window button visible", file: file, line: line)
+            XCTAssertEqual(
+                button.alphaValue, 1, accuracy: 0.01, "\(context): window button opaque", file: file, line: line)
+            XCTAssertTrue(
+                titlebar.insetBy(dx: -0.5, dy: -0.5).contains(h.frame(button)),
+                "\(context): window button \(h.frame(button)) inside the titlebar \(titlebar)", file: file, line: line)
         }
         let zoom = try XCTUnwrap(h.window.standardWindowButton(.zoomButton))
         for item in h.placed {
             let frame = h.frame(item.view!)
             for button in h.buttons {
                 // 0.5 pt of slack for subpixel rounding on 2x displays.
-                XCTAssertFalse(frame.insetBy(dx: 0.5, dy: 0.5).intersects(h.frame(button)),
-                               "\(context): \(item.label) \(frame) overlaps a window button \(h.frame(button)) — \(h.geometry)", file: file, line: line)
+                XCTAssertFalse(
+                    frame.insetBy(dx: 0.5, dy: 0.5).intersects(h.frame(button)),
+                    "\(context): \(item.label) \(frame) overlaps a window button \(h.frame(button)) — \(h.geometry)",
+                    file: file, line: line)
             }
-            XCTAssertGreaterThanOrEqual(frame.minX, h.frame(zoom).maxX + Self.buttonSpacing,
-                                        "\(context): \(item.label) starts after the zoom button — \(h.geometry)", file: file, line: line)
+            XCTAssertGreaterThanOrEqual(
+                frame.minX, h.frame(zoom).maxX + Self.buttonSpacing,
+                "\(context): \(item.label) starts after the zoom button — \(h.geometry)", file: file, line: line)
         }
     }
 
     /// (c) nothing in the » menu: every control and the breadcrumb are placed, left to right in design order.
-    @MainActor private func assertNothingOverflows(_ h: Harness, _ context: String, file: StaticString = #filePath, line: UInt = #line) throws {
+    @MainActor private func assertNothingOverflows(
+        _ h: Harness, _ context: String, file: StaticString = #filePath, line: UInt = #line
+    ) throws {
         for label in Self.controls {
             let view = try XCTUnwrap(h.view(label), "\(context): \(label)", file: file, line: line)
-            XCTAssertTrue(view.window === h.window, "\(context): \(label) overflowed into » — \(h.geometry)", file: file, line: line)
+            XCTAssertTrue(
+                view.window === h.window, "\(context): \(label) overflowed into » — \(h.geometry)", file: file,
+                line: line)
         }
         let crumb = try XCTUnwrap(h.crumbItem?.view, context, file: file, line: line)
-        XCTAssertTrue(crumb.window === h.window, "\(context): breadcrumb overflowed into » — \(h.geometry)", file: file, line: line)
+        XCTAssertTrue(
+            crumb.window === h.window, "\(context): breadcrumb overflowed into » — \(h.geometry)", file: file,
+            line: line)
         guard h.placed.count == h.toolbar.items.count else { return }
-        let order = ["Hide Sidebars", "New Document", "Sort By", "Filter by Tag"].compactMap { h.view($0) } + [crumb]
+        let order =
+            ["Hide Sidebars", "New Document", "Sort By", "Filter by Tag"].compactMap { h.view($0) } + [crumb]
             + ["View Mode", "Show Outline", "Show Document Info"].compactMap { h.view($0) }
         for (left, right) in zip(order, order.dropFirst()) {
-            XCTAssertLessThanOrEqual(h.frame(left).maxX, h.frame(right).minX + 0.5, "\(context): items overlap — \(h.geometry)", file: file, line: line)
+            XCTAssertLessThanOrEqual(
+                h.frame(left).maxX, h.frame(right).minX + 0.5, "\(context): items overlap — \(h.geometry)", file: file,
+                line: line)
         }
     }
 
@@ -169,7 +209,8 @@ final class ToolbarRealWindowTests: XCTestCase {
                         // Only the breadcrumb gives way: its ancestors fold into `…`; the title stays.
                         XCTAssertFalse(fit.collapsed.isEmpty, context)
                         XCTAssertFalse(breadcrumb.currentLabel.isHidden, context)
-                        XCTAssertLessThanOrEqual(breadcrumb.currentLabel.frame.maxX, breadcrumb.bounds.maxX + 0.5, context)
+                        XCTAssertLessThanOrEqual(
+                            breadcrumb.currentLabel.frame.maxX, breadcrumb.bounds.maxX + 0.5, context)
                     }
                 }
                 XCTAssertLessThan(widths[900] ?? 0, widths[1400] ?? 0, "the breadcrumb is what shrinks")
@@ -216,8 +257,9 @@ final class ToolbarRealWindowTests: XCTestCase {
         XCTAssertFalse(CompactToolbarController.windowButtonsAbsent(buttonsShown: [true, true, true]))
         XCTAssertFalse(CompactToolbarController.windowButtonsAbsent(buttonsShown: [false, false, true]))
         XCTAssertFalse(CompactToolbarController.windowButtonsAbsent(buttonsShown: [true, false, false]))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         defer { window.close() }
         let zoom = window.standardWindowButton(.zoomButton)
@@ -237,11 +279,13 @@ final class ToolbarRealWindowTests: XCTestCase {
     @MainActor
     func testFullScreenKeepsTheToolbarVisible() {
         let coordinator = EditorWindowLifecycle.Coordinator(workspace: LibraryWorkspace())
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled, .resizable],
-                              backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled, .resizable],
+            backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         defer { window.close() }
-        let options = coordinator.window(window, willUseFullScreenPresentationOptions: [.fullScreen, .autoHideMenuBar, .autoHideToolbar])
+        let options = coordinator.window(
+            window, willUseFullScreenPresentationOptions: [.fullScreen, .autoHideMenuBar, .autoHideToolbar])
         XCTAssertFalse(options.contains(.autoHideToolbar))
         XCTAssertTrue(options.contains(.fullScreen))
         XCTAssertTrue(options.contains(.autoHideMenuBar))
@@ -272,8 +316,10 @@ final class ToolbarRealWindowTests: XCTestCase {
             try await h.settle()
             let context = "buttons hidden, Reduce Motion \(reduced)"
             XCTAssertEqual(firstMinX(h), shown, accuracy: 0.5, "\(context): AppKit's placement kept — \(h.geometry)")
-            XCTAssertEqual(try trailingGap(h), shownGap, accuracy: 0.5, "\(context): trailing items at the edge — \(h.geometry)")
-            XCTAssertEqual(h.workspace.toolbarMetrics.breadcrumbWidth, shownWidth, accuracy: 0.5, "\(context) — \(h.geometry)")
+            XCTAssertEqual(
+                try trailingGap(h), shownGap, accuracy: 0.5, "\(context): trailing items at the edge — \(h.geometry)")
+            XCTAssertEqual(
+                h.workspace.toolbarMetrics.breadcrumbWidth, shownWidth, accuracy: 0.5, "\(context) — \(h.geometry)")
             XCTAssertNil(controller.lastMoveAnimated, "\(context): nothing moved")
             try assertNothingOverflows(h, context)
             for button in h.buttons { button.isHidden = false }
@@ -286,15 +332,19 @@ final class ToolbarRealWindowTests: XCTestCase {
     }
 
     /// No placed item touches a window button that is showing, whatever the window's full-screen state.
-    @MainActor private func assertClearOfVisibleButtons(_ h: Harness, _ context: String, file: StaticString = #filePath, line: UInt = #line) {
+    @MainActor private func assertClearOfVisibleButtons(
+        _ h: Harness, _ context: String, file: StaticString = #filePath, line: UInt = #line
+    ) {
         let visible = h.buttons.filter { !$0.isHiddenOrHasHiddenAncestor && $0.alphaValue > 0.01 && $0.window != nil }
-        XCTAssertEqual(visible.count, 3, "\(context): the revealed titlebar shows all three buttons", file: file, line: line)
+        XCTAssertEqual(
+            visible.count, 3, "\(context): the revealed titlebar shows all three buttons", file: file, line: line)
         for item in h.placed {
             let frame = h.frame(item.view!)
             for button in visible {
-                XCTAssertFalse(frame.insetBy(dx: 0.5, dy: 0.5).intersects(h.frame(button)),
-                               "\(context): \(item.label) \(frame) overlaps a visible window button \(h.frame(button)) — \(h.geometry)",
-                               file: file, line: line)
+                XCTAssertFalse(
+                    frame.insetBy(dx: 0.5, dy: 0.5).intersects(h.frame(button)),
+                    "\(context): \(item.label) \(frame) overlaps a visible window button \(h.frame(button)) — \(h.geometry)",
+                    file: file, line: line)
             }
         }
     }
@@ -379,18 +429,26 @@ final class ToolbarRealWindowTests: XCTestCase {
                     for button in h.buttons { button.isHidden = true }
                     try await h.settle()
                     try await h.settle()
-                    let context = "\(Int(width)) pt, outline \(outline), sidebars hidden \(sidebarsHidden), full screen concealed"
+                    let context =
+                        "\(Int(width)) pt, outline \(outline), sidebars hidden \(sidebarsHidden), full screen concealed"
                     try assertNothingOverflows(h, context)
                     let gap = try trailingGap(h)
-                    XCTAssertLessThanOrEqual(gap, windowed + 1, "\(context): trailing items left the edge (windowed gap \(windowed)) — \(h.geometry)")
-                    XCTAssertLessThanOrEqual(gap, CompactToolbarController.rowEndInset + 12,
-                                             "\(context): trailing items sit at the edge — \(h.geometry)")
+                    XCTAssertLessThanOrEqual(
+                        gap, windowed + 1,
+                        "\(context): trailing items left the edge (windowed gap \(windowed)) — \(h.geometry)")
+                    XCTAssertLessThanOrEqual(
+                        gap, CompactToolbarController.rowEndInset + 12,
+                        "\(context): trailing items sit at the edge — \(h.geometry)")
                     if width >= 1400, let fit = h.breadcrumb?.fit {
                         XCTAssertTrue(fit.collapsed.isEmpty, "\(context): ancestors folded — \(h.geometry)")
                         XCTAssertTrue(fit.showsCount, "\(context): count dropped — \(h.geometry)")
                         if let breadcrumb = h.breadcrumb {
-                            let full = BreadcrumbView.textWidth(breadcrumb.path.current, BreadcrumbView.currentFont) + 2 * BreadcrumbView.padding
-                            XCTAssertGreaterThanOrEqual(CGFloat(fit.currentWidth), full - 0.5, "\(context): current crumb truncated — \(h.geometry)")
+                            let full =
+                                BreadcrumbView.textWidth(breadcrumb.path.current, BreadcrumbView.currentFont) + 2
+                                * BreadcrumbView.padding
+                            XCTAssertGreaterThanOrEqual(
+                                CGFloat(fit.currentWidth), full - 0.5,
+                                "\(context): current crumb truncated — \(h.geometry)")
                         }
                     }
                     // Hover reveal: the buttons show again, nothing sits under them, the trailing group stays put.
@@ -420,18 +478,23 @@ final class ToolbarRealWindowTests: XCTestCase {
         let workspace: LibraryWorkspace
         init(workspace: LibraryWorkspace) { self.workspace = workspace }
         var identifiers: [NSToolbarItem.Identifier] {
-            Self.leadingLabels.map { NSToolbarItem.Identifier($0) } + [Self.crumbIdentifier] + Self.trailingLabels.map { NSToolbarItem.Identifier($0) }
+            Self.leadingLabels.map { NSToolbarItem.Identifier($0) } + [Self.crumbIdentifier]
+                + Self.trailingLabels.map { NSToolbarItem.Identifier($0) }
         }
         func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { identifiers }
         func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { identifiers }
-        func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
-                     willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        func toolbar(
+            _ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
+            willBeInsertedIntoToolbar flag: Bool
+        ) -> NSToolbarItem? {
             let item = NSToolbarItem(itemIdentifier: identifier)
             if identifier == Self.crumbIdentifier {
                 item.view = NSHostingView(rootView: ToolbarBreadcrumb(workspace: workspace))
             } else {
                 item.label = identifier.rawValue
-                item.view = NSButton(title: identifier.rawValue == "View Mode" ? "Editor  Split  Preview" : "•", target: nil, action: nil)
+                item.view = NSButton(
+                    title: identifier.rawValue == "View Mode" ? "Editor  Split  Preview" : "•", target: nil, action: nil
+                )
             }
             return item
         }
@@ -444,9 +507,10 @@ final class ToolbarRealWindowTests: XCTestCase {
     func testWithoutASidebarSectionTheLeadingItemsSlideAndTheTrailingItemsKeepTheEdge() async throws {
         _ = NSApplication.shared
         let workspace = LibraryWorkspace()
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 600),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-                              backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 600),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         defer { window.toolbar = nil; window.close() }
         window.toolbarStyle = .unifiedCompact
@@ -464,29 +528,40 @@ final class ToolbarRealWindowTests: XCTestCase {
         }
         try await settle()
         let controller = workspace.toolbarMetrics.controller
-        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { window.standardWindowButton($0) }
+        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap {
+            window.standardWindowButton($0)
+        }
         func frame(_ label: String) -> NSRect {
-            guard let view = toolbar.items.first(where: { $0.label == label })?.view, view.window != nil else { return .null }
+            guard let view = toolbar.items.first(where: { $0.label == label })?.view, view.window != nil else {
+                return .null
+            }
             return view.convert(view.bounds, to: nil)
         }
         func firstMinX() -> CGFloat { frame("Hide Sidebars").minX }
         func gap() -> CGFloat { window.frame.width - frame("Show Document Info").maxX }
         var geometry: String {
-            toolbar.items.map { "\($0.label.isEmpty ? "breadcrumb" : $0.label): placed=\($0.view?.window != nil) frame=\($0.view.map { $0.convert($0.bounds, to: nil) } ?? .zero)" }
-                .joined(separator: "; ") + "; breadcrumbWidth=\(workspace.toolbarMetrics.breadcrumbWidth) failed=\(controller.shiftGrowthFailed)"
+            toolbar.items.map {
+                "\($0.label.isEmpty ? "breadcrumb" : $0.label): placed=\($0.view?.window != nil) frame=\($0.view.map { $0.convert($0.bounds, to: nil) } ?? .zero)"
+            }
+            .joined(separator: "; ")
+                + "; breadcrumbWidth=\(workspace.toolbarMetrics.breadcrumbWidth) failed=\(controller.shiftGrowthFailed)"
         }
         func assertWhole(_ context: String, line: UInt = #line) {
             for item in toolbar.items {
-                XCTAssertNotNil(item.view?.window, "\(context): \(item.label) overflowed into » — \(geometry)", line: line)
+                XCTAssertNotNil(
+                    item.view?.window, "\(context): \(item.label) overflowed into » — \(geometry)", line: line)
             }
-            XCTAssertLessThanOrEqual(gap(), CompactToolbarController.rowEndInset + 12, "\(context): trailing items at the edge — \(geometry)", line: line)
+            XCTAssertLessThanOrEqual(
+                gap(), CompactToolbarController.rowEndInset + 12,
+                "\(context): trailing items at the edge — \(geometry)", line: line)
         }
         let shown = firstMinX()
         let shownWidth = workspace.toolbarMetrics.breadcrumbWidth
         let zoom = try XCTUnwrap(window.standardWindowButton(.zoomButton))
         XCTAssertGreaterThan(shown, zoom.convert(zoom.bounds, to: nil).maxX, geometry)
-        XCTAssertLessThan(shown, zoom.convert(zoom.bounds, to: nil).maxX + CompactToolbarController.sectionSlack,
-                          "AppKit starts the row right after the traffic lights — \(geometry)")
+        XCTAssertLessThan(
+            shown, zoom.convert(zoom.bounds, to: nil).maxX + CompactToolbarController.sectionSlack,
+            "AppKit starts the row right after the traffic lights — \(geometry)")
         assertWhole("buttons shown")
 
         let reduceMotion = CompactToolbarController.reduceMotion
@@ -501,16 +576,19 @@ final class ToolbarRealWindowTests: XCTestCase {
             try await settle()
             let context = "buttons hidden, Reduce Motion \(reduced)"
             XCTAssertFalse(controller.shiftGrowthFailed, "\(context): AppKit gave the row the room — \(geometry)")
-            XCTAssertLessThanOrEqual(firstMinX(), Spacing.small + 0.5, "\(context): items at the leading inset — \(geometry)")
-            XCTAssertEqual(workspace.toolbarMetrics.breadcrumbWidth, shownWidth + shown - firstMinX(), accuracy: 2,
-                           "\(context): the breadcrumb takes the freed room — \(geometry)")
+            XCTAssertLessThanOrEqual(
+                firstMinX(), Spacing.small + 0.5, "\(context): items at the leading inset — \(geometry)")
+            XCTAssertEqual(
+                workspace.toolbarMetrics.breadcrumbWidth, shownWidth + shown - firstMinX(), accuracy: 2,
+                "\(context): the breadcrumb takes the freed room — \(geometry)")
             assertWhole(context)
             for button in buttons { button.isHidden = false }
             controller.update()
             XCTAssertEqual(controller.lastMoveAnimated, !reduced)
             try await settle()
             try await settle()
-            XCTAssertEqual(firstMinX(), shown, accuracy: 0.5, "buttons shown again, Reduce Motion \(reduced): \(geometry)")
+            XCTAssertEqual(
+                firstMinX(), shown, accuracy: 0.5, "buttons shown again, Reduce Motion \(reduced): \(geometry)")
             XCTAssertEqual(workspace.toolbarMetrics.breadcrumbWidth, shownWidth, accuracy: 0.5, geometry)
             assertWhole("buttons shown again, Reduce Motion \(reduced)")
         }
@@ -559,13 +637,21 @@ final class ToolbarRealWindowTests: XCTestCase {
     @MainActor
     func testOnlyARowAfterASidebarSectionKeepsItsPlace() {
         let section = NSRect(x: 178, y: 0, width: 5, height: 38)
-        XCTAssertTrue(CompactToolbarController.rowFollowsSection(naturalLeading: 185, regions: [section], buttonsEnd: 66))
-        XCTAssertTrue(CompactToolbarController.rowFollowsSection(naturalLeading: 185, regions: [], buttonsEnd: 66), "sidebar column, no divider view")
-        XCTAssertTrue(CompactToolbarController.rowFollowsSection(naturalLeading: 185, regions: [section], buttonsEnd: nil))
-        XCTAssertFalse(CompactToolbarController.rowFollowsSection(naturalLeading: 76, regions: [], buttonsEnd: 66), "right after the traffic lights")
+        XCTAssertTrue(
+            CompactToolbarController.rowFollowsSection(naturalLeading: 185, regions: [section], buttonsEnd: 66))
+        XCTAssertTrue(
+            CompactToolbarController.rowFollowsSection(naturalLeading: 185, regions: [], buttonsEnd: 66),
+            "sidebar column, no divider view")
+        XCTAssertTrue(
+            CompactToolbarController.rowFollowsSection(naturalLeading: 185, regions: [section], buttonsEnd: nil))
+        XCTAssertFalse(
+            CompactToolbarController.rowFollowsSection(naturalLeading: 76, regions: [], buttonsEnd: 66),
+            "right after the traffic lights")
         XCTAssertFalse(CompactToolbarController.rowFollowsSection(naturalLeading: 185, regions: [], buttonsEnd: nil))
         let inspector = NSRect(x: 1000, y: 0, width: 400, height: 38)
-        XCTAssertFalse(CompactToolbarController.rowFollowsSection(naturalLeading: 76, regions: [inspector], buttonsEnd: 66), "the inspector's area is trailing")
+        XCTAssertFalse(
+            CompactToolbarController.rowFollowsSection(naturalLeading: 76, regions: [inspector], buttonsEnd: 66),
+            "the inspector's area is trailing")
     }
 
     /// #68, the owner's report on 827620b: the Info glyph ended about 30 pt short of the bar's edge in full screen
@@ -592,14 +678,16 @@ final class ToolbarRealWindowTests: XCTestCase {
                     let context = "\(Int(width)) pt, outline \(outline), \(state)"
                     try assertNothingOverflows(h, context)
                     let gap = try glyphGap(h)
-                    XCTAssertEqual(gap, 12, accuracy: 1,
-                                   "\(context): Info glyph ends \(gap) pt from the edge — \(h.geometry)")
+                    XCTAssertEqual(
+                        gap, 12, accuracy: 1,
+                        "\(context): Info glyph ends \(gap) pt from the edge — \(h.geometry)")
                     // The overhanging bezel (hover fill, focus ring) stays inside the item's viewer.
                     let info = try XCTUnwrap(h.view("Show Document Info"))
                     let viewer = try XCTUnwrap(info.superview)
                     let bezel = try XCTUnwrap(Self.descendants(info).first { $0 is NSButton })
-                    XCTAssertLessThanOrEqual(bezel.convert(bezel.bounds, to: viewer).maxX, viewer.bounds.maxX + 0.5,
-                                             "\(context): Info bezel clipped by its viewer — \(h.geometry)")
+                    XCTAssertLessThanOrEqual(
+                        bezel.convert(bezel.bounds, to: viewer).maxX, viewer.bounds.maxX + 0.5,
+                        "\(context): Info bezel clipped by its viewer — \(h.geometry)")
                 }
                 for button in h.buttons { button.isHidden = false }
                 window.simulatesFullScreen = false
@@ -617,7 +705,9 @@ final class ToolbarRealWindowTests: XCTestCase {
         let column = stride(from: rep.pixelsWide - 1, through: 0, by: -1).first { x in
             (0..<rep.pixelsHigh).contains { (rep.colorAt(x: x, y: $0)?.alphaComponent ?? 0) > 0.2 }
         }
-        let glyphEnd = info.convert(NSPoint(x: CGFloat(try XCTUnwrap(column, "Info glyph painted") + 1) / scale, y: 0), to: bar).x
+        let glyphEnd = info.convert(
+            NSPoint(x: CGFloat(try XCTUnwrap(column, "Info glyph painted") + 1) / scale, y: 0), to: bar
+        ).x
         var limit = bar.bounds.maxX
         for region in CompactToolbarController.reservedRegions(in: bar) where region.minX >= glyphEnd - 1 {
             limit = min(limit, region.minX)

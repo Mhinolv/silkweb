@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 /// Stable, virtualized native rows in both standalone and split-view hosting.
 struct DocumentTable: NSViewRepresentable {
@@ -30,13 +30,15 @@ struct DocumentTable: NSViewRepresentable {
         scroll.backgroundColor = .silkwebPaneBackground
         scroll.documentView = table
         context.coordinator.table = table
-        context.coordinator.update(documents: documents, dateReference: dateReference, makeDragProvider: makeDragProvider)
+        context.coordinator.update(
+            documents: documents, dateReference: dateReference, makeDragProvider: makeDragProvider)
         return scroll
     }
 
     func updateNSView(_ scroll: DocumentScrollView, context: Context) {
         _ = workspace.editor.refusedNavigation // Restore native selection when unsaved text blocks navigation.
-        context.coordinator.update(documents: documents, dateReference: dateReference, makeDragProvider: makeDragProvider)
+        context.coordinator.update(
+            documents: documents, dateReference: dateReference, makeDragProvider: makeDragProvider)
     }
 
     static func dismantleNSView(_ scroll: DocumentScrollView, coordinator: Coordinator) {
@@ -62,19 +64,25 @@ struct DocumentTable: NSViewRepresentable {
 
         init(workspace: LibraryWorkspace) { self.workspace = workspace }
 
-        func update(documents: [LibraryDocument], dateReference: Date,
-                    makeDragProvider: (([String]) -> NSItemProvider)?) {
+        func update(
+            documents: [LibraryDocument], dateReference: Date,
+            makeDragProvider: (([String]) -> NSItemProvider)?
+        ) {
             guard let table else { return }
             updating = true
             defer { updating = false }
-            let structureChanged = self.documents.count != documents.count || zip(self.documents, documents).contains {
-                $0.id != $1.id || $0.relativePath != $1.relativePath
-            }
+            let structureChanged =
+                self.documents.count != documents.count
+                || zip(self.documents, documents).contains {
+                    $0.id != $1.id || $0.relativePath != $1.relativePath
+                }
             let reload = structureChanged || includesSubfolders != workspace.includesSubfolders
             // A visible selection stays in view when sorting or filtering reorders the rows.
-            let anchor = reload ? table.visibleSelectedRow(in: table.visibleRect).flatMap { row in
-                self.documents.indices.contains(row) ? self.documents[row].relativePath : nil
-            } : nil
+            let anchor =
+                reload
+                ? table.visibleSelectedRow(in: table.visibleRect).flatMap { row in
+                    self.documents.indices.contains(row) ? self.documents[row].relativePath : nil
+                } : nil
             self.documents = documents
             self.dateReference = dateReference
             self.makeDragProvider = makeDragProvider
@@ -93,11 +101,17 @@ struct DocumentTable: NSViewRepresentable {
             }
             let selected = syncSelection()
             if lastRename != workspace.rename, let rename = workspace.rename, !rename.isFolder,
-               let row = documents.firstIndex(where: { $0.relativePath == rename.path }) {
+                let row = documents.firstIndex(where: { $0.relativePath == rename.path })
+            {
                 table.scrollRowToVisible(row)
-            } else if lastRevision != workspace.revision, let row = selected.first { table.scrollRowToVisible(row) }
-            else if let anchor, let row = documents.firstIndex(where: { $0.relativePath == anchor }), selected.contains(row),
-                    !table.visibleRect.intersects(table.rect(ofRow: row)) { table.scrollRowToVisible(row) }
+            } else if lastRevision != workspace.revision, let row = selected.first {
+                table.scrollRowToVisible(row)
+            } else if let anchor, let row = documents.firstIndex(where: { $0.relativePath == anchor }),
+                selected.contains(row),
+                !table.visibleRect.intersects(table.rect(ofRow: row))
+            {
+                table.scrollRowToVisible(row)
+            }
             lastRename = workspace.rename
             lastRevision = workspace.revision
         }
@@ -106,7 +120,8 @@ struct DocumentTable: NSViewRepresentable {
         /// same frame (#70) instead of waiting for SwiftUI's next update.
         @discardableResult func syncSelection() -> IndexSet {
             guard let table else { return [] }
-            let selected = IndexSet(documents.indices.filter { workspace.session.selectedDocuments.contains(documents[$0].relativePath) })
+            let selected = IndexSet(
+                documents.indices.filter { workspace.session.selectedDocuments.contains(documents[$0].relativePath) })
             if table.selectedRowIndexes != selected {
                 let wasUpdating = updating
                 updating = true
@@ -117,9 +132,12 @@ struct DocumentTable: NSViewRepresentable {
         }
 
         private func rowView(_ document: LibraryDocument) -> DocumentRow {
-            DocumentRow(document: document, root: workspace.snapshot!.rootURL, workspace: workspace,
-                        dateReference: dateReference, pointerState: pointerState,
-                        location: locationScope.map { DocumentRowPresentation.location(for: document.relativePath, scope: $0.path, scopeName: $0.name) })
+            DocumentRow(
+                document: document, root: workspace.snapshot!.rootURL, workspace: workspace,
+                dateReference: dateReference, pointerState: pointerState,
+                location: locationScope.map {
+                    DocumentRowPresentation.location(for: document.relativePath, scope: $0.path, scopeName: $0.name)
+                })
         }
 
         /// Rows show where they live only when the list spans folders: All Documents, a tag, or Include Subfolders.
@@ -153,9 +171,10 @@ struct DocumentTable: NSViewRepresentable {
         func tableViewSelectionDidChange(_ notification: Notification) {
             guard !updating, let table else { return }
             workspace.focusColumn = 1
-            let selection = Set(table.selectedRowIndexes.compactMap {
-                documents.indices.contains($0) ? documents[$0].relativePath : nil
-            })
+            let selection = Set(
+                table.selectedRowIndexes.compactMap {
+                    documents.indices.contains($0) ? documents[$0].relativePath : nil
+                })
             if selection != workspace.session.selectedDocuments { workspace.selectDocuments(selection) }
         }
 
@@ -191,7 +210,9 @@ struct DocumentTable: NSViewRepresentable {
             for tag in workspace.tags {
                 let item = NSMenuItem(title: tag.name, action: #selector(toggleTag(_:)), keyEquivalent: "")
                 item.target = self; item.representedObject = TagMenuSelection(tag: tag, paths: Set(paths))
-                let count = ids.filter { workspace.snapshot?.metadata.tagsByDocument[$0.uuidString]?.contains(tag.id) == true }.count
+                let count = ids.filter {
+                    workspace.snapshot?.metadata.tagsByDocument[$0.uuidString]?.contains(tag.id) == true
+                }.count
                 item.state = count == 0 ? .off : count == ids.count ? .on : .mixed
                 item.isEnabled = workspace.canMutate
                 submenu.addItem(item)
@@ -214,7 +235,9 @@ struct DocumentTable: NSViewRepresentable {
         @objc private func editTags(_ sender: NSMenuItem) {
             guard let path = sender.representedObject as? String else { return }
             workspace.selectDocuments(Set(workspace.documentDragPaths(path)))
-            Task { await workspace.waitForNavigation(); workspace.showInfo() }
+            Task {
+                await workspace.waitForNavigation(); workspace.showInfo()
+            }
         }
         @objc private func openTab(_ sender: NSMenuItem) {
             workspace.openSelectionInNewTab(sender.representedObject as? String)
@@ -227,7 +250,9 @@ struct DocumentTable: NSViewRepresentable {
             guard let path = sender.representedObject as? String else { return }
             workspace.requestMove(workspace.documentDragPaths(path))
         }
-        @objc private func exportHTML(_ sender: NSMenuItem) { workspace.exportHTML(path: sender.representedObject as? String) }
+        @objc private func exportHTML(_ sender: NSMenuItem) {
+            workspace.exportHTML(path: sender.representedObject as? String)
+        }
         @objc func exportPDF(_ sender: NSMenuItem) {
             guard let path = sender.representedObject as? String else { return }
             workspace.exportPDF(path: path)
@@ -292,7 +317,8 @@ final class DocumentTableView: NSTableView {
 
     override func canDragRows(with rowIndexes: IndexSet, at mouseDownPoint: NSPoint) -> Bool {
         guard let coordinator, coordinator.workspace.canMutate,
-              let row = rowIndexes.first, coordinator.documents.indices.contains(row) else { return false }
+            let row = rowIndexes.first, coordinator.documents.indices.contains(row)
+        else { return false }
         let paths = coordinator.workspace.documentDragPaths(coordinator.documents[row].relativePath)
         _ = coordinator.makeDragProvider?(paths)
         return true

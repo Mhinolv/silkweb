@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 import UniformTypeIdentifiers
 
 struct FolderSidebar: NSViewRepresentable {
@@ -68,7 +68,9 @@ struct FolderSidebar: NSViewRepresentable {
         return scroll
     }
 
-    static func dismantleNSView(_ view: NSScrollView, coordinator: Coordinator) { coordinator.finishDrag(accepted: false) }
+    static func dismantleNSView(_ view: NSScrollView, coordinator: Coordinator) {
+        coordinator.finishDrag(accepted: false)
+    }
 
     func updateNSView(_ view: NSScrollView, context: Context) {
         Self.update(view, coordinator: context.coordinator, snapshot: snapshot)
@@ -78,10 +80,11 @@ struct FolderSidebar: NSViewRepresentable {
         let workspace = coordinator.workspace
         if coordinator.rootURL != snapshot.rootURL || coordinator.revision != workspace.revision {
             coordinator.revision = workspace.revision
-            if coordinator.configure(snapshot) { coordinator.restore() }
-            else { coordinator.updateVisibleCounts() }
+            if coordinator.configure(snapshot) { coordinator.restore() } else { coordinator.updateVisibleCounts() }
         }
-        if coordinator.selectedTagID != workspace.session.selectedTagID || coordinator.tagsExpanded != workspace.tagsExpanded {
+        if coordinator.selectedTagID != workspace.session.selectedTagID
+            || coordinator.tagsExpanded != workspace.tagsExpanded
+        {
             coordinator.restore()
         }
         if coordinator.tagRenameID != workspace.tagRenameID {
@@ -137,10 +140,12 @@ struct FolderSidebar: NSViewRepresentable {
 
         private let readDragData: (NSPasteboard) -> Data?
 
-        init(workspace: LibraryWorkspace, snapshot: LibrarySnapshot,
-             readDragData: @escaping (NSPasteboard) -> Data? = {
-                 $0.data(forType: NSPasteboard.PasteboardType(UTType.silkwebMove.identifier))
-             }) {
+        init(
+            workspace: LibraryWorkspace, snapshot: LibrarySnapshot,
+            readDragData: @escaping (NSPasteboard) -> Data? = {
+                $0.data(forType: NSPasteboard.PasteboardType(UTType.silkwebMove.identifier))
+            }
+        ) {
             self.readDragData = readDragData
             self.workspace = workspace
             super.init()
@@ -152,7 +157,9 @@ struct FolderSidebar: NSViewRepresentable {
             counts = snapshot.presentation.counts
             totalCount = snapshot.documents.count
             tagCounts = workspace.tagCounts
-            guard rootURL != snapshot.rootURL || folders != snapshot.folders || tags != workspace.tags else { return false }
+            guard rootURL != snapshot.rootURL || folders != snapshot.folders || tags != workspace.tags else {
+                return false
+            }
             tags = workspace.tags
             rootURL = snapshot.rootURL
             folders = snapshot.folders
@@ -191,7 +198,8 @@ struct FolderSidebar: NSViewRepresentable {
             guard let outline else { return }
             for row in 0..<outline.numberOfRows {
                 if let item = outline.item(atRow: row) as? Item,
-                   let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarFolderCell {
+                    let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarFolderCell
+                {
                     applyCount(to: cell, item: item)
                 }
             }
@@ -204,10 +212,12 @@ struct FolderSidebar: NSViewRepresentable {
                 cell.toolTip = nil
                 return
             }
-            let count = item.folder.flatMap { counts[$0.id] } ?? FolderDocumentCount(direct: totalCount, recursive: totalCount)
+            let count =
+                item.folder.flatMap { counts[$0.id] } ?? FolderDocumentCount(direct: totalCount, recursive: totalCount)
             cell.countBadge.stringValue = count.inlineSuffix
             cell.setAccessibilityValue(count.accessibilityValue + currentSuffix(item))
-            cell.toolTip = item.folder?.isUnreadable == true ? "You don't have permission to view this folder." : count.tooltip
+            cell.toolTip =
+                item.folder?.isUnreadable == true ? "You don't have permission to view this folder." : count.tooltip
         }
 
         private func currentSuffix(_ item: Item) -> String { item === currentItem ? ", current folder" : "" }
@@ -241,9 +251,10 @@ struct FolderSidebar: NSViewRepresentable {
             while let parent = chain.last?.parent { chain.append(parent) }
             chain.reverse()
             func isLast(_ item: Item) -> Bool { (item.parent?.children ?? roots).last === item }
-            return ThreadRowView.Thread(level: chain.count - 1, isLastChild: isLast(item),
-                                        ancestorContinues: chain.dropFirst().dropLast().map { !isLast($0) },
-                                        hasChildren: item.isTagsGroup || !item.children.isEmpty)
+            return ThreadRowView.Thread(
+                level: chain.count - 1, isLastChild: isLast(item),
+                ancestorContinues: chain.dropFirst().dropLast().map { !isLast($0) },
+                hasChildren: item.isTagsGroup || !item.children.isEmpty)
         }
 
         func restore() {
@@ -270,7 +281,9 @@ struct FolderSidebar: NSViewRepresentable {
         /// Selects the scope's row without reloading; a no-op when it is already selected.
         func selectScope() {
             selectedFolder = .some(workspace.session.selectedFolder)
-            guard let outline, let item = scopeItem(), outline.item(atRow: outline.selectedRow) as? Item !== item else { return }
+            guard let outline, let item = scopeItem(), outline.item(atRow: outline.selectedRow) as? Item !== item else {
+                return
+            }
             restoring = true
             select(item)
             restoring = false
@@ -284,7 +297,10 @@ struct FolderSidebar: NSViewRepresentable {
                 parent = outline.parent(forItem: ancestor)
             }
             let row = outline.row(forItem: item)
-            if row >= 0 { outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false); outline.scrollRowToVisible(row) }
+            if row >= 0 {
+                outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false);
+                outline.scrollRowToVisible(row)
+            }
         }
 
         func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
@@ -296,7 +312,9 @@ struct FolderSidebar: NSViewRepresentable {
         func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
             (item as? Item)?.isTagsGroup == true || !((item as? Item)?.children.isEmpty ?? true)
         }
-        func outlineView(_ outlineView: NSOutlineView, objectValueFor tableColumn: NSTableColumn?, byItem item: Any?) -> Any? {
+        func outlineView(_ outlineView: NSOutlineView, objectValueFor tableColumn: NSTableColumn?, byItem item: Any?)
+            -> Any?
+        {
             (item as? Item)?.title
         }
         func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
@@ -304,13 +322,17 @@ struct FolderSidebar: NSViewRepresentable {
         }
         /// Guides are set per added row only: expand/collapse never redraws the rest of the tree.
         func outlineView(_ outlineView: NSOutlineView, didAdd rowView: NSTableRowView, forRow row: Int) {
-            guard let rowView = rowView as? ThreadRowView, let item = outlineView.item(atRow: row) as? Item else { return }
+            guard let rowView = rowView as? ThreadRowView, let item = outlineView.item(atRow: row) as? Item else {
+                return
+            }
             rowView.thread = thread(for: item)
         }
         func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
             guard let item = item as? Item else { return nil }
             let identifier = NSUserInterfaceItemIdentifier("folderCell")
-            let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? SidebarFolderCell ?? SidebarFolderCell()
+            let cell =
+                outlineView.makeView(withIdentifier: identifier, owner: self) as? SidebarFolderCell
+                ?? SidebarFolderCell()
             if cell.textField == nil {
                 cell.identifier = identifier
                 let text = NSTextField(labelWithString: "")
@@ -344,7 +366,8 @@ struct FolderSidebar: NSViewRepresentable {
                 NSLayoutConstraint.activate([
                     image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
                     image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                    image.widthAnchor.constraint(equalToConstant: 16), image.heightAnchor.constraint(equalToConstant: 16),
+                    image.widthAnchor.constraint(equalToConstant: 16),
+                    image.heightAnchor.constraint(equalToConstant: 16),
                     text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
                     cell.titleToLock!,
                     text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
@@ -352,7 +375,7 @@ struct FolderSidebar: NSViewRepresentable {
                     count.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
                     count.firstBaselineAnchor.constraint(equalTo: text.firstBaselineAnchor),
                     badge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                    cell.lockWidth!, badge.heightAnchor.constraint(equalToConstant: 12)
+                    cell.lockWidth!, badge.heightAnchor.constraint(equalToConstant: 12),
                 ])
             }
             cell.renameField?.removeFromSuperview()
@@ -370,7 +393,7 @@ struct FolderSidebar: NSViewRepresentable {
                         field.leadingAnchor.constraint(equalTo: text.leadingAnchor),
                         field.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
                         field.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                        field.heightAnchor.constraint(equalToConstant: 22)
+                        field.heightAnchor.constraint(equalToConstant: 22),
                     ])
                 }
                 cell.renameField = field
@@ -390,20 +413,25 @@ struct FolderSidebar: NSViewRepresentable {
                         field.leadingAnchor.constraint(equalTo: text.leadingAnchor),
                         field.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
                         field.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                        field.heightAnchor.constraint(equalToConstant: 22)
+                        field.heightAnchor.constraint(equalToConstant: 22),
                     ])
                 }
                 cell.renameField = field
             }
             cell.textField?.stringValue = item.title
-            let symbol = item.tag != nil || item.isTagsGroup ? "tag" : item.folder.map { $0.parentID == nil ? "books.vertical" : "folder" } ?? "doc.on.doc"
+            let symbol =
+                item.tag != nil || item.isTagsGroup
+                ? "tag" : item.folder.map { $0.parentID == nil ? "books.vertical" : "folder" } ?? "doc.on.doc"
             cell.imageView?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
             cell.configureCluster(unreadable: item.folder?.isUnreadable == true, renaming: cell.renameField != nil)
             let label = item.folder.map { "\(item.title), \($0.parentID == nil ? "library" : "folder")" } ?? item.title
             cell.setAccessibilityElement(true)
-            cell.setAccessibilityLabel(item.folder?.isUnreadable == true ? "\(label), unreadable, permission denied" : label)
+            cell.setAccessibilityLabel(
+                item.folder?.isUnreadable == true ? "\(label), unreadable, permission denied" : label)
             if item.isTagsGroup { cell.setAccessibilityLabel("Tags") }
-            if let tag = item.tag { cell.setAccessibilityLabel("\(tag.name), tag, \(tagCounts[tag.id] ?? 0) documents") }
+            if let tag = item.tag {
+                cell.setAccessibilityLabel("\(tag.name), tag, \(tagCounts[tag.id] ?? 0) documents")
+            }
             applyCount(to: cell, item: item)
             return cell
         }
@@ -415,9 +443,12 @@ struct FolderSidebar: NSViewRepresentable {
             guard let folder = item.folder else { return nil }
             let menu = NSMenu()
             menu.autoenablesItems = false
-            for (title, action) in [("New Document", #selector(newDocument(_:))), ("New Folder", #selector(newFolder(_:)))] {
+            for (title, action) in [
+                ("New Document", #selector(newDocument(_:))), ("New Folder", #selector(newFolder(_:))),
+            ] {
                 let entry = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
-                entry.target = self; entry.representedObject = folder.relativePath; entry.isEnabled = workspace.canMutate
+                entry.target = self; entry.representedObject = folder.relativePath;
+                entry.isEnabled = workspace.canMutate
             }
             menu.addItem(.separator())
             let rename = menu.addItem(withTitle: "Rename…", action: #selector(renameFolder(_:)), keyEquivalent: "")
@@ -426,7 +457,8 @@ struct FolderSidebar: NSViewRepresentable {
             let move = menu.addItem(withTitle: "Move To…", action: #selector(moveFolder(_:)), keyEquivalent: "")
             move.target = self; move.representedObject = folder.relativePath
             move.isEnabled = workspace.canMutate && !folder.relativePath.isEmpty
-            let reveal = menu.addItem(withTitle: "Reveal in Finder", action: #selector(revealFolder(_:)), keyEquivalent: "")
+            let reveal = menu.addItem(
+                withTitle: "Reveal in Finder", action: #selector(revealFolder(_:)), keyEquivalent: "")
             reveal.target = self; reveal.representedObject = folder.relativePath
             menu.addItem(.separator())
             let trash = menu.addItem(withTitle: "Move to Trash", action: #selector(trashFolder(_:)), keyEquivalent: "")
@@ -437,7 +469,9 @@ struct FolderSidebar: NSViewRepresentable {
         func tagMenu(_ tag: LibraryTag) -> NSMenu {
             let menu = NSMenu()
             menu.autoenablesItems = false
-            for (title, action) in [("Rename Tag…", #selector(renameTag(_:))), ("Delete Tag…", #selector(deleteTag(_:)))] {
+            for (title, action) in [
+                ("Rename Tag…", #selector(renameTag(_:))), ("Delete Tag…", #selector(deleteTag(_:))),
+            ] {
                 let entry = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
                 entry.target = self; entry.representedObject = tag; entry.isEnabled = workspace.canMutate
             }
@@ -456,11 +490,14 @@ struct FolderSidebar: NSViewRepresentable {
             if let tag = item.tag {
                 guard workspace.canMutate else { return }
                 workspace.tagRenameName = tag.name; workspace.tagRenameID = tag.id
-            } else if !item.isTagsGroup { workspace.beginRename() }
+            } else if !item.isTagsGroup {
+                workspace.beginRename()
+            }
         }
         private func setGroupExpanded(_ expanded: Bool) {
             guard let outline, let group = tagsGroup else { return }
-            let target = restoring || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? outline : outline.animator()
+            let target =
+                restoring || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? outline : outline.animator()
             if expanded { target.expandItem(group) } else { target.collapseItem(group) }
         }
         func toggleDisclosure(at row: Int) -> Bool {
@@ -469,16 +506,23 @@ struct FolderSidebar: NSViewRepresentable {
             return true
         }
         func toggleSelectedGroup() -> Bool {
-            guard let outline, let group = tagsGroup, outline.item(atRow: outline.selectedRow) as? Item === group else { return false }
+            guard let outline, let group = tagsGroup, outline.item(atRow: outline.selectedRow) as? Item === group else {
+                return false
+            }
             setGroupExpanded(!outline.isItemExpanded(group))
             return true
         }
         func navigateTags(_ key: UInt16) -> Bool {
-            guard let outline, let item = outline.item(atRow: outline.selectedRow) as? Item, let group = tagsGroup else { return false }
+            guard let outline, let item = outline.item(atRow: outline.selectedRow) as? Item, let group = tagsGroup
+            else { return false }
             if item.isTagsGroup {
-                if key == 123 { setGroupExpanded(false) }
-                else if !outline.isItemExpanded(group) { setGroupExpanded(true) }
-                else { return false }
+                if key == 123 {
+                    setGroupExpanded(false)
+                } else if !outline.isItemExpanded(group) {
+                    setGroupExpanded(true)
+                } else {
+                    return false
+                }
                 return true
             }
             if key == 123, item.tag != nil {
@@ -488,8 +532,12 @@ struct FolderSidebar: NSViewRepresentable {
             return false
         }
 
-        @objc private func newDocument(_ sender: NSMenuItem) { workspace.create(folder: false, parent: sender.representedObject as? String) }
-        @objc private func newFolder(_ sender: NSMenuItem) { workspace.create(folder: true, parent: sender.representedObject as? String) }
+        @objc private func newDocument(_ sender: NSMenuItem) {
+            workspace.create(folder: false, parent: sender.representedObject as? String)
+        }
+        @objc private func newFolder(_ sender: NSMenuItem) {
+            workspace.create(folder: true, parent: sender.representedObject as? String)
+        }
         @objc private func renameFolder(_ sender: NSMenuItem) {
             guard let path = sender.representedObject as? String else { return }
             workspace.beginRename(LibraryRename(path: path, isFolder: true))
@@ -504,16 +552,21 @@ struct FolderSidebar: NSViewRepresentable {
 
         func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
             guard workspace.canMutate, let path = (item as? Item)?.folder?.relativePath, !path.isEmpty,
-                  let id = workspace.snapshot?.metadata.IDsByPath[path] else { return nil }
+                let id = workspace.snapshot?.metadata.IDsByPath[path]
+            else { return nil }
             let writer = NSPasteboardItem()
-            writer.setData(try! JSONEncoder().encode(InternalMove(library: workspace.dragIdentity, ids: [id])),
-                           forType: NSPasteboard.PasteboardType(UTType.silkwebMove.identifier))
+            writer.setData(
+                try! JSONEncoder().encode(InternalMove(library: workspace.dragIdentity, ids: [id])),
+                forType: NSPasteboard.PasteboardType(UTType.silkwebMove.identifier))
             return writer
         }
         func dragPaths(_ pasteboard: NSPasteboard) -> [String]? {
             let count = pasteboard.changeCount
             if let cached = dragCache, cached.name == pasteboard.name, cached.count == count,
-               cached.revision == workspace.revision, cached.library == workspace.dragIdentity { return cached.paths }
+                cached.revision == workspace.revision, cached.library == workspace.dragIdentity
+            {
+                return cached.paths
+            }
             let paths = readDragData(pasteboard).flatMap { workspace.pathsForDrag($0) }
             dragCache = (pasteboard.name, count, workspace.revision, workspace.dragIdentity, paths)
             return paths
@@ -522,7 +575,10 @@ struct FolderSidebar: NSViewRepresentable {
             guard workspace.canMutate, let folder = (item as? Item)?.folder, !folder.isUnreadable else { return false }
             return MoveSelection.permits(paths, destination: folder.relativePath)
         }
-        func outlineView(_ outlineView: NSOutlineView, validateDrop info: NSDraggingInfo, proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
+        func outlineView(
+            _ outlineView: NSOutlineView, validateDrop info: NSDraggingInfo, proposedItem item: Any?,
+            proposedChildIndex index: Int
+        ) -> NSDragOperation {
             guard let paths = dragPaths(info.draggingPasteboard), allowsDrop(paths, item: item) else {
                 setHover(nil); return []
             }
@@ -530,9 +586,12 @@ struct FolderSidebar: NSViewRepresentable {
             setHover(item as? Item)
             return .move
         }
-        func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo, item: Any?, childIndex: Int) -> Bool {
+        func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo, item: Any?, childIndex: Int)
+            -> Bool
+        {
             guard let paths = dragPaths(info.draggingPasteboard), allowsDrop(paths, item: item),
-                  let destination = (item as? Item)?.folder?.relativePath else { return false }
+                let destination = (item as? Item)?.folder?.relativePath
+            else { return false }
             finishDrag(accepted: true)
             workspace.move(paths, to: destination)
             return true
@@ -551,7 +610,10 @@ struct FolderSidebar: NSViewRepresentable {
                 }
             }
             if UserDefaults.standard.object(forKey: "com.apple.springing.enabled") != nil,
-               !UserDefaults.standard.bool(forKey: "com.apple.springing.enabled") { return }
+                !UserDefaults.standard.bool(forKey: "com.apple.springing.enabled")
+            {
+                return
+            }
             guard let item, !item.children.isEmpty, outline?.isItemExpanded(item) == false else { return }
             let configured = UserDefaults.standard.double(forKey: "com.apple.springing.delay")
             let delay = configured > 0 ? configured : 0.6
@@ -572,7 +634,8 @@ struct FolderSidebar: NSViewRepresentable {
             springTask?.cancel()
             for item in springExpanded.reversed() {
                 if accepted, let target = hovered?.folder?.relativePath, let path = item.folder?.relativePath,
-                   target == path || target.hasPrefix(path.isEmpty ? "" : path + "/") {
+                    target == path || target.hasPrefix(path.isEmpty ? "" : path + "/")
+                {
                     workspace.session.expandedFolders.insert(path)
                 } else {
                     restoring = true; outline?.collapseItem(item); restoring = false
@@ -584,8 +647,11 @@ struct FolderSidebar: NSViewRepresentable {
         func outlineViewSelectionDidChange(_ notification: Notification) {
             guard !restoring, let outline, let item = outline.item(atRow: outline.selectedRow) as? Item else { return }
             if item.isTagsGroup { return }
-            if let tag = item.tag { workspace.selectTag(tag.id) }
-            else { workspace.selectFolder(item.folder?.relativePath) }
+            if let tag = item.tag {
+                workspace.selectTag(tag.id)
+            } else {
+                workspace.selectFolder(item.folder?.relativePath)
+            }
             Task {
                 // Wait for the guarded switch; restore the row if saving refused it.
                 await workspace.waitForNavigation()
@@ -607,8 +673,11 @@ struct FolderSidebar: NSViewRepresentable {
                 if expanded, !springExpanded.contains(where: { $0 === item }) { springExpanded.append(item) }
                 return
             }
-            if expanded { workspace.session.expandedFolders.insert(path) }
-            else { workspace.session.expandedFolders.remove(path) }
+            if expanded {
+                workspace.session.expandedFolders.insert(path)
+            } else {
+                workspace.session.expandedFolders.remove(path)
+            }
         }
     }
 }
@@ -641,9 +710,12 @@ final class SidebarFolderCell: NSTableCellView, CapsuleAccessories {
     }
 
     func updateSecondaryColor() {
-        let color: NSColor = capsuleFocused ? .silkwebAccent
-            : backgroundStyle == .emphasized ? NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.75)
-            : .secondaryLabelColor
+        let color: NSColor =
+            capsuleFocused
+            ? .silkwebAccent
+            : backgroundStyle == .emphasized
+                ? NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.75)
+                : .secondaryLabelColor
         countBadge.textColor = color
         lockBadge.contentTintColor = color
         imageView?.contentTintColor = color
@@ -676,8 +748,9 @@ final class ThreadRowView: CapsuleRowView {
         let row = outline.row(for: self)
         guard row >= 0 else { return nil }
         let cellX = outline.frameOfCell(atColumn: 0, row: row).minX
-        return ThreadGuides.Metrics(leadingInset: cellX - CGFloat(thread.level) * outline.indentationPerLevel - Self.slotWidth,
-                                    indentation: outline.indentationPerLevel, slotWidth: Self.slotWidth, rowHeight: bounds.height)
+        return ThreadGuides.Metrics(
+            leadingInset: cellX - CGFloat(thread.level) * outline.indentationPerLevel - Self.slotWidth,
+            indentation: outline.indentationPerLevel, slotWidth: Self.slotWidth, rowHeight: bounds.height)
     }
 
     /// Row-local y from a distance below the top edge.
@@ -690,8 +763,10 @@ final class ThreadRowView: CapsuleRowView {
         path.lineWidth = Self.lineWidth
         path.lineCapStyle = .butt
         path.lineJoinStyle = .round
-        for segment in ThreadGuides.segments(level: thread.level, isLastChild: thread.isLastChild,
-                                             ancestorContinues: thread.ancestorContinues, hasChildren: thread.hasChildren, metrics: metrics) {
+        for segment in ThreadGuides.segments(
+            level: thread.level, isLastChild: thread.isLastChild,
+            ancestorContinues: thread.ancestorContinues, hasChildren: thread.hasChildren, metrics: metrics)
+        {
             switch segment {
             case .rail(let x):
                 path.move(to: NSPoint(x: x + dx, y: bounds.minY))
@@ -700,9 +775,10 @@ final class ThreadRowView: CapsuleRowView {
                 let k = 0.5523 * radius // Quarter-circle control distance.
                 path.move(to: NSPoint(x: x + dx, y: y(0)))
                 path.line(to: NSPoint(x: x + dx, y: y(cornerY - radius)))
-                path.curve(to: NSPoint(x: x + dx + radius, y: y(cornerY)),
-                           controlPoint1: NSPoint(x: x + dx, y: y(cornerY - radius + k)),
-                           controlPoint2: NSPoint(x: x + dx + radius - k, y: y(cornerY)))
+                path.curve(
+                    to: NSPoint(x: x + dx + radius, y: y(cornerY)),
+                    controlPoint1: NSPoint(x: x + dx, y: y(cornerY - radius + k)),
+                    controlPoint2: NSPoint(x: x + dx + radius - k, y: y(cornerY)))
                 path.line(to: NSPoint(x: endX + dx, y: y(cornerY)))
             }
         }
@@ -719,7 +795,8 @@ final class ThreadRowView: CapsuleRowView {
     override func drawDraggingDestinationFeedback(in dirtyRect: NSRect) {
         NSColor.silkwebSelection.setFill()
         NSBezierPath(roundedRect: capsuleRect, xRadius: cornerRadius, yRadius: cornerRadius).fill()
-        let outline = NSBezierPath(roundedRect: capsuleRect.insetBy(dx: 0.75, dy: 0.75), xRadius: cornerRadius, yRadius: cornerRadius)
+        let outline = NSBezierPath(
+            roundedRect: capsuleRect.insetBy(dx: 0.75, dy: 0.75), xRadius: cornerRadius, yRadius: cornerRadius)
         outline.lineWidth = 1.5
         NSColor.silkwebAccent.setStroke()
         outline.stroke()
@@ -757,7 +834,10 @@ final class SidebarOutlineView: NSOutlineView {
     override func mouseDown(with event: NSEvent) {
         let clicked = row(at: convert(event.locationInWindow, from: nil))
         if clicked >= 0, frameOfOutlineCell(atRow: clicked).contains(convert(event.locationInWindow, from: nil)),
-           toggleDisclosure?(clicked) == true { return }
+            toggleDisclosure?(clicked) == true
+        {
+            return
+        }
         let wasSelected = clicked == selectedRow
         super.mouseDown(with: event)
         if event.clickCount == 2, toggleGroup?() == true { return }
@@ -776,11 +856,13 @@ final class SidebarOutlineView: NSOutlineView {
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
         let point = convert(sender.draggingLocation, from: nil)
         let visible = visibleRect
-        if (point.y < visible.minY + 24 || point.y > visible.maxY - 24), let event = NSApp.currentEvent { autoscroll(with: event) }
+        if point.y < visible.minY + 24 || point.y > visible.maxY - 24, let event = NSApp.currentEvent {
+            autoscroll(with: event)
+        }
         return super.draggingUpdated(sender)
     }
     override func keyDown(with event: NSEvent) {
-        if (event.keyCode == 123 || event.keyCode == 124), tagArrow?(event.keyCode) == true {
+        if event.keyCode == 123 || event.keyCode == 124, tagArrow?(event.keyCode) == true {
             return
         } else if event.keyCode == 49, expandHovered?() == true {
             return

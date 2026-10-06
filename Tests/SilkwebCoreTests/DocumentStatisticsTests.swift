@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class DocumentStatisticsTests: XCTestCase {
@@ -78,22 +79,32 @@ final class DocumentStatisticsTests: XCTestCase {
             let part = count(ns.substring(with: NSRange(location: 0, length: length)))
             XCTAssertLessThanOrEqual(part.characters, ns.length)
         }
-        XCTAssertEqual(DocumentStatisticsPresentation.label(document: document, selection: selection),
-                       "3 of 11 words · 23 of 51 characters")
-        XCTAssertEqual(DocumentStatisticsPresentation.accessibilityValue(document: document, selection: selection),
-                       "Selection: 3 of 11 words, 23 of 51 characters")
+        XCTAssertEqual(
+            DocumentStatisticsPresentation.label(document: document, selection: selection),
+            "3 of 11 words · 23 of 51 characters")
+        XCTAssertEqual(
+            DocumentStatisticsPresentation.accessibilityValue(document: document, selection: selection),
+            "Selection: 3 of 11 words, 23 of 51 characters")
     }
 
     func testPresentationCopy() {
         let big = DocumentStatistics(words: 1_204, characters: 6_830)
         let separator = Locale.current.groupingSeparator ?? ","
-        XCTAssertEqual(DocumentStatisticsPresentation.label(document: big), "1\(separator)204 words · 6\(separator)830 characters")
-        XCTAssertEqual(DocumentStatisticsPresentation.label(document: big, includesCharacters: false), "1\(separator)204 words")
-        XCTAssertEqual(DocumentStatisticsPresentation.label(document: big, selection: DocumentStatistics(words: 38, characters: 212), includesCharacters: false),
-                       "38 of 1\(separator)204 words")
+        XCTAssertEqual(
+            DocumentStatisticsPresentation.label(document: big), "1\(separator)204 words · 6\(separator)830 characters")
+        XCTAssertEqual(
+            DocumentStatisticsPresentation.label(document: big, includesCharacters: false), "1\(separator)204 words")
+        XCTAssertEqual(
+            DocumentStatisticsPresentation.label(
+                document: big, selection: DocumentStatistics(words: 38, characters: 212), includesCharacters: false),
+            "38 of 1\(separator)204 words")
         XCTAssertEqual(DocumentStatisticsPresentation.label(document: .zero), "0 words · 0 characters")
-        XCTAssertEqual(DocumentStatisticsPresentation.label(document: DocumentStatistics(words: 1, characters: 1)), "1 word · 1 character")
-        XCTAssertEqual(DocumentStatisticsPresentation.accessibilityValue(document: DocumentStatistics(words: 2, characters: 9)), "2 words, 9 characters")
+        XCTAssertEqual(
+            DocumentStatisticsPresentation.label(document: DocumentStatistics(words: 1, characters: 1)),
+            "1 word · 1 character")
+        XCTAssertEqual(
+            DocumentStatisticsPresentation.accessibilityValue(document: DocumentStatistics(words: 2, characters: 9)),
+            "2 words, 9 characters")
     }
 
     /// Edge sweep: every prefix of a mixed fixture counts without crashing and grows monotonically in characters.

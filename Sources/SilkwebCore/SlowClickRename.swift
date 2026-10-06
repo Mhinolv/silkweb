@@ -8,16 +8,20 @@ public struct SlowClickRename {
 
     public mutating func reset() { previous = nil }
 
-    public mutating func click(path: String, timestamp: TimeInterval, clickCount: Int,
-                               wasSingleSelected: Bool, isSingleSelected: Bool,
-                               hasModifiers: Bool = false) -> Bool {
+    public mutating func click(
+        path: String, timestamp: TimeInterval, clickCount: Int,
+        wasSingleSelected: Bool, isSingleSelected: Bool,
+        hasModifiers: Bool = false
+    ) -> Bool {
         guard clickCount == 1, !hasModifiers else {
             reset()
             return false
         }
-        let rename = wasSingleSelected && isSingleSelected && previous.map {
-            $0.path == path && (0.5...1.5).contains(timestamp - $0.timestamp)
-        } == true
+        let rename =
+            wasSingleSelected && isSingleSelected
+            && previous.map {
+                $0.path == path && (0.5...1.5).contains(timestamp - $0.timestamp)
+            } == true
         previous = rename ? nil : (path, timestamp)
         return rename
     }

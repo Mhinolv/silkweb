@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 /// Owns cancellable work for both search surfaces; the index actor owns all disk IO.
 @MainActor @Observable
@@ -19,8 +19,8 @@ final class LibrarySearch {
     @ObservationIgnored private var request: UUID?
     @ObservationIgnored private var quickRequest: UUID?
     #if DEBUG
-    @ObservationIgnored private(set) var queryCount = 0
-    @ObservationIgnored var resultsBodyCount = 0
+        @ObservationIgnored private(set) var queryCount = 0
+        @ObservationIgnored var resultsBodyCount = 0
     #endif
     var hasPendingQuery: Bool { completed?.text != text || completed?.scope != folderScope }
     var quickHasPendingQuery: Bool { quickCompleted?.text != quickText }
@@ -91,7 +91,7 @@ final class LibrarySearch {
                 guard !Task.isCancelled else { return }
                 self?.error = nil
                 if changed { self?.revision += 1 }
-            } catch is CancellationError { } catch {
+            } catch is CancellationError {} catch {
                 self?.error = "Search is unavailable: \(error.localizedDescription)"
             }
         }
@@ -134,14 +134,20 @@ final class LibrarySearch {
                 guard identity != (quick ? quickCompleted : completed) else { return }
             }
             #if DEBUG
-            queryCount += 1
+                queryCount += 1
             #endif
-            let hits = quick && queryText.isEmpty ? try await index.recentResults() : try await index.query(SearchQuery(queryText,
-                scope: scope.map { .folder($0, includeSubfolders: true) } ?? .library,
-                mode: quick ? .quickOpen : .library, limit: quick ? 12 : Int.max))
+            let hits =
+                quick && queryText.isEmpty
+                ? try await index.recentResults()
+                : try await index.query(
+                    SearchQuery(
+                        queryText,
+                        scope: scope.map { .folder($0, includeSubfolders: true) } ?? .library,
+                        mode: quick ? .quickOpen : .library, limit: quick ? 12 : Int.max))
             try Task.checkCancellation()
             guard self.index === index, queryText == (quick ? quickText : text),
-                  quick || scope == folderScope, identity.revision == revision else { return }
+                quick || scope == folderScope, identity.revision == revision
+            else { return }
             let previous = quick ? quickCompleted : completed
             let countChanged = hits.count != (quick ? quickResults.count : results.count)
             if quick {
@@ -154,10 +160,14 @@ final class LibrarySearch {
                 completed = identity
             }
             if countChanged || previous?.text != queryText {
-                NSAccessibility.post(element: NSApplication.shared.keyWindow as Any, notification: .announcementRequested,
-                                     userInfo: [.announcement: Self.resultCount(hits.count), .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+                NSAccessibility.post(
+                    element: NSApplication.shared.keyWindow as Any, notification: .announcementRequested,
+                    userInfo: [
+                        .announcement: Self.resultCount(hits.count),
+                        .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+                    ])
             }
-        } catch is CancellationError { } catch {
+        } catch is CancellationError {} catch {
             self.error = "Search is unavailable: \(error.localizedDescription)"
         }
     }
@@ -223,12 +233,18 @@ extension LibraryWorkspace {
             for _ in 0..<50 {
                 guard editor.url == url else { return }
                 if let view = preview.editor, view.string == editor.text {
-                    let literal = (view.string as NSString).range(of: findText, options: [.caseInsensitive, .diacriticInsensitive])
-                    let range = literal.location != NSNotFound ? literal :
-                        SearchNavigation.matchRanges(in: view.string, query: findText).min { $0.location < $1.location } ?? literal
+                    let literal = (view.string as NSString).range(
+                        of: findText, options: [.caseInsensitive, .diacriticInsensitive])
+                    let range =
+                        literal.location != NSNotFound
+                        ? literal
+                        : SearchNavigation.matchRanges(in: view.string, query: findText).min {
+                            $0.location < $1.location
+                        } ?? literal
                     if range.location != NSNotFound {
                         NSPasteboard(name: .find).clearContents()
-                        NSPasteboard(name: .find).setString((view.string as NSString).substring(with: range), forType: .string)
+                        NSPasteboard(name: .find).setString(
+                            (view.string as NSString).substring(with: range), forType: .string)
                         view.setSelectedRange(range)
                         view.scrollRangeToVisible(range)
                         view.showFindIndicator(for: range)

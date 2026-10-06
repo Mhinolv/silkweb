@@ -22,7 +22,9 @@ public struct LibraryLocation: Codable, Equatable, Sendable {
     public static func saving(_ url: URL) -> LibraryLocation {
         let url = url.standardizedFileURL.resolvingSymlinksInPath()
         // A path remains usable even if bookmark creation fails.
-        return LibraryLocation(bookmark: try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil), path: url.path)
+        return LibraryLocation(
+            bookmark: try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil),
+            path: url.path)
     }
 }
 
@@ -77,13 +79,16 @@ public enum LibraryLocationRestore {
         }
         try validate(url, scoped)
         let refresh = legacy || resolution == nil || resolution?.stale == true || location?.path != url.path
-        return ResolvedLibraryLocation(url: url, usesSecurityScope: scoped,
-                                       refreshedLocation: refresh ? save(url) : nil)
+        return ResolvedLibraryLocation(
+            url: url, usesSecurityScope: scoped,
+            refreshedLocation: refresh ? save(url) : nil)
     }
 
     public static func resolveBookmark(_ data: Data, scoped: Bool) throws -> BookmarkResolution {
         var stale = false
-        let url = try URL(resolvingBookmarkData: data, options: scoped ? [.withSecurityScope, .withoutUI] : [.withoutUI], bookmarkDataIsStale: &stale)
+        let url = try URL(
+            resolvingBookmarkData: data, options: scoped ? [.withSecurityScope, .withoutUI] : [.withoutUI],
+            bookmarkDataIsStale: &stale)
         return BookmarkResolution(url: url, stale: stale)
     }
 
@@ -104,7 +109,8 @@ public enum LibraryLocationRestore {
         } catch {
             let cocoa = error as NSError
             if cocoa.domain == NSCocoaErrorDomain,
-               [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(cocoa.code) {
+                [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(cocoa.code)
+            {
                 throw LibraryLocationError.notFound
             }
             throw LibraryLocationError.unreadable

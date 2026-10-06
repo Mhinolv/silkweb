@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 /// silkweb-1.75: Return while the 150 ms debounce is pending opens the current query's result, never the stale first row.
@@ -27,7 +28,9 @@ final class SearchReturnTests: XCTestCase {
     private func host<Content: View>(_ view: Content, width: CGFloat) -> (NSHostingView<Content>, NSWindow) {
         let host = NSHostingView(rootView: view)
         host.sizingOptions = []
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 700), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: width, height: 700), styleMask: [.titled], backing: .buffered,
+            defer: false)
         window.contentView = host
         return (host, window)
     }
@@ -130,7 +133,8 @@ final class SearchReturnTests: XCTestCase {
     func testSearchLibraryReturnBeforeDebounceOpensCurrentQuery() async throws {
         let (workspace, root) = try await makeWorkspace()
         defer { try? FileManager.default.removeItem(at: root) }
-        let (host, window) = host(SearchView(workspace: workspace, search: workspace.search) { Color.clear }, width: 480)
+        let (host, window) = host(
+            SearchView(workspace: workspace, search: workspace.search) { Color.clear }, width: 480)
         defer { window.contentView = nil }
         workspace.search.text = "kyo"
         await workspace.search.query(quick: false)
@@ -161,7 +165,8 @@ final class SearchReturnTests: XCTestCase {
             await debounced.value
             let again = await search.settle(quick: quick)
             XCTAssertTrue(again)
-            XCTAssertEqual(search.queryCount - start, 1, "the debounced view task must not repeat a query Return already settled")
+            XCTAssertEqual(
+                search.queryCount - start, 1, "the debounced view task must not repeat a query Return already settled")
         }
     }
 
