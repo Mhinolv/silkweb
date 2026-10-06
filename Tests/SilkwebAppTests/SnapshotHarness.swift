@@ -58,6 +58,8 @@ struct SnapshotScenario {
     /// Hides the traffic lights as macOS does in full screen with the titlebar concealed (#54). The window can't
     /// enter real full screen offscreen; the toolbar controller reacts to the buttons, not the style mask.
     var concealedTitlebar = false
+    /// #87: the Outline's rows while a note too large to parse within a frame is still parsing (dimmed, inert).
+    var outlinePending = false
 
     static let deepFolder =
         "Field Notes/Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
@@ -141,6 +143,7 @@ struct SnapshotScenario {
             name: "split-scroll-entry", document: "Snapshot Fixtures/Scroll Preview.md", mode: .split, outline: true,
             previewScrollState: "entry"),
         .init(name: "inspector-outline", document: pourOver, outline: true),
+        .init(name: "inspector-outline-pending", document: pourOver, outline: true, outlinePending: true),
         .init(
             name: "outline-images-split", document: "Snapshot Fixtures/Outline Images.md", mode: .split, outline: true,
             caretImage: "![Portrait]"),
@@ -875,6 +878,12 @@ final class SnapshotHarness {
                     }
                 }
                 controller.view.layoutSubtreeIfNeeded()
+            }
+            if scenario.outlinePending {
+                // The state a list click on a large note leaves up until its background parse lands.
+                workspace.preview.outlinePending = true
+                controller.view.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(100))
             }
             if let text = scenario.outlineJump {
                 // The production action of an Outline row click: jump, anchor and focus the editor.

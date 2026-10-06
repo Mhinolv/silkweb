@@ -152,7 +152,9 @@ struct PreviewView: NSViewRepresentable {
         }
 
         private var imageAnchors: [[String: Any]] {
-            workspace.preview.outlineItems.compactMap { item in
+            // The Outline may already describe the next note (#87); its images aren't on this page.
+            guard workspace.preview.outlineURL == workspace.preview.renderedURL else { return [] }
+            return workspace.preview.outlineItems.compactMap { item in
                 guard case .image = item.content else { return nil }
                 return ["id": item.id, "line": item.sourceLine ?? "", "direct": item.isInlineImage]
             }
