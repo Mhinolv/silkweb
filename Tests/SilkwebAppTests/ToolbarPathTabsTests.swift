@@ -5,7 +5,8 @@ import XCTest
 @testable import Silkweb
 @testable import SilkwebCore
 
-/// silkweb-1.65: the compact bar with its breadcrumb, and hairline folder tabs with a coral unsaved dot.
+/// silkweb-1.65: the compact bar (its path moved to the status bar in #91), and hairline folder tabs with a
+/// coral unsaved dot.
 final class ToolbarPathTabsTests: XCTestCase {
     static let deep =
         "Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
@@ -51,9 +52,10 @@ final class ToolbarPathTabsTests: XCTestCase {
         return object.perform(selector)?.takeUnretainedValue() as? String
     }
 
-    /// The production window shape with a unified toolbar from SwiftUI, never ordered on screen.
+    /// The production window shape with a unified toolbar from SwiftUI, never ordered on screen. #91: the bar has
+    /// no path; the path leads the status bar, navigates like the sidebar and folds at the minimum width.
     @MainActor
-    func testCompactBarBreadcrumbNavigatesAndFollowsWindowButtons() async throws {
+    func testCompactBarHasNoPathAndTheStatusBarPathNavigates() async throws {
         _ = NSApplication.shared
         let (workspace, container) = try await library()
         let oldAppearance = NSApp.appearance
@@ -78,6 +80,18 @@ final class ToolbarPathTabsTests: XCTestCase {
                 try await Task.sleep(for: .milliseconds(120))
             }
         }
+        let toolbar = try XCTUnwrap(window.toolbar)
+        func toolbarPaths() -> [BreadcrumbView] {
+            toolbar.items.compactMap(\.view).flatMap(Self.descendants).compactMap { $0 as? BreadcrumbView }
+        }
+        func statusPath() -> BreadcrumbView? {
+            Self.descendants(controller.view).compactMap { $0 as? BreadcrumbView }.first { $0.window != nil }
+        }
+        // No document open: no path anywhere in the window.
+        try await settle()
+        XCTAssertTrue(toolbarPaths().isEmpty)
+        XCTAssertNil(statusPath(), "no document, no path")
+
         workspace.navigate(folder: "Vanlife/East", documents: ["Vanlife/East/Settling In.md"], pinned: true)
         await workspace.waitForNavigation()
         try await settle()
@@ -89,7 +103,6 @@ final class ToolbarPathTabsTests: XCTestCase {
         let barHeight = window.frame.height - window.contentLayoutRect.height
         XCTAssertGreaterThan(barHeight, 20)
         XCTAssertLessThanOrEqual(barHeight, 40)
-        let toolbar = try XCTUnwrap(window.toolbar)
         func frame(_ view: NSView) -> NSRect { view.convert(view.bounds, to: nil) }
         func placed() -> [NSView] {
             toolbar.items.compactMap(\.view).filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
@@ -98,27 +111,33 @@ final class ToolbarPathTabsTests: XCTestCase {
         let zoom = try XCTUnwrap(window.standardWindowButton(.zoomButton))
         func firstMinX() -> CGFloat { placed().map { frame($0).minX }.min() ?? .infinity }
         XCTAssertGreaterThan(firstMinX(), frame(zoom).maxX, "items follow the traffic lights")
-        // The breadcrumb fills the middle, so the trailing items stay at the trailing edge.
+        // No path and no count in the bar, only the controls and the unlabelled empty gap; the trailing items stay
+        // at the trailing edge.
+        XCTAssertTrue(toolbarPaths().isEmpty, "the toolbar shows no path")
+        XCTAssertEqual(
+            toolbar.items.map(\.label).sorted(),
+            [
+                "", "Filter by Tag", "Hide Sidebars", "New Document", "Show Document Info", "Show Outline", "Sort By",
+                "View Mode",
+            ])
         let info = try XCTUnwrap(toolbar.items.first { $0.label == "Show Document Info" }?.view)
         XCTAssertEqual(frame(info).maxX, window.frame.width - Spacing.small, accuracy: 3)
 
-        // The breadcrumb: the open document's real folder, with the count as a suffix, for VoiceOver too.
-        let crumbItem = try XCTUnwrap(
-            toolbar.items.first { item in
-                item.view.map { Self.descendants($0).contains { $0 is BreadcrumbView } } == true
-            }?.view)
-        let breadcrumb = try XCTUnwrap(Self.descendants(crumbItem).compactMap { $0 as? BreadcrumbView }.first)
+        // The status bar path: the open document's real folder, no count, for VoiceOver too.
+        let breadcrumb = try XCTUnwrap(statusPath(), "status bar path")
+        XCTAssertEqual(breadcrumb.accessibilityIdentifier(), "statusPath")
         XCTAssertEqual(workspace.breadcrumb.crumbs.map(\.title), ["Field Notes", "Vanlife", "East"])
         func element(_ label: String) -> AnyObject? {
             Self.accessibilityTree(breadcrumb).first { Self.label($0) == label }
         }
-        let group = try XCTUnwrap(element("Path"), "breadcrumb group")
-        XCTAssertEqual(Self.value(group), "Field Notes › Vanlife › East › Settling In, 1 document")
+        let group = try XCTUnwrap(element("Path"), "path group")
+        XCTAssertEqual(Self.value(group), "Field Notes › Vanlife › East › Settling In")
         for name in ["Field Notes", "Vanlife", "East"] {
             let crumb = try XCTUnwrap(element("\(name), folder"), name)
             XCTAssertEqual(crumb.accessibilityHelp?() ?? nil, "Shows this folder", name)
         }
-        XCTAssertNil(element("Settling In, folder"), "the last crumb is not a link")
+        XCTAssertNil(element("Settling In, folder"), "the document title is not a link")
+        XCTAssertEqual(breadcrumb.currentLabel.stringValue, "Settling In")
 
         // Pressing an intermediate crumb is a sidebar click: scope, list and sidebar change; the tab stays open.
         let openURL = workspace.editor.url
@@ -134,6 +153,7 @@ final class ToolbarPathTabsTests: XCTestCase {
         let selected = try XCTUnwrap(outline.item(atRow: outline.selectedRow) as? FolderSidebar.Item)
         XCTAssertEqual(selected.folder?.relativePath, "Vanlife", "sidebar selection stays in sync")
         XCTAssertNotNil(Self.descendants(controller.view).first { $0 is EditorTabBarView })
+        XCTAssertEqual(Self.value(group), "Field Notes › Vanlife › East › Settling In", "still the document's folder")
 
         // A long path folds into `…` at the minimum window width; the document title stays, VoiceOver hears it all.
         window.setFrame(NSRect(x: 0, y: 0, width: 900, height: 900), display: false)
@@ -141,32 +161,20 @@ final class ToolbarPathTabsTests: XCTestCase {
             folder: Self.deep, documents: [Self.deep + "/Settling In at the Campground.md"], pinned: true)
         await workspace.waitForNavigation()
         try await settle()
-        let geometry = toolbar.items.map { item -> String in
-            let view = item.view
-            return
-                "\(item.label): placed=\(view?.window != nil) frame=\(view.map(frame) ?? .zero) fitting=\(view?.fittingSize ?? .zero) priority=\(item.visibilityPriority.rawValue)"
-        }.joined(separator: "\n")
-        XCTAssertEqual(
-            placed().count, toolbar.items.count,
-            "no item overflows at the minimum width; breadcrumb width \(workspace.toolbarMetrics.breadcrumbWidth), window \(window.frame)\n\(geometry)"
-        )
+        XCTAssertEqual(placed().count, toolbar.items.count, "no item overflows at the minimum width")
+        let deepPath = try XCTUnwrap(statusPath())
         let folders: [String] = ["Field Notes"] + Self.deep.split(separator: "/").map(String.init)
         let fullPath: String = (folders + ["Settling In at the Campground"]).joined(separator: " › ")
-        XCTAssertEqual(element("Path").flatMap(Self.value), fullPath + ", 1 document")
+        XCTAssertEqual(
+            Self.accessibilityTree(deepPath).first { Self.label($0) == "Path" }.flatMap(Self.value), fullPath)
         let more = try XCTUnwrap(
-            Self.accessibilityTree(breadcrumb).first { Self.label($0)?.hasPrefix("More folders: ") == true })
+            Self.accessibilityTree(deepPath).first { Self.label($0)?.hasPrefix("More folders: ") == true })
         XCTAssertTrue(Self.label(more)?.contains("North American Road Trips") == true)
-        let titles: [String?] = Self.accessibilityTree(breadcrumb).flatMap { [Self.label($0), Self.value($0)] }
-        XCTAssertTrue(
-            titles.contains("Settling In at the Campground"), "the document title is never dropped: \(titles)")
-        let fit = try XCTUnwrap(breadcrumb.fit)
+        let fit = try XCTUnwrap(deepPath.fit)
         XCTAssertFalse(fit.collapsed.isEmpty, "the long path folds")
-        XCTAssertFalse(fit.showsCount, "the count is the first thing dropped")
-        XCTAssertFalse(breadcrumb.currentLabel.isHidden)
-        XCTAssertGreaterThanOrEqual(breadcrumb.currentLabel.frame.width, 80 - 2 * BreadcrumbView.padding)
-        XCTAssertLessThanOrEqual(breadcrumb.currentLabel.frame.maxX, breadcrumb.bounds.maxX + 0.5)
-        XCTAssertLessThanOrEqual(
-            frame(crumbItem).maxX, frame(try XCTUnwrap(toolbar.items.first { $0.label == "View Mode" }?.view)).minX)
+        XCTAssertFalse(deepPath.currentLabel.isHidden)
+        XCTAssertEqual(deepPath.currentLabel.stringValue, "Settling In at the Campground")
+        XCTAssertLessThanOrEqual(deepPath.currentLabel.frame.maxX, deepPath.bounds.maxX + 0.5)
 
         // Without the window buttons the items move to the bar's leading inset, and back when they return.
         window.setFrame(NSRect(x: 0, y: 0, width: 1400, height: 900), display: false)
@@ -185,6 +193,12 @@ final class ToolbarPathTabsTests: XCTestCase {
         for _ in 0..<20 where firstMinX() <= frame(zoom).maxX { try await settle() }
         XCTAssertEqual(firstMinX(), shown, accuracy: 0.5)
         XCTAssertGreaterThan(firstMinX(), frame(zoom).maxX)
+
+        // View ▸ Show Status Bar off: no path anywhere.
+        workspace.preview.showsStatusBar = false
+        try await settle()
+        XCTAssertNil(statusPath(), "⌘/ off hides the path with the status bar")
+        XCTAssertTrue(toolbarPaths().isEmpty)
     }
 
     @MainActor private func tabsFixture() async throws -> LibraryWorkspace {

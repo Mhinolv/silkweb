@@ -1,6 +1,7 @@
 import Foundation
 
-/// The toolbar path (silkweb-1.65): library › folders › document, or the list scope with no document open.
+/// The library path (silkweb-1.65; in the status bar since #91): library › folders › document, or the list scope
+/// with no document open.
 public struct Breadcrumb: Equatable, Sendable {
     public struct Crumb: Equatable, Sendable {
         public let title: String
@@ -52,11 +53,7 @@ public struct Breadcrumb: Equatable, Sendable {
     }
 
     /// The full path for VoiceOver, so truncation hides nothing.
-    public func accessibilityValue(count: String?) -> String {
-        let path = (crumbs.map(\.title) + [current]).joined(separator: Self.separator)
-        guard let count, !count.isEmpty else { return path }
-        return path + ", " + count
-    }
+    public var accessibilityValue: String { (crumbs.map(\.title) + [current]).joined(separator: Self.separator) }
 
     /// Widths in points, measured by the caller; each crumb width includes its own padding.
     public struct Metrics: Equatable, Sendable {
@@ -75,7 +72,6 @@ public struct Breadcrumb: Equatable, Sendable {
 
     /// How the path is drawn in the available width.
     public struct Fit: Equatable, Sendable {
-        public var showsCount: Bool
         /// Crumb indices folded into the `…` menu: empty, or a contiguous run ending before the nearest visible ancestor.
         public var collapsed: Range<Int>
         /// One width per crumb; collapsed entries are unused.
@@ -85,22 +81,17 @@ public struct Breadcrumb: Equatable, Sendable {
     }
 
     /// The truncation ladder, applied in order until the path fits:
-    /// 0. drop the count; 1. cap each folder crumb; 2. fold ancestors after the root into `…`, nearest the root first;
-    /// 3. fold the root too; 4. middle-truncate the last crumb down to its minimum. The last crumb is never dropped.
-    public static func fit(crumbs: [Double], current: Double, count: Double, available: Double, metrics: Metrics) -> Fit
-    {
+    /// 1. cap each folder crumb; 2. fold ancestors after the root into `…`, nearest the root first; 3. fold the root
+    /// too; 4. middle-truncate the last crumb down to its minimum. The last crumb is never dropped.
+    public static func fit(crumbs: [Double], current: Double, available: Double, metrics: Metrics) -> Fit {
         func width(_ fit: Fit) -> Double {
             let visible = crumbs.indices.filter { !fit.collapsed.contains($0) }
             let items = visible.count + (fit.collapsed.isEmpty ? 0 : 1)
             return visible.reduce(0) { $0 + fit.crumbWidths[$1] } + (fit.collapsed.isEmpty ? 0 : metrics.ellipsis)
-                + Double(items) * metrics.separator + fit.currentWidth + (fit.showsCount ? count : 0)
+                + Double(items) * metrics.separator + fit.currentWidth
         }
         func measured(_ fit: Fit) -> Fit { var fit = fit; fit.width = width(fit); return fit }
-        var fit = measured(
-            Fit(showsCount: count > 0, collapsed: 0..<0, crumbWidths: crumbs, currentWidth: current, width: 0))
-        if fit.width <= available { return fit }
-        fit.showsCount = false
-        fit = measured(fit)
+        var fit = measured(Fit(collapsed: 0..<0, crumbWidths: crumbs, currentWidth: current, width: 0))
         if fit.width <= available { return fit }
         fit.crumbWidths = crumbs.map { min($0, metrics.crumbCap) }
         fit = measured(fit)

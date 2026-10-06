@@ -58,6 +58,8 @@ struct SnapshotScenario {
     /// Hides the traffic lights as macOS does in full screen with the titlebar concealed (#54). The window can't
     /// enter real full screen offscreen; the toolbar controller reacts to the buttons, not the style mask.
     var concealedTitlebar = false
+    /// Captures at this window width instead of the harness's (#91 narrow status bar at the 900 pt minimum).
+    var windowWidth: CGFloat? = nil
     /// #87: the Outline's rows while a note too large to parse within a frame is still parsing (dimmed, inert).
     var outlinePending = false
     /// #90: the user's Accent (Settings ▸ Appearance) in both colour sets, restored after the capture.
@@ -201,15 +203,25 @@ struct SnapshotScenario {
             document: "Snapshot Fixtures/Empty Document.md", createDocument: true),
         .init(name: "read-only-banner", document: "Snapshot Fixtures/Read Only.md"),
         .init(name: "tabs-open", document: image, tabs: [pourOver, image, "Snapshot Fixtures/Empty Document.md"]),
-        // silkweb-1.65: compact bar, one-line breadcrumb folded at `…`, folder tabs with a coral unsaved dot.
+        // silkweb-1.65: compact bar, folder tabs with a coral unsaved dot; #91: the path, folded at `…`, in the status bar.
         .init(
             name: "redesign-path-tabs", folder: deepFolder, document: deepDocument,
             tabs: [pourOver, deepDocument, image], dirtyActive: true),
-        // #54: full screen, titlebar concealed: the whole path, the trailing items at the edge.
+        // #54: full screen, titlebar concealed, the trailing items at the edge. #91: sidebars hidden and no document,
+        // so no path anywhere.
         .init(
-            name: "redesign-path-tabs-fullscreen", folder: "Coffee/Brewing Guides", document: pourOver,
-            tabs: [pourOver, image],
+            name: "redesign-path-tabs-fullscreen", folder: "Coffee/Brewing Guides", sidebarsHidden: true,
             concealedTitlebar: true),
+        // #91: the path leads the status bar, the counts sit on its midline, the chip and save state trail.
+        .init(
+            name: "status-path-wide", folder: "Snapshot Fixtures", document: writingModes,
+            visibleCaret: "The caret rests", dirtyActive: true, focusMode: true),
+        .init(
+            name: "status-path-narrow", folder: "Snapshot Fixtures", document: writingModes,
+            visibleCaret: "The caret rests", dirtyActive: true, focusMode: true, windowWidth: 900),
+        .init(name: "status-path-deep", folder: deepFolder, document: deepDocument, tabs: [deepDocument]),
+        // #91: library group, empty middle, view group; no path and no count in the bar.
+        .init(name: "toolbar-no-breadcrumb", folder: "Coffee/Brewing Guides", document: pourOver, tabs: [pourOver]),
         // silkweb-1.24: Settings tabs. Appearance edits the Light set with a low-contrast Text so the warning shows.
         .init(name: "settings-editor", settingsTab: .editor),
         .init(name: "settings-appearance", settingsTab: .appearance),
@@ -387,7 +399,7 @@ final class SnapshotHarness {
             try Data(text.utf8).write(to: url, options: .atomic)
         }
         if deepPath {
-            // Only the breadcrumb scenario gets the deep path, so other sidebars are unchanged.
+            // Only the deep-path scenarios get the deep folder, so other sidebars are unchanged.
             let folder = root.appendingPathComponent(SnapshotScenario.deepFolder)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try Data("# Settling In at the Campground\n\nThe first night by the lake.\n".utf8)
@@ -670,6 +682,7 @@ final class SnapshotHarness {
     }
 
     private func render(_ scenario: SnapshotScenario, dark: Bool, output: URL) async -> SnapshotManifest.Capture {
+        let size = scenario.windowWidth.map { NSSize(width: $0, height: self.size.height) } ?? self.size
         var capture = SnapshotManifest.Capture(
             scenario: scenario.name, appearance: dark ? "dark" : "light", status: "ok")
         if NSApp.activationPolicy().rawValue == -1 {
@@ -1061,7 +1074,7 @@ final class SnapshotHarness {
                     for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
                         window.standardWindowButton(type)?.isHidden = true
                     }
-                    // The toolbar controller's pass, any slide (0.2 s) and the breadcrumb's new width.
+                    // The toolbar controller's pass, any slide (0.2 s) and the gap's new width.
                     for _ in 0..<8 { view.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(100)) }
                 }
                 window.title = workspace.editor.url == nil ? workspace.folderName : workspace.editor.name
