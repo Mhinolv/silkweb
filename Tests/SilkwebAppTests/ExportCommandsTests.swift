@@ -59,6 +59,47 @@ final class ExportCommandsTests: XCTestCase {
         await workspace.didCloseWindow()
     }
 
+    /// #101: HTML export, PDF export and Print (`printOutput`) follow the Preview line-break and
+    /// [TOC] settings; only the stylesheet differs between them.
+    @MainActor func testExportAndPrintFollowPreviewRenderingSettings() async throws {
+        _ = NSApplication.shared
+        let live = LivePreferences.shared.current
+        defer { LivePreferences.shared.current = live }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("Poem.md")
+        try Data("Old".utf8).write(to: file)
+        let workspace = LibraryWorkspace(defaults: disposableDefaults("ExportCommands"))
+        workspace.root = root
+        workspace.install(try await LibraryScanner.scan(root: root))
+        workspace.session.selectedDocuments = ["Poem.md"]
+        await workspace.editor.configure(root: root, recoveryDirectory: root.appendingPathComponent("recovery"))
+        _ = await workspace.editor.open(file, readOnly: false)
+        workspace.editor.edit("[TOC]\n\n# One\nfirst\nsecond\nhard\\\nbreak\n\n```\n[TOC]\n```\n")
+        for keepsLineBreaks in [false, true] {
+            for showsTableOfContents in [false, true] {
+                LivePreferences.shared.current.keepsLineBreaks = keepsLineBreaks
+                LivePreferences.shared.current.showsTableOfContents = showsTableOfContents
+                for printOutput in [false, true] {
+                    let label = "lineBreaks \(keepsLineBreaks), TOC \(showsTableOfContents), print \(printOutput)"
+                    let prepared = try await workspace.prepareHTMLExport(printOutput: printOutput)
+                    let html = try XCTUnwrap(prepared).html
+                    let body = try XCTUnwrap(html.components(separatedBy: "<body>").last)
+                    XCTAssertEqual(body.contains("first<br>"), keepsLineBreaks, label)
+                    XCTAssertEqual(body.contains("first\nsecond"), !keepsLineBreaks, label)
+                    XCTAssertTrue(body.contains("hard<br>"), "Backslash breaks are kept either way: \(label)")
+                    XCTAssertEqual(body.contains("<nav class=\"sw-toc\""), showsTableOfContents, label)
+                    XCTAssertEqual(body.contains("<p>[TOC]</p>"), !showsTableOfContents, label)
+                    XCTAssertTrue(body.contains("<code>[TOC]"), "[TOC] in a code block stays code: \(label)")
+                    XCTAssertEqual(html.contains("@page { margin: 0; }"), printOutput, label)
+                    XCTAssertEqual(html.contains("prefers-color-scheme: dark"), !printOutput, label)
+                }
+            }
+        }
+        await workspace.didCloseWindow()
+    }
+
     @MainActor func testNativeAlertAndStylesheet() {
         let root = URL(fileURLWithPath: "/nonexistent-export-fixture")
         let result = HTMLExport.prepare(

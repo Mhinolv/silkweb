@@ -70,6 +70,8 @@ extension LibraryWorkspace {
         }
         let text = buffer?.text
         let language = Locale.preferredLanguages.first ?? "en"
+        // Same rendering settings as Preview (#101); only the stylesheet differs.
+        let preferences = LivePreferences.shared.current
         return try await Task.detached(priority: .userInitiated) {
             let markdown = try text ?? String(contentsOf: destination, encoding: .utf8)
             return HTMLExport.prepare(
@@ -77,6 +79,8 @@ extension LibraryWorkspace {
                 documentURL: destination, libraryRoot: root,
                 stylesheet: printOutput ? PrintCoordinator.stylesheet : PreviewCoordinator.stylesheet,
                 language: language,
+                lineBreaks: preferences.keepsLineBreaks ? .preserve : .standard,
+                showsTableOfContents: preferences.showsTableOfContents,
                 printOutput: printOutput)
         }.value
     }
