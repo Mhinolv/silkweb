@@ -9,10 +9,10 @@ final class OutlineKeyboardTests: XCTestCase {
         [view] + view.subviews.flatMap { descendants($0) }
     }
 
-    /// Owner GUI check on fec8ed0: clicking an Outline row navigated but left the
-    /// List without focus, so ↑/↓ never reached it.
+    /// Owner GUI check on fec8ed0: ↑/↓ must reach a focused Outline. Since #89 a click jumps and
+    /// focuses the editor; the clicked row stays selected for ↑/↓ once the Outline is focused.
     @MainActor
-    func testClickFocusesOutlineAndRealKeysMoveThroughHeadingsAndImages() async throws {
+    func testClickFocusesEditorAndRealKeysMoveThroughHeadingsAndImages() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let defaults = disposableDefaults("OutlineKeyboard")
@@ -81,11 +81,15 @@ final class OutlineKeyboardTests: XCTestCase {
         _ = NSApp.nextEvent(matching: .leftMouseUp, until: Date(), inMode: .default, dequeue: true)
         for _ in 0..<5 { controller.view.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertEqual(editor.selectedRange().location, items[1].sourceRange.location, "Click navigates the editor")
-        let responder = window.firstResponder as? NSView
+        // #89 owner decision: a click jumps and focuses the editor; ↑/↓ need the Outline focused first.
         XCTAssertTrue(
-            responder.map { $0 === outline || $0.isDescendant(of: outline) } ?? false,
-            "Click leaves the Outline focused, not \(String(describing: window.firstResponder))")
+            window.firstResponder === editor,
+            "Click focuses the editor, not \(String(describing: window.firstResponder))"
+        )
         XCTAssertEqual(outline.selectedRow, offset + 1)
+        window.makeFirstResponder(outline) // Tab, or a click on the Outline's background.
+        for _ in 0..<3 { controller.view.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(outline.selectedRow, offset + 1, "Focusing the Outline keeps the clicked row")
 
         func press(_ key: String, _ code: UInt16) async throws {
             let event = try XCTUnwrap(

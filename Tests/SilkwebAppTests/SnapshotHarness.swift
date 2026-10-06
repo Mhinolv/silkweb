@@ -49,6 +49,8 @@ struct SnapshotScenario {
     /// Turns on Focus and/or Typewriter (1.27) with the caret right after `visibleCaret`.
     var focusMode = false
     var typewriterMode = false
+    /// #89: clicks this Outline heading after the writing modes are on; the caret is drawn at the jump.
+    var outlineJump: String? = nil
     /// Selects this source text (all text when empty) so the status bar shows “N of M” counts (1.25).
     var selectText: String? = nil
     /// Widens the sidebar and list to their limits so the detail column (and its status bar) is narrow.
@@ -189,6 +191,13 @@ struct SnapshotScenario {
             name: "focus-mode-image-adjacent", document: "Snapshot Fixtures/Focus Image Adjacent.md",
             visibleCaret: "no blank line", focusMode: true),
         .init(name: "typewriter-mode", document: writingModes, visibleCaret: "Second paragraph", typewriterMode: true),
+        // #89: an Outline click with Typewriter on: heading at the 40% anchor, caret drawn there, current capsule.
+        .init(
+            name: "typewriter-outline-jump", document: writingModes, outline: true, visibleCaret: "Second paragraph",
+            typewriterMode: true, outlineJump: "Middle"),
+        .init(
+            name: "focus-typewriter-outline-jump", document: writingModes, outline: true,
+            visibleCaret: "Second paragraph", focusMode: true, typewriterMode: true, outlineJump: "Middle"),
         // silkweb-1.25: selection counts leading, Focus chip + “Saved” trailing; narrow detail drops the characters segment.
         .init(
             name: "status-bar-counts", document: writingModes, visibleCaret: "The caret rests", focusMode: true,
@@ -867,6 +876,17 @@ final class SnapshotHarness {
                 }
                 controller.view.layoutSubtreeIfNeeded()
             }
+            if let text = scenario.outlineJump {
+                // The production action of an Outline row click: jump, anchor and focus the editor.
+                guard let item = workspace.preview.outlineItems.first(where: { $0.label == text }) else {
+                    throw SnapshotFailure.error("Missing outline jump heading")
+                }
+                workspace.preview.navigate(item)
+                workspace.editor.caretLocation = item.sourceRange.location
+                // Focus fade (150 ms) and the Outline's current-row update.
+                try await Task.sleep(for: .milliseconds(500))
+                controller.view.layoutSubtreeIfNeeded()
+            }
             if scenario.legacyScroller, let scroll = workspace.preview.editor?.enclosingScrollView {
                 scroll.scrollerStyle = .legacy
                 scroll.autohidesScrollers = false
@@ -993,10 +1013,14 @@ final class SnapshotHarness {
                 // drawInsertionPoint path itself.
                 if let marker = scenario.visibleCaret, scenario.selectText == nil, let editor = workspace.preview.editor
                 {
-                    let found = (editor.string as NSString).range(of: marker)
-                    guard found.location != NSNotFound else { throw SnapshotFailure.error("Missing caret text") }
-                    editor.setSelectedRange(NSRange(location: NSMaxRange(found), length: 0))
-                    let caret = editor.textHeightInsertionRect(for: editor.lineFragmentCaretRect(at: NSMaxRange(found)))
+                    var location = editor.selectedRange().location
+                    if scenario.outlineJump == nil {
+                        let found = (editor.string as NSString).range(of: marker)
+                        guard found.location != NSNotFound else { throw SnapshotFailure.error("Missing caret text") }
+                        location = NSMaxRange(found)
+                        editor.setSelectedRange(NSRange(location: location, length: 0))
+                    }
+                    let caret = editor.textHeightInsertionRect(for: editor.lineFragmentCaretRect(at: location))
                     var caretRect = editor.convert(caret, to: view)
                     // Bitmap rows run top-down.
                     if !view.isFlipped { caretRect.origin.y = view.bounds.height - caretRect.maxY }

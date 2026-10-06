@@ -92,4 +92,16 @@ final class EditorScrollView: NSScrollView {
     override func cancelOperation(_ sender: Any?) {
         if isFindBarVisible { isFindBarVisible = false } else { super.cancelOperation(sender) }
     }
+
+    /// AppKit keeps clicks in the content insets for the scroll view itself. Typewriter's insets
+    /// (1.27) are overscroll, not chrome, and cover all but a band around the caret line, so clicks
+    /// there go to the text as they do with the mode off (#89). Scrollers and the find bar still win.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        guard hit === self, let document = documentView else { return hit }
+        let local = contentView.convert(point, from: superview)
+        guard contentView.bounds.contains(local) else { return hit }
+        // Above the first line or below the last, the text view still places the caret.
+        return document.hitTest(local) ?? document
+    }
 }

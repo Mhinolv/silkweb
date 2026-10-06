@@ -62,7 +62,7 @@ LIBRARY
 5. **Alerts.** Use `NSAlert` or SwiftUI `.alert` with a short title (statement or question), an informative sentence, and verb buttons (“Move to Trash”, never “OK/Yes”). Escape = Cancel. Destructive buttons use `.destructive` role.
 6. **Status Bar.** A 26pt strip, pane color + hairline (top edge), 16pt horizontal padding, at the bottom of the detail column while a document is open. Counts lead (`statusCounts`, filled by 1.25; Focus/Typewriter chip 1.27), save state trails in `.subheadline` secondary: “Saved” / “Edited” / “Not Saved” / “Read-only”. Only save failures and their recovery are announced.
 6a. **Tab bar (1.65): hairline folder tabs, coral dot = unsaved.** A 32pt strip of 28pt tabs, bottom-aligned under a 4pt gap, 110–220pt wide, 12pt titles. The active tab has a 1pt `separatorColor` outline on its top, left and right edges (6pt top corners, `labelColor` 40% under Increase Contrast) and an open bottom: the strip's bottom hairline runs everywhere except under it, so it joins the editor. Inactive tabs have no outline, `secondaryLabelColor` titles, and a `quaternarySystemFill` hover clipped to the tab shape. × sits at the leading edge on hover and on the active tab. An unsaved document shows a 6pt `SilkwebCoral` dot 6pt after its title, also on hover. Preview tabs stay italic. No fill beyond the surface.
-7. **Inspector.** Right panel with a segmented header: **Outline** (1.18; thread tree #72) | **Info** (1.21 tags as chips + Suggested #72, path, dates).
+7. **Inspector.** Right panel with a segmented header: **Outline** (1.18; thread tree #72) | **Info** (1.21 tags as chips + Suggested #72, path, dates). Outline focus (#89): a click on a row jumps and focuses the editor at the heading; ↑/↓ and Return work once the Outline is focused (Tab or a click on its background), and Return keeps it focused. ⎋ returns focus to the editor.
 
 ## 6. Keyboard shortcut map (single source of truth)
 Before adding any shortcut, check it against this table. 1.25 audits the final map. Focus-dependent keys are marked †.
@@ -107,6 +107,7 @@ Before adding any shortcut, check it against this table. 1.25 audits the final m
 | View | Focus Mode / Typewriter Mode | ⌃⇧⌘F / ⌃⇧⌘T | 1.27 |
 | View | Bigger / Smaller / Actual Size (editor text) | ⌘+ / ⌘− / ⌘0 | 1.24 |
 | Go | Folders / Documents / Editor (move focus) | ⌥⌘1 / ⌥⌘2 / ⌥⌘3 | 1.4 |
+| — | Return focus to the editor (preview when Preview shows alone) | ⎋ † (Outline/Inspector focused; no menu item. Sheets, popovers, the find bar, rename and tag fields keep their own Esc) | #89 |
 | Window | Show Next / Previous Tab | ⌃⇥ or ⇧⌘] / ⌃⇧⇥ or ⇧⌘[ | 1.26 |
 | Window | Close Other Tabs | ⌥⌘W | 1.26 |
 
