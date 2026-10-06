@@ -26,6 +26,41 @@ final class TagEditorTests: XCTestCase {
         XCTAssertTrue(metadata.tagsByDocument.isEmpty)
     }
 
+    /// #72 chips: applied/mixed coverage, add keeps queued edits, remove clears partial tags too.
+    func testAppliedTagsAddAndRemoveAcrossSelections() throws {
+        let a = UUID(), b = UUID(), c = UUID()
+        var metadata = LibraryMetadata(IDsByPath: ["a.md": a, "b.md": b, "c.md": c])
+        XCTAssertTrue(TagEditor.appliedTags(documents: [], metadata: metadata).isEmpty)
+        XCTAssertTrue(TagEditor.appliedTags(documents: [a, b], metadata: metadata).isEmpty)
+        metadata = TagEditor.edit(["camping", "coffee"], documents: [a], metadata: metadata)
+        metadata = TagEditor.edit(["camping"], documents: [b], metadata: metadata)
+        let camping = try XCTUnwrap(metadata.tags.first { $0.name == "camping" }?.id)
+        let coffee = try XCTUnwrap(metadata.tags.first { $0.name == "coffee" }?.id)
+        XCTAssertEqual(TagEditor.appliedTags(documents: [a], metadata: metadata), [camping: true, coffee: true])
+        XCTAssertEqual(TagEditor.appliedTags(documents: [a, b], metadata: metadata), [camping: true, coffee: false])
+        XCTAssertEqual(TagEditor.appliedTags(documents: [a, b, c], metadata: metadata), [camping: false, coffee: false])
+        XCTAssertEqual(TagEditor.appliedTags(documents: [c], metadata: metadata), [:])
+
+        // Adding never removes a common tag, even when the caller's view of it is stale.
+        var added = TagEditor.add(["  Vanlife ", "COFFEE", "a,b", ""], documents: [a, b], metadata: metadata)
+        XCTAssertEqual(TagEditor.appliedTags(documents: [a, b], metadata: added).filter(\.value).count, 3)
+        XCTAssertEqual(Set(added.tags.map(\.name)), ["camping", "coffee", "Vanlife"], "Existing spelling is reused")
+        XCTAssertEqual(added.tagRecency.first.flatMap { id in added.tags.first { $0.id == id }?.name }, "Vanlife")
+        added = TagEditor.add(["vanlife"], documents: [a, b], metadata: added)
+        XCTAssertEqual(added.tags.count, 3)
+        XCTAssertEqual(TagEditor.add([], documents: [a], metadata: metadata).tagsByDocument, metadata.tagsByDocument)
+        XCTAssertEqual(TagEditor.add(["x"], documents: [], metadata: metadata), metadata)
+
+        // Removing a mixed tag clears it from every selected document only.
+        var removed = TagEditor.remove(coffee, documents: [a, b], metadata: metadata)
+        XCTAssertEqual(TagEditor.appliedTags(documents: [a, b], metadata: removed), [camping: true])
+        XCTAssertFalse(removed.tags.contains { $0.id == coffee }, "An unused tag is pruned")
+        removed = TagEditor.remove(camping, documents: [a], metadata: metadata)
+        XCTAssertEqual(TagEditor.appliedTags(documents: [b], metadata: removed), [camping: true])
+        XCTAssertEqual(TagEditor.remove(UUID(), documents: [a], metadata: metadata).tagsByDocument, metadata.tagsByDocument)
+        XCTAssertEqual(TagEditor.remove(camping, documents: [c], metadata: metadata).tagsByDocument, metadata.tagsByDocument)
+    }
+
     func testFolderTagSearchPredicateSweep() {
         let folder = LibraryFolder(id: UUID(), parentID: nil, relativePath: "Folder", name: "Folder")
         let nested = UUID(), tag = UUID(), other = UUID()

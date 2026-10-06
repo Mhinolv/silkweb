@@ -55,7 +55,7 @@ func render(size: Int) -> CGImage {
         end: CGPoint(x: 0, y: 512), options: [])
     context.restoreGState()
 
-    // Exact paths and nodes from .team/ux/silkweb-1.53-concept-c.svg.
+    // Paths and nodes of the Silk Tree concept (the owner-approved app icon design).
     context.setStrokeColor(color(0xF7F1E3))
     context.setLineWidth(52)
     context.setLineCap(.round)
@@ -106,7 +106,7 @@ let representations = [
 ]
 let iconset = output.appendingPathComponent(".build/icon-generation/Silkweb.iconset")
 let scripts = output.appendingPathComponent("scripts")
-let qa = output.appendingPathComponent(".team/qa/silkweb-1.53")
+let qa = output.appendingPathComponent(".build/icon-generation/preview")
 for directory in [iconset, scripts, qa] {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 }

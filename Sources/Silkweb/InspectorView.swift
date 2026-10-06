@@ -46,29 +46,29 @@ struct InspectorView: View {
                 }
             } else {
                 ScrollViewReader { proxy in
+                    let threads = OutlineRowStyle.threads(depths: items.map(\.depth))
                     List(selection: $selectedHeading) {
-                        Section("Headings") {
-                            ForEach(items) { item in
-                                Button {
-                                    // A click selects and focuses the Outline so ↑/↓ work right away.
-                                    selectedHeading = item.id
-                                    outlineFocused = true
-                                    preview.navigate(item, focusEditor: false)
-                                } label: {
-                                    Group {
-                                        switch item.content {
-                                        case .heading(let heading): row(heading, depth: item.depth, current: current == item.id)
-                                        case .image:
-                                            OutlineImageRow(item: item, document: preview.renderedURL, root: workspace.root,
-                                                indent: item.indent, current: current == item.id,
-                                                selected: showsSelection(item.id))
-                                        }
+                        ForEach(Array(zip(items, threads)), id: \.0.id) { item, thread in
+                            Button {
+                                // A click selects and focuses the Outline so ↑/↓ work right away.
+                                selectedHeading = item.id
+                                outlineFocused = true
+                                preview.navigate(item, focusEditor: false)
+                            } label: {
+                                Group {
+                                    switch item.content {
+                                    case .heading(let heading): row(heading, depth: item.depth, current: current == item.id)
+                                    case .image:
+                                        OutlineImageRow(item: item, document: preview.renderedURL, root: workspace.root,
+                                            current: current == item.id, selected: showsSelection(item.id))
                                     }
-                                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain).tag(item.id).id(item.id)
-                                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                .outlineRowChrome(thread: thread, indent: item.indent, current: current == item.id,
+                                                  selected: showsSelection(item.id))
+                                .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain).tag(item.id).id(item.id)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                         }
                     }
                     .listStyle(.sidebar)
@@ -122,28 +122,81 @@ struct InspectorView: View {
     }
 
     private func row(_ heading: MarkdownHeading, depth: Int, current: Bool) -> some View {
-        let style = OutlineRowStyle(level: heading.level, depth: depth,
-                                    isFirst: heading.id == preview.headings.first?.id)
+        let style = OutlineRowStyle(level: heading.level, depth: depth)
         let selected = showsSelection(heading.id)
-        return HStack(spacing: 8) {
-            Rectangle().fill(current && !selected ? Color.silkwebAccent : .clear).frame(width: 3)
-            Text(heading.text).font(.system(size: style.fontSize, weight: style.isSemibold ? .semibold : .regular))
-                .foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor) :
-                                    Color(nsColor: current || heading.level <= 2 ? .labelColor : .secondaryLabelColor))
-                .lineLimit(1).truncationMode(.middle)
-                .padding(.leading, style.indent)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, 3)
-        .background {
-            if current && !selected {
-                RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
+        return Text(heading.text)
+            .font(.system(size: OutlineRowStyle.fontSize, weight: style.isSemibold ? .semibold : .regular))
+            .foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor) :
+                                Color(nsColor: current || !style.isSecondary ? .labelColor : .secondaryLabelColor))
+            .lineLimit(1).truncationMode(.tail)
+            .help(heading.text)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Heading level \(heading.level), \(heading.text)")
+            .accessibilityValue(current ? "current" : "")
+    }
+}
+
+/// #72 thread tree: a fixed-height row hanging from the sidebar's 1.5 pt `SilkwebThread` guides, with the
+/// current section on the sidebar's `SilkwebSelection` capsule. Keyboard selection keeps the List's own fill.
+struct OutlineRowChrome: ViewModifier {
+    static let leading: CGFloat = 6
+    static let trailing: CGFloat = 8
+    let thread: OutlineRowStyle.Thread
+    let indent: Double
+    let current: Bool
+    let selected: Bool
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.leading, indent)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, Self.leading).padding(.trailing, Self.trailing)
+            .frame(height: OutlineRowStyle.rowHeight)
+            .background {
+                ZStack(alignment: .leading) {
+                    if current && !selected {
+                        RoundedRectangle(cornerRadius: 6).fill(Color.silkwebSelection)
+                        if contrast == .increased {
+                            RoundedRectangle(cornerRadius: 6).strokeBorder(Color.silkwebAccent, lineWidth: 1)
+                        }
+                    }
+                    OutlineThreadShape(thread: thread)
+                        .stroke(Color.silkwebThread, style: StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .round))
+                        .padding(.leading, Self.leading)
+                        .accessibilityHidden(true)
+                }
+            }
+    }
+}
+
+extension View {
+    func outlineRowChrome(thread: OutlineRowStyle.Thread, indent: Double, current: Bool, selected: Bool) -> some View {
+        modifier(OutlineRowChrome(thread: thread, indent: indent, current: current, selected: selected))
+    }
+}
+
+/// The same rails and rounded elbows as `ThreadRowView`, in row coordinates with y running down.
+struct OutlineThreadShape: Shape {
+    let thread: OutlineRowStyle.Thread
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        for segment in thread.segments(rowHeight: rect.height) {
+            switch segment {
+            case .rail(let x):
+                path.move(to: CGPoint(x: rect.minX + x, y: rect.minY))
+                path.addLine(to: CGPoint(x: rect.minX + x, y: rect.maxY))
+            case .elbow(let x, let cornerY, let radius, let endX):
+                let k = 0.5523 * radius // Quarter-circle control distance.
+                let x = rect.minX + x, y = rect.minY + cornerY
+                path.move(to: CGPoint(x: x, y: rect.minY))
+                path.addLine(to: CGPoint(x: x, y: y - radius))
+                path.addCurve(to: CGPoint(x: x + radius, y: y), control1: CGPoint(x: x, y: y - radius + k),
+                              control2: CGPoint(x: x + radius - k, y: y))
+                path.addLine(to: CGPoint(x: rect.minX + endX, y: y))
             }
         }
-        .padding(.top, style.spacingAbove)
-        .help(heading.text)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Heading level \(heading.level), \(heading.text)")
-        .accessibilityValue(current ? "current" : "")
+        return path
     }
 }

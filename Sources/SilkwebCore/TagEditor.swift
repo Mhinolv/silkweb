@@ -46,6 +46,26 @@ public enum TagEditor {
         }
         return pruning(result)
     }
+    /// Applies `names` to every document and keeps all other tags. Reads the common tags from `metadata`
+    /// itself, so queued edits never resurrect or drop a tag committed just before.
+    public static func add(_ names: [String], documents: Set<UUID>, metadata: LibraryMetadata) -> LibraryMetadata {
+        let common = commonTags(documents: documents, metadata: metadata)
+        return edit(metadata.tags.filter { common.contains($0.id) }.map(\.name) + names, documents: documents, metadata: metadata)
+    }
+    /// Removes the tag from every document, including a multi-selection where only some carry it.
+    public static func remove(_ id: UUID, documents: Set<UUID>, metadata: LibraryMetadata) -> LibraryMetadata {
+        var result = metadata
+        for document in documents { result.tagsByDocument[document.uuidString]?.remove(id) }
+        return pruning(result)
+    }
+    /// Tags carried by any of `documents`: true when every document has the tag, false when only some do.
+    public static func appliedTags(documents: Set<UUID>, metadata: LibraryMetadata) -> [UUID: Bool] {
+        var counts: [UUID: Int] = [:]
+        for document in documents {
+            for id in metadata.tagsByDocument[document.uuidString] ?? [] { counts[id, default: 0] += 1 }
+        }
+        return counts.mapValues { $0 == documents.count }
+    }
     public static func rename(_ id: UUID, to input: String, metadata: LibraryMetadata) -> LibraryMetadata {
         guard let name = normalize(input), let index = metadata.tags.firstIndex(where: { $0.id == id }) else { return metadata }
         var result = metadata
