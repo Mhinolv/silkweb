@@ -27,13 +27,15 @@ public struct TableOptions: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey { case version, columns, rows, alignment }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(columns: (try? values.decode(Int.self, forKey: .columns)) ?? 3,
-                  rows: (try? values.decode(Int.self, forKey: .rows)) ?? 2,
-                  alignment: (try? values.decode(TableAlignment.self, forKey: .alignment)) ?? .default)
+        self.init(
+            columns: (try? values.decode(Int.self, forKey: .columns)) ?? 3,
+            rows: (try? values.decode(Int.self, forKey: .rows)) ?? 2,
+            alignment: (try? values.decode(TableAlignment.self, forKey: .alignment)) ?? .default)
     }
     public static func load(from defaults: UserDefaults = .standard) -> Self {
         guard let data = defaults.data(forKey: "tableOptions"),
-              let value = try? JSONDecoder().decode(Self.self, from: data) else { return Self() }
+            let value = try? JSONDecoder().decode(Self.self, from: data)
+        else { return Self() }
         return value
     }
     public func save(to defaults: UserDefaults = .standard) {
@@ -61,7 +63,10 @@ public enum MarkdownTable {
         // Compact GFM: one space on each side of every pipe, no column padding (cells drift once edited).
         func row(_ values: [String]) -> String { "| " + values.joined(separator: " | ") + " |" }
         let separators = Array(repeating: options.alignment.marker, count: options.columns)
-        return ([row(cells), row(separators)] + Array(repeating: row(Array(repeating: "", count: options.columns)), count: options.rows)).joined(separator: "\n")
+        return
+            ([row(cells), row(separators)]
+            + Array(repeating: row(Array(repeating: "", count: options.columns)), count: options.rows)).joined(
+                separator: "\n")
     }
     public static func insertion(text: String, selection: NSRange, options: TableOptions) -> MarkdownEdit {
         let source = text as NSString
@@ -75,7 +80,8 @@ public enum MarkdownTable {
         }
         let prefix = padding(before, before: true)
         let replacement = prefix + self.source(options: options) + padding(after, before: false)
-        return MarkdownEdit(range: range, replacement: replacement,
-                            selection: NSRange(location: range.location + prefix.utf16.count + 2, length: 8))
+        return MarkdownEdit(
+            range: range, replacement: replacement,
+            selection: NSRange(location: range.location + prefix.utf16.count + 2, length: 8))
     }
 }

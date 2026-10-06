@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 /// Redesign tokens (silkweb-1.62). R2–R4 consume these and add no new colour values.
 /// Each colour is dynamic per appearance; Increase Contrast has its own value.
@@ -10,15 +10,20 @@ enum SilkwebTokens {
     }
 
     static let pane = Palette(light: 0xFBFBFA, dark: 0x1E1F21, highContrastLight: nil, highContrastDark: nil)
-    static let accent = Palette(light: 0x3F7D64, dark: 0x7FC0A4, highContrastLight: 0x2F6550, highContrastDark: 0x8FD0B3)
-    static let selection = Palette(light: 0xE4ECE8, dark: 0x2F3C39, highContrastLight: 0xD5E2DC, highContrastDark: 0x33423E)
-    static let selectionInactive = Palette(light: 0xEFEFEE, dark: 0x2B2D30, highContrastLight: nil, highContrastDark: nil)
+    static let accent = Palette(
+        light: 0x3F7D64, dark: 0x7FC0A4, highContrastLight: 0x2F6550, highContrastDark: 0x8FD0B3)
+    static let selection = Palette(
+        light: 0xE4ECE8, dark: 0x2F3C39, highContrastLight: 0xD5E2DC, highContrastDark: 0x33423E)
+    static let selectionInactive = Palette(
+        light: 0xEFEFEE, dark: 0x2B2D30, highContrastLight: nil, highContrastDark: nil)
     static let coral = Palette(light: 0xCC6544, dark: 0xF29A7A, highContrastLight: 0xB8563A, highContrastDark: 0xFFB295)
-    static let thread = Palette(light: 0xC2C9C0, dark: 0x3D4640, highContrastLight: 0x9AA39C, highContrastDark: 0x6A746D)
+    static let thread = Palette(
+        light: 0xC2C9C0, dark: 0x3D4640, highContrastLight: 0x9AA39C, highContrastDark: 0x6A746D)
 
     static func srgb(_ rgb: Int) -> NSColor {
-        NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255, green: CGFloat((rgb >> 8) & 255) / 255,
-                blue: CGFloat(rgb & 255) / 255, alpha: 1)
+        NSColor(
+            srgbRed: CGFloat((rgb >> 16) & 255) / 255, green: CGFloat((rgb >> 8) & 255) / 255,
+            blue: CGFloat(rgb & 255) / 255, alpha: 1)
     }
 
     static func hex(_ rgb: Int) -> String { String(format: "#%06X", rgb) }
@@ -36,13 +41,20 @@ enum SilkwebTokens {
     /// A user colour from Settings (1.24) for this appearance, or nil to keep the token.
     typealias Override = @Sendable (_ colors: ColorSet, _ dark: Bool) -> HexColor?
 
-    static func color(_ name: String, _ palette: Palette, fallback: NSColor? = nil, override: Override? = nil) -> NSColor {
+    static func color(_ name: String, _ palette: Palette, fallback: NSColor? = nil, override: Override? = nil)
+        -> NSColor
+    {
         NSColor(name: name) { appearance in
             let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            if let override, let custom = override(LivePreferences.shared.colors(dark: dark), dark) { return srgb(custom.rgb) }
-            let contrast = appearance.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua,
-                                                       .accessibilityHighContrastDarkAqua])
-            let highContrast = contrast == .accessibilityHighContrastAqua || contrast == .accessibilityHighContrastDarkAqua
+            if let override, let custom = override(LivePreferences.shared.colors(dark: dark), dark) {
+                return srgb(custom.rgb)
+            }
+            let contrast = appearance.bestMatch(from: [
+                .aqua, .darkAqua, .accessibilityHighContrastAqua,
+                .accessibilityHighContrastDarkAqua,
+            ])
+            let highContrast =
+                contrast == .accessibilityHighContrastAqua || contrast == .accessibilityHighContrastDarkAqua
             return resolve(palette, dark: dark, highContrast: highContrast, fallback: fallback)
         }
     }
@@ -57,16 +69,18 @@ enum SilkwebTokens {
     }
 
     /// Derived colours follow the user's Surface/Text/Accent only once one of their inputs changed.
-    static let surfaceOrText: Override = { set, dark in set.surface == nil && set.text == nil ? nil : set.hairline(dark: dark) }
+    static let surfaceOrText: Override = { set, dark in
+        set.surface == nil && set.text == nil ? nil : set.hairline(dark: dark)
+    }
 
     /// Live preview only: export and print keep their portable system colours.
     static let previewCSS = """
-    :root { --sw-surface: \(hex(pane.light)); --sw-accent: \(hex(accent.light)); }
-    @media (prefers-color-scheme: dark) { :root { --sw-surface: \(hex(pane.dark)); --sw-accent: \(hex(accent.dark)); } }
-    @media (prefers-contrast: more) { :root { --sw-surface: -apple-system-text-background; --sw-accent: \(hex(accent.highContrastLight!)); } }
-    @media (prefers-color-scheme: dark) and (prefers-contrast: more) { :root { --sw-accent: \(hex(accent.highContrastDark!)); } }
-    body { background: var(--sw-surface); } a { color: var(--sw-accent); }
-    """
+        :root { --sw-surface: \(hex(pane.light)); --sw-accent: \(hex(accent.light)); }
+        @media (prefers-color-scheme: dark) { :root { --sw-surface: \(hex(pane.dark)); --sw-accent: \(hex(accent.dark)); } }
+        @media (prefers-contrast: more) { :root { --sw-surface: -apple-system-text-background; --sw-accent: \(hex(accent.highContrastLight!)); } }
+        @media (prefers-color-scheme: dark) and (prefers-contrast: more) { :root { --sw-accent: \(hex(accent.highContrastDark!)); } }
+        body { background: var(--sw-surface); } a { color: var(--sw-accent); }
+        """
 }
 
 /// The 8 pt spacing scale and the fixed redesign metrics.
@@ -92,27 +106,36 @@ extension NSColor {
     /// editor, preview, Inspector, strips and banners, toolbar and empty states.
     /// #FBFBFA / #1E1F21 (1.62); the system text background under Increase Contrast. The swap point for 1.24.
     /// Settings ▸ Appearance ▸ Surface replaces it per appearance (1.24).
-    static let silkwebPaneBackground = SilkwebTokens.color("SilkwebPaneBackground", SilkwebTokens.pane, fallback: .textBackgroundColor,
-                                                           override: { set, _ in set.surface })
+    static let silkwebPaneBackground = SilkwebTokens.color(
+        "SilkwebPaneBackground", SilkwebTokens.pane, fallback: .textBackgroundColor,
+        override: { set, _ in set.surface })
     /// Sage: Silkweb-drawn selection accents, links and tag tints. Native focus rings keep the system accent.
-    static let silkwebAccent = SilkwebTokens.color("SilkwebAccent", SilkwebTokens.accent, override: { set, _ in set.accent })
+    static let silkwebAccent = SilkwebTokens.color(
+        "SilkwebAccent", SilkwebTokens.accent, override: { set, _ in set.accent })
     /// Capsule fill for the focused selection in the key window: Accent tinted over Surface once either is custom.
-    static let silkwebSelection = SilkwebTokens.color("SilkwebSelection", SilkwebTokens.selection, override: { set, dark in
-        set.surface == nil && set.accent == nil ? nil : set.selection(dark: dark)
-    })
+    static let silkwebSelection = SilkwebTokens.color(
+        "SilkwebSelection", SilkwebTokens.selection,
+        override: { set, dark in
+            set.surface == nil && set.accent == nil ? nil : set.selection(dark: dark)
+        })
     /// Inactive capsule and the current-line band: Surface stepped toward Text once either is custom.
-    static let silkwebSelectionInactive = SilkwebTokens.color("SilkwebSelectionInactive", SilkwebTokens.selectionInactive,
-                                                              fallback: .unemphasizedSelectedContentBackgroundColor, override: { set, dark in
-        set.surface == nil && set.text == nil ? nil : set.selectionInactive(dark: dark)
-    })
+    static let silkwebSelectionInactive = SilkwebTokens.color(
+        "SilkwebSelectionInactive", SilkwebTokens.selectionInactive,
+        fallback: .unemphasizedSelectedContentBackgroundColor,
+        override: { set, dark in
+            set.surface == nil && set.text == nil ? nil : set.selectionInactive(dark: dark)
+        })
     /// Only the unsaved dot on tabs (R4; the sidebar node was removed in 1.65); the user may recolour but not repurpose it.
-    static let silkwebCoral = SilkwebTokens.color("SilkwebCoral", SilkwebTokens.coral, override: { set, _ in set.coral })
+    static let silkwebCoral = SilkwebTokens.color(
+        "SilkwebCoral", SilkwebTokens.coral, override: { set, _ in set.coral })
     /// Sidebar thread lines (R2); they follow the derived hairline.
-    static let silkwebThread = SilkwebTokens.color("SilkwebThread", SilkwebTokens.thread, override: SilkwebTokens.surfaceOrText)
+    static let silkwebThread = SilkwebTokens.color(
+        "SilkwebThread", SilkwebTokens.thread, override: SilkwebTokens.surfaceOrText)
     /// Body text in the editor (1.24 Text slot); `labelColor` by default.
     static let silkwebText = SilkwebTokens.color("SilkwebText", system: .labelColor, override: { set, _ in set.text })
     /// Pane dividers and strip hairlines; `separatorColor` until Surface or Text is custom.
-    static let silkwebHairline = SilkwebTokens.color("SilkwebHairline", system: .separatorColor, override: SilkwebTokens.surfaceOrText)
+    static let silkwebHairline = SilkwebTokens.color(
+        "SilkwebHairline", system: .separatorColor, override: SilkwebTokens.surfaceOrText)
 }
 
 /// Puts the window's titlebar/toolbar strip on the pane surface (silkweb-1.62): the titlebar stops drawing
@@ -166,11 +189,12 @@ struct TitlebarHairline: View {
         let name = token.colorNameComponent
         guard revision > 0 else { return Color(nsColor: token) }
         if let cached = revisions[name], cached.revision == revision { return cached.color }
-        let color = Color(nsColor: NSColor(name: "\(name).\(revision)") { appearance in
-            var resolved = token
-            appearance.performAsCurrentDrawingAppearance { resolved = token.usingColorSpace(.sRGB) ?? token }
-            return resolved
-        })
+        let color = Color(
+            nsColor: NSColor(name: "\(name).\(revision)") { appearance in
+                var resolved = token
+                appearance.performAsCurrentDrawingAppearance { resolved = token.usingColorSpace(.sRGB) ?? token }
+                return resolved
+            })
         revisions[name] = (revision, color)
         return color
     }
@@ -185,7 +209,9 @@ struct CapsuleStyle: Equatable {
     let tintsAccessories: Bool
 
     static func fill(isKey: Bool, isFocused: Bool, contrast: Bool) -> CapsuleStyle {
-        guard isKey && isFocused else { return CapsuleStyle(fill: .silkwebSelectionInactive, stroke: nil, tintsAccessories: false) }
+        guard isKey && isFocused else {
+            return CapsuleStyle(fill: .silkwebSelectionInactive, stroke: nil, tintsAccessories: false)
+        }
         return CapsuleStyle(fill: .silkwebSelection, stroke: contrast ? .silkwebAccent : nil, tintsAccessories: true)
     }
 }
@@ -209,15 +235,19 @@ class CapsuleRowView: NSTableRowView {
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
 
     var style: CapsuleStyle {
-        CapsuleStyle.fill(isKey: window?.isKeyWindow == true, isFocused: isEmphasized,
-                          contrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
+        CapsuleStyle.fill(
+            isKey: window?.isKeyWindow == true, isFocused: isEmphasized,
+            contrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
     }
 
     /// The capsule in row coordinates: 10 pt from the table's edges, whatever the table style's row inset.
     var capsuleRect: NSRect {
         var rect = bounds
         if let table = superview as? NSTableView {
-            let edges = convert(NSRect(x: Spacing.capsuleInset, y: 0, width: max(0, table.bounds.width - 2 * Spacing.capsuleInset), height: 1), from: table)
+            let edges = convert(
+                NSRect(
+                    x: Spacing.capsuleInset, y: 0, width: max(0, table.bounds.width - 2 * Spacing.capsuleInset),
+                    height: 1), from: table)
             rect.origin.x = max(bounds.minX, edges.minX)
             rect.size.width = max(0, min(bounds.maxX, edges.maxX) - rect.minX)
         }
@@ -231,7 +261,8 @@ class CapsuleRowView: NSTableRowView {
         style.fill.setFill()
         path.fill()
         if let stroke = style.stroke {
-            let outline = NSBezierPath(roundedRect: capsuleRect.insetBy(dx: 0.5, dy: 0.5), xRadius: cornerRadius, yRadius: cornerRadius)
+            let outline = NSBezierPath(
+                roundedRect: capsuleRect.insetBy(dx: 0.5, dy: 0.5), xRadius: cornerRadius, yRadius: cornerRadius)
             outline.lineWidth = 1
             stroke.setStroke()
             outline.stroke()

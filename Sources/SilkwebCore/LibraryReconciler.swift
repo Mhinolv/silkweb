@@ -2,7 +2,9 @@ import Foundation
 
 public enum LibraryReconciler {
     /// Remap exact identities rather than applying a parent move twice to descendants.
-    public static func session(_ session: LibrarySession, from old: LibrarySnapshot, to new: LibrarySnapshot) -> LibrarySession {
+    public static func session(_ session: LibrarySession, from old: LibrarySnapshot, to new: LibrarySnapshot)
+        -> LibrarySession
+    {
         let oldIDs = old.metadata.IDsByPath
         let newPaths = Dictionary(uniqueKeysWithValues: new.metadata.IDsByPath.map { ($0.value, $0.key) })
         func remap(_ path: String) -> String? { oldIDs[path].flatMap { newPaths[$0] } }

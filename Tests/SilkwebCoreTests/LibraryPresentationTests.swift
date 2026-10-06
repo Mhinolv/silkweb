@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class LibraryPresentationTests: XCTestCase {
@@ -24,7 +25,9 @@ final class LibraryPresentationTests: XCTestCase {
         let prefix = LibraryFolder(id: UUID(), parentID: root.id, relativePath: "Chapter 20", name: "Chapter 20")
         let folders = [root, ten, two, nested, prefix]
         let documents = [root, two, nested, prefix].map {
-            LibraryDocument(id: UUID(), folderID: $0.id, relativePath: $0.relativePath.isEmpty ? "Note.md" : $0.relativePath + "/Note.md", name: "Note.md")
+            LibraryDocument(
+                id: UUID(), folderID: $0.id,
+                relativePath: $0.relativePath.isEmpty ? "Note.md" : $0.relativePath + "/Note.md", name: "Note.md")
         }
         let presentation = LibraryPresentation(folders: folders, documents: documents)
         XCTAssertEqual(presentation.counts[root.id], FolderDocumentCount(direct: 1, recursive: 4))
@@ -46,9 +49,11 @@ final class LibraryPresentationTests: XCTestCase {
         let folder = LibraryFolder(id: UUID(), parentID: nil, relativePath: "", name: "Library")
         for count in [0, 1, 10_000] {
             let documents = (0..<count).map { index in
-                LibraryDocument(id: UUID(), folderID: folder.id, relativePath: "Folder \(index)/Note \(index % 10).md", name: "Note \(index % 10).md",
-                                created: index % 4 == 0 ? nil : Date(timeIntervalSince1970: Double(index % 3)),
-                                modified: index % 5 == 0 ? nil : Date(timeIntervalSince1970: Double(index % 7)))
+                LibraryDocument(
+                    id: UUID(), folderID: folder.id, relativePath: "Folder \(index)/Note \(index % 10).md",
+                    name: "Note \(index % 10).md",
+                    created: index % 4 == 0 ? nil : Date(timeIntervalSince1970: Double(index % 3)),
+                    modified: index % 5 == 0 ? nil : Date(timeIntervalSince1970: Double(index % 7)))
             }
             let presentation = LibraryPresentation(folders: [folder], documents: documents)
             let reversed = LibraryPresentation(folders: [folder], documents: documents.reversed())
@@ -56,7 +61,8 @@ final class LibraryPresentationTests: XCTestCase {
                 for descending in [false, true] {
                     for recursive in [false, true] {
                         var preference = LibraryListPreference()
-                        preference.key = key; preference.descending = descending; preference.includeSubfolders = recursive
+                        preference.key = key; preference.descending = descending;
+                        preference.includeSubfolders = recursive
                         let sorted = presentation.documents(in: folder, preference: preference)
                         XCTAssertEqual(sorted.count, count)
                         XCTAssertEqual(sorted, reversed.documents(in: folder, preference: preference))
@@ -69,7 +75,9 @@ final class LibraryPresentationTests: XCTestCase {
                                 let bDate = (key == .created ? b.created : b.modified) ?? .distantPast
                                 XCTAssertTrue(descending ? aDate >= bDate : aDate <= bDate)
                                 if aDate == bDate {
-                                    XCTAssertTrue(LibraryPresentation.naturalOrder(a.name, b.name, pathA: a.relativePath, pathB: b.relativePath))
+                                    XCTAssertTrue(
+                                        LibraryPresentation.naturalOrder(
+                                            a.name, b.name, pathA: a.relativePath, pathB: b.relativePath))
                                 }
                             }
                         }
@@ -87,7 +95,8 @@ final class LibraryPresentationTests: XCTestCase {
         try Data("original".utf8).write(to: url)
         let created = Date(timeIntervalSince1970: 1_500_000_000)
         let modified = Date(timeIntervalSince1970: 1_600_000_000)
-        try FileManager.default.setAttributes([.creationDate: created, .modificationDate: modified], ofItemAtPath: url.path)
+        try FileManager.default.setAttributes(
+            [.creationDate: created, .modificationDate: modified], ofItemAtPath: url.path)
         let before = try await LibraryScanner.scan(root: root)
         XCTAssertEqual(before.documents[0].created, created)
         XCTAssertEqual(before.documents[0].modified, modified)
@@ -103,8 +112,10 @@ final class LibraryPresentationTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
-        try FileManager.default.createDirectory(at: root.appendingPathComponent(".silkweb"), withIntermediateDirectories: false)
-        try Data(#"{"formatVersion":1,"selectedFolder":"","expandedFolders":[""]}"#.utf8).write(to: root.appendingPathComponent(".silkweb/session.json"))
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(".silkweb"), withIntermediateDirectories: false)
+        try Data(#"{"formatVersion":1,"selectedFolder":"","expandedFolders":[""]}"#.utf8).write(
+            to: root.appendingPathComponent(".silkweb/session.json"))
         var session = try await LibrarySession.load(root: root)
         XCTAssertEqual(session.listPreferences, [:])
         let engine = try LibraryMutations(root: root)

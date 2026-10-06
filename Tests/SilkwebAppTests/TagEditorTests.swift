@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
+
 @testable import Silkweb
 @testable import SilkwebCore
 
@@ -9,20 +10,23 @@ final class TagEditorTests: XCTestCase {
     func testFolderSearchIncludesDescendantsRegardlessOfListPreference() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Writing/Drafts/Deep"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Writing/Drafts/Deep"), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let direct = "Writing/A.md", nested = "Writing/Drafts/B.md"
         let deep = "Writing/Drafts/Deep/C.md", outside = "Else.md"
         for path in [direct, nested, deep, outside] {
             try "needle".write(to: root.appendingPathComponent(path), atomically: true, encoding: .utf8)
         }
-        try "unrelated".write(to: root.appendingPathComponent("Writing/Drafts/Other.md"), atomically: true, encoding: .utf8)
+        try "unrelated".write(
+            to: root.appendingPathComponent("Writing/Drafts/Other.md"), atomically: true, encoding: .utf8)
         let initial = try await LibraryScanner.scan(root: root)
         let researchIDs = Set(initial.documents.map(\.id))
         let draftIDs = Set(initial.documents.filter { [nested, deep, outside].contains($0.relativePath) }.map(\.id))
         _ = try await TagStore.update(root: root) {
-            TagEditor.edit(["research", "draft"], documents: draftIDs,
-                           metadata: TagEditor.edit(["research"], documents: researchIDs, metadata: $0))
+            TagEditor.edit(
+                ["research", "draft"], documents: draftIDs,
+                metadata: TagEditor.edit(["research"], documents: researchIDs, metadata: $0))
         }
         let snapshot = try await LibraryScanner.scan(root: root)
         let workspace = LibraryWorkspace()
@@ -37,7 +41,7 @@ final class TagEditorTests: XCTestCase {
             ([], [direct, nested, deep], [direct, nested, deep, outside]),
             ([research], [direct, nested, deep], [direct, nested, deep, outside]),
             ([research, draft], [nested, deep], [nested, deep, outside]),
-            ([UUID()], [], [])
+            ([UUID()], [], []),
         ]
         for scoped in [false, true] {
             workspace.search.folderScope = scoped ? folder.id : nil
@@ -46,11 +50,16 @@ final class TagEditorTests: XCTestCase {
                 await workspace.search.query(quick: false)
                 for testCase in cases {
                     workspace.tagFilters = testCase.filters
-                    let expected = query == "absent" ? Set<String>() : (scoped ? testCase.folderPaths : testCase.libraryPaths)
+                    let expected =
+                        query == "absent" ? Set<String>() : (scoped ? testCase.folderPaths : testCase.libraryPaths)
                     for include in [false, true] {
                         workspace.setIncludeSubfolders(include)
-                        XCTAssertEqual(Set(workspace.filteredSearchResults.compactMap { snapshot.presentation.documentsByID[$0.id]?.relativePath }), expected,
-                                       "scope=\(scoped), query=\(query), tags=\(testCase.filters.count), include=\(include)")
+                        XCTAssertEqual(
+                            Set(
+                                workspace.filteredSearchResults.compactMap {
+                                    snapshot.presentation.documentsByID[$0.id]?.relativePath
+                                }), expected,
+                            "scope=\(scoped), query=\(query), tags=\(testCase.filters.count), include=\(include)")
                         XCTAssertEqual(workspace.subtitle, LibrarySearch.resultCount(expected.count))
                     }
                 }
@@ -78,7 +87,9 @@ final class TagEditorTests: XCTestCase {
         workspace.session.selectedDocuments = ["A.md", "B.md"]
         workspace.inspectorInfo = true
         let controller = NSHostingController(rootView: InspectorView(workspace: workspace))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 700), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 700), styleMask: [.titled], backing: .buffered,
+            defer: false)
         window.isReleasedWhenClosed = false
         window.contentViewController = controller
         defer { window.contentViewController = nil; window.close() }
@@ -139,7 +150,9 @@ final class TagEditorTests: XCTestCase {
         let snapshot = try XCTUnwrap(workspace.snapshot)
         let coordinator = FolderSidebar.Coordinator(workspace: workspace, snapshot: snapshot)
         let scroll = FolderSidebar.makeScrollView(coordinator: coordinator)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 600), styleMask: [.titled], backing: .buffered,
+            defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = scroll
         defer { window.contentView = nil; window.close() }
@@ -150,7 +163,8 @@ final class TagEditorTests: XCTestCase {
         for _ in 0..<10 { await Task.yield() }
         FolderSidebar.update(scroll, coordinator: coordinator, snapshot: snapshot)
         XCTAssertEqual(workspace.session.selectedTagID, tag.id)
-        XCTAssertTrue(outline.item(atRow: outline.selectedRow) as? FolderSidebar.Item === coordinator.itemsByTag[tag.id])
+        XCTAssertTrue(
+            outline.item(atRow: outline.selectedRow) as? FolderSidebar.Item === coordinator.itemsByTag[tag.id])
         for width in [180.0, 220.0, 320.0] {
             scroll.setFrameSize(NSSize(width: width, height: 600))
             scroll.layoutSubtreeIfNeeded()

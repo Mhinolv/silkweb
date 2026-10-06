@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 /// View ▸ Focus Mode / Typewriter Mode (silkweb-1.27) for one editor.
 ///
@@ -47,7 +47,8 @@ import SilkwebCore
 
     init() {
         contrastObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.focus || self.fadeFrom != nil else { return }
                 self.updateDim()
@@ -96,8 +97,10 @@ import SilkwebCore
             return NSRange(location: range.location + delta, length: range.length)
         }
         // Text inserted right after a unit that ends with a newline belongs to the next line.
-        if start > end || (start == end && range.length > 0 && start > 0 && start <= text.length
-                           && text.character(at: start - 1) == 0x0A) {
+        if start > end
+            || (start == end && range.length > 0 && start > 0 && start <= text.length
+                && text.character(at: start - 1) == 0x0A)
+        {
             return range
         }
         guard oldEnd <= end else { return nil }
@@ -129,7 +132,8 @@ import SilkwebCore
         var animated = true
         if let previous, let old = band(for: previous), let new = band(for: next) {
             let visible = editor.visibleRect
-            animated = abs(old.top - new.top) <= visible.height && old.top < visible.maxY && new.top < visible.maxY
+            animated =
+                abs(old.top - new.top) <= visible.height && old.top < visible.maxY && new.top < visible.maxY
                 && old.bottom > visible.minY && new.bottom > visible.minY
         }
         begin(from: (true, previous), animated: animated)
@@ -137,8 +141,9 @@ import SilkwebCore
 
     private func computeRange() -> NSRange? {
         guard let editor, let storage = editor.textStorage else { return nil }
-        return FocusUnit.range(in: storage.string as NSString, selection: editor.selectedRange(),
-                               fencedBefore: { [styler = editor.styler] in styler.fencedBefore(line: $0) })
+        return FocusUnit.range(
+            in: storage.string as NSString, selection: editor.selectedRange(),
+            fencedBefore: { [styler = editor.styler] in styler.fencedBefore(line: $0) })
     }
 
     /// Snaps any running fade, then fades from `from` to the current state over 150 ms
@@ -166,7 +171,9 @@ import SilkwebCore
         // A scroll during the fade lands it at once.
         let scrolled = editor.enclosingScrollView.map { abs($0.contentView.bounds.minY - fadeOrigin) > 0.5 } ?? true
         progress = scrolled ? 1 : min(1, CGFloat((CACurrentMediaTime() - fadeStart) / Self.fadeDuration))
-        if progress >= 1 { finishFade() } else {
+        if progress >= 1 {
+            finishFade()
+        } else {
             updateDim()
             applyImageAlpha()
         }
@@ -195,17 +202,21 @@ import SilkwebCore
         }
         let laid = layout.firstUnlaidCharacterIndex()
         guard range.location < laid else { return below }
-        let first = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: range.location),
-                                            effectiveRange: nil, withoutAdditionalLayout: true)
+        let first = layout.lineFragmentRect(
+            forGlyphAt: layout.glyphIndexForCharacter(at: range.location),
+            effectiveRange: nil, withoutAdditionalLayout: true)
         let last = max(range.location, NSMaxRange(range) - 1)
         guard last < laid else { return (first.minY + origin, .greatestFiniteMagnitude) }
-        let end = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: last),
-                                          effectiveRange: nil, withoutAdditionalLayout: true)
+        let end = layout.lineFragmentRect(
+            forGlyphAt: layout.glyphIndexForCharacter(at: last),
+            effectiveRange: nil, withoutAdditionalLayout: true)
         return (first.minY + origin, end.maxY + origin)
     }
 
     /// Fraction of the surface colour painted over text at `y` (0 = undimmed).
-    private func overlay(at y: CGFloat, to: (top: CGFloat, bottom: CGFloat)?, from: (top: CGFloat, bottom: CGFloat)?) -> CGFloat {
+    private func overlay(at y: CGFloat, to: (top: CGFloat, bottom: CGFloat)?, from: (top: CGFloat, bottom: CGFloat)?)
+        -> CGFloat
+    {
         let dim = 1 - Self.dimmedOpacity
         func value(on: Bool, band: (top: CGFloat, bottom: CGFloat)?) -> CGFloat {
             guard on else { return 0 }
@@ -251,19 +262,28 @@ import SilkwebCore
             var edges: [CGFloat] = [0, height]
             for band in [bands.to, bands.from].compactMap({ $0 }) {
                 for edge in [band.top, band.bottom] {
-                    if edge == .greatestFiniteMagnitude { incomplete = true } else if edge > 0 && edge < height { edges.append(edge) }
+                    if edge == .greatestFiniteMagnitude {
+                        incomplete = true
+                    } else if edge > 0 && edge < height {
+                        edges.append(edge)
+                    }
                 }
             }
             edges.sort()
             for (top, bottom) in zip(edges, edges.dropFirst()) where bottom > top {
                 let alpha = overlay(at: (top + bottom) / 2, to: bands.to, from: bands.from)
                 guard alpha > 0.001 else { continue }
-                if let last = strips.last, last.bottom == top, last.alpha == alpha { strips[strips.count - 1].bottom = bottom }
-                else { strips.append((top, bottom, alpha)) }
+                if let last = strips.last, last.bottom == top, last.alpha == alpha {
+                    strips[strips.count - 1].bottom = bottom
+                } else {
+                    strips.append((top, bottom, alpha))
+                }
             }
         }
-        measured = (editor.bounds.width, editor.bounds.height, editor.textContainerOrigin,
-                    incomplete ? editor.layoutManager?.firstUnlaidCharacterIndex() : nil)
+        measured = (
+            editor.bounds.width, editor.bounds.height, editor.textContainerOrigin,
+            incomplete ? editor.layoutManager?.firstUnlaidCharacterIndex() : nil
+        )
         dimmedStrips = strips
         while stripViews.count > strips.count { stripViews.removeLast().removeFromSuperview() }
         while stripViews.count < strips.count {
@@ -283,7 +303,8 @@ import SilkwebCore
     /// may have moved a band, so a scrolled frame costs a few comparisons.
     func dimWillDraw() {
         guard let editor, focus || fadeFrom != nil || !stripViews.isEmpty else { return }
-        let stale = dimNeedsUpdate || measured.width != editor.bounds.width || measured.height != editor.bounds.height
+        let stale =
+            dimNeedsUpdate || measured.width != editor.bounds.width || measured.height != editor.bounds.height
             || measured.origin != editor.textContainerOrigin
             || measured.unlaid.map { $0 != editor.layoutManager?.firstUnlaidCharacterIndex() } == true
         guard stale else { return }
@@ -300,7 +321,8 @@ import SilkwebCore
     /// frame at once; a pending re-measure still runs before the next frame draws.
     func editorDidResize() {
         guard let editor, focus || fadeFrom != nil || !stripViews.isEmpty,
-              measured.width != editor.bounds.width || measured.height != editor.bounds.height else { return }
+            measured.width != editor.bounds.width || measured.height != editor.bounds.height
+        else { return }
         let pending = dimNeedsUpdate
         updateDim()
         dimNeedsUpdate = pending
@@ -335,7 +357,9 @@ import SilkwebCore
             scroll.contentInsets = insets
         }
         editor.layoutEditor()
-        if on { anchorCaret() } else if let scroll, let origin {
+        if on {
+            anchorCaret()
+        } else if let scroll, let origin {
             // Keep the caret line where it is on screen, clamped to the inset-free range.
             let maximum = max(0, editor.frame.height - scroll.contentSize.height)
             scroll.contentView.scroll(to: NSPoint(x: origin.x, y: min(max(0, origin.y), maximum)))
@@ -353,7 +377,8 @@ import SilkwebCore
 
     private func lineHeight(_ editor: PlainMarkdownTextView) -> CGFloat {
         let font = editor.style.bodyFont
-        return (editor.layoutManager?.defaultLineHeight(for: font) ?? font.ascender - font.descender) * editor.style.lineHeight
+        return (editor.layoutManager?.defaultLineHeight(for: font) ?? font.ascender - font.descender)
+            * editor.style.lineHeight
     }
 
     private func scheduleAnchor() {
@@ -381,7 +406,8 @@ import SilkwebCore
         guard location < editor.string.utf16.count else { return }
         layout.ensureLayout(forCharacterRange: NSRange(location: location, length: 0))
         let rect = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: location), effectiveRange: nil)
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, rect.minY + editor.textContainerOrigin.y - scroll.contentSize.height / 3)))
+        scroll.contentView.scroll(
+            to: NSPoint(x: 0, y: max(0, rect.minY + editor.textContainerOrigin.y - scroll.contentSize.height / 3)))
         scroll.reflectScrolledClipView(scroll.contentView)
     }
 
@@ -390,7 +416,8 @@ import SilkwebCore
         guard let editor, let layout = editor.layoutManager else { return nil }
         let length = editor.textStorage?.length ?? 0
         let location = max(0, min(location, length))
-        layout.ensureLayout(forCharacterRange: NSRange(location: min(location, max(0, length - 1)), length: length > 0 ? 1 : 0))
+        layout.ensureLayout(
+            forCharacterRange: NSRange(location: min(location, max(0, length - 1)), length: length > 0 ? 1 : 0))
         var fragment = layout.extraLineFragmentRect
         if location < length || fragment.isEmpty {
             guard length > 0, layout.numberOfGlyphs > 0 else { return nil }
@@ -481,9 +508,13 @@ struct WritingModeItems: View {
     var shortcuts = true
     var body: some View {
         Toggle("Focus Mode", isOn: Binding(get: { focus }, set: { workspace.setWritingModes(focus: $0) }))
-            .keyboardShortcut(shortcuts ? KeyboardShortcut("f", modifiers: [.control, .shift, .command]) : nil).disabled(!enabled)
-        Toggle("Typewriter Mode", isOn: Binding(get: { typewriter }, set: { workspace.setWritingModes(typewriter: $0) }))
-            .keyboardShortcut(shortcuts ? KeyboardShortcut("t", modifiers: [.control, .shift, .command]) : nil).disabled(!enabled)
+            .keyboardShortcut(shortcuts ? KeyboardShortcut("f", modifiers: [.control, .shift, .command]) : nil)
+            .disabled(!enabled)
+        Toggle(
+            "Typewriter Mode", isOn: Binding(get: { typewriter }, set: { workspace.setWritingModes(typewriter: $0) })
+        )
+        .keyboardShortcut(shortcuts ? KeyboardShortcut("t", modifiers: [.control, .shift, .command]) : nil).disabled(
+            !enabled)
     }
 }
 
@@ -504,7 +535,9 @@ struct WritingModesChip: View {
     var body: some View {
         if let title = Self.title(focus: workspace.focusMode, typewriter: workspace.typewriterMode) {
             Menu {
-                WritingModeItems(workspace: workspace, focus: workspace.focusMode, typewriter: workspace.typewriterMode, shortcuts: false)
+                WritingModeItems(
+                    workspace: workspace, focus: workspace.focusMode, typewriter: workspace.typewriterMode,
+                    shortcuts: false)
             } label: {
                 Text(title).font(.caption).foregroundStyle(Color.silkwebAccent)
             }
@@ -513,7 +546,9 @@ struct WritingModesChip: View {
             .tint(.silkwebAccent)
             .fixedSize()
             .padding(.vertical, 2).padding(.horizontal, 6)
-            .background(RoundedRectangle(cornerRadius: 4).fill(hovering ? Color(nsColor: .quaternarySystemFill) : .clear))
+            .background(
+                RoundedRectangle(cornerRadius: 4).fill(hovering ? Color(nsColor: .quaternarySystemFill) : .clear)
+            )
             .onHover { hovering = $0 }
             .help("Writing Modes")
             .accessibilityLabel("Writing modes")

@@ -74,8 +74,13 @@ struct EditorWindowLifecycle: NSViewRepresentable {
             }
         }
         /// The compact bar stays visible in full screen (1.65); its leading items move into the freed space.
-        func window(_ window: NSWindow, willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions = []) -> NSApplication.PresentationOptions {
-            let options = previousDelegate?.window?(window, willUseFullScreenPresentationOptions: proposedOptions) ?? proposedOptions
+        func window(
+            _ window: NSWindow,
+            willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions = []
+        ) -> NSApplication.PresentationOptions {
+            let options =
+                previousDelegate?.window?(window, willUseFullScreenPresentationOptions: proposedOptions)
+                ?? proposedOptions
             return options.subtracting(.autoHideToolbar)
         }
         func windowWillClose(_ notification: Notification) {

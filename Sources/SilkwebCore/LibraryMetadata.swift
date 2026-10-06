@@ -43,8 +43,10 @@ enum LibraryMetadataStore {
         let attributes: [FileAttributeKey: Any]
         do {
             attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        } catch let error as NSError where error.domain == NSCocoaErrorDomain
-            && (error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError) {
+        } catch let error as NSError
+            where error.domain == NSCocoaErrorDomain
+            && (error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError)
+        {
             return
         }
         if attributes[.type] as? FileAttributeType == .typeSymbolicLink {
@@ -57,8 +59,10 @@ enum LibraryMetadataStore {
         let data: Data
         do {
             data = try Data(contentsOf: file)
-        } catch let error as NSError where error.domain == NSCocoaErrorDomain
-            && error.code == NSFileReadNoSuchFileError {
+        } catch let error as NSError
+            where error.domain == NSCocoaErrorDomain
+            && error.code == NSFileReadNoSuchFileError
+        {
             return (LibraryMetadata(), nil)
         }
         let metadata: LibraryMetadata
@@ -75,7 +79,8 @@ enum LibraryMetadataStore {
         }
         // Never overwrite a newer format this build cannot understand.
         guard metadata.formatVersion <= LibraryMetadata.currentVersion,
-              metadata.formatVersion >= 1 else {
+            metadata.formatVersion >= 1
+        else {
             throw LibraryError.unsupportedMetadataVersion(metadata.formatVersion)
         }
         return (metadata, nil)

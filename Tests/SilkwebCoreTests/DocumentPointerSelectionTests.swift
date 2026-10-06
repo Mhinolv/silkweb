@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class DocumentPointerSelectionTests: XCTestCase {
@@ -18,7 +19,9 @@ final class DocumentPointerSelectionTests: XCTestCase {
                                     XCTAssertEqual(result, toggle ? selected.union(expected) : expected)
                                 } else if toggle {
                                     XCTAssertEqual(result, selected.symmetricDifference([paths[target]]))
-                                } else { XCTAssertEqual(result, [paths[target]]) }
+                                } else {
+                                    XCTAssertEqual(result, [paths[target]])
+                                }
                             }
                         }
                     }
@@ -27,8 +30,10 @@ final class DocumentPointerSelectionTests: XCTestCase {
         }
         for paths in [[], ["A.md"]] {
             for anchor: String? in [nil, "missing.md"] {
-                XCTAssertEqual(DocumentPointerSelection.selection(path: "A.md", orderedPaths: paths,
-                    selected: [], anchor: anchor, extendRange: true, toggle: false), ["A.md"])
+                XCTAssertEqual(
+                    DocumentPointerSelection.selection(
+                        path: "A.md", orderedPaths: paths,
+                        selected: [], anchor: anchor, extendRange: true, toggle: false), ["A.md"])
             }
         }
     }

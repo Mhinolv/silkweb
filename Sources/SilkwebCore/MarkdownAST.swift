@@ -9,8 +9,10 @@ public struct MarkdownDocument: Equatable, Sendable {
     public var headings: [MarkdownHeading] {
         MarkdownExtensions.headings(in: blocks, sourceRanges: headingSourceRanges)
     }
-    public init(blocks: [MarkdownBlock], headingSourceRanges: [NSRange] = [],
-                footnotes: [String: [MarkdownInline]] = [:]) {
+    public init(
+        blocks: [MarkdownBlock], headingSourceRanges: [NSRange] = [],
+        footnotes: [String: [MarkdownInline]] = [:]
+    ) {
         self.blocks = blocks
         self.headingSourceRanges = headingSourceRanges
         self.footnotes = footnotes

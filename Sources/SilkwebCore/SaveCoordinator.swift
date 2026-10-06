@@ -1,5 +1,5 @@
-import Foundation
 import Darwin
+import Foundation
 
 public struct DocumentSaveFailure: Error, LocalizedError, Equatable, Sendable {
     public enum Reason: Equatable, Sendable { case diskFull, permission, volumeUnavailable, other(String) }
@@ -21,10 +21,13 @@ public struct DocumentSaveFailure: Error, LocalizedError, Equatable, Sendable {
         let error = error as NSError
         let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError ?? error
         if (error.domain == NSCocoaErrorDomain && error.code == NSFileWriteOutOfSpaceError)
-            || (underlying.domain == NSPOSIXErrorDomain && underlying.code == Int(ENOSPC)) {
+            || (underlying.domain == NSPOSIXErrorDomain && underlying.code == Int(ENOSPC))
+        {
             reason = .diskFull
         } else if (error.domain == NSCocoaErrorDomain && error.code == NSFileWriteNoPermissionError)
-            || (underlying.domain == NSPOSIXErrorDomain && [Int(EACCES), Int(EPERM), Int(EROFS)].contains(underlying.code)) {
+            || (underlying.domain == NSPOSIXErrorDomain
+                && [Int(EACCES), Int(EPERM), Int(EROFS)].contains(underlying.code))
+        {
             reason = .permission
         } else if underlying.domain == NSPOSIXErrorDomain && [Int(ENODEV), Int(ENXIO)].contains(underlying.code) {
             reason = .volumeUnavailable
@@ -64,7 +67,8 @@ public struct RecoveryDraft: Codable, Equatable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         formatVersion = try values.decodeIfPresent(Int.self, forKey: .formatVersion) ?? 1
         guard formatVersion == Self.currentVersion else {
-            throw DecodingError.dataCorruptedError(forKey: .formatVersion, in: values, debugDescription: "Unsupported recovery format")
+            throw DecodingError.dataCorruptedError(
+                forKey: .formatVersion, in: values, debugDescription: "Unsupported recovery format")
         }
         documentURL = try values.decode(URL.self, forKey: .documentURL)
         text = try values.decode(String.self, forKey: .text)
@@ -94,7 +98,9 @@ public actor SaveCoordinator {
 
     public init(store: DocumentStore = DocumentStore(), recoveryDirectory: URL? = nil) {
         self.store = store
-        self.recoveryDirectory = recoveryDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        self.recoveryDirectory =
+            recoveryDirectory
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Silkweb/Recovery", isDirectory: true)
     }
 
@@ -117,7 +123,7 @@ public actor SaveCoordinator {
         guard var entry = entries[url] else { throw CocoaError(.fileReadUnknown) }
         guard text != entry.text else { return }
         entry.text = text
-        if case .conflict = entry.state { } else { entry.state = .dirty }
+        if case .conflict = entry.state {} else { entry.state = .dirty }
         entries[url] = entry
         publish(url)
     }
@@ -134,7 +140,7 @@ public actor SaveCoordinator {
                 try await Task.sleep(for: delay)
                 try Task.checkCancellation()
                 _ = await self?.commit(url, explicit: false)
-            } catch { }
+            } catch {}
         }
     }
 
@@ -211,8 +217,10 @@ public actor SaveCoordinator {
         } catch {
             let failure = error as NSError
             let underlying = failure.userInfo[NSUnderlyingErrorKey] as? NSError ?? failure
-            if (failure.domain == NSCocoaErrorDomain && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(failure.code))
-                || (underlying.domain == NSPOSIXErrorDomain && underlying.code == Int(ENOENT)) {
+            if (failure.domain == NSCocoaErrorDomain
+                && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(failure.code))
+                || (underlying.domain == NSPOSIXErrorDomain && underlying.code == Int(ENOENT))
+            {
                 entry.state = .conflict(diskRevision: nil)
             } else {
                 entry.state = .failed(error: DocumentSaveFailure(error: error, url: url), attempt: entry.attempts)
@@ -220,8 +228,9 @@ public actor SaveCoordinator {
         }
         entries[url] = entry
         if entry.state.isDirty {
-            do { try persistRecovery(url, entry: entry) }
-            catch { recoveryFailures[url] = DocumentSaveFailure(error: error, url: recoveryDirectory) }
+            do { try persistRecovery(url, entry: entry) } catch {
+                recoveryFailures[url] = DocumentSaveFailure(error: error, url: recoveryDirectory)
+            }
         }
         publish(url)
         return entry.state
@@ -244,7 +253,10 @@ public actor SaveCoordinator {
                 let data = try? Data(contentsOf: file)
                 if let data, let draft = try? JSONDecoder().decode(RecoveryDraft.self, from: data) { return draft }
                 if let data, let version = try? JSONDecoder().decode(RecoveryVersion.self, from: data).formatVersion,
-                   version > RecoveryDraft.currentVersion { return nil }
+                    version > RecoveryDraft.currentVersion
+                {
+                    return nil
+                }
                 quarantine(file)
                 return nil
             }
@@ -262,7 +274,8 @@ public actor SaveCoordinator {
         let folder = recoveryDirectory.appendingPathComponent("Unreadable", isDirectory: true)
         var target = folder.appendingPathComponent(file.lastPathComponent)
         if FileManager.default.fileExists(atPath: target.path) {
-            target = folder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + " " + UUID().uuidString + ".json")
+            target = folder.appendingPathComponent(
+                file.deletingPathExtension().lastPathComponent + " " + UUID().uuidString + ".json")
         }
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -281,8 +294,9 @@ public actor SaveCoordinator {
         let url = draft.documentURL.standardizedFileURL
         guard entries[url] == nil else { return }
         let deleted = !FileManager.default.fileExists(atPath: url.path)
-        entries[url] = Entry(text: draft.text, revision: draft.revision,
-                             state: deleted ? .conflict(diskRevision: nil) : .dirty, recoveryPending: true)
+        entries[url] = Entry(
+            text: draft.text, revision: draft.revision,
+            state: deleted ? .conflict(diskRevision: nil) : .dirty, recoveryPending: true)
         publish(url)
     }
 
@@ -328,17 +342,21 @@ public actor SaveCoordinator {
             }
             entries[target] = entry
             if entry.state.isDirty {
-                do { try persistRecovery(target, entry: entry) }
-                catch { recoveryFailures[target] = DocumentSaveFailure(error: error, url: recoveryDirectory) }
+                do { try persistRecovery(target, entry: entry) } catch {
+                    recoveryFailures[target] = DocumentSaveFailure(error: error, url: recoveryDirectory)
+                }
             }
             publish(target)
             return disk
-        } catch let error as NSError where error.domain == NSCocoaErrorDomain
-            && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(error.code) {
+        } catch let error as NSError
+            where error.domain == NSCocoaErrorDomain
+            && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(error.code)
+        {
             entry.state = .conflict(diskRevision: nil)
             entries[target] = entry
-            do { try persistRecovery(target, entry: entry) }
-            catch { recoveryFailures[target] = DocumentSaveFailure(error: error, url: recoveryDirectory) }
+            do { try persistRecovery(target, entry: entry) } catch {
+                recoveryFailures[target] = DocumentSaveFailure(error: error, url: recoveryDirectory)
+            }
             publish(target)
             return nil
         }
@@ -358,7 +376,8 @@ public actor SaveCoordinator {
         var stem = url.deletingPathExtension().lastPathComponent
         while (stem + suffix).utf8.count > 240 { stem.removeLast() }
         let base = stem + suffix
-        let parent = String(url.deletingLastPathComponent().path.dropFirst(root.path.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let parent = String(url.deletingLastPathComponent().path.dropFirst(root.path.count)).trimmingCharacters(
+            in: CharacterSet(charactersIn: "/"))
         let mutations = try LibraryMutations(root: root)
         let name = try await mutations.uniqueName(base: base, in: parent)
         _ = try await mutations.createDocument(named: name, in: parent, text: keepMine ? disk.text : entry.text)
@@ -382,7 +401,8 @@ public actor SaveCoordinator {
 
     public func recreate(_ url: URL, root: URL) async throws -> URL {
         guard let entry = entries[url] else { throw CocoaError(.fileWriteUnknown) }
-        let parent = String(url.deletingLastPathComponent().path.dropFirst(root.path.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let parent = String(url.deletingLastPathComponent().path.dropFirst(root.path.count)).trimmingCharacters(
+            in: CharacterSet(charactersIn: "/"))
         let mutations = try LibraryMutations(root: root)
         // Save Again also restores a containing folder deleted in Finder.
         var ancestor = ""
@@ -399,7 +419,8 @@ public actor SaveCoordinator {
         let loaded = try store.load(target)
         guard let latest = entries[url] else { throw CocoaError(.fileWriteUnknown) }
         entries[url] = nil
-        entries[target] = Entry(text: latest.text, revision: loaded.revision, state: latest.text == entry.text ? .clean : .dirty)
+        entries[target] = Entry(
+            text: latest.text, revision: loaded.revision, state: latest.text == entry.text ? .clean : .dirty)
         if latest.text != entry.text { scheduleSave(target) }
         try? FileManager.default.removeItem(at: recoveryURL(url))
         publish(target)

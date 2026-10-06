@@ -9,8 +9,10 @@ public enum FocusUnit {
 
     /// `fencedBefore` answers whether a line (by its start offset) begins inside a fenced
     /// block, or nil when unknown; unknown lines are derived from the nearest known line above.
-    public static func range(in text: NSString, selection: NSRange, lineLimit: Int = 2_000,
-                             fencedBefore known: (Int) -> Bool? = { _ in nil }) -> NSRange {
+    public static func range(
+        in text: NSString, selection: NSRange, lineLimit: Int = 2_000,
+        fencedBefore known: (Int) -> Bool? = { _ in nil }
+    ) -> NSRange {
         let length = text.length
         guard length > 0 else { return NSRange(location: 0, length: 0) }
         let start = max(0, min(selection.location, length))
@@ -44,7 +46,9 @@ public enum FocusUnit {
         return next < text.length ? text.lineRange(for: NSRange(location: next, length: 0)) : nil
     }
 
-    private static func fencedBefore(_ line: Int, in text: NSString, known: (Int) -> Bool?, cache: inout [Int: Bool]) -> Bool {
+    private static func fencedBefore(_ line: Int, in text: NSString, known: (Int) -> Bool?, cache: inout [Int: Bool])
+        -> Bool
+    {
         if let value = cache[line] ?? known(line) { cache[line] = value; return value }
         // Walk up to a known line (or the start), then propagate fence toggles down.
         var cursor = line
@@ -74,7 +78,9 @@ public enum FocusUnit {
             var first = line
             if inside {
                 var steps = 0
-                while fenced(first.location), let previous = previousLine(before: first.location, in: text), steps < lineLimit {
+                while fenced(first.location), let previous = previousLine(before: first.location, in: text),
+                    steps < lineLimit
+                {
                     first = previous; steps += 1
                 }
             }
@@ -97,13 +103,15 @@ public enum FocusUnit {
         var first = line
         var steps = 0
         while MarkdownEditing.listPrefix(text.substring(with: first)) == nil,
-              let previous = previousLine(before: first.location, in: text), !boundary(previous), steps < lineLimit {
+            let previous = previousLine(before: first.location, in: text), !boundary(previous), steps < lineLimit
+        {
             first = previous; steps += 1
         }
         var last = line
         steps = 0
         while let next = nextLine(after: last, in: text), !boundary(next),
-              MarkdownEditing.listPrefix(text.substring(with: next)) == nil, steps < lineLimit {
+            MarkdownEditing.listPrefix(text.substring(with: next)) == nil, steps < lineLimit
+        {
             last = next; steps += 1
         }
         return NSUnionRange(first, last)

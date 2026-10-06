@@ -47,15 +47,18 @@ func searchSnippet(_ body: String, terms: [String]) -> (String, [NSRange]) {
     let first = terms.map { full.range(of: $0, options: options) }.filter { $0.location != NSNotFound }
         .min { $0.location < $1.location }
     let start = max(0, (first?.location ?? 0) - 40)
-    let range = full.rangeOfComposedCharacterSequences(for: NSRange(location: start, length: min(120, full.length - start)))
-    let snippet = (range.location > 0 ? "…" : "") + full.substring(with: range)
+    let range = full.rangeOfComposedCharacterSequences(
+        for: NSRange(location: start, length: min(120, full.length - start)))
+    let snippet =
+        (range.location > 0 ? "…" : "") + full.substring(with: range)
         + (NSMaxRange(range) < full.length ? "…" : "")
     let text = snippet as NSString
     var matches: [NSRange] = []
     for term in terms where !term.isEmpty {
         var cursor = 0
         while cursor < text.length {
-            let hit = text.range(of: term, options: options, range: NSRange(location: cursor, length: text.length - cursor))
+            let hit = text.range(
+                of: term, options: options, range: NSRange(location: cursor, length: text.length - cursor))
             guard hit.location != NSNotFound else { break }
             matches.append(hit)
             cursor = NSMaxRange(hit)

@@ -1,21 +1,27 @@
 import AppKit
 import SwiftUI
 import XCTest
-@testable import SilkwebCore
+
 @testable import Silkweb
+@testable import SilkwebCore
 
 /// silkweb-1.65: the compact bar with its breadcrumb, and hairline folder tabs with a coral unsaved dot.
 final class ToolbarPathTabsTests: XCTestCase {
-    static let deep = "Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
+    static let deep =
+        "Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
 
     @MainActor private func library() async throws -> (LibraryWorkspace, URL) {
-        let container = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebPath-" + UUID().uuidString)
+        let container = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SilkwebPath-" + UUID().uuidString)
         let root = container.appendingPathComponent("Field Notes")
         for folder in ["Vanlife/East", Self.deep] {
-            try FileManager.default.createDirectory(at: root.appendingPathComponent(folder), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent(folder), withIntermediateDirectories: true)
         }
-        for (path, text) in [("Vanlife/East/Settling In.md", "# Settling In\n\nBody."), ("Vanlife/Road.md", "# Road"),
-                             ("Other.md", "# Other"), (Self.deep + "/Settling In at the Campground.md", "# Campground")] {
+        for (path, text) in [
+            ("Vanlife/East/Settling In.md", "# Settling In\n\nBody."), ("Vanlife/Road.md", "# Road"),
+            ("Other.md", "# Other"), (Self.deep + "/Settling In at the Campground.md", "# Campground"),
+        ] {
             try Data(text.utf8).write(to: root.appendingPathComponent(path))
         }
         let workspace = LibraryWorkspace(defaults: disposableDefaults("PathTabs"))
@@ -52,8 +58,9 @@ final class ToolbarPathTabsTests: XCTestCase {
         let (workspace, container) = try await library()
         let oldAppearance = NSApp.appearance
         NSApp.appearance = NSAppearance(named: .aqua)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         defer {
             window.contentViewController = nil
@@ -84,7 +91,9 @@ final class ToolbarPathTabsTests: XCTestCase {
         XCTAssertLessThanOrEqual(barHeight, 40)
         let toolbar = try XCTUnwrap(window.toolbar)
         func frame(_ view: NSView) -> NSRect { view.convert(view.bounds, to: nil) }
-        func placed() -> [NSView] { toolbar.items.compactMap(\.view).filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor } }
+        func placed() -> [NSView] {
+            toolbar.items.compactMap(\.view).filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
+        }
         XCTAssertEqual(placed().count, toolbar.items.count, "no item overflows into the » menu at 1400 pt")
         let zoom = try XCTUnwrap(window.standardWindowButton(.zoomButton))
         func firstMinX() -> CGFloat { placed().map { frame($0).minX }.min() ?? .infinity }
@@ -94,9 +103,10 @@ final class ToolbarPathTabsTests: XCTestCase {
         XCTAssertEqual(frame(info).maxX, window.frame.width - Spacing.small, accuracy: 3)
 
         // The breadcrumb: the open document's real folder, with the count as a suffix, for VoiceOver too.
-        let crumbItem = try XCTUnwrap(toolbar.items.first { item in
-            item.view.map { Self.descendants($0).contains { $0 is BreadcrumbView } } == true
-        }?.view)
+        let crumbItem = try XCTUnwrap(
+            toolbar.items.first { item in
+                item.view.map { Self.descendants($0).contains { $0 is BreadcrumbView } } == true
+            }?.view)
         let breadcrumb = try XCTUnwrap(Self.descendants(crumbItem).compactMap { $0 as? BreadcrumbView }.first)
         XCTAssertEqual(workspace.breadcrumb.crumbs.map(\.title), ["Field Notes", "Vanlife", "East"])
         func element(_ label: String) -> AnyObject? {
@@ -127,39 +137,51 @@ final class ToolbarPathTabsTests: XCTestCase {
 
         // A long path folds into `…` at the minimum window width; the document title stays, VoiceOver hears it all.
         window.setFrame(NSRect(x: 0, y: 0, width: 900, height: 900), display: false)
-        workspace.navigate(folder: Self.deep, documents: [Self.deep + "/Settling In at the Campground.md"], pinned: true)
+        workspace.navigate(
+            folder: Self.deep, documents: [Self.deep + "/Settling In at the Campground.md"], pinned: true)
         await workspace.waitForNavigation()
         try await settle()
         let geometry = toolbar.items.map { item -> String in
             let view = item.view
-            return "\(item.label): placed=\(view?.window != nil) frame=\(view.map(frame) ?? .zero) fitting=\(view?.fittingSize ?? .zero) priority=\(item.visibilityPriority.rawValue)"
+            return
+                "\(item.label): placed=\(view?.window != nil) frame=\(view.map(frame) ?? .zero) fitting=\(view?.fittingSize ?? .zero) priority=\(item.visibilityPriority.rawValue)"
         }.joined(separator: "\n")
-        XCTAssertEqual(placed().count, toolbar.items.count, "no item overflows at the minimum width; breadcrumb width \(workspace.toolbarMetrics.breadcrumbWidth), window \(window.frame)\n\(geometry)")
+        XCTAssertEqual(
+            placed().count, toolbar.items.count,
+            "no item overflows at the minimum width; breadcrumb width \(workspace.toolbarMetrics.breadcrumbWidth), window \(window.frame)\n\(geometry)"
+        )
         let folders: [String] = ["Field Notes"] + Self.deep.split(separator: "/").map(String.init)
         let fullPath: String = (folders + ["Settling In at the Campground"]).joined(separator: " › ")
         XCTAssertEqual(element("Path").flatMap(Self.value), fullPath + ", 1 document")
-        let more = try XCTUnwrap(Self.accessibilityTree(breadcrumb).first { Self.label($0)?.hasPrefix("More folders: ") == true })
+        let more = try XCTUnwrap(
+            Self.accessibilityTree(breadcrumb).first { Self.label($0)?.hasPrefix("More folders: ") == true })
         XCTAssertTrue(Self.label(more)?.contains("North American Road Trips") == true)
         let titles: [String?] = Self.accessibilityTree(breadcrumb).flatMap { [Self.label($0), Self.value($0)] }
-        XCTAssertTrue(titles.contains("Settling In at the Campground"), "the document title is never dropped: \(titles)")
+        XCTAssertTrue(
+            titles.contains("Settling In at the Campground"), "the document title is never dropped: \(titles)")
         let fit = try XCTUnwrap(breadcrumb.fit)
         XCTAssertFalse(fit.collapsed.isEmpty, "the long path folds")
         XCTAssertFalse(fit.showsCount, "the count is the first thing dropped")
         XCTAssertFalse(breadcrumb.currentLabel.isHidden)
         XCTAssertGreaterThanOrEqual(breadcrumb.currentLabel.frame.width, 80 - 2 * BreadcrumbView.padding)
         XCTAssertLessThanOrEqual(breadcrumb.currentLabel.frame.maxX, breadcrumb.bounds.maxX + 0.5)
-        XCTAssertLessThanOrEqual(frame(crumbItem).maxX, frame(try XCTUnwrap(toolbar.items.first { $0.label == "View Mode" }?.view)).minX)
+        XCTAssertLessThanOrEqual(
+            frame(crumbItem).maxX, frame(try XCTUnwrap(toolbar.items.first { $0.label == "View Mode" }?.view)).minX)
 
         // Without the window buttons the items move to the bar's leading inset, and back when they return.
         window.setFrame(NSRect(x: 0, y: 0, width: 1400, height: 900), display: false)
         try await settle()
         let shown = firstMinX()
-        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { window.standardWindowButton(kind)?.isHidden = true }
+        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(kind)?.isHidden = true
+        }
         for _ in 0..<20 where firstMinX() > Spacing.small { try await settle() }
         XCTAssertLessThanOrEqual(firstMinX(), Spacing.small)
         XCTAssertEqual(placed().count, toolbar.items.count)
         XCTAssertEqual(frame(info).maxX, window.frame.width - Spacing.small, accuracy: 3)
-        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { window.standardWindowButton(kind)?.isHidden = false }
+        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(kind)?.isHidden = false
+        }
         for _ in 0..<20 where firstMinX() <= frame(zoom).maxX { try await settle() }
         XCTAssertEqual(firstMinX(), shown, accuracy: 0.5)
         XCTAssertGreaterThan(firstMinX(), frame(zoom).maxX)
@@ -168,7 +190,9 @@ final class ToolbarPathTabsTests: XCTestCase {
     @MainActor private func tabsFixture() async throws -> LibraryWorkspace {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
-        for name in ["A", "B", "C"] { try Data("# \(name)\n\nText.".utf8).write(to: root.appendingPathComponent(name + ".md")) }
+        for name in ["A", "B", "C"] {
+            try Data("# \(name)\n\nText.".utf8).write(to: root.appendingPathComponent(name + ".md"))
+        }
         let workspace = LibraryWorkspace(defaults: disposableDefaults("FolderTabs"))
         workspace.root = root
         workspace.recoveryDirectory = root.appendingPathComponent(".recovery")
@@ -185,8 +209,9 @@ final class ToolbarPathTabsTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: workspace.root!) }
         let host = NSHostingView(rootView: DocumentDetail(workspace: workspace))
         host.sizingOptions = []
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 560), styleMask: [.titled, .resizable],
-                              backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 560), styleMask: [.titled, .resizable],
+            backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: .aqua)
         window.contentView = host
@@ -194,9 +219,14 @@ final class ToolbarPathTabsTests: XCTestCase {
         func settle() async throws {
             for _ in 0..<5 { host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(20)) }
         }
-        func bar() throws -> EditorTabBarView { try XCTUnwrap(Self.descendants(host).compactMap { $0 as? EditorTabBarView }.first) }
+        func bar() throws -> EditorTabBarView {
+            try XCTUnwrap(Self.descendants(host).compactMap { $0 as? EditorTabBarView }.first)
+        }
         func editorFrame() throws -> NSRect {
-            let editor = try XCTUnwrap(Self.descendants(host).compactMap { $0 as? PlainMarkdownTextView }.first { $0.string == workspace.editor.text })
+            let editor = try XCTUnwrap(
+                Self.descendants(host).compactMap { $0 as? PlainMarkdownTextView }.first {
+                    $0.string == workspace.editor.text
+                })
             let scroll = try XCTUnwrap(editor.enclosingScrollView)
             return scroll.convert(scroll.bounds, to: host)
         }
@@ -239,7 +269,8 @@ final class ToolbarPathTabsTests: XCTestCase {
         func pixel(_ point: NSPoint, in view: NSView) throws -> NSColor {
             let p = view.convert(point, to: tabBar)
             let y = Int((tabBar.bounds.height - p.y) * scale)
-            return try XCTUnwrap(bitmap.colorAt(x: Int(p.x * scale), y: min(bitmap.pixelsHigh - 1, y))?.usingColorSpace(.sRGB))
+            return try XCTUnwrap(
+                bitmap.colorAt(x: Int(p.x * scale), y: min(bitmap.pixelsHigh - 1, y))?.usingColorSpace(.sRGB))
         }
         // Reference colours rendered through the same window pipeline as the tab bar.
         func rendered(_ color: NSColor) throws -> NSColor {
@@ -253,18 +284,23 @@ final class ToolbarPathTabsTests: XCTestCase {
         }
         let coral = try rendered(.silkwebCoral), pane = try rendered(.silkwebPaneBackground)
         func close(_ color: NSColor, _ wanted: NSColor, _ label: String) {
-            for (x, y) in [(color.redComponent, wanted.redComponent), (color.greenComponent, wanted.greenComponent),
-                           (color.blueComponent, wanted.blueComponent)] {
+            for (x, y) in [
+                (color.redComponent, wanted.redComponent), (color.greenComponent, wanted.greenComponent),
+                (color.blueComponent, wanted.blueComponent),
+            ] {
                 XCTAssertEqual(x * 255, y * 255, accuracy: 4, "\(label): \(color) vs \(wanted)")
             }
         }
         close(try pixel(NSPoint(x: dot.midX, y: dot.midY), in: b), coral, "coral dot")
         close(try pixel(NSPoint(x: dot.midX, y: dot.midY), in: a), pane, "no dot on the saved tab")
         close(try pixel(NSPoint(x: b.bounds.midX, y: 0.25), in: b), pane, "open bottom under the active tab")
-        XCTAssertGreaterThan(abs(try pixel(NSPoint(x: a.bounds.midX, y: 0.25), in: a).redComponent - pane.redComponent) * 255, 4,
-                             "hairline under inactive tabs")
-        XCTAssertGreaterThan(abs(try pixel(NSPoint(x: b.bounds.midX, y: b.bounds.maxY - 0.25), in: b).redComponent - pane.redComponent) * 255, 4,
-                             "outline on the active tab's top edge")
+        XCTAssertGreaterThan(
+            abs(try pixel(NSPoint(x: a.bounds.midX, y: 0.25), in: a).redComponent - pane.redComponent) * 255, 4,
+            "hairline under inactive tabs")
+        XCTAssertGreaterThan(
+            abs(try pixel(NSPoint(x: b.bounds.midX, y: b.bounds.maxY - 0.25), in: b).redComponent - pane.redComponent)
+                * 255, 4,
+            "outline on the active tab's top edge")
 
         // 1.26: a preview tab keeps its italic title; saving clears the dot; closing back to one tab keeps the origin.
         await open("C", pinned: false)

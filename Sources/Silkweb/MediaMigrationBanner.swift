@@ -10,9 +10,10 @@ struct MediaMigrationBanner: View {
                 Image(systemName: workspace.mediaFailures.isEmpty ? "info.circle" : "exclamationmark.triangle.fill")
                     .foregroundStyle(workspace.mediaFailures.isEmpty ? Color.secondary : Color(nsColor: .systemOrange))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(workspace.mediaFailures.isEmpty
-                         ? "Moving images to the “\(workspace.mediaDirectoryName)” folder…"
-                         : "Some images couldn’t be moved to the “\(workspace.mediaDirectoryName)” folder.")
+                    Text(
+                        workspace.mediaFailures.isEmpty
+                            ? "Moving images to the “\(workspace.mediaDirectoryName)” folder…"
+                            : "Some images couldn’t be moved to the “\(workspace.mediaDirectoryName)” folder.")
                     if !workspace.mediaFailures.isEmpty {
                         Text("Their links still work. Silkweb will try again next time this library opens.")
                             .font(.subheadline).foregroundStyle(.secondary)
@@ -36,8 +37,12 @@ struct MediaMigrationBanner: View {
                             }.frame(width: 360, height: 200)
                         }
                     Button("Try Again") { workspace.retryMediaMigration() }
-                    Button { workspace.mediaBannerVisible = false } label: { Image(systemName: "xmark") }
-                        .accessibilityLabel("Dismiss message").help("Dismiss message")
+                    Button {
+                        workspace.mediaBannerVisible = false
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("Dismiss message").help("Dismiss message")
                 }
             }
             .font(.callout).controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8)
@@ -58,8 +63,12 @@ struct UnreadableRecoveryBanner: View {
                 Text(Self.message)
                 Spacer()
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
-                Button { workspace.unreadableRecoveryFile = nil } label: { Image(systemName: "xmark") }
-                    .accessibilityLabel("Dismiss message").help("Dismiss message")
+                Button {
+                    workspace.unreadableRecoveryFile = nil
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .accessibilityLabel("Dismiss message").help("Dismiss message")
             }
             .font(.callout).controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8)
             .frame(minHeight: 36).paneStrip(hairline: .bottom)

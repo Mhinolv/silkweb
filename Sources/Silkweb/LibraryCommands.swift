@@ -22,7 +22,13 @@ enum LibraryUndo {
     case move(MovePlan)
     case trash([TrashedItem])
     var title: String {
-        switch self { case .tags(_, let title): return title; case .newFolder: return "Undo New Folder"; case .rename: return "Undo Rename"; case .move: return "Undo Move"; case .trash: return "Undo Move to Trash" }
+        switch self {
+        case .tags(_, let title): return title;
+        case .newFolder: return "Undo New Folder";
+        case .rename: return "Undo Rename";
+        case .move: return "Undo Move";
+        case .trash: return "Undo Move to Trash"
+        }
     }
 }
 
@@ -52,14 +58,19 @@ extension LibraryWorkspace {
             do {
                 let engine = try LibraryMutations(root: root)
                 let name = try await engine.uniqueName(base: folder ? "Untitled Folder" : "Untitled.md", in: target)
-                let changes = try await (folder ? engine.createFolder(named: name, in: target) : engine.createDocument(named: name, in: target))
+                let changes =
+                    try await
+                    (folder
+                    ? engine.createFolder(named: name, in: target) : engine.createDocument(named: name, in: target))
                 guard let change = changes.changes.first else { return }
                 try await refresh(changes)
                 if folder { libraryUndo.append(.newFolder(change.newPath)) }
                 session.expandedFolders.insert(target)
                 // A tag scope or filter hides the new untagged row: never leave a rename pending on a
                 // row that isn't on screen (it blocks Trash, Return, drag). Keep scope and selection.
-                let visible = folder ? session.selectedTagID == nil
+                let visible =
+                    folder
+                    ? session.selectedTagID == nil
                     : search.text.isEmpty && documents.contains { $0.relativePath == change.newPath }
                 if visible {
                     session.selectedFolder = folder ? change.newPath : target
@@ -128,7 +139,10 @@ extension LibraryWorkspace {
                 let plan = try await engine.planRename(item.path, to: item.filename(value))
                 let changes = try await commitMove(plan, using: engine)
                 if let change = changes.changes.first {
-                    libraryUndo.append(.rename(LibraryRename(path: change.newPath, isFolder: item.isFolder), (item.path as NSString).lastPathComponent, plan.reversed))
+                    libraryUndo.append(
+                        .rename(
+                            LibraryRename(path: change.newPath, isFolder: item.isFolder),
+                            (item.path as NSString).lastPathComponent, plan.reversed))
                 }
                 rename = nil
                 if item.focusEditor { focus(2) }
@@ -141,7 +155,9 @@ extension LibraryWorkspace {
 
     func reveal(_ path: String? = nil) {
         guard let root else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([root.appendingPathComponent(path ?? selectedItem?.path ?? targetFolder)])
+        NSWorkspace.shared.activateFileViewerSelecting([
+            root.appendingPathComponent(path ?? selectedItem?.path ?? targetFolder)
+        ])
     }
 
     func refresh(_ changes: LibraryChangeSet) async throws {
@@ -223,19 +239,19 @@ extension LibraryWorkspace {
                     reportTrashFailures(result.failures, reveal: remaining.map(\.trashURL), restoring: true)
                     return
                 case .move(let plan):
-                    do { _ = try await commitMove(plan, using: engine) }
-                    catch {
+                    do { _ = try await commitMove(plan, using: engine) } catch {
                         mutationFailure(error, title: "The move can’t be undone because items have changed since.")
                         return
                     }
                 case .newFolder(let path):
                     try await engine.removeEmptyFolder(path)
-                    if session.selectedFolder == path { session.selectedFolder = (path as NSString).deletingLastPathComponent }
+                    if session.selectedFolder == path {
+                        session.selectedFolder = (path as NSString).deletingLastPathComponent
+                    }
                     session.expandedFolders.remove(path)
                     try await refresh(LibraryChangeSet(changes: []))
                 case .rename(let item, let name, let plan):
-                    do { _ = try await commitMove(plan, using: engine) }
-                    catch MovePlanError.changed {
+                    do { _ = try await commitMove(plan, using: engine) } catch MovePlanError.changed {
                         // Something changed since the rename: rename back and rewrite links afresh.
                         let changes = try await engine.restoreName(item.path, to: name)
                         try await refresh(changes)

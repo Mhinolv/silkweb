@@ -1,7 +1,7 @@
 import AppKit
 import Quartz
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 struct EditorStyle: Equatable {
     var fontFamily: String
@@ -12,9 +12,11 @@ struct EditorStyle: Equatable {
     var topInset: CGFloat = 16
     var indent = WritingPreferences.Indent.fourSpaces
 
-    init(fontSize: CGFloat? = nil, lineHeight: CGFloat? = nil, maximumWidth: CGFloat? = nil,
-         horizontalInset: CGFloat? = nil, topInset: CGFloat = 16,
-         preferences: WritingPreferences = LivePreferences.shared.current) {
+    init(
+        fontSize: CGFloat? = nil, lineHeight: CGFloat? = nil, maximumWidth: CGFloat? = nil,
+        horizontalInset: CGFloat? = nil, topInset: CGFloat = 16,
+        preferences: WritingPreferences = LivePreferences.shared.current
+    ) {
         fontFamily = preferences.fontFamily
         self.fontSize = fontSize ?? CGFloat(preferences.fontSize)
         self.lineHeight = lineHeight ?? CGFloat(preferences.lineHeight)
@@ -29,7 +31,8 @@ struct EditorStyle: Equatable {
     /// Settings font choices (1.24). A missing custom family falls back to Menlo without an alert.
     static func font(family: String, size: CGFloat) -> NSFont {
         switch family {
-        case "Menlo": return NSFont(name: "Menlo-Regular", size: size) ?? .monospacedSystemFont(ofSize: size, weight: .regular)
+        case "Menlo":
+            return NSFont(name: "Menlo-Regular", size: size) ?? .monospacedSystemFont(ofSize: size, weight: .regular)
         case "Monospaced": return .monospacedSystemFont(ofSize: size, weight: .regular)
         case "System": return .systemFont(ofSize: size)
         case "Serif":
@@ -158,7 +161,10 @@ struct MarkdownTextView: NSViewRepresentable {
             text.inlineImages.schedule()
             if replacingBuffer { text.undoManager?.removeAllActions() }
             let count = (text.string as NSString).length
-            text.setSelectedRange(NSRange(location: min(selection.location, count), length: min(selection.length, max(0, count - selection.location))))
+            text.setSelectedRange(
+                NSRange(
+                    location: min(selection.location, count),
+                    length: min(selection.length, max(0, count - selection.location))))
             text.layoutEditor()
             scroll.contentView.scroll(to: position)
             scroll.reflectScrolledClipView(scroll.contentView)
@@ -178,7 +184,9 @@ struct MarkdownTextView: NSViewRepresentable {
     }
 
     /// Reload a clean external edit in place, clamping UTF-16 selection and scroll.
-    static func reload(_ text: PlainMarkdownTextView, in scroll: NSScrollView, value: String, selection: NSRange, position: NSPoint) {
+    static func reload(
+        _ text: PlainMarkdownTextView, in scroll: NSScrollView, value: String, selection: NSRange, position: NSPoint
+    ) {
         text.string = value
         text.styler.reload()
         text.inlineImages.schedule()
@@ -203,7 +211,9 @@ struct MarkdownTextView: NSViewRepresentable {
         func undoManager(for view: NSTextView) -> UndoManager? {
             (view as? PlainMarkdownTextView)?.documentUndoManager
         }
-        func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
+        func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?)
+            -> Bool
+        {
             !session.loading && !session.readOnly
         }
         func textDidChange(_ notification: Notification) {
@@ -290,8 +300,9 @@ final class PlainMarkdownTextView: NSTextView {
             if self.needsEndMarginAfterEdit {
                 self.needsEndMarginAfterEdit = false
                 // Typewriter's own bottom inset already reaches the anchor; never jump past it.
-                if self.writingModes.typewriter { self.writingModes.anchorCaret() }
-                else if self.selectedRange() == NSRange(location: self.textStorage?.length ?? 0, length: 0) {
+                if self.writingModes.typewriter {
+                    self.writingModes.anchorCaret()
+                } else if self.selectedRange() == NSRange(location: self.textStorage?.length ?? 0, length: 0) {
                     self.scrollToEndOfDocument(nil)
                 }
             }
@@ -342,11 +353,13 @@ final class PlainMarkdownTextView: NSTextView {
         }
         // AppKit applies content insets to the scroller track as well. Cancel all
         // edges so typewriter insets do not shorten or shift the track.
-        let scrollerInsets = NSEdgeInsets(top: -contentInsets.top, left: -contentInsets.left,
-                                          bottom: -contentInsets.bottom, right: -contentInsets.right)
+        let scrollerInsets = NSEdgeInsets(
+            top: -contentInsets.top, left: -contentInsets.left,
+            bottom: -contentInsets.bottom, right: -contentInsets.right)
         let current = scroll.scrollerInsets
         if current.top != scrollerInsets.top || current.left != scrollerInsets.left
-            || current.bottom != scrollerInsets.bottom || current.right != scrollerInsets.right {
+            || current.bottom != scrollerInsets.bottom || current.right != scrollerInsets.right
+        {
             scroll.scrollerInsets = scrollerInsets
         }
         let minimum = NSSize(width: 0, height: viewport.height)
@@ -423,8 +436,11 @@ final class PlainMarkdownTextView: NSTextView {
         guard !hasMarkedText() else { super.insertTab(sender); return }
         let source = string as NSString
         let line = source.substring(with: source.lineRange(for: selectedRange()))
-        if selectedRange().length > 0 || MarkdownEditing.listPrefix(line) != nil { format(.indent) }
-        else { insertText(style.indent.text, replacementRange: selectedRange()) }
+        if selectedRange().length > 0 || MarkdownEditing.listPrefix(line) != nil {
+            format(.indent)
+        } else {
+            insertText(style.indent.text, replacementRange: selectedRange())
+        }
     }
     override func insertBacktab(_ sender: Any?) { format(.outdent) }
     override func keyDown(with event: NSEvent) {
@@ -436,7 +452,7 @@ final class PlainMarkdownTextView: NSTextView {
         }
     }
     #if DEBUG
-    private(set) var fullDrawCount = 0
+        private(set) var fullDrawCount = 0
     #endif
 
     /// Inline images move in the same display pass as the reflowed text: lay out the
@@ -454,7 +470,7 @@ final class PlainMarkdownTextView: NSTextView {
 
     override func draw(_ dirtyRect: NSRect) {
         #if DEBUG
-        if dirtyRect.width > 10 && dirtyRect.height > 30 { fullDrawCount += 1 }
+            if dirtyRect.width > 10 && dirtyRect.height > 30 { fullDrawCount += 1 }
         #endif
         super.draw(dirtyRect)
     }
@@ -480,10 +496,13 @@ final class PlainMarkdownTextView: NSTextView {
     func applySettings(_ preferences: WritingPreferences = LivePreferences.shared.current) {
         applyBehaviour(preferences)
         var next = EditorStyle(topInset: style.topInset, preferences: preferences)
-        next.fontSize = CGFloat(WritingPreferences.clamp(preferences.fontSize + Double(zoom), WritingPreferences.fontSizes,
-                                                         fallback: preferences.fontSize))
+        next.fontSize = CGFloat(
+            WritingPreferences.clamp(
+                preferences.fontSize + Double(zoom), WritingPreferences.fontSizes,
+                fallback: preferences.fontSize))
         guard next != style else { return }
-        let restyle = next.fontFamily != style.fontFamily || next.fontSize != style.fontSize
+        let restyle =
+            next.fontFamily != style.fontFamily || next.fontSize != style.fontSize
             || next.lineHeight != style.lineHeight || next.indent != style.indent
         let origin = enclosingScrollView?.contentView.bounds.origin
         let selection = selectedRanges
@@ -491,7 +510,9 @@ final class PlainMarkdownTextView: NSTextView {
         if restyle {
             let paragraph = style.paragraphStyle
             defaultParagraphStyle = paragraph
-            typingAttributes = [.font: style.bodyFont, .paragraphStyle: paragraph, .foregroundColor: NSColor.silkwebText]
+            typingAttributes = [
+                .font: style.bodyFont, .paragraphStyle: paragraph, .foregroundColor: NSColor.silkwebText,
+            ]
             styler.reload()
             if selectedRanges != selection { selectedRanges = selection }
         }
@@ -506,16 +527,23 @@ final class PlainMarkdownTextView: NSTextView {
 
     /// Settings that need no restyle.
     func applyBehaviour(_ preferences: WritingPreferences) {
-        if isContinuousSpellCheckingEnabled != preferences.checksSpelling { isContinuousSpellCheckingEnabled = preferences.checksSpelling }
-        if isAutomaticQuoteSubstitutionEnabled != preferences.smartPunctuation { isAutomaticQuoteSubstitutionEnabled = preferences.smartPunctuation }
-        if isAutomaticDashSubstitutionEnabled != preferences.smartPunctuation { isAutomaticDashSubstitutionEnabled = preferences.smartPunctuation }
+        if isContinuousSpellCheckingEnabled != preferences.checksSpelling {
+            isContinuousSpellCheckingEnabled = preferences.checksSpelling
+        }
+        if isAutomaticQuoteSubstitutionEnabled != preferences.smartPunctuation {
+            isAutomaticQuoteSubstitutionEnabled = preferences.smartPunctuation
+        }
+        if isAutomaticDashSubstitutionEnabled != preferences.smartPunctuation {
+            isAutomaticDashSubstitutionEnabled = preferences.smartPunctuation
+        }
         highlightsCurrentLine = preferences.highlightsCurrentLine
         inlineImages.enabled = preferences.showsInlineImages
     }
 
     /// The caret line's full-width band when “Highlight the current line” is on; none while text is selected.
     func currentLineBand() -> NSRect? {
-        guard highlightsCurrentLine, selectedRange().length == 0, let layout = layoutManager, textContainer != nil else { return nil }
+        guard highlightsCurrentLine, selectedRange().length == 0, let layout = layoutManager, textContainer != nil
+        else { return nil }
         let length = (string as NSString).length
         let location = selectedRange().location
         let fragment: NSRect
@@ -527,7 +555,8 @@ final class PlainMarkdownTextView: NSTextView {
             fragment = layout.lineFragmentRect(forGlyphAt: min(glyph, layout.numberOfGlyphs - 1), effectiveRange: nil)
         }
         guard !fragment.isEmpty else { return nil }
-        return NSRect(x: bounds.minX, y: fragment.minY + textContainerOrigin.y, width: bounds.width, height: fragment.height)
+        return NSRect(
+            x: bounds.minX, y: fragment.minY + textContainerOrigin.y, width: bounds.width, height: fragment.height)
     }
 
     override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
@@ -573,7 +602,8 @@ final class PlainMarkdownTextView: NSTextView {
             // Prefer the selection's glyph (or the one before it at the end); point lookup
             // lands on the previous line for empty lines, so use it only for other carets.
             let source = string as NSString
-            var glyph = min(layout.glyphIndexForCharacter(at: max(0, min(selectedRange().location, source.length - 1))), count - 1)
+            var glyph = min(
+                layout.glyphIndexForCharacter(at: max(0, min(selectedRange().location, source.length - 1))), count - 1)
             var glyphs = NSRange()
             var fragment = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: &glyphs)
             if point.y < fragment.minY || point.y >= fragment.maxY {
@@ -607,9 +637,11 @@ final class PlainMarkdownTextView: NSTextView {
         var attributes = typingAttributes
         attributes[.foregroundColor] = NSColor.tertiaryLabelColor
         let value = NSAttributedString(string: "Start writing…", attributes: attributes)
-        value.draw(with: NSRect(origin: textContainerOrigin,
-                                size: NSSize(width: textContainer?.containerSize.width ?? 720, height: 100)),
-                   options: [.usesLineFragmentOrigin])
+        value.draw(
+            with: NSRect(
+                origin: textContainerOrigin,
+                size: NSSize(width: textContainer?.containerSize.width ?? 720, height: 100)),
+            options: [.usesLineFragmentOrigin])
     }
 
 }
@@ -630,25 +662,43 @@ struct EditorBanner: View {
                     .foregroundStyle(informational ? Color.secondary : Color(nsColor: .systemOrange))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(message).font(.callout)
-                    if session.externalConflict || session.externalDeleted, let error = session.error { Text(error).font(.subheadline).foregroundStyle(.secondary) }
-                    if case .failed(let failure, _) = session.state { Text(failure.localizedDescription).font(.subheadline).foregroundStyle(.secondary) }
+                    if session.externalConflict || session.externalDeleted, let error = session.error {
+                        Text(error).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    if case .failed(let failure, _) = session.state {
+                        Text(failure.localizedDescription).font(.subheadline).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 if session.externalConflict {
                     Button("Compare…") { session.compare() }
-                    Button("Keep My Version") { Task { await session.resolveConflict(keepMine: true); await workspace?.reconcileFinderChanges() } }
-                    Button("Use Disk Version") { Task { await session.resolveConflict(keepMine: false); await workspace?.reconcileFinderChanges() } }
+                    Button("Keep My Version") {
+                        Task {
+                            await session.resolveConflict(keepMine: true); await workspace?.reconcileFinderChanges()
+                        }
+                    }
+                    Button("Use Disk Version") {
+                        Task {
+                            await session.resolveConflict(keepMine: false); await workspace?.reconcileFinderChanges()
+                        }
+                    }
                 } else if session.externalDeleted {
-                    Button("Save Again") { Task {
-                        await session.saveAgain()
-                        await workspace?.reconcileFinderChanges()
-                        if !session.externalDeleted, let url = session.url { workspace?.showDocument(url) }
-                    } }
+                    Button("Save Again") {
+                        Task {
+                            await session.saveAgain()
+                            await workspace?.reconcileFinderChanges()
+                            if !session.externalDeleted, let url = session.url { workspace?.showDocument(url) }
+                        }
+                    }
                     // An orphan recovery draft offers Save a Copy instead of Close so it can't be lost.
                     if session.orphanDraft {
                         Button("Save a Copy…") { session.saveCopy() }
                     } else {
-                        Button("Close") { Task { await session.closeDeleted(); workspace?.removeClosedTabs() } }
+                        Button("Close") {
+                            Task {
+                                await session.closeDeleted(); workspace?.removeClosedTabs()
+                            }
+                        }
                     }
                 } else if session.recovered {
                     Button("Keep Recovered Text") { session.keepRecovery() }
@@ -664,15 +714,21 @@ struct EditorBanner: View {
                             workspace.showDocument(copy)
                         }
                     }
-                    Button { session.conflictCopy = nil } label: { Image(systemName: "xmark") }
-                        .accessibilityLabel("Dismiss message")
+                    Button {
+                        session.conflictCopy = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("Dismiss message")
                 }
             }
             .disabled(session.loading)
             .controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8)
             .frame(minHeight: 36).paneStrip(hairline: .bottom)
             .opacity(opacity)
-            .sheet(isPresented: Binding(get: { session.showingComparison }, set: { session.showingComparison = $0 })) { ConflictSheet(session: session) }
+            .sheet(isPresented: Binding(get: { session.showingComparison }, set: { session.showingComparison = $0 })) {
+                ConflictSheet(session: session)
+            }
             .task(id: session.refusedNavigation) {
                 guard session.refusedNavigation > 0, !reduceMotion else { return }
                 withAnimation(.easeOut(duration: 0.12)) { opacity = 0.5 }

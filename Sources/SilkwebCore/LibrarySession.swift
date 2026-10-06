@@ -30,8 +30,10 @@ public struct LibrarySession: Codable, Equatable, Sendable {
         guard (1...3).contains(version) else { throw LibraryError.unsupportedMetadataVersion(version) }
         formatVersion = 3
         selectedTagID = try values.decodeIfPresent(UUID.self, forKey: .selectedTagID)
-        listPreferences = try values.decodeIfPresent([String: LibraryListPreference].self, forKey: .listPreferences) ?? [:]
-        selectedFolder = values.contains(.selectedFolder) ? try values.decodeIfPresent(String.self, forKey: .selectedFolder) : ""
+        listPreferences =
+            try values.decodeIfPresent([String: LibraryListPreference].self, forKey: .listPreferences) ?? [:]
+        selectedFolder =
+            values.contains(.selectedFolder) ? try values.decodeIfPresent(String.self, forKey: .selectedFolder) : ""
         selectedDocuments = try values.decodeIfPresent(Set<String>.self, forKey: .selectedDocuments) ?? []
         expandedFolders = try values.decodeIfPresent(Set<String>.self, forKey: .expandedFolders) ?? [""]
     }
@@ -48,7 +50,8 @@ public struct LibrarySession: Codable, Equatable, Sendable {
 
     public func pruningPreferences(folderIDs: Set<UUID>, tagIDs: Set<UUID>) -> LibrarySession {
         var result = self
-        let valid = Set(folderIDs.map { "folder:" + $0.uuidString }).union(tagIDs.map { "tag:" + $0.uuidString }).union(["all"])
+        let valid = Set(folderIDs.map { "folder:" + $0.uuidString }).union(tagIDs.map { "tag:" + $0.uuidString }).union(
+            ["all"])
         result.listPreferences = listPreferences.filter { valid.contains($0.key) }
         if let id = selectedTagID, !tagIDs.contains(id) { result.selectedTagID = nil }
         return result
@@ -75,7 +78,8 @@ public struct LibrarySession: Codable, Equatable, Sendable {
             let file = root.appendingPathComponent(".silkweb/session.json")
             try LibraryMetadataStore.rejectLink(file.deletingLastPathComponent())
             try LibraryMetadataStore.rejectLink(file)
-            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(self).write(to: file, options: .atomic)
         }.value
     }
@@ -109,8 +113,9 @@ public struct DocumentSummary: Sendable {
                 }
                 let title = URL(fileURLWithPath: document.name).deletingPathExtension().lastPathComponent
                 let text = String(decoding: data, as: UTF8.self)
-                return DocumentSummary(modified: date, firstLine: DocumentRowPresentation.snippet(text, title: title),
-                                       excerpt: DocumentRowPresentation.excerpt(text, title: title))
+                return DocumentSummary(
+                    modified: date, firstLine: DocumentRowPresentation.snippet(text, title: title),
+                    excerpt: DocumentRowPresentation.excerpt(text, title: title))
             } catch {
                 return DocumentSummary(modified: nil, firstLine: "No additional text", excerpt: "No additional text")
             }

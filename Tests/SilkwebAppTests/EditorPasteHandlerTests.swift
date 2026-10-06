@@ -1,10 +1,12 @@
 import AppKit
-import XCTest
 import SilkwebCore
+import XCTest
+
 @testable import Silkweb
 
 final class EditorPasteHandlerTests: XCTestCase {
-    private let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6XcAAAAASUVORK5CYII=")!
+    private let png = Data(
+        base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6XcAAAAASUVORK5CYII=")!
 
     @MainActor func testPasteboardPrecedenceAndImageFileFiltering() throws {
         let board = NSPasteboard.withUniqueName()
@@ -19,7 +21,9 @@ final class EditorPasteHandlerTests: XCTestCase {
         text.unmarkText()
         text.isEditable = false
         XCTAssertFalse(text.assetHandler.paste(from: board))
-        let content = EditorPasteContent(fileURLs: [URL(fileURLWithPath: "/tmp/image.heic"), URL(fileURLWithPath: "/tmp/report.pdf")])
+        let content = EditorPasteContent(fileURLs: [
+            URL(fileURLWithPath: "/tmp/image.heic"), URL(fileURLWithPath: "/tmp/report.pdf"),
+        ])
         XCTAssertEqual(EditorPasteHandler.files(in: content, imagesOnly: true).map(\.name), ["image.heic"])
         XCTAssertEqual(EditorPasteHandler.files(in: content, imagesOnly: false).map(\.isImage), [true, false])
     }
@@ -32,15 +36,17 @@ final class EditorPasteHandlerTests: XCTestCase {
         try "before".write(to: doc, atomically: true, encoding: .utf8)
         let image = root.appendingPathComponent("Finder image.PNG")
         try png.write(to: image)
-        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1, pixelsHigh: 1,
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
-            bytesPerRow: 4, bitsPerPixel: 32))
+        let bitmap = try XCTUnwrap(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 1, pixelsHigh: 1,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                bytesPerRow: 4, bitsPerPixel: 32))
         bitmap.setColor(.red, atX: 0, y: 0)
         let tiff = try XCTUnwrap(bitmap.tiffRepresentation)
         let contents = [
             EditorPasteContent(plainText: image.lastPathComponent, fileURLs: [image]),
             EditorPasteContent(plainText: "clipboard filename", png: png),
-            EditorPasteContent(plainText: "clipboard filename", tiff: tiff)
+            EditorPasteContent(plainText: "clipboard filename", tiff: tiff),
         ]
         for content in contents {
             let workspace = LibraryWorkspace()
@@ -92,8 +98,10 @@ final class EditorPasteHandlerTests: XCTestCase {
         text.string = "unchanged"
         let board = NSPasteboard.withUniqueName()
         defer { board.releaseGlobally() }
-        for content in [EditorPasteContent(plainText: "filename", png: png),
-                        EditorPasteContent(fileURLs: [URL(fileURLWithPath: "/tmp/missing.png")])] {
+        for content in [
+            EditorPasteContent(plainText: "filename", png: png),
+            EditorPasteContent(fileURLs: [URL(fileURLWithPath: "/tmp/missing.png")]),
+        ] {
             session.assetMessage = nil
             text.assetHandler.readContent = { _ in content }
             XCTAssertFalse(text.assetHandler.paste(from: board))
@@ -130,9 +138,11 @@ final class EditorPasteHandlerTests: XCTestCase {
         text.assetHandler.documentID = id
         let board = NSPasteboard.withUniqueName()
         defer { board.releaseGlobally() }
-        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1, pixelsHigh: 1,
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
-            bytesPerRow: 4, bitsPerPixel: 32))
+        let bitmap = try XCTUnwrap(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 1, pixelsHigh: 1,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                bytesPerRow: 4, bitsPerPixel: 32))
         bitmap.setColor(.red, atX: 0, y: 0)
         let tiff = try XCTUnwrap(bitmap.tiffRepresentation)
         let encodedPNG = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
@@ -190,7 +200,11 @@ final class EditorPasteHandlerTests: XCTestCase {
         text.session = session
         text.assetHandler.root = root
         text.assetHandler.documentID = UUID()
-        XCTAssertTrue(text.assetHandler.add([.init(name: "good.png", isImage: true, data: png), .init(name: "bad.png", isImage: true, file: root.appendingPathComponent("missing"))]))
+        XCTAssertTrue(
+            text.assetHandler.add([
+                .init(name: "good.png", isImage: true, data: png),
+                .init(name: "bad.png", isImage: true, file: root.appendingPathComponent("missing")),
+            ]))
         XCTAssertFalse(text.assetHandler.add([.init(name: "overlap.png", isImage: true, data: png)]))
         try await finish(text.assetHandler)
         XCTAssertTrue(text.string.contains("![good]"))

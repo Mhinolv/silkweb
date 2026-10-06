@@ -65,8 +65,9 @@ final class RenameNameField: NSTextField, NSTextFieldDelegate {
         feedback.contentViewController?.view.subviews.forEach { $0.removeFromSuperview() }
         feedback.contentViewController?.view.addSubview(label)
         if window != nil { feedback.show(relativeTo: bounds, of: self, preferredEdge: .maxY) }
-        NSAccessibility.post(element: self, notification: .announcementRequested,
-                             userInfo: [.announcement: error, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        NSAccessibility.post(
+            element: self, notification: .announcementRequested,
+            userInfo: [.announcement: error, .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -96,7 +97,9 @@ final class RenameNameField: NSTextField, NSTextFieldDelegate {
             if let error {
                 show(error)
                 NSSound.beep()
-            } else { complete(value) }
+            } else {
+                complete(value)
+            }
         }
     }
 

@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 /// Width-bound flow; measuring and placement share the same row calculation.
 struct RecentTagFlow: Layout {
@@ -23,8 +23,9 @@ struct RecentTagFlow: Layout {
         let result = positions(width: bounds.width, subviews: subviews)
         for (view, point) in zip(subviews, result.points) {
             let width = min(bounds.width, view.sizeThatFits(ProposedViewSize(width: bounds.width, height: 22)).width)
-            view.place(at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y), anchor: .topLeading,
-                       proposal: ProposedViewSize(width: width, height: 22))
+            view.place(
+                at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y), anchor: .topLeading,
+                proposal: ProposedViewSize(width: width, height: 22))
         }
     }
 }
@@ -69,12 +70,15 @@ final class TagPillButton: NSButton {
     /// “+” and its gap.
     private static let plusWidth: CGFloat = 12
     override var intrinsicContentSize: NSSize {
-        NSSize(width: ceil((title as NSString).size(withAttributes: [.font: font!]).width) + 18 + Self.plusWidth, height: 22)
+        NSSize(
+            width: ceil((title as NSString).size(withAttributes: [.font: font!]).width) + 18 + Self.plusWidth,
+            height: 22)
     }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let tracking { removeTrackingArea(tracking) }
-        let next = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        let next = NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
         addTrackingArea(next); tracking = next
     }
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
@@ -89,13 +93,19 @@ final class TagPillButton: NSButton {
         NSColor.separatorColor.setStroke()
         capsule.lineWidth = 1; capsule.stroke()
         let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byTruncatingTail
-        let plus: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.silkwebAccent]
+        let plus: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.silkwebAccent,
+        ]
         let plusHeight = ("+" as NSString).size(withAttributes: plus).height
         ("+" as NSString).draw(at: NSPoint(x: 9, y: (bounds.height - plusHeight) / 2), withAttributes: plus)
-        let attributes: [NSAttributedString.Key: Any] = [.font: font!, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: paragraph]
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font!, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: paragraph,
+        ]
         let height = (title as NSString).size(withAttributes: attributes).height
         let x = 9 + Self.plusWidth
-        (title as NSString).draw(in: NSRect(x: x, y: (bounds.height - height) / 2, width: max(0, bounds.width - x - 9), height: height), withAttributes: attributes)
+        (title as NSString).draw(
+            in: NSRect(x: x, y: (bounds.height - height) / 2, width: max(0, bounds.width - x - 9), height: height),
+            withAttributes: attributes)
         NSGraphicsContext.restoreGraphicsState()
     }
     override var focusRingMaskBounds: NSRect { bounds }
@@ -140,7 +150,8 @@ extension TagInputField {
         guard let window, window.isVisible else { return }
         let rect = window.convertToScreen(convert(bounds, to: nil))
         let height = CGFloat(min(visibleNames.count, 8) * 24 + 8)
-        completionPanel.setFrame(NSRect(x: rect.minX, y: rect.minY - height, width: max(160, rect.width), height: height), display: false)
+        completionPanel.setFrame(
+            NSRect(x: rect.minX, y: rect.minY - height, width: max(160, rect.width), height: height), display: false)
         window.addChildWindow(completionPanel, ordered: .above)
     }
     private func highlightCompletion() {
@@ -170,7 +181,8 @@ extension TagInputField {
     }
     @objc func acceptCompletion(_ sender: NSButton) {
         guard let coordinator = delegate as? TagChipField.Coordinator,
-              let name = coordinator.suggestions.first(where: { $0 == sender.title }) else { return }
+            let name = coordinator.suggestions.first(where: { $0 == sender.title })
+        else { return }
         dismissCompletions()
         stringValue = ""
         coordinator.onAdd([name])

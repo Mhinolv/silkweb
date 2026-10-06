@@ -1,9 +1,10 @@
 import AppKit
 import ImageIO
 import ObjectiveC
+import SilkwebCore
 import UniformTypeIdentifiers
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class InlineImagePositionTests: XCTestCase {
@@ -21,12 +22,17 @@ final class InlineImagePositionTests: XCTestCase {
             try? FileManager.default.removeItem(at: root)
         }
         // Large enough that a wider column requests a sharper decode (Split -> Editor).
-        let context = try XCTUnwrap(CGContext(data: nil, width: 1600, height: 400, bitsPerComponent: 8, bytesPerRow: 6400,
-                                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(root.appendingPathComponent("image.png") as CFURL, UTType.png.identifier as CFString, 1, nil))
+        let context = try XCTUnwrap(
+            CGContext(
+                data: nil, width: 1600, height: 400, bitsPerComponent: 8, bytesPerRow: 6400,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let destination = try XCTUnwrap(
+            CGImageDestinationCreateWithURL(
+                root.appendingPathComponent("image.png") as CFURL, UTType.png.identifier as CFString, 1, nil))
         CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
         XCTAssertTrue(CGImageDestinationFinalize(destination))
-        let source = "# Heading\n\nIntro words.\n\n![First](image.png)\n\nBetween first and middle.\n\n"
+        let source =
+            "# Heading\n\nIntro words.\n\n![First](image.png)\n\nBetween first and middle.\n\n"
             + String(repeating: "A paragraph with words.\n\n", count: 1000)
             + "![Middle](image.png)\n\nMore words.\n\n![Last](image.png)\n\nClosing words.\n"
         try Data(source.utf8).write(to: root.appendingPathComponent("Document.md"))
@@ -37,7 +43,9 @@ final class InlineImagePositionTests: XCTestCase {
         let opened = await workspace.openTab(try XCTUnwrap(workspace.snapshot?.documents.first), pinned: true)
         XCTAssertTrue(opened)
         let controller = LibrarySplitViewController(workspace: workspace)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900), styleMask: [.titled, .resizable],
+            backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         defer { window.contentViewController = nil; window.close() }
 
@@ -61,9 +69,11 @@ final class InlineImagePositionTests: XCTestCase {
             let end = NSMaxRange(source.lineRange(for: marker)) - 1
             guard end < layout.firstUnlaidCharacterIndex() else { return nil }
             let glyph = layout.glyphIndexForCharacter(at: end)
-            let line = layout.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil, withoutAdditionalLayout: true)
+            let line = layout.lineFragmentUsedRect(
+                forGlyphAt: glyph, effectiveRange: nil, withoutAdditionalLayout: true)
             let y = line.maxY + editor.textContainerOrigin.y + 6
-            let slot = NSRect(x: 0, y: line.minY + editor.textContainerOrigin.y, width: 1, height: y - line.minY + view.frame.height)
+            let slot = NSRect(
+                x: 0, y: line.minY + editor.textContainerOrigin.y, width: 1, height: y - line.minY + view.frame.height)
             return editor.visibleRect.intersects(slot) ? y : nil
         }
         func sampleDisplay(_ editor: PlainMarkdownTextView) {
@@ -73,7 +83,10 @@ final class InlineImagePositionTests: XCTestCase {
                 guard let expected = expectedY(view) else { continue }
                 checked[String(phase.prefix(while: { $0 != " " })), default: 0] += 1
                 if view.isHidden || abs(view.frame.minY - expected) > 1 {
-                    violations.append(Violation(image: view.content.reference.alt, phase: phase, hidden: view.isHidden, y: view.frame.minY, expected: expected))
+                    violations.append(
+                        Violation(
+                            image: view.content.reference.alt, phase: phase, hidden: view.isHidden, y: view.frame.minY,
+                            expected: expected))
                 }
             }
         }
@@ -90,23 +103,36 @@ final class InlineImagePositionTests: XCTestCase {
             restores.append((method, current, replacement))
             return current
         }
-        defer { for (method, old, replacement) in restores.reversed() { method_setImplementation(method, old); imp_removeBlock(replacement) } }
+        defer {
+            for (method, old, replacement) in restores.reversed() {
+                method_setImplementation(method, old); imp_removeBlock(replacement)
+            }
+        }
         let drawSelector = #selector(NSView.draw(_:))
         var drawIMP: IMP?
-        drawIMP = try hook(PlainMarkdownTextView.self, drawSelector, block: { (editor: PlainMarkdownTextView, rect: NSRect) in
-            sampleDisplay(editor)
-            unsafeBitCast(drawIMP!, to: (@convention(c) (AnyObject, Selector, NSRect) -> Void).self)(editor, drawSelector, rect)
-        } as @convention(block) (PlainMarkdownTextView, NSRect) -> Void)
+        drawIMP = try hook(
+            PlainMarkdownTextView.self, drawSelector,
+            block: { (editor: PlainMarkdownTextView, rect: NSRect) in
+                sampleDisplay(editor)
+                unsafeBitCast(drawIMP!, to: (@convention(c) (AnyObject, Selector, NSRect) -> Void).self)(
+                    editor, drawSelector, rect)
+            } as @convention(block) (PlainMarkdownTextView, NSRect) -> Void)
         let hiddenSelector = #selector(setter: NSView.isHidden)
         var hiddenIMP: IMP?
-        hiddenIMP = try hook(InlineImageView.self, hiddenSelector, block: { (view: InlineImageView, hidden: Bool) in
-            unsafeBitCast(hiddenIMP!, to: (@convention(c) (AnyObject, Selector, Bool) -> Void).self)(view, hiddenSelector, hidden)
-            // A previously shown image that hides again is a blink, wherever it is.
-            if hidden, sampling, shown.contains(ObjectIdentifier(view)) {
-                violations.append(Violation(image: view.content.reference.alt, phase: phase + " (hid)", hidden: true, y: view.frame.minY, expected: .nan))
-            }
-            if !hidden { shown.insert(ObjectIdentifier(view)) }
-        } as @convention(block) (InlineImageView, Bool) -> Void)
+        hiddenIMP = try hook(
+            InlineImageView.self, hiddenSelector,
+            block: { (view: InlineImageView, hidden: Bool) in
+                unsafeBitCast(hiddenIMP!, to: (@convention(c) (AnyObject, Selector, Bool) -> Void).self)(
+                    view, hiddenSelector, hidden)
+                // A previously shown image that hides again is a blink, wherever it is.
+                if hidden, sampling, shown.contains(ObjectIdentifier(view)) {
+                    violations.append(
+                        Violation(
+                            image: view.content.reference.alt, phase: phase + " (hid)", hidden: true,
+                            y: view.frame.minY, expected: .nan))
+                }
+                if !hidden { shown.insert(ObjectIdentifier(view)) }
+            } as @convention(block) (InlineImageView, Bool) -> Void)
 
         window.contentViewController = controller
         func display() { controller.view.layoutSubtreeIfNeeded(); window.displayIfNeeded() }
@@ -141,7 +167,8 @@ final class InlineImagePositionTests: XCTestCase {
             {
                 let source = editor.string as NSString
                 let start = fraction == 0 ? 0 : source.length / fraction
-                let found = source.range(of: phrase, options: [], range: NSRange(location: start, length: source.length - start))
+                let found = source.range(
+                    of: phrase, options: [], range: NSRange(location: start, length: source.length - start))
                 return found.location == NSNotFound ? 2 : NSMaxRange(found)
             }
         }
@@ -169,7 +196,9 @@ final class InlineImagePositionTests: XCTestCase {
                     // Immediate path stays cheap: no forced full-document layout.
                     let unlaid = editor.layoutManager?.firstUnlaidCharacterIndex()
                     editor.inlineImages.positionViews()
-                    XCTAssertEqual(editor.layoutManager?.firstUnlaidCharacterIndex(), unlaid, "positioning must not advance TextKit layout per keystroke")
+                    XCTAssertEqual(
+                        editor.layoutManager?.firstUnlaidCharacterIndex(), unlaid,
+                        "positioning must not advance TextKit layout per keystroke")
                     await Task.yield()
                     redraw()
                 }
@@ -180,7 +209,9 @@ final class InlineImagePositionTests: XCTestCase {
                 editor.deleteBackward(nil); redraw(); await Task.yield(); redraw()
                 try await settle()
             }
-            XCTAssertTrue(zip(previous, editor.inlineImages.imageViews).allSatisfy { $0 === $1 }, "edits must keep existing image views")
+            XCTAssertTrue(
+                zip(previous, editor.inlineImages.imageViews).allSatisfy { $0 === $1 },
+                "edits must keep existing image views")
         }
         // Long-note guard: positioning reads cached TextKit geometry only (bounded by the
         // image count), so per-keystroke/per-display cost stays flat on a 1,000-paragraph note.
@@ -217,9 +248,16 @@ final class InlineImagePositionTests: XCTestCase {
         sampling = false
         XCTAssertEqual(editor.inlineImages.imageViews.count, 3)
         XCTAssertGreaterThan(displaySamples, 100, "the editor's draw callback must be sampled")
-        for kind in ["typing", "mode", "width"] { XCTAssertGreaterThan(checked[kind] ?? 0, 5, "visible images checked while \(kind)") }
-        XCTAssertTrue(violations.isEmpty, "\(violations.count) hidden/misplaced image samples of \(displaySamples) displays: \(violations.prefix(10))")
-        print("Inline image display sweep: \(displaySamples) editor draws, visible-image checks \(checked), \(violations.count) violations")
+        for kind in ["typing", "mode", "width"] {
+            XCTAssertGreaterThan(checked[kind] ?? 0, 5, "visible images checked while \(kind)")
+        }
+        XCTAssertTrue(
+            violations.isEmpty,
+            "\(violations.count) hidden/misplaced image samples of \(displaySamples) displays: \(violations.prefix(10))"
+        )
+        print(
+            "Inline image display sweep: \(displaySamples) editor draws, visible-image checks \(checked), \(violations.count) violations"
+        )
         XCTAssertFalse(window.isVisible)
     }
 }

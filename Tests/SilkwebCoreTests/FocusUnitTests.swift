@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 /// silkweb-1.27: Focus Mode's paragraph unit.
@@ -7,34 +8,35 @@ final class FocusUnitTests: XCTestCase {
         let source = text as NSString
         let location = source.range(of: marker).location
         XCTAssertNotEqual(location, NSNotFound, marker)
-        let range = FocusUnit.range(in: source, selection: NSRange(location: location, length: length), fencedBefore: { known[$0] })
+        let range = FocusUnit.range(
+            in: source, selection: NSRange(location: location, length: length), fencedBefore: { known[$0] })
         return source.substring(with: range)
     }
 
     private let document = """
-    # Title
-    Intro line one
-    intro line two
+        # Title
+        Intro line one
+        intro line two
 
-    Second paragraph
-    wraps here
+        Second paragraph
+        wraps here
 
-    - item one
-      continued
-    - item two
-    1. numbered
+        - item one
+          continued
+        - item two
+        1. numbered
 
-    ```swift
-    let a = 1
+        ```swift
+        let a = 1
 
-    let b = 2
-    ```
-    After fence
-    > quote line
-    > more quote
+        let b = 2
+        ```
+        After fence
+        > quote line
+        > more quote
 
-    Last
-    """
+        Last
+        """
 
     func testBlankLineDelimitedParagraphs() {
         XCTAssertEqual(unit(document, at: "intro line two"), "Intro line one\nintro line two\n")
@@ -81,9 +83,12 @@ final class FocusUnitTests: XCTestCase {
         }
         for location in 0...source.length {
             let derived = FocusUnit.range(in: source, selection: NSRange(location: location, length: 0))
-            let supplied = FocusUnit.range(in: source, selection: NSRange(location: location, length: 0), fencedBefore: { known[$0] })
+            let supplied = FocusUnit.range(
+                in: source, selection: NSRange(location: location, length: 0), fencedBefore: { known[$0] })
             XCTAssertEqual(derived, supplied, "at \(location)")
-            XCTAssertTrue(NSLocationInRange(location, derived) || location == NSMaxRange(derived), "unit contains the caret at \(location)")
+            XCTAssertTrue(
+                NSLocationInRange(location, derived) || location == NSMaxRange(derived),
+                "unit contains the caret at \(location)")
         }
     }
 
@@ -106,19 +111,27 @@ final class FocusUnitTests: XCTestCase {
     }
 
     func testEdgeCases() {
-        XCTAssertEqual(FocusUnit.range(in: "", selection: NSRange(location: 0, length: 0)), NSRange(location: 0, length: 0))
+        XCTAssertEqual(
+            FocusUnit.range(in: "", selection: NSRange(location: 0, length: 0)), NSRange(location: 0, length: 0))
         // Caret on a blank line, and on the empty line after a final newline.
-        XCTAssertEqual(FocusUnit.range(in: "A\n\nB", selection: NSRange(location: 2, length: 0)), NSRange(location: 2, length: 1))
-        XCTAssertEqual(FocusUnit.range(in: "A\nB\n", selection: NSRange(location: 4, length: 0)), NSRange(location: 4, length: 0))
+        XCTAssertEqual(
+            FocusUnit.range(in: "A\n\nB", selection: NSRange(location: 2, length: 0)), NSRange(location: 2, length: 1))
+        XCTAssertEqual(
+            FocusUnit.range(in: "A\nB\n", selection: NSRange(location: 4, length: 0)), NSRange(location: 4, length: 0))
         // Out-of-range selections clamp (to the end of the one-paragraph text).
-        XCTAssertEqual(FocusUnit.range(in: "A\nB", selection: NSRange(location: 99, length: 5)), NSRange(location: 0, length: 3))
-        XCTAssertEqual(FocusUnit.range(in: "A\n\nB", selection: NSRange(location: 99, length: 5)), NSRange(location: 3, length: 1))
+        XCTAssertEqual(
+            FocusUnit.range(in: "A\nB", selection: NSRange(location: 99, length: 5)), NSRange(location: 0, length: 3))
+        XCTAssertEqual(
+            FocusUnit.range(in: "A\n\nB", selection: NSRange(location: 99, length: 5)), NSRange(location: 3, length: 1))
         // UTF-16: emoji and CJK keep whole lines.
         let text = "👩🏽‍💻 one\n日本語 two\n\nnext" as NSString
-        XCTAssertEqual(text.substring(with: FocusUnit.range(in: text, selection: NSRange(location: 3, length: 0))), "👩🏽‍💻 one\n日本語 two\n")
+        XCTAssertEqual(
+            text.substring(with: FocusUnit.range(in: text, selection: NSRange(location: 3, length: 0))),
+            "👩🏽‍💻 one\n日本語 two\n")
         // CRLF and whitespace-only separators.
         let crlf = "A\r\nB\r\n  \r\nC" as NSString
-        XCTAssertEqual(crlf.substring(with: FocusUnit.range(in: crlf, selection: NSRange(location: 0, length: 0))), "A\r\nB\r\n")
+        XCTAssertEqual(
+            crlf.substring(with: FocusUnit.range(in: crlf, selection: NSRange(location: 0, length: 0))), "A\r\nB\r\n")
     }
 
     func testLineLimitBoundsTheWalk() {

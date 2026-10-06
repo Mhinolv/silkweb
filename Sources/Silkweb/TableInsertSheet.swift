@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 @MainActor @Observable
 final class TableInsertForm {
@@ -12,7 +12,8 @@ final class TableInsertForm {
     }
     var options: TableOptions? {
         guard let columns = TableOptions.dimension(columns, within: 1...20),
-              let rows = TableOptions.dimension(rows, within: 1...100) else { return nil }
+            let rows = TableOptions.dimension(rows, within: 1...100)
+        else { return nil }
         return TableOptions(columns: columns, rows: rows, alignment: alignment)
     }
     @discardableResult func commit(columns field: Bool) -> Bool {
@@ -71,37 +72,52 @@ struct TableInsertSheet: View {
         HStack {
             Text(title)
             Spacer()
-            TextField(title, text: Binding(get: { field ? form.columns : form.rows }, set: { if field { form.columns = $0 } else { form.rows = $0 } }))
-                .labelsHidden().frame(width: 48).focused($focusedDimension, equals: field)
-                .onSubmit { if !form.commit(columns: field) { NSSound.beep() } }
-            Stepper(title, value: Binding(get: {
-                TableOptions.dimension(field ? form.columns : form.rows, within: bounds) ?? bounds.lowerBound
-            }, set: { if field { form.columns = String($0) } else { form.rows = String($0) } }), in: bounds)
-                .labelsHidden().accessibilityLabel(title)
+            TextField(
+                title,
+                text: Binding(
+                    get: { field ? form.columns : form.rows },
+                    set: { if field { form.columns = $0 } else { form.rows = $0 } })
+            )
+            .labelsHidden().frame(width: 48).focused($focusedDimension, equals: field)
+            .onSubmit { if !form.commit(columns: field) { NSSound.beep() } }
+            Stepper(
+                title,
+                value: Binding(
+                    get: {
+                        TableOptions.dimension(field ? form.columns : form.rows, within: bounds) ?? bounds.lowerBound
+                    }, set: { if field { form.columns = String($0) } else { form.rows = String($0) } }), in: bounds
+            )
+            .labelsHidden().accessibilityLabel(title)
         }
     }
 }
 
 extension PlainMarkdownTextView {
     @objc func showTableInsertSheet(_ sender: Any? = nil) {
-        guard let window, window.firstResponder === self, isEditable, !hasMarkedText(), window.attachedSheet == nil else { return }
+        guard let window, window.firstResponder === self, isEditable, !hasMarkedText(), window.attachedSheet == nil
+        else { return }
         let selection = selectedRange()
         let original = string
         let sheet = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
-        sheet.contentViewController = NSHostingController(rootView: TableInsertSheet(cancel: { [weak self, weak window] in
-            window?.endSheet(sheet)
-            if let self { window?.makeFirstResponder(self) }
-        }, insert: { [weak self, weak window] options in
-            window?.endSheet(sheet)
-            guard let self, self.string == original, self.isEditable else { return }
-            options.save(to: AppDefaults.store)
-            self.insertTable(options, selection: selection)
-            window?.makeFirstResponder(self)
-        }))
+        sheet.contentViewController = NSHostingController(
+            rootView: TableInsertSheet(
+                cancel: { [weak self, weak window] in
+                    window?.endSheet(sheet)
+                    if let self { window?.makeFirstResponder(self) }
+                },
+                insert: { [weak self, weak window] options in
+                    window?.endSheet(sheet)
+                    guard let self, self.string == original, self.isEditable else { return }
+                    options.save(to: AppDefaults.store)
+                    self.insertTable(options, selection: selection)
+                    window?.makeFirstResponder(self)
+                }))
         if let view = sheet.contentView { sheet.setContentSize(view.fittingSize) }
         window.beginSheet(sheet) { _ in sheet.contentViewController = nil }
     }
     func insertTable(_ options: TableOptions, selection: NSRange? = nil) {
-        apply(MarkdownTable.insertion(text: string, selection: selection ?? selectedRange(), options: options), name: "Insert Table")
+        apply(
+            MarkdownTable.insertion(text: string, selection: selection ?? selectedRange(), options: options),
+            name: "Insert Table")
     }
 }

@@ -1,8 +1,9 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import WebKit
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class PreviewTests: XCTestCase {
@@ -11,14 +12,15 @@ final class PreviewTests: XCTestCase {
         let variants: [(NSAppearance.Name, Int)] = [
             (.aqua, HeadingPalette.light), (.darkAqua, HeadingPalette.dark),
             (.accessibilityHighContrastAqua, HeadingPalette.highContrastLight),
-            (.accessibilityHighContrastDarkAqua, HeadingPalette.highContrastDark)
+            (.accessibilityHighContrastDarkAqua, HeadingPalette.highContrastDark),
         ]
         for (name, rgb) in variants {
             let dark = name == .darkAqua || name == .accessibilityHighContrastDarkAqua
             let highContrast = name == .accessibilityHighContrastAqua || name == .accessibilityHighContrastDarkAqua
             // AppKit normalizes named accessibility appearances while Increase Contrast
             // is off. Exercise the provider's four palette variants directly as well.
-            let color = try XCTUnwrap(HeadingPalette.color(dark: dark, highContrast: highContrast).usingColorSpace(.sRGB))
+            let color = try XCTUnwrap(
+                HeadingPalette.color(dark: dark, highContrast: highContrast).usingColorSpace(.sRGB))
             XCTAssertEqual(Int((color.redComponent * 255).rounded()), (rgb >> 16) & 255)
             XCTAssertEqual(Int((color.greenComponent * 255).rounded()), (rgb >> 8) & 255)
             XCTAssertEqual(Int((color.blueComponent * 255).rounded()), rgb & 255)
@@ -29,12 +31,14 @@ final class PreviewTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(HeadingPalette.previewCSS, """
-        :root { --sw-heading: #2A6A86; }
-        @media (prefers-color-scheme: dark) { :root { --sw-heading: #86BCD6; } }
-        @media (prefers-contrast: more) { :root { --sw-heading: #1F5570; } }
-        @media (prefers-color-scheme: dark) and (prefers-contrast: more) { :root { --sw-heading: #A6D3E6; } }
-        """)
+        XCTAssertEqual(
+            HeadingPalette.previewCSS,
+            """
+            :root { --sw-heading: #2A6A86; }
+            @media (prefers-color-scheme: dark) { :root { --sw-heading: #86BCD6; } }
+            @media (prefers-contrast: more) { :root { --sw-heading: #1F5570; } }
+            @media (prefers-color-scheme: dark) and (prefers-contrast: more) { :root { --sw-heading: #A6D3E6; } }
+            """)
         let defaults = disposableDefaults("PreviewPalette")
         let preview = PreviewCoordinator(defaults: defaults)
         preview.mode = .preview
@@ -55,9 +59,11 @@ final class PreviewTests: XCTestCase {
         let file = root.appendingPathComponent("space # 日本語.png")
         let bytes = Data([1, 2, 3, 4])
         try bytes.write(to: file)
-        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("escape"), withDestinationURL: root.deletingLastPathComponent())
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("escape"), withDestinationURL: root.deletingLastPathComponent())
         let web = PreviewView.makeWebView()
-        let handler = try XCTUnwrap(web.configuration.urlSchemeHandler(forURLScheme: PreviewResource.scheme) as? PreviewSchemeHandler)
+        let handler = try XCTUnwrap(
+            web.configuration.urlSchemeHandler(forURLScheme: PreviewResource.scheme) as? PreviewSchemeHandler)
         handler.root = root
         handler.page = URL(string: "silkweb-preview://page/test")!
         handler.html = Data("<h1>Memory page</h1>".utf8)
@@ -73,7 +79,11 @@ final class PreviewTests: XCTestCase {
         XCTAssertEqual(page.response?.mimeType, "text/html")
         XCTAssertEqual(image.data, bytes)
         XCTAssertEqual(image.response?.mimeType, "image/png")
-        for value in ["https://example.invalid/image.png", "file:///etc/passwd", "silkweb-preview://asset/../outside.png", "silkweb-preview://asset/escape/outside.png", "silkweb-preview://page/old", "silkweb-preview://asset/missing.png"] {
+        for value in [
+            "https://example.invalid/image.png", "file:///etc/passwd", "silkweb-preview://asset/../outside.png",
+            "silkweb-preview://asset/escape/outside.png", "silkweb-preview://page/old",
+            "silkweb-preview://asset/missing.png",
+        ] {
             let task = RecordingSchemeTask(url: try XCTUnwrap(URL(string: value)))
             handler.webView(web, start: task)
             try await Task.sleep(for: .milliseconds(30))
@@ -147,22 +157,33 @@ final class PreviewTests: XCTestCase {
     func testOffscreenPreviewLoadsLocalImageAndNavigatesAnchor() async throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
-        if SnapshotHarness.isWebKitUnavailable(environment: ProcessInfo.processInfo.environment, activationPolicy: NSApp.activationPolicy().rawValue) {
-            throw XCTSkip("Real WebKit DOM/image regression requires an unsandboxed registered offscreen host; WebKit is unavailable in this sandbox.")
+        if SnapshotHarness.isWebKitUnavailable(
+            environment: ProcessInfo.processInfo.environment, activationPolicy: NSApp.activationPolicy().rawValue)
+        {
+            throw XCTSkip(
+                "Real WebKit DOM/image regression requires an unsandboxed registered offscreen host; WebKit is unavailable in this sandbox."
+            )
         }
         let defaults = disposableDefaults("WebTests")
         let workspace = LibraryWorkspace(defaults: defaults)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("img"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("img"), withIntermediateDirectories: true)
         defer {
             try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
             try? FileManager.default.removeItem(at: root)
         }
-        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 4, pixelsHigh: 4, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 16, bitsPerPixel: 32))
+        let bitmap = try XCTUnwrap(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 4, pixelsHigh: 4, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 16, bitsPerPixel: 32))
         for x in 0..<4 { for y in 0..<4 { bitmap.setColor(.systemBlue, atX: x, y: y) } }
-        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: root.appendingPathComponent("img/p.png"))
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
+            to: root.appendingPathComponent("img/p.png"))
         let document = root.appendingPathComponent("note.md")
-        let source = "# Title\n###### Subtitle\n\n## Level two\n### Level three\n#### Level four\n##### Level five\n\nA paragraph.\n\n| A | B |\n| --- | --- |\n| one | two |\n\n![p](img/p.png)\n![remote](https://example.invalid/image.png)\n" + String(repeating: "paragraph\n\n", count: 100) + "## End"
+        let source =
+            "# Title\n###### Subtitle\n\n## Level two\n### Level three\n#### Level four\n##### Level five\n\nA paragraph.\n\n| A | B |\n| --- | --- |\n| one | two |\n\n![p](img/p.png)\n![remote](https://example.invalid/image.png)\n"
+            + String(repeating: "paragraph\n\n", count: 100) + "## End"
         try Data(source.utf8).write(to: document)
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
         workspace.root = root
@@ -171,7 +192,9 @@ final class PreviewTests: XCTestCase {
         workspace.preview.schedule(text: source, document: document, root: root)
         let host = NSHostingController(rootView: PreviewPane(workspace: workspace))
         host.sizingOptions = []
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled, .resizable],
+            backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentViewController = host
         defer { window.contentViewController = nil; window.close() }
@@ -182,7 +205,10 @@ final class PreviewTests: XCTestCase {
             host.view.layoutSubtreeIfNeeded()
             web = descendants(host.view).compactMap { $0 as? WKWebView }.first
             if let coordinator = web?.navigationDelegate as? PreviewView.Coordinator,
-               coordinator.completedPage != nil || coordinator.navigationError != nil { break }
+                coordinator.completedPage != nil || coordinator.navigationError != nil
+            {
+                break
+            }
             try await Task.sleep(for: .milliseconds(50))
         }
         let loaded = try XCTUnwrap(web)
@@ -190,7 +216,9 @@ final class PreviewTests: XCTestCase {
         XCTAssertNotNil(coordinator.completedPage, "Timed out waiting for real preview didFinish (10 seconds)")
         XCTAssertNil(coordinator.navigationError)
         XCTAssertNil(workspace.preview.error)
-        let value = try await loaded.evaluateJavaScript("({title: document.querySelector('h1')?.textContent, paragraph: document.querySelector('p')?.textContent, table: !!document.querySelector('table'), complete: document.images[0]?.complete, width: document.images[0]?.naturalWidth, count: document.images.length, remote: Array.from(document.images).some(i => i.src.startsWith('https:')), placeholder: document.querySelector('.sw-remote-image')?.textContent})")
+        let value = try await loaded.evaluateJavaScript(
+            "({title: document.querySelector('h1')?.textContent, paragraph: document.querySelector('p')?.textContent, table: !!document.querySelector('table'), complete: document.images[0]?.complete, width: document.images[0]?.naturalWidth, count: document.images.length, remote: Array.from(document.images).some(i => i.src.startsWith('https:')), placeholder: document.querySelector('.sw-remote-image')?.textContent})"
+        )
         let result = try XCTUnwrap(value as? [String: Any])
         XCTAssertEqual(result["title"] as? String, "Title")
         XCTAssertEqual(result["paragraph"] as? String, "A paragraph.")
@@ -203,24 +231,25 @@ final class PreviewTests: XCTestCase {
         for name in [NSAppearance.Name.aqua, .darkAqua] {
             window.appearance = try XCTUnwrap(NSAppearance(named: name))
             try await Task.sleep(for: .milliseconds(100))
-            let styles = try await loaded.evaluateJavaScript("""
-            (() => {
-              const article = document.querySelector('.sw-doc');
-              const headings = [1,2,3,4,5,6].map(n => document.querySelector('h' + n));
-              const title = headings[0], subtitle = headings[5];
-              const style = getComputedStyle(title);
-              return {sizes: headings.map(h => parseFloat(getComputedStyle(h).fontSize)),
-                weights: headings.slice(4).map(h => getComputedStyle(h).fontWeight),
-                body: getComputedStyle(document.body).fontSize,
-                top: title.getBoundingClientRect().top, border: style.borderBottomWidth,
-                padding: style.paddingBottom, width: title.getBoundingClientRect().width,
-                column: article.clientWidth - 96,
-                gap: subtitle.getBoundingClientRect().top - title.getBoundingClientRect().bottom,
-                color: style.color, allTinted: headings.every(h => getComputedStyle(h).color === style.color),
-                dark: matchMedia('(prefers-color-scheme: dark)').matches,
-                contrast: matchMedia('(prefers-contrast: more)').matches};
-            })()
-            """)
+            let styles = try await loaded.evaluateJavaScript(
+                """
+                (() => {
+                  const article = document.querySelector('.sw-doc');
+                  const headings = [1,2,3,4,5,6].map(n => document.querySelector('h' + n));
+                  const title = headings[0], subtitle = headings[5];
+                  const style = getComputedStyle(title);
+                  return {sizes: headings.map(h => parseFloat(getComputedStyle(h).fontSize)),
+                    weights: headings.slice(4).map(h => getComputedStyle(h).fontWeight),
+                    body: getComputedStyle(document.body).fontSize,
+                    top: title.getBoundingClientRect().top, border: style.borderBottomWidth,
+                    padding: style.paddingBottom, width: title.getBoundingClientRect().width,
+                    column: article.clientWidth - 96,
+                    gap: subtitle.getBoundingClientRect().top - title.getBoundingClientRect().bottom,
+                    color: style.color, allTinted: headings.every(h => getComputedStyle(h).color === style.color),
+                    dark: matchMedia('(prefers-color-scheme: dark)').matches,
+                    contrast: matchMedia('(prefers-contrast: more)').matches};
+                })()
+                """)
             let computed = try XCTUnwrap(styles as? [String: Any])
             XCTAssertEqual(computed["sizes"] as? [Double], [32, 24, 20, 18, 16, 15])
             XCTAssertEqual(computed["weights"] as? [String], ["700", "700"])
@@ -234,8 +263,10 @@ final class PreviewTests: XCTestCase {
             let dark = name == .darkAqua
             XCTAssertEqual(computed["dark"] as? Bool, dark)
             let contrast = computed["contrast"] as? Bool == true
-            let rgb = contrast ? (dark ? HeadingPalette.highContrastDark : HeadingPalette.highContrastLight)
-                               : (dark ? HeadingPalette.dark : HeadingPalette.light)
+            let rgb =
+                contrast
+                ? (dark ? HeadingPalette.highContrastDark : HeadingPalette.highContrastLight)
+                : (dark ? HeadingPalette.dark : HeadingPalette.light)
             XCTAssertEqual(computed["color"] as? String, "rgb(\((rgb >> 16) & 255), \((rgb >> 8) & 255), \(rgb & 255))")
         }
         for width: CGFloat in [0, 1, 280, 600, 4096] {
@@ -275,7 +306,9 @@ final class PreviewTests: XCTestCase {
         let html = preview.html
         XCTAssertTrue(html.contains("Visible"))
         preview.didFinish(document: document)
-        for _ in 0..<10 { preview.schedule(text: "# Visible", document: document, root: document.deletingLastPathComponent()) }
+        for _ in 0..<10 {
+            preview.schedule(text: "# Visible", document: document, root: document.deletingLastPathComponent())
+        }
         try await Task.sleep(for: .milliseconds(450))
         XCTAssertEqual(preview.html, html)
         XCTAssertFalse(preview.isLoading)

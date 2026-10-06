@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 @MainActor @Observable
 final class DocumentTab: Identifiable {
@@ -30,7 +30,9 @@ extension LibraryWorkspace {
             // A recovered/conflicted preview must retain its buffer. Keep it and open a new slot.
             oldPreview.isPreview = false
         }
-        guard let editor = await openEditor(snapshot.rootURL.appendingPathComponent(document.relativePath)) else { return false }
+        guard let editor = await openEditor(snapshot.rootURL.appendingPathComponent(document.relativePath)) else {
+            return false
+        }
         if let tab = tabs.first(where: { $0.id == document.id }) {
             // A concurrent open (e.g. session restore vs. a click) added this document meanwhile: focus it instead.
             await editor.didCloseWindow()
@@ -48,7 +50,8 @@ extension LibraryWorkspace {
             await oldPreview.editor.didCloseWindow()
             tabs[index] = tab
         } else {
-            let index = activeTabID.flatMap { active in tabs.firstIndex { $0.id == active } }.map { $0 + 1 } ?? tabs.count
+            let index =
+                activeTabID.flatMap { active in tabs.firstIndex { $0.id == active } }.map { $0 + 1 } ?? tabs.count
             tabs.insert(tab, at: index)
         }
         activateTab(tab.id, syncSelection: false)
@@ -79,8 +82,11 @@ extension LibraryWorkspace {
         let ids = Set(snapshot.documents.map(\.id))
         for (index, tab) in tabs.enumerated() where !ids.contains(tab.id) {
             guard let url = tab.editor.url,
-                  let document = snapshot.documents.first(where: { snapshot.rootURL.appendingPathComponent($0.relativePath) == url }),
-                  !tabs.contains(where: { $0.id == document.id }) else { continue }
+                let document = snapshot.documents.first(where: {
+                    snapshot.rootURL.appendingPathComponent($0.relativePath) == url
+                }),
+                !tabs.contains(where: { $0.id == document.id })
+            else { continue }
             let replacement = DocumentTab(id: document.id, editor: tab.editor, isPreview: tab.isPreview)
             replacement.textView = tab.textView
             tabs[index] = replacement
@@ -89,9 +95,12 @@ extension LibraryWorkspace {
     }
 
     func openSelectionInNewTab(_ path: String? = nil) {
-        guard let path = path ?? selectedDocument?.relativePath ?? editor.url.map({ url in
-            String(url.path.dropFirst((root?.path.count ?? 0) + 1))
-        }) else { return }
+        guard
+            let path = path ?? selectedDocument?.relativePath
+                ?? editor.url.map({ url in
+                    String(url.path.dropFirst((root?.path.count ?? 0) + 1))
+                })
+        else { return }
         navigate(folder: session.selectedFolder, documents: [path], pinned: true)
     }
 
@@ -100,7 +109,8 @@ extension LibraryWorkspace {
         let wasEditing = NSApp?.keyWindow?.firstResponder is PlainMarkdownTextView
         activeTabID = id
         if syncSelection, search.text.isEmpty,
-           let document = snapshot?.documents.first(where: { $0.id == id }) {
+            let document = snapshot?.documents.first(where: { $0.id == id })
+        {
             session.selectedFolder = (document.relativePath as NSString).deletingLastPathComponent
             session.selectedDocuments = [document.relativePath]
             revision += 1
@@ -115,8 +125,7 @@ extension LibraryWorkspace {
         tabs.removeAll { $0.editor.url == nil }
         if !tabs.contains(where: { $0.id == activeTabID }) {
             activeTabID = tabs.first?.id
-            if let id = activeTabID { activateTab(id) }
-            else { session.selectedDocuments = []; preview.editor = nil }
+            if let id = activeTabID { activateTab(id) } else { session.selectedDocuments = []; preview.editor = nil }
         }
         persistSession()
     }
@@ -148,7 +157,9 @@ extension LibraryWorkspace {
 
     func closeTab(_ id: UUID) async -> Bool {
         await waitForNavigation()
-        guard !mutating, let tab = tabs.first(where: { $0.id == id }), closingTabIDs.insert(id).inserted else { return false }
+        guard !mutating, let tab = tabs.first(where: { $0.id == id }), closingTabIDs.insert(id).inserted else {
+            return false
+        }
         defer { closingTabIDs.remove(id) }
         tab.editor.loading = true
         defer { tab.editor.loading = false }
@@ -161,8 +172,11 @@ extension LibraryWorkspace {
         tabs.remove(at: index)
         if activeTabID == id {
             activeTabID = nil
-            if !tabs.isEmpty { activateTab(tabs[min(index, tabs.count - 1)].id) }
-            else { session.selectedDocuments = []; preview.editor = nil }
+            if !tabs.isEmpty {
+                activateTab(tabs[min(index, tabs.count - 1)].id)
+            } else {
+                session.selectedDocuments = []; preview.editor = nil
+            }
         }
         persistSession()
         return true
@@ -218,7 +232,8 @@ extension LibraryWorkspace {
         value.focusMode = focusMode
         value.typewriterMode = typewriterMode
         value.tabs = tabs.map { tab in
-            var item = DocumentTabMetadata(documentID: tab.id,
+            var item = DocumentTabMetadata(
+                documentID: tab.id,
                 relativePath: tab.editor.url.map { String($0.path.dropFirst((root?.path.count ?? 0) + 1)) } ?? "",
                 isPreview: tab.isPreview)
             item.selectionLocation = tab.editor.selection.location
@@ -249,7 +264,9 @@ extension LibraryWorkspace {
             if let tab = tabs.first(where: { $0.id == item.documentID }) {
                 tab.isPreview = item.isPreview && !tab.editor.state.isDirty
                 let length = (tab.editor.text as NSString).length
-                tab.editor.selection = NSRange(location: min(item.selectionLocation, length), length: min(item.selectionLength, max(0, length - item.selectionLocation)))
+                tab.editor.selection = NSRange(
+                    location: min(item.selectionLocation, length),
+                    length: min(item.selectionLength, max(0, length - item.selectionLocation)))
                 tab.editor.scroll = NSPoint(x: 0, y: item.scrollY)
             }
         }

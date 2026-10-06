@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class AssetMigrationWorkspaceTests: XCTestCase {
@@ -9,7 +10,8 @@ final class AssetMigrationWorkspaceTests: XCTestCase {
     func testOpeningLibraryAutomaticallyMigratesBeforeSettling() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent(".silkweb-assets/id"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(".silkweb-assets/id"), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try Data([1]).write(to: root.appendingPathComponent(".silkweb-assets/id/image.png"))
         try Data("![x](.silkweb-assets/id/image.png)".utf8).write(to: root.appendingPathComponent("note.md"))
@@ -19,13 +21,17 @@ final class AssetMigrationWorkspaceTests: XCTestCase {
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
             if workspace.snapshot != nil, !workspace.loading, !workspace.mediaMigrationRunning,
-               !FileManager.default.fileExists(atPath: root.appendingPathComponent(".silkweb-assets").path) { break }
+                !FileManager.default.fileExists(atPath: root.appendingPathComponent(".silkweb-assets").path)
+            {
+                break
+            }
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTAssertNil(workspace.error)
         XCTAssertFalse(workspace.mediaBannerVisible, "Fast migration stays silent")
         XCTAssertTrue(workspace.mediaFailures.isEmpty)
-        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("note.md"), encoding: .utf8), "![x](media/id/image.png)")
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("note.md"), encoding: .utf8), "![x](media/id/image.png)")
         XCTAssertFalse(workspace.snapshot!.folders.contains { $0.relativePath == "media" })
         await workspace.didCloseWindow()
     }
@@ -34,7 +40,8 @@ final class AssetMigrationWorkspaceTests: XCTestCase {
     func testPendingAssetInsertionIsSavedBeforeMigrationRewrite() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent(".silkweb-assets/id"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(".silkweb-assets/id"), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try Data([1]).write(to: root.appendingPathComponent(".silkweb-assets/id/old.png"))
         let document = root.appendingPathComponent("note.md")
@@ -69,10 +76,13 @@ final class AssetMigrationWorkspaceTests: XCTestCase {
     func testMigrationSavesDirtyTabsAndReloadsRealEditorAndBanners() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent(".silkweb-assets/id"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(".silkweb-assets/id"), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try Data([1]).write(to: root.appendingPathComponent(".silkweb-assets/id/image.png"))
-        for name in ["A", "B"] { try Data("![x](.silkweb-assets/id/image.png)".utf8).write(to: root.appendingPathComponent(name + ".md")) }
+        for name in ["A", "B"] {
+            try Data("![x](.silkweb-assets/id/image.png)".utf8).write(to: root.appendingPathComponent(name + ".md"))
+        }
         let defaults = disposableDefaults("Migration")
         let workspace = LibraryWorkspace(defaults: defaults)
         workspace.root = root
@@ -83,7 +93,9 @@ final class AssetMigrationWorkspaceTests: XCTestCase {
         dirty.edit("dirty " + dirty.text)
         let host = NSHostingController(rootView: DocumentDetail(workspace: workspace))
         host.sizingOptions = []
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 700), styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 700), styleMask: [.borderless], backing: .buffered,
+            defer: false)
         window.contentView = host.view
         await workspace.migrateMedia()
         XCTAssertTrue(workspace.mediaFailures.isEmpty)

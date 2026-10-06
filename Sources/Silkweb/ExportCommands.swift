@@ -1,7 +1,7 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import UniformTypeIdentifiers
-import SilkwebCore
 
 struct ExportMenu: View {
     let workspace: LibraryWorkspace
@@ -22,7 +22,10 @@ struct ExportMenu: View {
     static func missingImageAlert(_ result: HTMLExport.Result, printing: Bool = false) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = result.warningTitle
-        alert.informativeText = printing ? result.warningDetail.replacingOccurrences(of: "The exported file", with: "The printed document") : result.warningDetail
+        alert.informativeText =
+            printing
+            ? result.warningDetail.replacingOccurrences(of: "The exported file", with: "The printed document")
+            : result.warningDetail
         alert.addButton(withTitle: printing ? "Print Anyway" : "Export Anyway")
         alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
         return alert
@@ -34,7 +37,8 @@ struct ExportMenu: View {
         panel.nameFieldStringValue = name + (pdf ? ".pdf" : ".html")
         panel.prompt = "Export"
         panel.canCreateDirectories = true
-        panel.directoryURL = defaults.string(forKey: directoryKey).map { URL(fileURLWithPath: $0, isDirectory: true) }
+        panel.directoryURL =
+            defaults.string(forKey: directoryKey).map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         return panel
     }
@@ -50,21 +54,30 @@ extension LibraryWorkspace {
     func prepareHTMLExport(path: String? = nil, printOutput: Bool = false) async throws -> HTMLExport.Result? {
         await waitForNavigation()
         guard !loading, !mutating, !editor.loading, session.selectedDocuments.count <= 1, let root else { return nil }
-        let destination = path.map { root.appendingPathComponent($0) }
-            ?? (printOutput ? editor.url : selectedDocument.map { root.appendingPathComponent($0.relativePath) } ?? editor.url)
+        let destination =
+            path.map { root.appendingPathComponent($0) }
+            ?? (printOutput
+                ? editor.url : selectedDocument.map { root.appendingPathComponent($0.relativePath) } ?? editor.url)
         guard let destination else { return nil }
         let buffer = allEditors.first { $0.url == destination }
         if let buffer, !(await buffer.flush()) {
-            throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "The document couldn’t be saved. Resolve its save warning before exporting."])
+            throw CocoaError(
+                .fileWriteUnknown,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "The document couldn’t be saved. Resolve its save warning before exporting."
+                ])
         }
         let text = buffer?.text
         let language = Locale.preferredLanguages.first ?? "en"
         return try await Task.detached(priority: .userInitiated) {
             let markdown = try text ?? String(contentsOf: destination, encoding: .utf8)
-            return HTMLExport.prepare(markdown: markdown, title: destination.deletingPathExtension().lastPathComponent,
-                                      documentURL: destination, libraryRoot: root,
-                                      stylesheet: printOutput ? PrintCoordinator.stylesheet : PreviewCoordinator.stylesheet, language: language,
-                                      printOutput: printOutput)
+            return HTMLExport.prepare(
+                markdown: markdown, title: destination.deletingPathExtension().lastPathComponent,
+                documentURL: destination, libraryRoot: root,
+                stylesheet: printOutput ? PrintCoordinator.stylesheet : PreviewCoordinator.stylesheet,
+                language: language,
+                printOutput: printOutput)
         }.value
     }
 
@@ -73,12 +86,16 @@ extension LibraryWorkspace {
         exporting = true
         Task {
             defer { exporting = false }
-            let name = path.map { (($0 as NSString).lastPathComponent as NSString).deletingPathExtension }
+            let name =
+                path.map { (($0 as NSString).lastPathComponent as NSString).deletingPathExtension }
                 ?? selectedDocument.map { ($0.name as NSString).deletingPathExtension } ?? editor.name
             do {
                 guard let result = try await prepareHTMLExport(path: path) else { return }
                 if !result.missingAssets.isEmpty,
-                   ExportCommands.missingImageAlert(result).runModal() != .alertFirstButtonReturn { return }
+                    ExportCommands.missingImageAlert(result).runModal() != .alertFirstButtonReturn
+                {
+                    return
+                }
                 let panel = ExportCommands.savePanel(name: name, defaults: preview.defaults)
                 // NSSavePanel owns the explicit confirmation before replacing an existing file.
                 guard panel.runModal() == .OK, let destination = panel.url else { return }

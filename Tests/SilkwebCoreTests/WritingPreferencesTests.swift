@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+
 @testable import SilkwebCore
 
 final class WritingPreferencesTests: XCTestCase {
@@ -34,7 +35,8 @@ final class WritingPreferencesTests: XCTestCase {
 
     /// Payloads saved by 1.47–1.65 (version 1, four keys) still load; 1.5 snaps to 1.6.
     func testFilesSavedBeforeSettingsStillLoad() throws {
-        let legacy = try decode("{\"version\":1,\"fontFamily\":\"Helvetica\",\"fontSize\":21,\"lineHeight\":1.5,\"maximumWidth\":720}")
+        let legacy = try decode(
+            "{\"version\":1,\"fontFamily\":\"Helvetica\",\"fontSize\":21,\"lineHeight\":1.5,\"maximumWidth\":720}")
         XCTAssertEqual(legacy.fontFamily, "Helvetica")
         XCTAssertEqual(legacy.fontSize, 21)
         XCTAssertEqual(legacy.lineHeight, 1.6)
@@ -53,7 +55,9 @@ final class WritingPreferencesTests: XCTestCase {
     }
 
     func testOutOfRangeValuesClampAndCorruptValuesUseDefaults() throws {
-        let sizes: [(Double, Double)] = [(0, 15), (-3, 15), (1, 10), (9.5, 10), (10, 10), (15, 15), (21.5, 21.5), (32, 32), (33, 32), (144, 32)]
+        let sizes: [(Double, Double)] = [
+            (0, 15), (-3, 15), (1, 10), (9.5, 10), (10, 10), (15, 15), (21.5, 21.5), (32, 32), (33, 32), (144, 32),
+        ]
         for (input, expected) in sizes {
             XCTAssertEqual(try decode("{\"fontSize\":\(input)}").fontSize, expected, "\(input)")
         }
@@ -61,7 +65,9 @@ final class WritingPreferencesTests: XCTestCase {
         for (input, expected) in insets {
             XCTAssertEqual(try decode("{\"horizontalInset\":\(input)}").horizontalInset, expected, "\(input)")
         }
-        let widths: [(Double, Double)] = [(0, 660), (-1, 660), (1, 480), (480, 480), (720, 720), (1200, 1200), (4096, 1200)]
+        let widths: [(Double, Double)] = [
+            (0, 660), (-1, 660), (1, 480), (480, 480), (720, 720), (1200, 1200), (4096, 1200),
+        ]
         for (input, expected) in widths {
             XCTAssertEqual(try decode("{\"maximumWidth\":\(input)}").maximumWidth, expected, "\(input)")
         }
@@ -69,13 +75,17 @@ final class WritingPreferencesTests: XCTestCase {
         for (input, expected) in preview {
             XCTAssertEqual(try decode("{\"previewFontSize\":\(input)}").previewFontSize, expected, "\(input)")
         }
-        let spacing: [(Double, Double)] = [(-1, 1.6), (0, 1.6), (0.5, 1.2), (1.2, 1.2), (1.3, 1.35), (1.35, 1.35), (1.475, 1.6),
-                                           (1.5, 1.6), (1.6, 1.6), (1.7, 1.75), (1.75, 1.75), (1.9, 2), (2, 2), (9, 2)]
+        let spacing: [(Double, Double)] = [
+            (-1, 1.6), (0, 1.6), (0.5, 1.2), (1.2, 1.2), (1.3, 1.35), (1.35, 1.35), (1.475, 1.6),
+            (1.5, 1.6), (1.6, 1.6), (1.7, 1.75), (1.75, 1.75), (1.9, 2), (2, 2), (9, 2),
+        ]
         for (input, expected) in spacing {
             XCTAssertEqual(try decode("{\"lineHeight\":\(input)}").lineHeight, expected, "\(input)")
         }
         // Wrong types and unknown enum cases fall back per key, never failing the whole payload.
-        let mixed = try decode("{\"fontFamily\":\"  \",\"fontSize\":\"big\",\"indent\":\"eight\",\"checksSpelling\":\"yes\",\"appearance\":\"sepia\",\"previewFont\":3,\"colors\":{\"light\":{\"accent\":\"#12\",\"text\":\"#112233\"},\"dark\":\"broken\"},\"smartPunctuation\":true}")
+        let mixed = try decode(
+            "{\"fontFamily\":\"  \",\"fontSize\":\"big\",\"indent\":\"eight\",\"checksSpelling\":\"yes\",\"appearance\":\"sepia\",\"previewFont\":3,\"colors\":{\"light\":{\"accent\":\"#12\",\"text\":\"#112233\"},\"dark\":\"broken\"},\"smartPunctuation\":true}"
+        )
         XCTAssertEqual(mixed.fontFamily, "Menlo")
         XCTAssertEqual(mixed.fontSize, 15)
         XCTAssertEqual(mixed.indent, .fourSpaces)
@@ -96,10 +106,12 @@ final class WritingPreferencesTests: XCTestCase {
                         for flag in [false, true] {
                             var value = WritingPreferences()
                             value.fontFamily = family; value.indent = indent; value.appearance = appearance
-                            value.previewFont = previewFont; value.keepsLineBreaks = flag; value.showsTableOfContents = !flag
+                            value.previewFont = previewFont; value.keepsLineBreaks = flag;
+                            value.showsTableOfContents = !flag
                             value.checksSpelling = flag; value.smartPunctuation = flag; value.showsInlineImages = !flag
                             value.highlightsCurrentLine = flag; value.reopensSession = !flag
-                            value.fontSize = 32; value.lineHeight = 1.35; value.horizontalInset = 120; value.maximumWidth = 480
+                            value.fontSize = 32; value.lineHeight = 1.35; value.horizontalInset = 120;
+                            value.maximumWidth = 480
                             value.previewFontSize = 12
                             value.colors.light.accent = HexColor(0xABCDEF)
                             value.colors.dark.surface = HexColor(0x000000)
@@ -116,10 +128,13 @@ final class WritingPreferencesTests: XCTestCase {
 
     func testRestoreDefaultsResetsOnlyItsTab() {
         var value = WritingPreferences()
-        value.fontFamily = "Serif"; value.fontSize = 20; value.lineHeight = 2; value.horizontalInset = 96; value.maximumWidth = 900
-        value.indent = .tab; value.checksSpelling = false; value.smartPunctuation = true; value.showsInlineImages = false
+        value.fontFamily = "Serif"; value.fontSize = 20; value.lineHeight = 2; value.horizontalInset = 96;
+        value.maximumWidth = 900
+        value.indent = .tab; value.checksSpelling = false; value.smartPunctuation = true;
+        value.showsInlineImages = false
         value.highlightsCurrentLine = true; value.reopensSession = false
-        value.previewFont = .serif; value.previewFontSize = 20; value.keepsLineBreaks = true; value.showsTableOfContents = false
+        value.previewFont = .serif; value.previewFontSize = 20; value.keepsLineBreaks = true;
+        value.showsTableOfContents = false
         value.appearance = .dark; value.colors.light.accent = HexColor(0x123456)
         XCTAssertFalse(value.editorIsDefault)
         XCTAssertFalse(value.previewIsDefault)
@@ -156,9 +171,13 @@ final class WritingPreferencesTests: XCTestCase {
         }
         var set = ColorSet()
         set.text = HexColor(0xAAAAAA)
-        guard case .text(let ratio)? = set.contrastWarning(dark: false) else { return XCTFail("Expected a text warning") }
+        guard case .text(let ratio)? = set.contrastWarning(dark: false) else {
+            return XCTFail("Expected a text warning")
+        }
         XCTAssertLessThan(ratio, 4.5)
-        XCTAssertEqual(set.contrastWarning(dark: false)?.message, "Text is hard to read on this surface (2.2:1). Aim for at least 4.5:1.")
+        XCTAssertEqual(
+            set.contrastWarning(dark: false)?.message,
+            "Text is hard to read on this surface (2.2:1). Aim for at least 4.5:1.")
         // Just under and at the 4.5:1 boundary on white.
         set = ColorSet(); set.surface = HexColor(0xFFFFFF)
         set.text = HexColor(0x777777)
@@ -166,7 +185,9 @@ final class WritingPreferencesTests: XCTestCase {
         set.text = HexColor(0x767676)
         XCTAssertNil(set.contrastWarning(dark: false))
         set.headings = HexColor(0xBBBBBB)
-        guard case .headings(let heading)? = set.contrastWarning(dark: false) else { return XCTFail("Expected a headings warning") }
+        guard case .headings(let heading)? = set.contrastWarning(dark: false) else {
+            return XCTFail("Expected a headings warning")
+        }
         XCTAssertLessThan(heading, 3)
         XCTAssertTrue(set.contrastWarning(dark: false)!.message.hasPrefix("Headings are hard to read"))
         // A dark set is tested against its own surface.
@@ -188,7 +209,9 @@ final class WritingPreferencesTests: XCTestCase {
     func testHexColorsAndPreviewVariables() throws {
         XCTAssertEqual(HexColor(hex: "#3f7d64"), HexColor(0x3F7D64))
         XCTAssertEqual(HexColor(hex: "3F7D64")?.hex, "#3F7D64")
-        for invalid in ["", "#", "#12345", "#1234567", "#GGGGGG", "red"] { XCTAssertNil(HexColor(hex: invalid), invalid) }
+        for invalid in ["", "#", "#12345", "#1234567", "#GGGGGG", "red"] {
+            XCTAssertNil(HexColor(hex: invalid), invalid)
+        }
         XCTAssertEqual(String(data: try JSONEncoder().encode(HexColor(0x0A0B0C)), encoding: .utf8), "\"#0A0B0C\"")
 
         var value = WritingPreferences()

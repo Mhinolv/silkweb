@@ -1,11 +1,13 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class SearchNavigationTests: XCTestCase {
     func testSelectionSurvivesReorderingAndFallsBackOnlyWhenMissing() {
         let hits = (0..<3).map { number in
-            SearchResult(id: UUID(), displayName: "Hit \(number)", folderPathComponents: [],
-                         modified: nil, matchKind: .title, snippet: "coffee", matchRanges: [])
+            SearchResult(
+                id: UUID(), displayName: "Hit \(number)", folderPathComponents: [],
+                modified: nil, matchKind: .title, snippet: "coffee", matchRanges: [])
         }
         for selected in hits {
             XCTAssertEqual(SearchNavigation.selection(selected.id, in: Array(hits.reversed())), selected.id)
@@ -20,8 +22,7 @@ final class SearchNavigationTests: XCTestCase {
             for current in [nil, -1, 0, count - 1, count] {
                 for delta in [Int.min, -10001, -12, -1, 0, 1, 12, 10001, Int.max] {
                     let next = SearchNavigation.nextIndex(current: current, count: count, delta: delta)
-                    if count == 0 { XCTAssertNil(next) }
-                    else { XCTAssertTrue((0..<count).contains(next!)) }
+                    if count == 0 { XCTAssertNil(next) } else { XCTAssertTrue((0..<count).contains(next!)) }
                 }
             }
         }

@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class TagEditorTests: XCTestCase {
@@ -38,7 +39,8 @@ final class TagEditorTests: XCTestCase {
         let coffee = try XCTUnwrap(metadata.tags.first { $0.name == "coffee" }?.id)
         XCTAssertEqual(TagEditor.appliedTags(documents: [a], metadata: metadata), [camping: true, coffee: true])
         XCTAssertEqual(TagEditor.appliedTags(documents: [a, b], metadata: metadata), [camping: true, coffee: false])
-        XCTAssertEqual(TagEditor.appliedTags(documents: [a, b, c], metadata: metadata), [camping: false, coffee: false])
+        XCTAssertEqual(
+            TagEditor.appliedTags(documents: [a, b, c], metadata: metadata), [camping: false, coffee: false])
         XCTAssertEqual(TagEditor.appliedTags(documents: [c], metadata: metadata), [:])
 
         // Adding never removes a common tag, even when the caller's view of it is stale.
@@ -57,8 +59,10 @@ final class TagEditorTests: XCTestCase {
         XCTAssertFalse(removed.tags.contains { $0.id == coffee }, "An unused tag is pruned")
         removed = TagEditor.remove(camping, documents: [a], metadata: metadata)
         XCTAssertEqual(TagEditor.appliedTags(documents: [b], metadata: removed), [camping: true])
-        XCTAssertEqual(TagEditor.remove(UUID(), documents: [a], metadata: metadata).tagsByDocument, metadata.tagsByDocument)
-        XCTAssertEqual(TagEditor.remove(camping, documents: [c], metadata: metadata).tagsByDocument, metadata.tagsByDocument)
+        XCTAssertEqual(
+            TagEditor.remove(UUID(), documents: [a], metadata: metadata).tagsByDocument, metadata.tagsByDocument)
+        XCTAssertEqual(
+            TagEditor.remove(camping, documents: [c], metadata: metadata).tagsByDocument, metadata.tagsByDocument)
     }
 
     func testFolderTagSearchPredicateSweep() {
@@ -67,7 +71,7 @@ final class TagEditorTests: XCTestCase {
         let documents = [
             LibraryDocument(id: UUID(), folderID: folder.id, relativePath: "Folder/A.md", name: "A.md"),
             LibraryDocument(id: UUID(), folderID: nested, relativePath: "Folder/Nested/B.md", name: "B.md"),
-            LibraryDocument(id: UUID(), folderID: UUID(), relativePath: "Elsewhere/C.md", name: "C.md")
+            LibraryDocument(id: UUID(), folderID: UUID(), relativePath: "Elsewhere/C.md", name: "C.md"),
         ]
         var metadata = LibraryMetadata()
         metadata.tagsByDocument = [documents[0].id.uuidString: [tag, other], documents[1].id.uuidString: [tag]]
@@ -77,9 +81,12 @@ final class TagEditorTests: XCTestCase {
                     for search: Set<UUID>? in [nil, [], Set(documents.map(\.id)), [documents[1].id]] {
                         for (index, document) in documents.enumerated() {
                             let expectedFolder = !scoped || index == 0 || (recursive && index == 1)
-                            let expectedTags = filters.isSubset(of: index == 0 ? [tag, other] : index == 1 ? [tag] : [])
-                            XCTAssertEqual(TagEditor.matches(document, folder: scoped ? folder : nil, includeSubfolders: recursive,
-                                tags: filters, metadata: metadata, searchIDs: search),
+                            let expectedTags = filters.isSubset(
+                                of: index == 0 ? [tag, other] : index == 1 ? [tag] : [])
+                            XCTAssertEqual(
+                                TagEditor.matches(
+                                    document, folder: scoped ? folder : nil, includeSubfolders: recursive,
+                                    tags: filters, metadata: metadata, searchIDs: search),
                                 expectedFolder && expectedTags && (search?.contains(document.id) ?? true))
                         }
                     }
@@ -94,7 +101,8 @@ final class TagEditorTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let body = Data("# Original\n#hashtag\n".utf8)
         try body.write(to: root.appendingPathComponent("A.md"))
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Destination"), withIntermediateDirectories: false)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Destination"), withIntermediateDirectories: false)
         var snapshot = try await LibraryScanner.scan(root: root)
         let document = try XCTUnwrap(snapshot.documents.first)
         let legacy = LibraryMetadata(IDsByPath: snapshot.metadata.IDsByPath)
@@ -103,7 +111,9 @@ final class TagEditorTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: json).write(to: root.appendingPathComponent(".silkweb/index.json"))
         snapshot = try await LibraryScanner.scan(root: root)
         XCTAssertTrue(snapshot.metadata.tags.isEmpty)
-        _ = try await TagStore.update(root: root) { TagEditor.edit(["research"], documents: [document.id], metadata: $0) }
+        _ = try await TagStore.update(root: root) {
+            TagEditor.edit(["research"], documents: [document.id], metadata: $0)
+        }
         snapshot = try await LibraryScanner.scan(root: root)
         let tagID = try XCTUnwrap(snapshot.metadata.tags.first?.id)
         let engine = try LibraryMutations(root: root)
@@ -116,7 +126,10 @@ final class TagEditorTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("Destination/Renamed.md")), body)
         var session = LibrarySession()
         session.selectedTagID = tagID
-        session.listPreferences = ["all": .init(), "tag:" + tagID.uuidString: .init(), "folder:" + UUID().uuidString: .init(), "tag:" + UUID().uuidString: .init()]
+        session.listPreferences = [
+            "all": .init(), "tag:" + tagID.uuidString: .init(), "folder:" + UUID().uuidString: .init(),
+            "tag:" + UUID().uuidString: .init(),
+        ]
         session = session.pruningPreferences(folderIDs: [], tagIDs: [tagID])
         XCTAssertEqual(session.listPreferences.count, 2)
         try await session.save(root: root)

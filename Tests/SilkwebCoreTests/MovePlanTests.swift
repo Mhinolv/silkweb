@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+
 @testable import SilkwebCore
 
 final class MovePlanTests: XCTestCase {
@@ -10,12 +11,16 @@ final class MovePlanTests: XCTestCase {
         _ = try await engine.createFolder(named: "A")
         _ = try await engine.createFolder(named: "Child", in: "A")
         _ = try await engine.createFolder(named: "B")
-        _ = try await engine.createDocument(named: "One.md", in: "A/Child", text: "[two](../../Two.md#title)\n![image](../asset.png)\n")
-        _ = try await engine.createDocument(named: "Two.md", text: "[one](A/Child/One.md)\n[ref]: <A/Child/One.md> \"Title\"\n[bad](A/Child/a(b).md)\n")
+        _ = try await engine.createDocument(
+            named: "One.md", in: "A/Child", text: "[two](../../Two.md#title)\n![image](../asset.png)\n")
+        _ = try await engine.createDocument(
+            named: "Two.md", text: "[one](A/Child/One.md)\n[ref]: <A/Child/One.md> \"Title\"\n[bad](A/Child/a(b).md)\n")
         try Data([0, 1, 255]).write(to: root.appendingPathComponent("A/asset.png"))
         return (root, engine)
     }
-    private func text(_ root: URL, _ path: String) throws -> String { try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8) }
+    private func text(_ root: URL, _ path: String) throws -> String {
+        try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+    }
 
     func testFolderDescendantsLinksIDsAndExactUndo() async throws {
         let (root, engine) = try await fixture()
@@ -28,7 +33,8 @@ final class MovePlanTests: XCTestCase {
         XCTAssertEqual(plan.unsupportedLinks.count, 1)
         _ = try await engine.executeMove(plan)
         XCTAssertEqual(try text(root, "B/A/Child/One.md"), "[two](../../../Two.md#title)\n![image](../asset.png)\n")
-        XCTAssertEqual(try text(root, "Two.md"), two.replacingOccurrences(of: "A/Child/One.md", with: "B/A/Child/One.md"))
+        XCTAssertEqual(
+            try text(root, "Two.md"), two.replacingOccurrences(of: "A/Child/One.md", with: "B/A/Child/One.md"))
         let after = try await LibraryScanner.scan(root: root)
         XCTAssertEqual(before.metadata.IDsByPath["A/Child/One.md"], after.metadata.IDsByPath["B/A/Child/One.md"])
         XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("B/A/asset.png")), Data([0, 1, 255]))
@@ -45,26 +51,35 @@ final class MovePlanTests: XCTestCase {
         _ = try await engine.createFolder(named: "A", in: "B")
         let stopped = try await engine.planMove(["A"], toFolder: "B")
         XCTAssertEqual(stopped.collisions, ["A"])
-        do { _ = try await engine.executeMove(stopped); XCTFail("Expected collision") } catch { }
+        do { _ = try await engine.executeMove(stopped); XCTFail("Expected collision") } catch {}
         let plan = try await engine.planMove(["A", "Two.md"], toFolder: "B", keepBoth: true)
         XCTAssertEqual(plan.changes.changes.map(\.newPath), ["B/A 2", "B/Two.md"])
         _ = try await engine.executeMove(plan)
         XCTAssertTrue(try text(root, "B/Two.md").contains("A%202/Child/One.md"))
         try Data("changed".utf8).write(to: root.appendingPathComponent("B/Two.md"), options: .atomic)
-        do { _ = try await engine.executeMove(plan.reversed); XCTFail("Expected stale undo") } catch { }
+        do { _ = try await engine.executeMove(plan.reversed); XCTFail("Expected stale undo") } catch {}
         XCTAssertEqual(try text(root, "B/Two.md"), "changed")
     }
 
     func testRootCycleNoOpInvalidPathsAndSymlinks() async throws {
         let (root, engine) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }
-        for (paths, destination) in [([""], "B"), (["A"], "A"), (["A"], "A/Child"), (["A"], ""), (["A"], "../B"), (["Missing.md"], "B")] {
-            do { _ = try await engine.planMove(paths, toFolder: destination); XCTFail("Expected refusal: \(paths) → \(destination)") } catch { }
+        for (paths, destination) in [
+            ([""], "B"), (["A"], "A"), (["A"], "A/Child"), (["A"], ""), (["A"], "../B"), (["Missing.md"], "B"),
+        ] {
+            do {
+                _ = try await engine.planMove(paths, toFolder: destination);
+                XCTFail("Expected refusal: \(paths) → \(destination)")
+            } catch {}
         }
-        try FileManager.default.createSymbolicLink(atPath: root.appendingPathComponent("Alias").path, withDestinationPath: root.appendingPathComponent("B").path)
-        do { _ = try await engine.planMove(["A"], toFolder: "Alias"); XCTFail("Expected symlink refusal") } catch { }
+        try FileManager.default.createSymbolicLink(
+            atPath: root.appendingPathComponent("Alias").path,
+            withDestinationPath: root.appendingPathComponent("B").path)
+        do { _ = try await engine.planMove(["A"], toFolder: "Alias"); XCTFail("Expected symlink refusal") } catch {}
         XCTAssertEqual(MoveSelection.topLevel(["A/Child", "A", "A", "Two.md"]), ["A", "Two.md"])
-        for destination in ["", "A", "A/Child"] { XCTAssertFalse(MoveSelection.permits(["A"], destination: destination)) }
+        for destination in ["", "A", "A/Child"] {
+            XCTAssertFalse(MoveSelection.permits(["A"], destination: destination))
+        }
         XCTAssertTrue(MoveSelection.permits(["A", "Two.md"], destination: "B"))
     }
 
@@ -74,7 +89,8 @@ final class MovePlanTests: XCTestCase {
         let (root, engine) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }
         try Data("[two](Two.md)\n".utf8).write(to: root.appendingPathComponent("Meeting 10:04.md"))
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Notes 9:30"), withIntermediateDirectories: false)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Notes 9:30"), withIntermediateDirectories: false)
         _ = try await LibraryScanner.scan(root: root)
         // Unrelated move and rename.
         let plan = try await engine.planMove(["Two.md"], toFolder: "B")
@@ -94,27 +110,49 @@ final class MovePlanTests: XCTestCase {
         try await engine.validateRename("Meeting 10:04.md", to: "Meeting 10:04.md")
         let unchanged = try await engine.rename("Meeting 10:04.md", to: "Meeting 10:04.md")
         XCTAssertTrue(unchanged.changes.isEmpty)
-        XCTAssertEqual(try LibraryMutations.renameFilename(" Meeting 10:04 ", for: "Meeting 10:04.md", isFolder: false), "Meeting 10:04.md")
-        XCTAssertEqual(try LibraryMutations.renameFilename("Notes 9:30", for: "Notes 9:30", isFolder: true), "Notes 9:30")
+        XCTAssertEqual(
+            try LibraryMutations.renameFilename(" Meeting 10:04 ", for: "Meeting 10:04.md", isFolder: false),
+            "Meeting 10:04.md")
+        XCTAssertEqual(
+            try LibraryMutations.renameFilename("Notes 9:30", for: "Notes 9:30", isFolder: true), "Notes 9:30")
         let fixed = try await engine.rename("Meeting 10:04.md", to: "Meeting 10-04.md")
         XCTAssertEqual(fixed.changes.map(\.newPath), ["Meeting 10-04.md"])
-        try FileManager.default.moveItem(at: root.appendingPathComponent("Meeting 10-04.md"), to: root.appendingPathComponent("Meeting 10:04.md"))
+        try FileManager.default.moveItem(
+            at: root.appendingPathComponent("Meeting 10-04.md"), to: root.appendingPathComponent("Meeting 10:04.md"))
         // New names keep the 1.6 rules, including renaming a legacy item to another ':' name.
-        for (path, name) in [("Meeting 10:04.md", "a:b.md"), ("Archive", "a:b"), ("Notes 9:30", ".hidden"), ("Archive", "x/y")] {
-            do { _ = try await engine.rename(path, to: name); XCTFail("Accepted \(name)") }
-            catch { guard case LibraryMutationError.invalidName = error else { return XCTFail("Unexpected \(error)") } }
-            do { try await engine.validateRename(path, to: name); XCTFail("Accepted \(name)") }
-            catch { guard case LibraryMutationError.invalidName = error else { return XCTFail("Unexpected \(error)") } }
+        for (path, name) in [
+            ("Meeting 10:04.md", "a:b.md"), ("Archive", "a:b"), ("Notes 9:30", ".hidden"), ("Archive", "x/y"),
+        ] {
+            do { _ = try await engine.rename(path, to: name); XCTFail("Accepted \(name)") } catch {
+                guard case LibraryMutationError.invalidName = error else { return XCTFail("Unexpected \(error)") }
+            }
+            do { try await engine.validateRename(path, to: name); XCTFail("Accepted \(name)") } catch {
+                guard case LibraryMutationError.invalidName = error else { return XCTFail("Unexpected \(error)") }
+            }
         }
         for input in ["a:b", "Meeting 10:05"] {
-            do { _ = try LibraryMutations.renameFilename(input, for: "Meeting 10:04.md", isFolder: false); XCTFail("Accepted \(input)") }
-            catch { guard case LibraryMutationError.invalidName(.separator) = error else { return XCTFail("Unexpected \(error)") } }
+            do {
+                _ = try LibraryMutations.renameFilename(input, for: "Meeting 10:04.md", isFolder: false);
+                XCTFail("Accepted \(input)")
+            } catch {
+                guard case LibraryMutationError.invalidName(.separator) = error else {
+                    return XCTFail("Unexpected \(error)")
+                }
+            }
         }
-        do { _ = try await engine.createFolder(named: "a:b"); XCTFail("Accepted a:b") }
-        catch { guard case LibraryMutationError.invalidName(.separator) = error else { return XCTFail("Unexpected \(error)") } }
+        do { _ = try await engine.createFolder(named: "a:b"); XCTFail("Accepted a:b") } catch {
+            guard case LibraryMutationError.invalidName(.separator) = error else {
+                return XCTFail("Unexpected \(error)")
+            }
+        }
         // Structural checks still refuse escaping and hidden paths.
-        for (paths, destination) in [(["Meeting 10:04.md/.."], "B"), ([".silkweb"], "B"), (["./Two.md"], "B"), (["Two.md"], ".silkweb")] {
-            do { _ = try await engine.planMove(paths, toFolder: destination); XCTFail("Expected refusal: \(paths) → \(destination)") } catch { }
+        for (paths, destination) in [
+            (["Meeting 10:04.md/.."], "B"), ([".silkweb"], "B"), (["./Two.md"], "B"), (["Two.md"], ".silkweb"),
+        ] {
+            do {
+                _ = try await engine.planMove(paths, toFolder: destination);
+                XCTFail("Expected refusal: \(paths) → \(destination)")
+            } catch {}
         }
     }
 
@@ -129,7 +167,7 @@ final class MovePlanTests: XCTestCase {
         XCTAssertEqual(restored.changes.map(\.newPath), ["Meeting 10:04.md"])
         XCTAssertEqual(restored.changes.first?.id, fixed.changes.first?.id)
         for name in ["../x.md", ".hidden.md", "", "a/b.md"] {
-            do { _ = try await engine.restoreName("Meeting 10:04.md", to: name); XCTFail("Accepted \(name)") } catch { }
+            do { _ = try await engine.restoreName("Meeting 10:04.md", to: name); XCTFail("Accepted \(name)") } catch {}
         }
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("Meeting 10:04.md").path))
     }
@@ -144,7 +182,7 @@ final class MovePlanTests: XCTestCase {
         let index = try Data(contentsOf: directory.appendingPathComponent("index.json"))
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
-        do { _ = try await engine.executeMove(plan); XCTFail("Expected failed commit") } catch { }
+        do { _ = try await engine.executeMove(plan); XCTFail("Expected failed commit") } catch {}
         XCTAssertEqual(try text(root, "A/Child/One.md"), one)
         XCTAssertEqual(try text(root, "Two.md"), two)
         XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("index.json")), index)
@@ -154,7 +192,9 @@ final class MovePlanTests: XCTestCase {
     func testCaseAliasLinksAndUnrelatedSymlinks() async throws {
         let (root, engine) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }
-        try FileManager.default.createSymbolicLink(atPath: root.appendingPathComponent("Alias.md").path, withDestinationPath: root.appendingPathComponent("Two.md").path)
+        try FileManager.default.createSymbolicLink(
+            atPath: root.appendingPathComponent("Alias.md").path,
+            withDestinationPath: root.appendingPathComponent("Two.md").path)
         let insensitive = FileManager.default.fileExists(atPath: root.appendingPathComponent("a/child/one.md").path)
         if insensitive {
             try Data("[alias](a/child/one.md)".utf8).write(to: root.appendingPathComponent("Two.md"), options: .atomic)
@@ -162,12 +202,16 @@ final class MovePlanTests: XCTestCase {
         let plan = try await engine.planMove(["A"], toFolder: "B")
         _ = try await engine.executeMove(plan)
         if insensitive { XCTAssertEqual(try text(root, "Two.md"), "[alias](B/A/Child/One.md)") }
-        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: root.appendingPathComponent("Alias.md").path), root.appendingPathComponent("Two.md").path)
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(atPath: root.appendingPathComponent("Alias.md").path),
+            root.appendingPathComponent("Two.md").path)
     }
 
     func testUndecodableDocumentsAreReportedPreservedAndGuarded() async throws {
-        let samples = [Data([0xFF, 0xFE, 0]), Data([0x63, 0x61, 0x66, 0xE9]), Data([0xC3]),
-                       Data(repeating: 0xFF, count: 65_536)]
+        let samples = [
+            Data([0xFF, 0xFE, 0]), Data([0x63, 0x61, 0x66, 0xE9]), Data([0xC3]),
+            Data(repeating: 0xFF, count: 65_536),
+        ]
         for bytes in samples {
             for path in ["bad.md", "A/Child/bad.MARKDOWN"] {
                 let (root, engine) = try await fixture()
@@ -191,13 +235,15 @@ final class MovePlanTests: XCTestCase {
                 var edited = bytes
                 edited[edited.startIndex] = 0xFE
                 try edited.write(to: root.appendingPathComponent(path))
-                do { _ = try await engine.executeMove(stale); XCTFail("Expected stale preflight") }
-                catch { XCTAssertEqual(error as? MovePlanError, .changed) }
+                do { _ = try await engine.executeMove(stale); XCTFail("Expected stale preflight") } catch {
+                    XCTAssertEqual(error as? MovePlanError, .changed)
+                }
                 let fresh = try await engine.planMove(["A"], toFolder: "B")
                 _ = try await engine.executeMove(fresh)
                 try bytes.write(to: root.appendingPathComponent(movedPath))
-                do { _ = try await engine.executeMove(fresh.reversed); XCTFail("Expected stale undo") }
-                catch { XCTAssertEqual(error as? MovePlanError, .changed) }
+                do { _ = try await engine.executeMove(fresh.reversed); XCTFail("Expected stale undo") } catch {
+                    XCTAssertEqual(error as? MovePlanError, .changed)
+                }
                 XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("A").path))
             }
         }
@@ -213,7 +259,8 @@ final class MovePlanTests: XCTestCase {
             try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: url.path)
             XCTAssertThrowsError(try Data(contentsOf: url))
             let plan = try await engine.planMove(["A"], toFolder: "B")
-            XCTAssertTrue(plan.unsupportedLinks.contains { $0.document == path && $0.syntax.contains("couldn’t be read") })
+            XCTAssertTrue(
+                plan.unsupportedLinks.contains { $0.document == path && $0.syntax.contains("couldn’t be read") })
             XCTAssertNotNil(plan.unreadableDocuments[path])
             XCTAssertNil(plan.before[path])
             _ = try await engine.executeMove(plan)
@@ -224,8 +271,8 @@ final class MovePlanTests: XCTestCase {
             try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: url.path)
             let stale = try await engine.planMove(["A"], toFolder: "B")
             try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
-            do { _ = try await engine.executeMove(stale); XCTFail("Expected refusal after readability changes") }
-            catch { XCTAssertEqual(error as? MovePlanError, .changed) }
+            do { _ = try await engine.executeMove(stale); XCTFail("Expected refusal after readability changes") } catch
+            { XCTAssertEqual(error as? MovePlanError, .changed) }
             XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("A").path))
         }
     }
@@ -256,8 +303,9 @@ final class MovePlanTests: XCTestCase {
                     values.isHidden = true
                     var flaggedURL = flagged
                     try flaggedURL.setResourceValues(values)
-                    try FileManager.default.createSymbolicLink(at: directory.appendingPathComponent("Alias.md"),
-                                                              withDestinationURL: root.appendingPathComponent("Two.md"))
+                    try FileManager.default.createSymbolicLink(
+                        at: directory.appendingPathComponent("Alias.md"),
+                        withDestinationURL: root.appendingPathComponent("Two.md"))
                 }
                 if !afterMove { _ = try await engine.executeMove(plan) }
                 _ = try await engine.executeMove(plan.reversed)
@@ -265,7 +313,9 @@ final class MovePlanTests: XCTestCase {
                 XCTAssertEqual(try text(root, "Two.md"), two)
                 for parent in ["", "A", "A/Child", "B"] {
                     for name in names + [".ignored/note.md", "Hidden.md"] {
-                        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(parent).appendingPathComponent(name)), bytes)
+                        XCTAssertEqual(
+                            try Data(contentsOf: root.appendingPathComponent(parent).appendingPathComponent(name)),
+                            bytes)
                     }
                 }
             }
@@ -306,14 +356,17 @@ final class MovePlanTests: XCTestCase {
                 case "rewrittenBody": try Data("edited".utf8).write(to: root.appendingPathComponent("Two.md"))
                 case "unchangedBody": try Data("modified".utf8).write(to: root.appendingPathComponent("Unchanged.md"))
                 case "newDocument": try Data().write(to: root.appendingPathComponent("New.md"))
-                case "newFolder": try FileManager.default.createDirectory(at: root.appendingPathComponent("New"), withIntermediateDirectories: false)
+                case "newFolder":
+                    try FileManager.default.createDirectory(
+                        at: root.appendingPathComponent("New"), withIntermediateDirectories: false)
                 default: try FileManager.default.removeItem(at: root.appendingPathComponent("Unchanged.md"))
                 }
                 do {
                     _ = try await engine.executeMove(afterMove ? plan.reversed : plan)
                     XCTFail("Expected refusal for \(change), afterMove=\(afterMove)")
                 } catch { XCTAssertEqual(error as? MovePlanError, .changed) }
-                XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(afterMove ? "B/A" : "A").path))
+                XCTAssertTrue(
+                    FileManager.default.fileExists(atPath: root.appendingPathComponent(afterMove ? "B/A" : "A").path))
             }
         }
     }
@@ -321,9 +374,11 @@ final class MovePlanTests: XCTestCase {
     func testFolderLinkTrailingSlashAndSuffixSweep() {
         let changes = LibraryChangeSet(changes: [.init(id: UUID(), oldPath: "A", newPath: "B/A", isFolder: true)])
         // Incoming, outgoing, unchanged, self-directory, root, and encoded slash.
-        let cases = [("Two.md", "A/", "B/A/"), ("A/One.md", "../B/", "../"),
-                     ("A/One.md", "./", "./"), ("A/One.md", "../", "../../"),
-                     ("Two.md", "B/", "B/"), ("Two.md", "A%2F", "B/A/")]
+        let cases = [
+            ("Two.md", "A/", "B/A/"), ("A/One.md", "../B/", "../"),
+            ("A/One.md", "./", "./"), ("A/One.md", "../", "../../"),
+            ("Two.md", "B/", "B/"), ("Two.md", "A%2F", "B/A/"),
+        ]
         for (source, destination, expected) in cases {
             for suffix in ["", "#heading", "?mode=1", "?mode=1#heading", "#heading?mode=1"] {
                 for angle in [false, true] {
@@ -333,7 +388,8 @@ final class MovePlanTests: XCTestCase {
                                 let token = angle ? "<\(path)\(suffix)>" : path + suffix
                                 return reference ? "[ref]: \(token)\(title)" : "[dir](\(token)\(title))"
                             }
-                            let result = MarkdownDestinations.rewrite(link(destination), source: source, changes: changes)
+                            let result = MarkdownDestinations.rewrite(
+                                link(destination), source: source, changes: changes)
                             XCTAssertEqual(result.text, link(expected))
                             XCTAssertTrue(result.unsupported.isEmpty)
                         }
@@ -360,24 +416,31 @@ final class MovePlanTests: XCTestCase {
                                 let token = String(value[value.index(after: start)..<end]).split(separator: " ").first!
                                     .trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
                                 let path = token.split(whereSeparator: { $0 == "#" || $0 == "?" }).first!
-                                let url = URL(fileURLWithPath: "/silkweb-root/" + sourcePath).deletingLastPathComponent()
+                                let url = URL(fileURLWithPath: "/silkweb-root/" + sourcePath)
+                                    .deletingLastPathComponent()
                                     .appendingPathComponent(String(path).removingPercentEncoding!).standardizedFileURL
                                 return String(url.path.dropFirst("/silkweb-root/".count))
                             }
-                            XCTAssertEqual(target(result.text, changes.remapping(source)), changes.remapping(target(text, source)))
+                            XCTAssertEqual(
+                                target(result.text, changes.remapping(source)), changes.remapping(target(text, source)))
                             XCTAssertTrue(suffix.isEmpty || result.text.contains(suffix))
                         }
                     }
                 }
             }
         }
-        for text in ["", "plain 📝", "[^1]: A/One.md", "`[a](A/One.md)`", "`` [a](A/One.md) ``", "```md\n[a](A/One.md)\n```", "~~~\n[a](A/One.md)\n~~~"] {
+        for text in [
+            "", "plain 📝", "[^1]: A/One.md", "`[a](A/One.md)`", "`` [a](A/One.md) ``", "```md\n[a](A/One.md)\n```",
+            "~~~\n[a](A/One.md)\n~~~",
+        ] {
             XCTAssertEqual(MarkdownDestinations.rewrite(text, source: "Two.md", changes: changes).text, text)
         }
         let mixed = MarkdownDestinations.rewrite("[ok](A/One.md) [bad](A/a(b).md)", source: "Two.md", changes: changes)
         XCTAssertEqual(mixed.text, "[ok](B/A/One.md) [bad](A/a(b).md)")
         XCTAssertEqual(mixed.unsupported.count, 1)
-        for text in ["[[A/One.md]]", "[a](../outside.md)", "[a](A/a(b).md)", "[a](A/a\\ b.md)", "<img src=\"A/a.png\">"] {
+        for text in [
+            "[[A/One.md]]", "[a](../outside.md)", "[a](A/a(b).md)", "[a](A/a\\ b.md)", "<img src=\"A/a.png\">",
+        ] {
             let result = MarkdownDestinations.rewrite(text, source: "Two.md", changes: changes)
             XCTAssertEqual(result.text, text)
             XCTAssertFalse(result.unsupported.isEmpty)
@@ -391,12 +454,14 @@ final class MovePlanTests: XCTestCase {
         let two = try text(root, "Two.md")
         let before = try await LibraryScanner.scan(root: root)
         _ = try await engine.rename("A/Child/One.md", to: "Renamed.md")
-        XCTAssertEqual(try text(root, "Two.md"), two.replacingOccurrences(of: "A/Child/One.md", with: "A/Child/Renamed.md"))
+        XCTAssertEqual(
+            try text(root, "Two.md"), two.replacingOccurrences(of: "A/Child/One.md", with: "A/Child/Renamed.md"))
         XCTAssertEqual(try text(root, "A/Child/Renamed.md"), one)
         _ = try await engine.restoreName("A/Child/Renamed.md", to: "One.md")
         XCTAssertEqual(try text(root, "Two.md"), two)
         _ = try await engine.rename("A", to: "Z Folder")
-        XCTAssertEqual(try text(root, "Two.md"), two.replacingOccurrences(of: "A/Child/One.md", with: "Z%20Folder/Child/One.md"))
+        XCTAssertEqual(
+            try text(root, "Two.md"), two.replacingOccurrences(of: "A/Child/One.md", with: "Z%20Folder/Child/One.md"))
         XCTAssertEqual(try text(root, "Z Folder/Child/One.md"), one)
         _ = try await engine.restoreName("Z Folder", to: "A")
         XCTAssertEqual(try text(root, "Two.md"), two)
@@ -409,11 +474,13 @@ final class MovePlanTests: XCTestCase {
     func testIndentedNestedListLinksAreRewritten() {
         let changes = LibraryChangeSet(changes: [.init(id: UUID(), oldPath: "A", newPath: "B/A", isFolder: true)])
         for indent in ["    ", "\t", "        ", "\t\t", "  \t"] {
-            let text = "- parent\n\(indent)- [one](A/One.md)\n\(indent)![image](A/pic.png \"Title\")\n\(indent)text [two](<A/Two.md#x>)"
+            let text =
+                "- parent\n\(indent)- [one](A/One.md)\n\(indent)![image](A/pic.png \"Title\")\n\(indent)text [two](<A/Two.md#x>)"
             let result = MarkdownDestinations.rewrite(text, source: "Two.md", changes: changes)
             XCTAssertEqual(result.text, text.replacingOccurrences(of: "A/", with: "B/A/"), indent.debugDescription)
             XCTAssertTrue(result.unsupported.isEmpty)
-            let unsupported = MarkdownDestinations.rewrite("- parent\n\(indent)- [bad](A/a(b).md)", source: "Two.md", changes: changes)
+            let unsupported = MarkdownDestinations.rewrite(
+                "- parent\n\(indent)- [bad](A/a(b).md)", source: "Two.md", changes: changes)
             XCTAssertEqual(unsupported.unsupported.count, 1, indent.debugDescription)
         }
         // Indented fences and inline code stay protected.
@@ -424,8 +491,14 @@ final class MovePlanTests: XCTestCase {
     /// silkweb-1.72: CRLF and CR documents split into lines like LF, and every terminator is preserved.
     func testCRLFAndCRDocumentsSplitLikeLFAndKeepTerminators() {
         let changes = LibraryChangeSet(changes: [.init(id: UUID(), oldPath: "A", newPath: "B/A", isFolder: true)])
-        let lines = ["[one](A/One.md)", "```", "[code](A/One.md)", "```", "[ref]: A/One.md", "    - [nested](A/One.md)", "~~~", "[tilde](A/One.md)", "~~~", "end [two](A/Two.md)"]
-        let expected = ["[one](B/A/One.md)", "```", "[code](A/One.md)", "```", "[ref]: B/A/One.md", "    - [nested](B/A/One.md)", "~~~", "[tilde](A/One.md)", "~~~", "end [two](B/A/Two.md)"]
+        let lines = [
+            "[one](A/One.md)", "```", "[code](A/One.md)", "```", "[ref]: A/One.md", "    - [nested](A/One.md)", "~~~",
+            "[tilde](A/One.md)", "~~~", "end [two](A/Two.md)",
+        ]
+        let expected = [
+            "[one](B/A/One.md)", "```", "[code](A/One.md)", "```", "[ref]: B/A/One.md", "    - [nested](B/A/One.md)",
+            "~~~", "[tilde](A/One.md)", "~~~", "end [two](B/A/Two.md)",
+        ]
         for newline in ["\n", "\r\n", "\r"] {
             for trailing in ["", newline, newline + newline] {
                 let text = lines.joined(separator: newline) + trailing
@@ -435,24 +508,39 @@ final class MovePlanTests: XCTestCase {
             }
         }
         let mixed = "a [x](A/One.md)\r\nb\nc [y](A/One.md)\r\r\n\n"
-        XCTAssertEqual(MarkdownDestinations.rewrite(mixed, source: "Two.md", changes: changes).text,
-                       "a [x](B/A/One.md)\r\nb\nc [y](B/A/One.md)\r\r\n\n")
+        XCTAssertEqual(
+            MarkdownDestinations.rewrite(mixed, source: "Two.md", changes: changes).text,
+            "a [x](B/A/One.md)\r\nb\nc [y](B/A/One.md)\r\r\n\n")
         for text in ["", "\n", "\r\n", "\r\n\r\n", "plain\r\n"] {
             XCTAssertEqual(MarkdownDestinations.rewrite(text, source: "Two.md", changes: changes).text, text)
         }
-        XCTAssertEqual(Array(MarkdownDestinations.rewrite("[a](A/x.md)\r\n", source: "Two.md", changes: changes).text.utf8.suffix(2)), [13, 10])
+        XCTAssertEqual(
+            Array(
+                MarkdownDestinations.rewrite("[a](A/x.md)\r\n", source: "Two.md", changes: changes).text.utf8.suffix(2)),
+            [13, 10])
         // Sweep: every 3-line combination gives the same rewrite under LF, CRLF and CR; no-op changes are identity.
-        let pool = ["", "[a](A/One.md)", "    - [b](A/One.md)", "\t![c](A/c.png)", "```", "~~~", "[r]: A/One.md", "`[d](A/One.md)`", "[bad](A/a(b).md)", "📝 [e](<A/e f.md>)"]
-        for a in pool { for b in pool { for c in pool {
-            let lf = MarkdownDestinations.rewrite([a, b, c].joined(separator: "\n") + "\n", source: "Two.md", changes: changes)
-            for newline in ["\r\n", "\r"] {
-                let other = MarkdownDestinations.rewrite([a, b, c].joined(separator: newline) + newline, source: "Two.md", changes: changes)
-                XCTAssertEqual(other.text, lf.text.replacingOccurrences(of: "\n", with: newline))
-                XCTAssertEqual(other.unsupported, lf.unsupported)
+        let pool = [
+            "", "[a](A/One.md)", "    - [b](A/One.md)", "\t![c](A/c.png)", "```", "~~~", "[r]: A/One.md",
+            "`[d](A/One.md)`", "[bad](A/a(b).md)", "📝 [e](<A/e f.md>)",
+        ]
+        for a in pool {
+            for b in pool {
+                for c in pool {
+                    let lf = MarkdownDestinations.rewrite(
+                        [a, b, c].joined(separator: "\n") + "\n", source: "Two.md", changes: changes)
+                    for newline in ["\r\n", "\r"] {
+                        let other = MarkdownDestinations.rewrite(
+                            [a, b, c].joined(separator: newline) + newline, source: "Two.md", changes: changes)
+                        XCTAssertEqual(other.text, lf.text.replacingOccurrences(of: "\n", with: newline))
+                        XCTAssertEqual(other.unsupported, lf.unsupported)
+                    }
+                    let identity = [a, b, c].joined(separator: "\r\n")
+                    XCTAssertEqual(
+                        MarkdownDestinations.rewrite(identity, source: "Two.md", changes: LibraryChangeSet(changes: []))
+                            .text, identity)
+                }
             }
-            let identity = [a, b, c].joined(separator: "\r\n")
-            XCTAssertEqual(MarkdownDestinations.rewrite(identity, source: "Two.md", changes: LibraryChangeSet(changes: [])).text, identity)
-        } } }
+        }
     }
 
     /// silkweb-1.72: nested changes (ancestor and descendant both renamed) remap to the most specific match in any order.
@@ -473,6 +561,9 @@ final class MovePlanTests: XCTestCase {
     }
 
     private static func reverse(_ changes: LibraryChangeSet) -> LibraryChangeSet {
-        .init(changes: changes.changes.map { .init(id: $0.id, oldPath: $0.newPath, newPath: $0.oldPath!, isFolder: $0.isFolder) })
+        .init(
+            changes: changes.changes.map {
+                .init(id: $0.id, oldPath: $0.newPath, newPath: $0.oldPath!, isFolder: $0.isFolder)
+            })
     }
 }

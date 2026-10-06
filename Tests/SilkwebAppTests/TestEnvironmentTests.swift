@@ -5,7 +5,8 @@ final class TestEnvironmentTests: XCTestCase {
     func testFrameBudgetScalesOnlyOnHostedCI() {
         let ci = ["GITHUB_ACTIONS": "true", "CI": "true"]
         XCTAssertTrue(TestEnvironment.isHostedCI(ci))
-        XCTAssertEqual(TestEnvironment.frameBudget(16.7, environment: ci), 16.7 * TestEnvironment.hostedCIScale, accuracy: 1e-9)
+        XCTAssertEqual(
+            TestEnvironment.frameBudget(16.7, environment: ci), 16.7 * TestEnvironment.hostedCIScale, accuracy: 1e-9)
         // The 10k list p95 measured on `macos-15` fits the CI budget; it would not fit a frame.
         XCTAssertLessThan(33.86, TestEnvironment.frameBudget(16.7, environment: ci))
         XCTAssertGreaterThan(33.86, TestEnvironment.frameBudget(16.7, environment: [:]))

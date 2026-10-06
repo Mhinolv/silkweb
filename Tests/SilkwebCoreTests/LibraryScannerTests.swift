@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class LibraryScannerTests: XCTestCase {
@@ -20,14 +21,19 @@ final class LibraryScannerTests: XCTestCase {
     }
 
     func testNestedEmptyFoldersExtensionsAndUTF8() async throws {
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Nested/Empty"), withIntermediateDirectories: true)
-        for name in ["Top.md", "Nested/Note.markdown", "Nested/UPPER.MD", "ignored.txt", ".hidden.md",
-                     ".hidden/ignored.md", ".silkweb/ignored.md", "Nested/Empty/fake.md/ignored.txt"] {
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Nested/Empty"), withIntermediateDirectories: true)
+        for name in [
+            "Top.md", "Nested/Note.markdown", "Nested/UPPER.MD", "ignored.txt", ".hidden.md",
+            ".hidden/ignored.md", ".silkweb/ignored.md", "Nested/Empty/fake.md/ignored.txt",
+        ] {
             try write(name)
         }
         let snapshot = try await LibraryScanner.scan(root: root)
-        XCTAssertEqual(Set(snapshot.folders.map(\.relativePath)), ["", "Nested", "Nested/Empty", "Nested/Empty/fake.md"])
-        XCTAssertEqual(Set(snapshot.documents.map(\.relativePath)), ["Top.md", "Nested/Note.markdown", "Nested/UPPER.MD"])
+        XCTAssertEqual(
+            Set(snapshot.folders.map(\.relativePath)), ["", "Nested", "Nested/Empty", "Nested/Empty/fake.md"])
+        XCTAssertEqual(
+            Set(snapshot.documents.map(\.relativePath)), ["Top.md", "Nested/Note.markdown", "Nested/UPPER.MD"])
         for document in snapshot.documents {
             XCTAssertTrue(snapshot.folders.contains { $0.id == document.folderID })
             let text = try await LibraryScanner.readDocument(document, root: root)
@@ -58,7 +64,8 @@ final class LibraryScannerTests: XCTestCase {
             let recovered = try XCTUnwrap(snapshot.recoveredMetadataURL)
             XCTAssertEqual(try String(contentsOf: recovered, encoding: .utf8), malformed)
             XCTAssertEqual(snapshot.documents.count, 1)
-            let saved = try JSONDecoder().decode(LibraryMetadata.self, from: Data(contentsOf: root.appendingPathComponent(".silkweb/index.json")))
+            let saved = try JSONDecoder().decode(
+                LibraryMetadata.self, from: Data(contentsOf: root.appendingPathComponent(".silkweb/index.json")))
             XCTAssertEqual(saved, snapshot.metadata)
         }
     }
@@ -72,14 +79,18 @@ final class LibraryScannerTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? LibraryError, .unsupportedMetadataVersion(999))
         }
-        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent(".silkweb/index.json"), encoding: .utf8), json)
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent(".silkweb/index.json"), encoding: .utf8), json)
     }
 
     func testSymlinkCycleFilesAndDanglingLinksAreSkipped() async throws {
         try write("Folder/real.md")
-        for (path, destination) in [("Folder/cycle", root.path), ("linked.md", root.appendingPathComponent("Folder/real.md").path),
-                                    ("dangling.md", root.appendingPathComponent("missing").path)] {
-            try FileManager.default.createSymbolicLink(atPath: root.appendingPathComponent(path).path, withDestinationPath: destination)
+        for (path, destination) in [
+            ("Folder/cycle", root.path), ("linked.md", root.appendingPathComponent("Folder/real.md").path),
+            ("dangling.md", root.appendingPathComponent("missing").path),
+        ] {
+            try FileManager.default.createSymbolicLink(
+                atPath: root.appendingPathComponent(path).path, withDestinationPath: destination)
         }
         let snapshot = try await LibraryScanner.scan(root: root)
         XCTAssertEqual(snapshot.folders.count, 2)
@@ -87,7 +98,8 @@ final class LibraryScannerTests: XCTestCase {
         // A file swapped for a symlink after scanning must not be read.
         let url = root.appendingPathComponent("Folder/real.md")
         try FileManager.default.removeItem(at: url)
-        try FileManager.default.createSymbolicLink(atPath: url.path, withDestinationPath: root.appendingPathComponent("missing").path)
+        try FileManager.default.createSymbolicLink(
+            atPath: url.path, withDestinationPath: root.appendingPathComponent("missing").path)
         do {
             _ = try await LibraryScanner.readDocument(snapshot.documents[0], root: root)
             XCTFail("Expected symlink rejection")
@@ -99,10 +111,12 @@ final class LibraryScannerTests: XCTestCase {
     func testMetadataSymlinksAreRejected() async throws {
         for path in [".silkweb", ".silkweb/index.json"] {
             if path.contains("/") {
-                try FileManager.default.createDirectory(at: root.appendingPathComponent(".silkweb"), withIntermediateDirectories: false)
+                try FileManager.default.createDirectory(
+                    at: root.appendingPathComponent(".silkweb"), withIntermediateDirectories: false)
             }
             let url = root.appendingPathComponent(path)
-            try FileManager.default.createSymbolicLink(atPath: url.path, withDestinationPath: root.appendingPathComponent("missing").path)
+            try FileManager.default.createSymbolicLink(
+                atPath: url.path, withDestinationPath: root.appendingPathComponent("missing").path)
             do {
                 _ = try await LibraryScanner.scan(root: root)
                 XCTFail("Expected symlink rejection")
@@ -181,8 +195,12 @@ final class LibraryScannerTests: XCTestCase {
         }
         let snapshot = try await LibraryScanner.scan(root: root)
         XCTAssertEqual(Set(snapshot.folders.filter(\.isUnreadable).map(\.relativePath)), ["Locked", "Parent/Locked"])
-        XCTAssertEqual(Set(snapshot.folders.map(\.relativePath)), ["", "Locked", "Parent", "Parent/Locked", "Parent/Readable", "Readable"])
-        XCTAssertEqual(Set(snapshot.documents.map(\.relativePath)), ["Parent/Readable/Note.md", "Readable/Note.markdown", "Top.md"])
+        XCTAssertEqual(
+            Set(snapshot.folders.map(\.relativePath)),
+            ["", "Locked", "Parent", "Parent/Locked", "Parent/Readable", "Readable"])
+        XCTAssertEqual(
+            Set(snapshot.documents.map(\.relativePath)),
+            ["Parent/Readable/Note.md", "Readable/Note.markdown", "Top.md"])
         XCTAssertFalse(snapshot.isReadOnly)
     }
 

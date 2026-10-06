@@ -47,7 +47,9 @@ public actor AssetStore {
         for input in inputs {
             do {
                 let root = root.standardizedFileURL
-                guard document.standardizedFileURL.path.hasPrefix(root.path + "/") else { throw LibraryMutationError.outsideRoot }
+                guard document.standardizedFileURL.path.hasPrefix(root.path + "/") else {
+                    throw LibraryMutationError.outsideRoot
+                }
                 try LibraryMetadataStore.rejectLink(root)
                 let assets = try MediaDirectory.prepare(root: root)
                 let directory = assets.appendingPathComponent(id.uuidString, isDirectory: true)
@@ -74,18 +76,29 @@ public actor AssetStore {
                 defer { try? FileManager.default.removeItem(at: staging) }
                 if let file = input.file {
                     let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
-                    guard values.isRegularFile == true, values.isSymbolicLink != true else { throw LibraryMutationError.unsupportedItem(file.path) }
+                    guard values.isRegularFile == true, values.isSymbolicLink != true else {
+                        throw LibraryMutationError.unsupportedItem(file.path)
+                    }
                     try FileManager.default.copyItem(at: file, to: staging)
-                } else if let data = input.data { try data.write(to: staging, options: .atomic) }
-                else { throw LibraryMutationError.unsupportedItem(input.name) }
+                } else if let data = input.data {
+                    try data.write(to: staging, options: .atomic)
+                } else {
+                    throw LibraryMutationError.unsupportedItem(input.name)
+                }
                 // moveItem refuses to overwrite a destination created concurrently.
                 try FileManager.default.moveItem(at: staging, to: target)
                 let parent = document.deletingLastPathComponent().standardizedFileURL.pathComponents
                 let destination = target.pathComponents
                 var common = 0
-                while common < min(parent.count, destination.count), parent[common] == destination[common] { common += 1 }
-                let relative = (Array(repeating: "..", count: parent.count - common) + destination.dropFirst(common)).joined(separator: "/")
-                result.assets.append(StoredAsset(url: target, path: Self.encodePath(relative), alt: Self.escapeLabel(input.alt), isImage: input.isImage))
+                while common < min(parent.count, destination.count), parent[common] == destination[common] {
+                    common += 1
+                }
+                let relative = (Array(repeating: "..", count: parent.count - common) + destination.dropFirst(common))
+                    .joined(separator: "/")
+                result.assets.append(
+                    StoredAsset(
+                        url: target, path: Self.encodePath(relative), alt: Self.escapeLabel(input.alt),
+                        isImage: input.isImage))
             } catch { result.failures.append(AssetFailure(name: input.name, reason: error.localizedDescription)) }
         }
         return result
@@ -95,8 +108,10 @@ public actor AssetStore {
         do {
             _ = try FileManager.default.attributesOfItem(atPath: url.path)
             return true
-        } catch let error as NSError where error.domain == NSCocoaErrorDomain
-            && (error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError) {
+        } catch let error as NSError
+            where error.domain == NSCocoaErrorDomain
+            && (error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError)
+        {
             return false
         }
     }
@@ -106,7 +121,10 @@ public actor AssetStore {
         allowed.remove(charactersIn: "()<>#?%\\[]:")
         return path.precomposedStringWithCanonicalMapping.unicodeScalars.map { scalar in
             if scalar.value > 127 && !CharacterSet.whitespacesAndNewlines.contains(scalar)
-                && !CharacterSet.controlCharacters.contains(scalar) { return String(scalar) }
+                && !CharacterSet.controlCharacters.contains(scalar)
+            {
+                return String(scalar)
+            }
             return String(scalar).addingPercentEncoding(withAllowedCharacters: allowed) ?? String(scalar)
         }.joined()
     }

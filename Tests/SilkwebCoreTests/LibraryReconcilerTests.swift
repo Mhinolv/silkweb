@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class LibraryReconcilerTests: XCTestCase {
@@ -16,7 +17,8 @@ final class LibraryReconcilerTests: XCTestCase {
             for keepMine in [false, true] {
                 let url = root.appendingPathComponent("\(UUID()).markdown")
                 try Data("original".utf8).write(to: url)
-                let coordinator = SaveCoordinator(store: DocumentStore(root: root), recoveryDirectory: root.appendingPathComponent(".recovery"))
+                let coordinator = SaveCoordinator(
+                    store: DocumentStore(root: root), recoveryDirectory: root.appendingPathComponent(".recovery"))
                 _ = try await coordinator.open(url)
                 try Data("clean reload".utf8).write(to: url, options: .atomic)
                 let reload = try await coordinator.reconcile(url)
@@ -29,15 +31,19 @@ final class LibraryReconcilerTests: XCTestCase {
                 _ = try await coordinator.reconcile(url)
                 try await coordinator.edit(mine + " newer", at: url)
                 let blocked = await coordinator.save(url)
-                guard case .conflict = blocked else { return XCTFail("Conflict must block explicit save and subsequent edits") }
+                guard case .conflict = blocked else {
+                    return XCTFail("Conflict must block explicit save and subsequent edits")
+                }
                 try await Task.sleep(for: .milliseconds(40))
                 XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "disk version")
                 // Resolve against another edit, rather than a stale comparison snapshot.
                 try Data("latest disk".utf8).write(to: url, options: .atomic)
-                let copy = try await coordinator.resolve(url, keepMine: keepMine, root: root, date: Date(timeIntervalSince1970: 0))
+                let copy = try await coordinator.resolve(
+                    url, keepMine: keepMine, root: root, date: Date(timeIntervalSince1970: 0))
                 XCTAssertFalse(copy.lastPathComponent.contains(":"))
                 XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), keepMine ? mine + " newer" : "latest disk")
-                XCTAssertEqual(try String(contentsOf: copy, encoding: .utf8), keepMine ? "latest disk" : mine + " newer")
+                XCTAssertEqual(
+                    try String(contentsOf: copy, encoding: .utf8), keepMine ? "latest disk" : mine + " newer")
             }
         }
     }
@@ -49,7 +55,8 @@ final class LibraryReconcilerTests: XCTestCase {
         for dirty in [false, true] {
             let url = root.appendingPathComponent("\(UUID()).md")
             try Data("original".utf8).write(to: url)
-            let coordinator = SaveCoordinator(store: DocumentStore(root: root), recoveryDirectory: root.appendingPathComponent(".recovery"))
+            let coordinator = SaveCoordinator(
+                store: DocumentStore(root: root), recoveryDirectory: root.appendingPathComponent(".recovery"))
             let unopened = await coordinator.needsReconcile(url)
             XCTAssertFalse(unopened)
             _ = try await coordinator.open(url)
@@ -80,7 +87,8 @@ final class LibraryReconcilerTests: XCTestCase {
         for dirty in [false, true] {
             let url = root.appendingPathComponent("\(UUID()).md")
             try Data("original".utf8).write(to: url)
-            let coordinator = SaveCoordinator(store: DocumentStore(root: root), recoveryDirectory: root.appendingPathComponent(".recovery"))
+            let coordinator = SaveCoordinator(
+                store: DocumentStore(root: root), recoveryDirectory: root.appendingPathComponent(".recovery"))
             _ = try await coordinator.open(url)
             if dirty { try await coordinator.edit("draft", at: url) }
             try FileManager.default.removeItem(at: url)
@@ -126,7 +134,8 @@ final class LibraryReconcilerTests: XCTestCase {
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
         let url = parent.appendingPathComponent("Note.md")
         try Data("original".utf8).write(to: url)
-        let coordinator = SaveCoordinator(store: DocumentStore(root: root), recoveryDirectory: root.appendingPathComponent(".recovery"))
+        let coordinator = SaveCoordinator(
+            store: DocumentStore(root: root), recoveryDirectory: root.appendingPathComponent(".recovery"))
         _ = try await coordinator.open(url)
         try FileManager.default.removeItem(at: root.appendingPathComponent("Parent"))
         _ = try await coordinator.reconcile(url)
@@ -160,7 +169,8 @@ final class LibraryReconcilerTests: XCTestCase {
         session.selectedFolder = "Parent/Child"
         session.selectedDocuments = ["Parent/Child/Note.md"]
         session.expandedFolders = ["", "Parent", "Parent/Child"]
-        try FileManager.default.moveItem(at: root.appendingPathComponent("Parent"), to: root.appendingPathComponent("Moved"))
+        try FileManager.default.moveItem(
+            at: root.appendingPathComponent("Parent"), to: root.appendingPathComponent("Moved"))
         let moved = try await LibraryScanner.scan(root: root, previousSnapshot: old)
         XCTAssertEqual(moved.documents.first?.id, old.documents.first?.id)
         let remapped = LibraryReconciler.session(session, from: old, to: moved)

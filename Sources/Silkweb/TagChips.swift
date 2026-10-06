@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 struct DocumentInfo: View {
     let workspace: LibraryWorkspace
@@ -14,17 +14,22 @@ struct DocumentInfo: View {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Tags").font(.headline)
-                        TagChipField(chips: workspace.tags.compactMap { tag in applied[tag.id].map { TagChip(tag: tag, mixed: !$0) } },
-                                     suggestions: workspace.tags.filter { applied[$0.id] != true }.map(\.name),
-                                     focusRequest: workspace.tagFocusRequest, enabled: workspace.canEditTags,
-                                     onAdd: workspace.addTags, onRemove: workspace.removeTag)
+                        TagChipField(
+                            chips: workspace.tags.compactMap { tag in
+                                applied[tag.id].map { TagChip(tag: tag, mixed: !$0) }
+                            },
+                            suggestions: workspace.tags.filter { applied[$0.id] != true }.map(\.name),
+                            focusRequest: workspace.tagFocusRequest, enabled: workspace.canEditTags,
+                            onAdd: workspace.addTags, onRemove: workspace.removeTag)
                         // Suggested: recent tags not on the selection yet; applying one moves it into the chips.
                         if !suggested.isEmpty {
                             Text("Suggested").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                                 .padding(.top, 4)
                             RecentTagFlow {
                                 ForEach(suggested) { tag in
-                                    RecentTagPill(tag: tag, enabled: workspace.canEditTags) { workspace.addTags([tag.name]) }
+                                    RecentTagPill(tag: tag, enabled: workspace.canEditTags) {
+                                        workspace.addTags([tag.name])
+                                    }
                                 }
                             }
                             .accessibilityElement(children: .contain).accessibilityLabel("Suggested tags")
@@ -35,10 +40,16 @@ struct DocumentInfo: View {
                     if let document = workspace.selectedDocument {
                         Text("Location").font(.headline)
                         let parent = (document.relativePath as NSString).deletingLastPathComponent
-                        Button(parent.isEmpty ? "Library" : parent.replacingOccurrences(of: "/", with: " › ")) { workspace.reveal(document.relativePath) }
-                            .buttonStyle(.link)
-                        if let date = document.created { Text("Created").font(.headline); Text(date.formatted()).font(.caption) }
-                        if let date = document.modified { Text("Modified").font(.headline); Text(date.formatted()).font(.caption) }
+                        Button(parent.isEmpty ? "Library" : parent.replacingOccurrences(of: "/", with: " › ")) {
+                            workspace.reveal(document.relativePath)
+                        }
+                        .buttonStyle(.link)
+                        if let date = document.created {
+                            Text("Created").font(.headline); Text(date.formatted()).font(.caption)
+                        }
+                        if let date = document.modified {
+                            Text("Modified").font(.headline); Text(date.formatted()).font(.caption)
+                        }
                     }
                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -120,9 +131,12 @@ struct TagChipField: NSViewRepresentable {
                 if !names.isEmpty { onAdd(names) }
             }
             let prefix = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            field.showCompletions(prefix.isEmpty ? [] : suggestions.filter {
-                !$0.isEmpty && $0.range(of: prefix, options: [.caseInsensitive, .anchored]) != nil
-            })
+            field.showCompletions(
+                prefix.isEmpty
+                    ? []
+                    : suggestions.filter {
+                        !$0.isEmpty && $0.range(of: prefix, options: [.caseInsensitive, .anchored]) != nil
+                    })
         }
         func controlTextDidEndEditing(_ notification: Notification) {
             if let field = notification.object as? TagInputField { commit(field) }
@@ -160,7 +174,9 @@ final class TagChipContainer: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func update(chips: [TagChip], enabled: Bool, onAdd: @escaping ([String]) -> Void, onRemove: @escaping (UUID) -> Void) {
+    func update(
+        chips: [TagChip], enabled: Bool, onAdd: @escaping ([String]) -> Void, onRemove: @escaping (UUID) -> Void
+    ) {
         while chipButtons.count > chips.count { chipButtons.removeLast().removeFromSuperview() }
         while chipButtons.count < chips.count {
             let button = TagChipButton()
@@ -193,11 +209,14 @@ final class TagChipContainer: NSView {
         }
         if x > 0 && width - x < Self.fieldMinWidth { x = 0; y += line }
         let fieldHeight = ceil(field.intrinsicContentSize.height)
-        let fieldRect = NSRect(x: x, y: y + floor((Self.chipHeight - fieldHeight) / 2), width: max(1, width - x), height: fieldHeight)
+        let fieldRect = NSRect(
+            x: x, y: y + floor((Self.chipHeight - fieldHeight) / 2), width: max(1, width - x), height: fieldHeight)
         return Frames(chips: chips, field: fieldRect, height: y + Self.chipHeight + Self.bottomInset + 1)
     }
     func measuredHeight(width: CGFloat) -> CGFloat { frames(width: width).height }
-    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: frames(width: bounds.width).height) }
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: frames(width: bounds.width).height)
+    }
 
     override func layout() {
         super.layout()
@@ -253,9 +272,13 @@ final class TagChipButton: NSButton {
         setAccessibilityLabel("Tag \(chip.tag.name), remove")
         setAccessibilityValue(chip.mixed ? "applied to some selected documents" : "applied")
         setAccessibilityHelp("Removes this tag")
-        setAccessibilityCustomActions(chip.mixed && enabled ? [NSAccessibilityCustomAction(name: "Apply to All Selected Documents") { [weak self] in
-            self?.onApply?(); return true
-        }] : [])
+        setAccessibilityCustomActions(
+            chip.mixed && enabled
+                ? [
+                    NSAccessibilityCustomAction(name: "Apply to All Selected Documents") { [weak self] in
+                        self?.onApply?(); return true
+                    }
+                ] : [])
         invalidateIntrinsicContentSize()
         needsDisplay = true
     }
@@ -267,17 +290,23 @@ final class TagChipButton: NSButton {
     }
     /// The × target: the chip's trailing 18 pt.
     var removeRect: NSRect {
-        isEnabled ? NSRect(x: bounds.maxX - Self.removeWidth, y: bounds.minY, width: Self.removeWidth, height: bounds.height) : .zero
+        isEnabled
+            ? NSRect(x: bounds.maxX - Self.removeWidth, y: bounds.minY, width: Self.removeWidth, height: bounds.height)
+            : .zero
     }
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
-        if removeRect.contains(convert(event.locationInWindow, from: nil)) { super.mouseDown(with: event) }
-        else if mixed { onApply?() }
+        if removeRect.contains(convert(event.locationInWindow, from: nil)) {
+            super.mouseDown(with: event)
+        } else if mixed {
+            onApply?()
+        }
     }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let tracking { removeTrackingArea(tracking) }
-        let next = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        let next = NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
         addTrackingArea(next); tracking = next
     }
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
@@ -287,7 +316,8 @@ final class TagChipButton: NSButton {
         NSGraphicsContext.saveGraphicsState()
         if !isEnabled { NSGraphicsContext.current?.cgContext.setAlpha(0.5) }
         let radius = bounds.height / 2
-        let capsule = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: radius - 0.5, yRadius: radius - 0.5)
+        let capsule = NSBezierPath(
+            roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: radius - 0.5, yRadius: radius - 0.5)
         if mixed {
             capsule.lineWidth = 1
             capsule.setLineDash([3, 2], count: 2, phase: 0)
@@ -296,11 +326,15 @@ final class TagChipButton: NSButton {
             NSColor.silkwebSelection.withAlphaComponent(isHighlighted ? 0.7 : 1).setFill(); capsule.fill()
         }
         let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byTruncatingTail
-        let attributes: [NSAttributedString.Key: Any] = [.font: font!, .foregroundColor: NSColor.silkwebAccent, .paragraphStyle: paragraph]
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font!, .foregroundColor: NSColor.silkwebAccent, .paragraphStyle: paragraph,
+        ]
         let height = (title as NSString).size(withAttributes: attributes).height
         let trailing = isEnabled ? Self.removeWidth : 9
-        (title as NSString).draw(in: NSRect(x: 9, y: (bounds.height - height) / 2, width: max(0, bounds.width - 9 - trailing), height: height),
-                                 withAttributes: attributes)
+        (title as NSString).draw(
+            in: NSRect(
+                x: 9, y: (bounds.height - height) / 2, width: max(0, bounds.width - 9 - trailing), height: height),
+            withAttributes: attributes)
         if isEnabled {
             // A stroked × keeps the label colour's own translucency in light and dark.
             let size: CGFloat = 6, cross = NSBezierPath()
@@ -324,7 +358,8 @@ final class TagInputField: NSTextField {
     weak var container: TagChipContainer?
     var completionRows: [NSButton] = []
     var completionIndex = 0
-    let completionPanel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+    let completionPanel = NSPanel(
+        contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     override func textDidBeginEditing(_ notification: Notification) {
         super.textDidBeginEditing(notification)
         container?.editingChanged()

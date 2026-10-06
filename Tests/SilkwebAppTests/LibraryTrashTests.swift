@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class LibraryTrashTests: XCTestCase {
@@ -10,7 +11,9 @@ final class LibraryTrashTests: XCTestCase {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let trash = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        for url in [root, trash] { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false) }
+        for url in [root, trash] {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+        }
         let engine = try LibraryMutations(root: root)
         _ = try await engine.createFolder(named: "A")
         _ = try await engine.createFolder(named: "B")
@@ -43,7 +46,8 @@ final class LibraryTrashTests: XCTestCase {
         let plan = try await service.plan(["A/Middle.md"])
         await workspace.performTrash(plan, using: service)
         XCTAssertNil(workspace.mutationError)
-        XCTAssertEqual(try String(contentsOf: trash.appendingPathComponent("Middle.md"), encoding: .utf8), "latest text")
+        XCTAssertEqual(
+            try String(contentsOf: trash.appendingPathComponent("Middle.md"), encoding: .utf8), "latest text")
         XCTAssertEqual(workspace.session.selectedDocuments, ["A/Last.md"])
         XCTAssertEqual(workspace.editor.url, root.appendingPathComponent("A/Last.md"))
         XCTAssertEqual(workspace.focusColumn, 1)
@@ -84,7 +88,9 @@ final class LibraryTrashTests: XCTestCase {
         XCTAssertFalse(workspace.canTrashSelection)
         workspace.session.selectedFolder = "A"
         workspace.requestTrash()
-        for _ in 0..<500 where workspace.trashPlan == nil && workspace.mutating { try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<500 where workspace.trashPlan == nil && workspace.mutating {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         XCTAssertNotNil(workspace.trashPlan)
         XCTAssertTrue(workspace.trashMessage.contains("3 documents"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("A").path))
@@ -128,7 +134,10 @@ final class LibraryTrashTests: XCTestCase {
         let content = NSHostingView(rootView: LibraryWorkspaceView(workspace: workspace))
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 4096, height: 2160))
         host.addSubview(sidebar); host.addSubview(list); host.addSubview(content)
-        for size in [NSSize.zero, NSSize(width: 1, height: 1), NSSize(width: 180, height: 24), NSSize(width: 1200, height: 760), NSSize(width: 4096, height: 2160)] {
+        for size in [
+            NSSize.zero, NSSize(width: 1, height: 1), NSSize(width: 180, height: 24), NSSize(width: 1200, height: 760),
+            NSSize(width: 4096, height: 2160),
+        ] {
             for view in [sidebar, list, content] as [NSView] {
                 view.setFrameSize(size); view.layoutSubtreeIfNeeded()
             }

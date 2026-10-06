@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 /// silkweb-1.70: recovery drafts never block opening, never autosave before Keep,
@@ -15,7 +16,8 @@ final class RecoveryDraftTests: XCTestCase {
     override func setUp() async throws {
         _ = NSApplication.shared
         container = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Notes"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Notes"), withIntermediateDirectories: true)
         try Data("healthy on disk".utf8).write(to: root.appendingPathComponent("Notes/Healthy.md"))
     }
 
@@ -76,10 +78,12 @@ final class RecoveryDraftTests: XCTestCase {
         editor.edit("edited")
         XCTAssertEqual(editor.text, "edited")
         XCTAssertFalse(FileManager.default.fileExists(atPath: bad.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: recovery.appendingPathComponent("Unreadable/corrupt.json").path))
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: recovery.appendingPathComponent("Unreadable/corrupt.json").path))
 
         _ = await editor.flush()
-        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("Notes/Healthy.md"), encoding: .utf8), "edited")
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("Notes/Healthy.md"), encoding: .utf8), "edited")
 
         // A later bad file is set aside too (the strip itself: UnreadableRecoveryBannerTests).
         try Data("{".utf8).write(to: recovery.appendingPathComponent("second.json"))
@@ -134,7 +138,9 @@ final class RecoveryDraftTests: XCTestCase {
         StatusBarCountsTests.exposeAccessibility(true)
         defer { StatusBarCountsTests.exposeAccessibility(false) }
         let host = NSHostingView(rootView: EditorBanner(session: editor, workspace: workspace))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 40), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 40), styleMask: [.titled], backing: .buffered,
+            defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.contentView = nil; window.close() }

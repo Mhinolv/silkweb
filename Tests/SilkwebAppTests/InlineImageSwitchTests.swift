@@ -1,8 +1,9 @@
 import AppKit
 import ImageIO
+import SilkwebCore
 import UniformTypeIdentifiers
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 /// silkweb-1.79: switching or renaming the editor's document must drop the previous
@@ -15,15 +16,20 @@ final class InlineImageSwitchTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let image = root.appendingPathComponent("photo.png")
-        let context = try XCTUnwrap(CGContext(data: nil, width: 400, height: 200, bitsPerComponent: 8, bytesPerRow: 1600,
-                                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(image as CFURL, UTType.png.identifier as CFString, 1, nil))
+        let context = try XCTUnwrap(
+            CGContext(
+                data: nil, width: 400, height: 200, bitsPerComponent: 8, bytesPerRow: 1600,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let destination = try XCTUnwrap(
+            CGImageDestinationCreateWithURL(image as CFURL, UTType.png.identifier as CFString, 1, nil))
         CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
         XCTAssertTrue(CGImageDestinationFinalize(destination))
 
         let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
         let editor = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled, .resizable],
+            backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.contentView = scroll
         defer { window.contentView = nil; window.close() }
         let images = "# Images\n\n![One](photo.png)\n\n![Two](photo.png)\n\nEnd"

@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class LibraryCommandsTests: XCTestCase {
@@ -52,7 +53,8 @@ final class LibraryCommandsTests: XCTestCase {
         XCTAssertEqual(workspace.selectedDocument?.id, id)
         XCTAssertEqual(workspace.session.selectedDocuments, ["Writing/PLAN.markdown"])
         XCTAssertEqual(workspace.editor.url, root.appendingPathComponent("Writing/PLAN.markdown"))
-        XCTAssertEqual(try String(contentsOf: workspace.editor.url!, encoding: .utf8), "# Heading stays unchanged\nUnsaved text")
+        XCTAssertEqual(
+            try String(contentsOf: workspace.editor.url!, encoding: .utf8), "# Heading stays unchanged\nUnsaved text")
         XCTAssertTrue(workspace.canUndoLibrary)
         workspace.undoLibrary()
         try await wait(workspace)
@@ -93,7 +95,8 @@ final class LibraryCommandsTests: XCTestCase {
         workspace.rename = item
         workspace.finishRename(item, value: "Renamed")
         try await wait(workspace)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("Writing/Renamed.markdown").path))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: root.appendingPathComponent("Writing/Renamed.markdown").path))
         XCTAssertEqual(workspace.editor.text, "Unsaved buffer")
         XCTAssertNotNil(workspace.editor.banner)
         workspace.selectDocuments([])
@@ -134,8 +137,10 @@ final class LibraryCommandsTests: XCTestCase {
         workspace.rename = LibraryRename(path: "Writing", isFolder: true)
         FolderSidebar.update(scroll, coordinator: coordinator, snapshot: snapshot)
         let row = outline.row(forItem: coordinator.itemsByPath["Writing"]!)
-        let cell = try XCTUnwrap(coordinator.outlineView(outline, viewFor: outline.tableColumns.first,
-                                                       item: coordinator.itemsByPath["Writing"]!) as? SidebarFolderCell)
+        let cell = try XCTUnwrap(
+            coordinator.outlineView(
+                outline, viewFor: outline.tableColumns.first,
+                item: coordinator.itemsByPath["Writing"]!) as? SidebarFolderCell)
         let field = try XCTUnwrap(cell.renameField)
         XCTAssertEqual(field.stringValue, "Writing")
         XCTAssertEqual(field.accessibilityLabel(), "Name")
@@ -154,7 +159,8 @@ final class LibraryCommandsTests: XCTestCase {
         field.viewDidMoveToWindow()
         var cancelled = false
         field.finish = { cancelled = $0 == nil }
-        XCTAssertTrue(field.control(field, textView: NSTextView(), doCommandBy: #selector(NSResponder.cancelOperation(_:))))
+        XCTAssertTrue(
+            field.control(field, textView: NSTextView(), doCommandBy: #selector(NSResponder.cancelOperation(_:))))
         XCTAssertTrue(cancelled)
         scroll.removeFromSuperview()
         host.addSubview(scroll)
@@ -177,10 +183,12 @@ final class LibraryCommandsTests: XCTestCase {
         workspace.session.selectedDocuments = ["Writing/Plan.markdown"]
         XCTAssertEqual(workspace.documents.map(\.relativePath), ["Writing/Plan.markdown"])
 
-        let host = NSHostingView(rootView: DocumentList(workspace: workspace).frame(maxWidth: .infinity, maxHeight: .infinity))
+        let host = NSHostingView(
+            rootView: DocumentList(workspace: workspace).frame(maxWidth: .infinity, maxHeight: .infinity))
         host.sizingOptions = []
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 600),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 600),
+            styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host // Never ordered on screen.
         defer { window.contentView = nil; window.close() }
@@ -216,12 +224,15 @@ final class LibraryCommandsTests: XCTestCase {
         XCTAssertEqual(table.numberOfRows, 1)
         // Drag is offered (hit-testing reaches the row's click source only without a pending rename).
         XCTAssertTrue(table.canDragRows(with: IndexSet(integer: 0), at: .zero))
-        let point = table.convert(NSPoint(x: table.rect(ofRow: 0).midX, y: table.rect(ofRow: 0).midY), to: table.superview)
+        let point = table.convert(
+            NSPoint(x: table.rect(ofRow: 0).midX, y: table.rect(ofRow: 0).midY), to: table.superview)
         XCTAssertTrue(table.hitTest(point) is DocumentRowClickView)
         // Return in the list starts renaming the selected, visible note.
-        let returnKey = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-                                                       windowNumber: window.windowNumber, context: nil, characters: "\r",
-                                                       charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
+        let returnKey = try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: "\r",
+                charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
         table.keyDown(with: returnKey)
         for _ in 0..<100 where workspace.rename == nil { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(workspace.rename, LibraryRename(path: "Writing/Plan.markdown", isFolder: false))
@@ -233,7 +244,8 @@ final class LibraryCommandsTests: XCTestCase {
         // New Folder under the tag scope: created, no rename, selection and scope unchanged.
         workspace.create(folder: true)
         try await wait(workspace)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("Writing/Untitled Folder").path))
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: root.appendingPathComponent("Writing/Untitled Folder").path))
         XCTAssertNil(workspace.rename)
         XCTAssertEqual(workspace.session.selectedTagID, tag.id)
         XCTAssertEqual(workspace.session.selectedFolder, "Writing")
@@ -252,7 +264,8 @@ final class LibraryCommandsTests: XCTestCase {
         workspace.tagFilters = []
         workspace.create(folder: false)
         try await wait(workspace)
-        XCTAssertEqual(workspace.rename, LibraryRename(path: "Writing/Untitled 3.md", isFolder: false, focusEditor: true))
+        XCTAssertEqual(
+            workspace.rename, LibraryRename(path: "Writing/Untitled 3.md", isFolder: false, focusEditor: true))
         XCTAssertEqual(workspace.session.selectedDocuments, ["Writing/Untitled 3.md"])
         workspace.finishRename(workspace.rename!, value: nil)
     }

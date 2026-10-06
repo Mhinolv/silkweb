@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 /// silkweb-1.25: live counts lead the status strip, save state (and the 1.27 chip) trail.
@@ -25,8 +26,9 @@ final class StatusBarCountsTests: XCTestCase {
     /// VoiceOver does so offscreen hosts expose it. Turned off again after each test.
     static func exposeAccessibility(_ on: Bool) {
         _ = NSApplication.shared
-        (NSApp as NSObject).perform(NSSelectorFromString("accessibilitySetValue:forAttribute:"),
-                                    with: NSNumber(value: on), with: "AXEnhancedUserInterface")
+        (NSApp as NSObject).perform(
+            NSSelectorFromString("accessibilitySetValue:forAttribute:"),
+            with: NSNumber(value: on), with: "AXEnhancedUserInterface")
     }
 
     private struct Library {
@@ -38,7 +40,8 @@ final class StatusBarCountsTests: XCTestCase {
 
     private func library(_ body: String) async throws -> Library {
         _ = NSApplication.shared
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebStatusCounts-" + UUID().uuidString)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SilkwebStatusCounts-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try Data(body.utf8).write(to: root.appendingPathComponent("Note.md"))
         let defaults = disposableDefaults("StatusCounts")
@@ -51,14 +54,17 @@ final class StatusBarCountsTests: XCTestCase {
 
     /// The real window hierarchy: counts leading, “Saved” trailing, selection “of” counts, Focus chip in between.
     func testRealHierarchyCountsLeadSaveStateTrailsAndSelectionShowsOf() async throws {
-        let body = "# Counting\n\nKyoto rewards **slowness**. 京都 ☕️\n\n" + String(repeating: "Another sentence with five words.\n\n", count: 40)
+        let body =
+            "# Counting\n\nKyoto rewards **slowness**. 京都 ☕️\n\n"
+            + String(repeating: "Another sentence with five words.\n\n", count: 40)
         let fixture = try await library(body)
         defer { fixture.cleanUp() }
         Self.exposeAccessibility(true)
         defer { Self.exposeAccessibility(false) }
         let workspace = fixture.workspace
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         let controller = NSHostingController(rootView: LibraryWorkspaceView(workspace: workspace))
         controller.sizingOptions = []
@@ -93,11 +99,14 @@ final class StatusBarCountsTests: XCTestCase {
             XCTAssertEqual(countsFrame.minX, pane.minX + 16, accuracy: 4, context, file: file, line: line)
             XCTAssertLessThan(countsFrame.maxX, saveFrame.minX, context, file: file, line: line)
             XCTAssertLessThanOrEqual(saveFrame.maxX, pane.maxX - 12, context, file: file, line: line)
-            XCTAssertLessThanOrEqual(countsFrame.maxY, pane.minY + 4, "strip sits under the editor: \(context)", file: file, line: line)
+            XCTAssertLessThanOrEqual(
+                countsFrame.maxY, pane.minY + 4, "strip sits under the editor: \(context)", file: file, line: line)
             if let chip {
                 let chipFrame = Self.frame(chip)
-                XCTAssertLessThanOrEqual(countsFrame.maxX, chipFrame.minX + 4, "counts vs chip: \(context)", file: file, line: line)
-                XCTAssertLessThanOrEqual(chipFrame.maxX, saveFrame.minX + 4, "chip vs save: \(context)", file: file, line: line)
+                XCTAssertLessThanOrEqual(
+                    countsFrame.maxX, chipFrame.minX + 4, "counts vs chip: \(context)", file: file, line: line)
+                XCTAssertLessThanOrEqual(
+                    chipFrame.maxX, saveFrame.minX + 4, "chip vs save: \(context)", file: file, line: line)
             }
         }
 
@@ -117,7 +126,9 @@ final class StatusBarCountsTests: XCTestCase {
         }
         editor.setSelectedRange(selected)
         let selection = DocumentStatistics(words: 3, characters: 23)
-        try await waitForCounts(DocumentStatisticsPresentation.accessibilityValue(document: expected, selection: selection), "selection counts")
+        try await waitForCounts(
+            DocumentStatisticsPresentation.accessibilityValue(document: expected, selection: selection),
+            "selection counts")
         try await settle()
         counts = try strip().counts
         XCTAssertTrue(Self.value(counts)?.hasPrefix("Selection: 3 of ") == true)
@@ -125,7 +136,9 @@ final class StatusBarCountsTests: XCTestCase {
 
         // The Focus chip (1.27) sits between them without overlap, across a resize sweep.
         workspace.setWritingModes(focus: true, typewriter: true)
-        for size in [NSSize(width: 1400, height: 900), NSSize(width: 1000, height: 700), NSSize(width: 1800, height: 1000)] {
+        for size in [
+            NSSize(width: 1400, height: 900), NSSize(width: 1000, height: 700), NSSize(width: 1800, height: 1000),
+        ] {
             window.setContentSize(size)
             try await settle(300)
             XCTAssertNotNil(try strip().chip, "chip visible at \(size)")
@@ -134,20 +147,26 @@ final class StatusBarCountsTests: XCTestCase {
         workspace.setWritingModes(focus: false, typewriter: false)
 
         editor.setSelectedRange(NSRange(location: 0, length: 0))
-        try await waitForCounts(DocumentStatisticsPresentation.accessibilityValue(document: expected), "collapsed selection reverts to totals")
+        try await waitForCounts(
+            DocumentStatisticsPresentation.accessibilityValue(document: expected),
+            "collapsed selection reverts to totals")
 
         // Typing updates the totals after the debounce, never synchronously.
         editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
         editor.insertText(" extra words", replacementRange: editor.selectedRange())
         XCTAssertEqual(workspace.editor.statistics.document, expected, "no count work on the keystroke itself")
-        try await waitUntil("debounced totals after typing") { workspace.editor.statistics.document?.words == expected.words + 2 }
+        try await waitUntil("debounced totals after typing") {
+            workspace.editor.statistics.document?.words == expected.words + 2
+        }
 
         // Preview-only keeps document totals visible and ignores the editor selection.
         editor.setSelectedRange(selected)
         workspace.preview.mode = .preview
         try await settle()
         counts = try strip().counts
-        XCTAssertEqual(Self.value(counts), DocumentStatisticsPresentation.accessibilityValue(document: workspace.editor.statistics.document!))
+        XCTAssertEqual(
+            Self.value(counts),
+            DocumentStatisticsPresentation.accessibilityValue(document: workspace.editor.statistics.document!))
         workspace.preview.mode = .editor
         try await settle()
 
@@ -179,8 +198,11 @@ final class StatusBarCountsTests: XCTestCase {
         session.statistics.refreshNow()
         XCTAssertEqual(session.statistics.document?.words, 1_204)
         XCTAssertEqual(session.statistics.selection?.words, 38)
-        let host = NSHostingView(rootView: DocumentStatusBar(session: session, readOnlyLibrary: false, workspace: workspace))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 26), styleMask: [.titled], backing: .buffered, defer: false)
+        let host = NSHostingView(
+            rootView: DocumentStatusBar(session: session, readOnlyLibrary: false, workspace: workspace))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 26), styleMask: [.titled], backing: .buffered,
+            defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.contentView = nil; window.close() }
@@ -199,7 +221,12 @@ final class StatusBarCountsTests: XCTestCase {
                 let bounds = window.convertToScreen(host.convert(host.bounds, to: nil))
                 XCTAssertEqual(host.fittingSize.height, Spacing.statusBarHeight, accuracy: 0.5)
                 // The save label never truncates or leaves the strip; counts give way first.
-                XCTAssertGreaterThanOrEqual(saveFrame.width + 0.5, ceil(("Saved" as NSString).size(withAttributes: [.font: NSFont.preferredFont(forTextStyle: .subheadline)]).width) - 2, context)
+                XCTAssertGreaterThanOrEqual(
+                    saveFrame.width + 0.5,
+                    ceil(
+                        ("Saved" as NSString).size(withAttributes: [
+                            .font: NSFont.preferredFont(forTextStyle: .subheadline)
+                        ]).width) - 2, context)
                 XCTAssertLessThanOrEqual(saveFrame.maxX, bounds.maxX - 16 + 0.5, context)
                 XCTAssertEqual(countsFrame.minX, bounds.minX + 16, accuracy: 0.5, context)
                 if let chipElement = Self.element("Writing modes", in: host) {
@@ -217,8 +244,10 @@ final class StatusBarCountsTests: XCTestCase {
         // Wide strips show both segments; narrow ones drop the characters segment, then truncate.
         let font = NSFont.preferredFont(forTextStyle: .subheadline)
         func measured(_ text: String) -> CGFloat { (text as NSString).size(withAttributes: [.font: font]).width }
-        let full = DocumentStatisticsPresentation.label(document: session.statistics.document!, selection: session.statistics.selection)
-        let words = DocumentStatisticsPresentation.label(document: session.statistics.document!, selection: session.statistics.selection, includesCharacters: false)
+        let full = DocumentStatisticsPresentation.label(
+            document: session.statistics.document!, selection: session.statistics.selection)
+        let words = DocumentStatisticsPresentation.label(
+            document: session.statistics.document!, selection: session.statistics.selection, includesCharacters: false)
         XCTAssertEqual(widths["false-1200"]!, measured(full), accuracy: 12)
         XCTAssertEqual(widths["true-360"]!, measured(words), accuracy: 12, "words-only fallback")
         XCTAssertLessThan(widths["true-160"]!, measured(words), "tail truncation as the last resort")

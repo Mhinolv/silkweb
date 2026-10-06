@@ -1,8 +1,9 @@
 import AppKit
 import Observation
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 /// Counts invalidations of production menu dependencies without launching a scene
@@ -14,14 +15,20 @@ private final class CommandInvalidations: @unchecked Sendable {
     var count: Int { lock.withLock { changes } }
 
     @MainActor func buildIfNeeded(_ body: () -> Void) {
-        guard lock.withLock({
-            if !needsBuild { return false }
-            needsBuild = false
-            return true
-        }) else { return }
-        withObservationTracking(body, onChange: { [self] in
-            lock.withLock { changes += 1; needsBuild = true }
-        })
+        guard
+            lock.withLock({
+                if !needsBuild { return false }
+                needsBuild = false
+                return true
+            })
+        else { return }
+        withObservationTracking(
+            body,
+            onChange: { [self] in
+                lock.withLock {
+                    changes += 1; needsBuild = true
+                }
+            })
     }
 }
 
@@ -42,8 +49,9 @@ final class MenuStabilityTests: XCTestCase {
         _ = await workspace.editor.open(file, readOnly: false)
         let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
         let editor = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+            styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = scroll // never ordered on screen
         editor.string = "# Heading\nBody"
         editor.isEditable = true
@@ -57,20 +65,31 @@ final class MenuStabilityTests: XCTestCase {
         // Format (including Heading), Window, File's print/export, and Edit's Find.
         let bodies: [(String, () -> Void)] = [
             ("File/Edit/View/Go", { _ = WorkspaceCommands(workspace: workspace).body }),
-            ("Format", {
-                _ = FormatCommands().body
-                // CommandGroup evaluates its content lazily. Register the exact
-                // enabled dependency read by its buttons while a menu is tracking.
-                _ = target.enabled
-            }),
-            ("Window/Save", {
-                _ = TabCommands(workspace: workspace).body
-                _ = workspace.tabs; _ = workspace.activeTabID
-                _ = workspace.editor.url; _ = workspace.editor.readOnly
-            }),
-            ("Print", { _ = PrintCommands(workspace: workspace).body; _ = workspace.menuState.value.canPrint }),
+            (
+                "Format",
+                {
+                    _ = FormatCommands().body
+                    // CommandGroup evaluates its content lazily. Register the exact
+                    // enabled dependency read by its buttons while a menu is tracking.
+                    _ = target.enabled
+                }
+            ),
+            (
+                "Window/Save",
+                {
+                    _ = TabCommands(workspace: workspace).body
+                    _ = workspace.tabs; _ = workspace.activeTabID
+                    _ = workspace.editor.url; _ = workspace.editor.readOnly
+                }
+            ),
+            (
+                "Print",
+                {
+                    _ = PrintCommands(workspace: workspace).body; _ = workspace.menuState.value.canPrint
+                }
+            ),
             ("Export", { _ = ExportMenu(workspace: workspace, state: workspace.menuState.value).body }),
-            ("Find", { _ = FindMenu(workspace: workspace, state: workspace.menuState.value).body })
+            ("Find", { _ = FindMenu(workspace: workspace, state: workspace.menuState.value).body }),
         ]
         let probes = bodies.map { _ in CommandInvalidations() }
         // Explicit offscreen NSMenu.update loop instead of an on-screen tracking loop.
@@ -138,8 +157,10 @@ final class MenuStabilityTests: XCTestCase {
         }
         // ⌘7/⌘8 checkmarks follow the visible Inspector segment only (#69).
         workspace.preview.showsOutline = false
-        for (segment, expected) in [(LibraryWorkspace.InspectorSegment.info, LibraryWorkspace.InspectorSegment?.some(.info)),
-                                    (.outline, .outline), (.outline, nil), (.outline, .outline), (.info, .info), (.info, nil)] {
+        for (segment, expected) in [
+            (LibraryWorkspace.InspectorSegment.info, LibraryWorkspace.InspectorSegment?.some(.info)),
+            (.outline, .outline), (.outline, nil), (.outline, .outline), (.info, .info), (.info, nil),
+        ] {
             workspace.toggleInspector(segment)
             await Task.yield()
             XCTAssertEqual(state.value.inspectorSegment, expected, "\(segment)")
@@ -165,7 +186,9 @@ final class MenuStabilityTests: XCTestCase {
             editor.isEditable = editable
             target.refresh()
             XCTAssertEqual(target.enabled, editable)
-            probe.buildIfNeeded { _ = FormatCommands().body; _ = target.enabled }
+            probe.buildIfNeeded {
+                _ = FormatCommands().body; _ = target.enabled
+            }
             let before = probe.count
             for _ in 0..<10 { target.refresh() }
             XCTAssertEqual(probe.count, before)
@@ -184,8 +207,9 @@ final class MenuStabilityTests: XCTestCase {
         XCTAssertFalse(target.enabled)
         target.editor = editor
         editor.isEditable = true
-        editor.setMarkedText("あ", selectedRange: NSRange(location: 1, length: 0),
-                             replacementRange: NSRange(location: 0, length: 0))
+        editor.setMarkedText(
+            "あ", selectedRange: NSRange(location: 1, length: 0),
+            replacementRange: NSRange(location: 0, length: 0))
         target.refresh()
         XCTAssertFalse(target.enabled, "IME composition disables formatting")
         editor.unmarkText()

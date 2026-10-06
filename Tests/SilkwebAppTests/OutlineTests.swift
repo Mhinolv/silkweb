@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class OutlineTests: XCTestCase {
@@ -17,7 +18,9 @@ final class OutlineTests: XCTestCase {
             for visible in [nil] + preview.headings.map({ Optional($0.id) }) {
                 preview.visibleHeading = visible
                 for caret in 0...source.utf16.count {
-                    let expected = mode == .preview ? visible : preview.headings.last(where: { $0.sourceRange.location <= caret })?.id
+                    let expected =
+                        mode == .preview
+                        ? visible : preview.headings.last(where: { $0.sourceRange.location <= caret })?.id
                     XCTAssertEqual(preview.currentHeading(caret: caret), expected, "\(mode), caret \(caret)")
                 }
             }
@@ -39,8 +42,9 @@ final class OutlineTests: XCTestCase {
         let headings = MarkdownParser.parse(source).headings
         let host = NSHostingView(rootView: InspectorView(workspace: workspace))
         host.sizingOptions = []
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 500),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 500),
+            styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.contentView = nil; window.close() }
@@ -53,7 +57,8 @@ final class OutlineTests: XCTestCase {
                     for heading in content {
                         workspace.editor.caretLocation = heading.sourceRange.location
                         workspace.preview.visibleHeading = heading.id
-                        XCTAssertEqual(workspace.preview.currentHeading(caret: workspace.editor.caretLocation), heading.id)
+                        XCTAssertEqual(
+                            workspace.preview.currentHeading(caret: workspace.editor.caretLocation), heading.id)
                         host.layoutSubtreeIfNeeded()
                     }
                     for width: CGFloat in [1, 200, 240, 320, 4096] {

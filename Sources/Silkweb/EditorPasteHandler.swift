@@ -1,7 +1,7 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import UniformTypeIdentifiers
-import SilkwebCore
 
 struct EditorPasteContent {
     var plainText: String?
@@ -14,7 +14,8 @@ struct EditorPasteContent {
     }
     init(pasteboard: NSPasteboard) {
         plainText = pasteboard.string(forType: .string)
-        fileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        fileURLs =
+            pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
         png = pasteboard.data(forType: .init("public.png"))
         tiff = pasteboard.data(forType: .tiff)
     }
@@ -44,7 +45,10 @@ struct EditorPasteContent {
     static func isImageExtension(_ value: String) -> Bool {
         // Common formats do not need a Launch Services lookup (also works offline
         // in offscreen tests where the system type service is unavailable).
-        let known: Set<String> = ["png", "jpg", "jpeg", "jpe", "gif", "tif", "tiff", "heic", "heif", "bmp", "webp", "avif", "svg", "ico", "icns"]
+        let known: Set<String> = [
+            "png", "jpg", "jpeg", "jpe", "gif", "tif", "tiff", "heic", "heif", "bmp", "webp", "avif", "svg", "ico",
+            "icns",
+        ]
         return known.contains(value.lowercased()) || UTType(filenameExtension: value)?.conforms(to: .image) == true
     }
 
@@ -65,9 +69,12 @@ struct EditorPasteContent {
         }
         return start(count: 1) {
             let data: Data
-            if let png { data = png }
-            else {
-                guard let bitmap = NSBitmapImageRep(data: raster), let encoded = bitmap.representation(using: .png, properties: [:]) else {
+            if let png {
+                data = png
+            } else {
+                guard let bitmap = NSBitmapImageRep(data: raster),
+                    let encoded = bitmap.representation(using: .png, properties: [:])
+                else {
                     return AssetBatchFailure.invalidImage
                 }
                 data = encoded
@@ -75,7 +82,9 @@ struct EditorPasteContent {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.dateFormat = "yyyyMMdd-HHmmss"
-            return .inputs([AssetInput(name: "image-\(formatter.string(from: Date())).png", isImage: true, data: data, alt: "image")])
+            return .inputs([
+                AssetInput(name: "image-\(formatter.string(from: Date())).png", isImage: true, data: data, alt: "image")
+            ])
         }
     }
 
@@ -86,22 +95,29 @@ struct EditorPasteContent {
 
     private func start(count: Int, prepare: @escaping @Sendable () -> AssetBatchFailure) -> Bool {
         guard let editor, editor.isEditable, !editor.hasMarkedText(), !busy,
-              let session = editor.session else { return false }
+            let session = editor.session
+        else { return false }
         // A restored editor can exist before the snapshot arrives. Resolve from
         // the current snapshot at insertion time rather than caching a missing ID.
         let root = workspace != nil ? workspace?.root : root
         let id: UUID?
         if let workspace {
-            id = workspace.snapshot?.documents.first {
-                root?.appendingPathComponent($0.relativePath) == session.url
-            }?.id
+            id =
+                workspace.snapshot?.documents.first {
+                    root?.appendingPathComponent($0.relativePath) == session.url
+                }?.id
         } else {
             id = documentID
         }
         guard let root, let id, let document = session.url else {
             session.assetFailures = []
-            session.assetMessage = "Silkweb couldn’t add files because this document isn’t available in the library. Try again after the library has loaded."
-            NSAccessibility.post(element: editor, notification: .announcementRequested, userInfo: [.announcement: session.assetMessage!, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+            session.assetMessage =
+                "Silkweb couldn’t add files because this document isn’t available in the library. Try again after the library has loaded."
+            NSAccessibility.post(
+                element: editor, notification: .announcementRequested,
+                userInfo: [
+                    .announcement: session.assetMessage!, .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+                ])
             return false
         }
         let original = editor.string
@@ -114,12 +130,15 @@ struct EditorPasteContent {
         Task { [self, weak editor] in
             let progress = Task { @MainActor in
                 do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
-                if session.url == document { session.assetProgress = "Adding \(count) \(count == 1 ? "file" : "files")…" }
+                if session.url == document {
+                    session.assetProgress = "Adding \(count) \(count == 1 ? "file" : "files")…"
+                }
             }
             let prepared = await Task.detached(priority: .userInitiated, operation: prepare).value
             let result: AssetBatch
             switch prepared {
-            case .inputs(let inputs): result = await AssetStore.shared.add(inputs, root: root, document: document, id: id)
+            case .inputs(let inputs):
+                result = await AssetStore.shared.add(inputs, root: root, document: document, id: id)
             case .invalidImage:
                 var failure = AssetBatch()
                 failure.failures = [AssetFailure(name: "image", reason: "The clipboard image couldn’t be decoded.")]
@@ -133,16 +152,25 @@ struct EditorPasteContent {
             FormattingTarget.shared.refresh()
             guard session.url == document else { return }
             guard editor.string == original else {
-                session.assetMessage = "The document changed while files were being added. Try inserting again. Copied files are preserved."
+                session.assetMessage =
+                    "The document changed while files were being added. Try inserting again. Copied files are preserved."
                 return
             }
             if let edit = AssetStore.insertion(result.assets, text: original, selection: selection) {
-                editor.apply(edit, name: result.assets.contains(where: \.isImage) ? "Insert Image" : "Insert Attachment")
+                editor.apply(
+                    edit, name: result.assets.contains(where: \.isImage) ? "Insert Image" : "Insert Attachment")
             }
             session.assetFailures = result.failures
             if let failure = result.failures.first {
-                session.assetMessage = count == 1 ? "Silkweb couldn’t add “\(failure.name)”." : "\(result.failures.count) of \(count) files couldn’t be added."
-                NSAccessibility.post(element: editor, notification: .announcementRequested, userInfo: [.announcement: session.assetMessage!, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+                session.assetMessage =
+                    count == 1
+                    ? "Silkweb couldn’t add “\(failure.name)”."
+                    : "\(result.failures.count) of \(count) files couldn’t be added."
+                NSAccessibility.post(
+                    element: editor, notification: .announcementRequested,
+                    userInfo: [
+                        .announcement: session.assetMessage!, .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+                    ])
             }
         }
         return true
@@ -177,7 +205,9 @@ struct AssetErrorBanner: View {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color(nsColor: .systemOrange))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(message).font(.callout)
-                    if session.assetFailures.count == 1 { Text(session.assetFailures[0].reason).font(.subheadline).foregroundStyle(.secondary) }
+                    if session.assetFailures.count == 1 {
+                        Text(session.assetFailures[0].reason).font(.subheadline).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 if !session.assetFailures.isEmpty {
@@ -192,8 +222,12 @@ struct AssetErrorBanner: View {
                             }.frame(width: 360, height: 200)
                         }
                 }
-                Button { session.assetMessage = nil; session.assetFailures = [] } label: { Image(systemName: "xmark") }
-                    .accessibilityLabel("Dismiss message").help("Dismiss message")
+                Button {
+                    session.assetMessage = nil; session.assetFailures = []
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .accessibilityLabel("Dismiss message").help("Dismiss message")
             }
             .controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8)
             .frame(minHeight: 36).paneStrip(hairline: .bottom)

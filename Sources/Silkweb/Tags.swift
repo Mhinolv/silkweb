@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 extension LibraryWorkspace {
     var canEditTags: Bool { snapshot != nil && snapshot?.isReadOnly == false && !loading && (!mutating || tagEditing) }
@@ -28,9 +28,13 @@ extension LibraryWorkspace {
     var inspectorSegment: InspectorSegment? { preview.showsOutline ? (inspectorInfo ? .info : .outline) : nil }
     /// Toolbar and ⌘7/⌘8 (#69): open or switch to `segment`, or close the panel when it is already showing.
     func toggleInspector(_ segment: InspectorSegment) {
-        if inspectorSegment == segment { preview.showsOutline = false }
-        else if segment == .info { showInfo() }
-        else { inspectorInfo = false; preview.showsOutline = true }
+        if inspectorSegment == segment {
+            preview.showsOutline = false
+        } else if segment == .info {
+            showInfo()
+        } else {
+            inspectorInfo = false; preview.showsOutline = true
+        }
     }
     /// Opens Info with the tag field focused; never closes the panel (Edit Tags…).
     func showInfo() { inspectorInfo = true; preview.showsOutline = true; tagFocusRequest += 1 }
@@ -43,7 +47,9 @@ extension LibraryWorkspace {
         let newIDs = TagEditor.commonTags(documents: ids, metadata: updated)
         let removed = oldIDs.subtracting(newIDs), added = newIDs.subtracting(oldIDs)
         let changes = removed.isEmpty ? added : removed
-        let changedNames = (metadata.tags + updated.tags).filter { changes.contains($0.id) }.reduce(into: [UUID: String]()) { $0[$1.id] = $1.name }
+        let changedNames = (metadata.tags + updated.tags).filter { changes.contains($0.id) }.reduce(
+            into: [UUID: String]()
+        ) { $0[$1.id] = $1.name }
         let verb = removed.isEmpty ? "Add" : "Remove"
         let title = changedNames.count == 1 ? "Undo \(verb) Tag “\(changedNames.values.first!)”" : "Undo \(verb) Tags"
         changeTags(title: title) { TagEditor.edit(names, documents: ids, metadata: $0) }
@@ -58,7 +64,8 @@ extension LibraryWorkspace {
         let names = input.compactMap(TagEditor.normalize)
         let ids = tagDocumentIDs
         guard let metadata = snapshot?.metadata, !names.isEmpty,
-              TagEditor.add(names, documents: ids, metadata: metadata) != metadata else { return }
+            TagEditor.add(names, documents: ids, metadata: metadata) != metadata
+        else { return }
         let first = TagEditor.existing(names[0], in: tags)?.name ?? names[0]
         changeTags(title: Set(names.map { $0.lowercased() }).count == 1 ? "Undo Add Tag “\(first)”" : "Undo Add Tags") {
             TagEditor.add(names, documents: ids, metadata: $0)
@@ -68,7 +75,8 @@ extension LibraryWorkspace {
     func removeTag(_ id: UUID) {
         let ids = tagDocumentIDs
         guard let metadata = snapshot?.metadata, let tag = tags.first(where: { $0.id == id }),
-              TagEditor.remove(id, documents: ids, metadata: metadata) != metadata else { return }
+            TagEditor.remove(id, documents: ids, metadata: metadata) != metadata
+        else { return }
         changeTags(title: "Undo Remove Tag “\(tag.name)”") { TagEditor.remove(id, documents: ids, metadata: $0) }
     }
     func toggleTag(_ tag: LibraryTag, paths: Set<String>) {
@@ -97,7 +105,8 @@ extension LibraryWorkspace {
                 _ = try await TagStore.update(root: snapshot.rootURL, transform: transform)
                 let scanned = try await LibraryScanner.scan(root: snapshot.rootURL, previousSnapshot: snapshot)
                 install(scanned)
-                if previous.tags != scanned.metadata.tags || previous.tagsByDocument != scanned.metadata.tagsByDocument {
+                if previous.tags != scanned.metadata.tags || previous.tagsByDocument != scanned.metadata.tagsByDocument
+                {
                     libraryUndo.append(.tags(previous, title))
                 }
                 tagFilters.formIntersection(Set(scanned.metadata.tags.map(\.id)))
@@ -111,7 +120,8 @@ extension LibraryWorkspace {
         if let existing = TagEditor.existing(normalized, in: tags), existing.id != tag.id {
             let alert = NSAlert()
             alert.messageText = "A tag named “\(existing.name)” already exists."
-            alert.informativeText = "Merge “\(tag.name)” into “\(existing.name)”? Documents with either tag will have “\(existing.name)”."
+            alert.informativeText =
+                "Merge “\(tag.name)” into “\(existing.name)”? Documents with either tag will have “\(existing.name)”."
             alert.addButton(withTitle: "Merge"); alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
@@ -134,8 +144,9 @@ extension LibraryWorkspace {
         return search.results.filter { result in
             guard let document = documents[result.id] else { return false }
             // Folder search always includes descendants; the toggle only scopes the plain list.
-            return TagEditor.matches(document, folder: search.folderScope == nil ? nil : selectedFolder,
-                                     includeSubfolders: true, tags: effectiveTagFilters, metadata: snapshot.metadata)
+            return TagEditor.matches(
+                document, folder: search.folderScope == nil ? nil : selectedFolder,
+                includeSubfolders: true, tags: effectiveTagFilters, metadata: snapshot.metadata)
         }
     }
 }
@@ -148,8 +159,12 @@ struct TagFilterBar: View {
                 HStack {
                     Text("Tagged:")
                     ForEach(workspace.tags.filter { workspace.tagFilters.contains($0.id) }) { tag in
-                        Button { workspace.tagFilters.remove(tag.id) } label: { Text(tag.name + " ×") }
-                            .accessibilityLabel("Remove filter \(tag.name)")
+                        Button {
+                            workspace.tagFilters.remove(tag.id)
+                        } label: {
+                            Text(tag.name + " ×")
+                        }
+                        .accessibilityLabel("Remove filter \(tag.name)")
                     }
                     Button("Clear") { workspace.tagFilters = [] }
                 }.font(.caption).padding(.horizontal, Spacing.small)
@@ -157,4 +172,3 @@ struct TagFilterBar: View {
         }
     }
 }
-

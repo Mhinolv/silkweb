@@ -4,7 +4,9 @@ import SwiftUI
 /// Both hosted views remain alive when collapsed, preserving the editor's undo manager.
 struct DocumentPanes: NSViewControllerRepresentable {
     let workspace: LibraryWorkspace
-    func makeNSViewController(context: Context) -> DocumentPanesController { DocumentPanesController(workspace: workspace) }
+    func makeNSViewController(context: Context) -> DocumentPanesController {
+        DocumentPanesController(workspace: workspace)
+    }
     func updateNSViewController(_ controller: DocumentPanesController, context: Context) { controller.updateMode() }
 }
 
@@ -30,7 +32,9 @@ final class DocumentPanesController: NSSplitViewController {
             item.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
             addSplitViewItem(item)
         }
-        resizeObserver = NotificationCenter.default.addObserver(forName: NSSplitView.didResizeSubviewsNotification, object: splitView, queue: .main) { [weak self] _ in
+        resizeObserver = NotificationCenter.default.addObserver(
+            forName: NSSplitView.didResizeSubviewsNotification, object: splitView, queue: .main
+        ) { [weak self] _ in
             MainActor.assumeIsolated { self?.resized() }
         }
         updateMode()
@@ -59,8 +63,11 @@ final class DocumentPanesController: NSSplitViewController {
             if mode == .split {
                 let saved = workspace.preview.defaults.double(forKey: "Silkweb.Detail.SplitRatio")
                 let ratio = saved > 0 && saved < 1 ? saved : 0.5
-                if splitView.bounds.width > 0 { splitView.setPosition(splitView.bounds.width * ratio, ofDividerAt: 0) }
-                else { pendingRatio = ratio }
+                if splitView.bounds.width > 0 {
+                    splitView.setPosition(splitView.bounds.width * ratio, ofDividerAt: 0)
+                } else {
+                    pendingRatio = ratio
+                }
             }
             // Collapse flags hide the outgoing pane immediately, but AppKit defers
             // resizing the incoming pane. Commit both panes' final geometry before

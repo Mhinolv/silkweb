@@ -1,6 +1,7 @@
 import AppKit
-import XCTest
 import SilkwebCore
+import XCTest
+
 @testable import Silkweb
 
 final class MarkdownTextViewTests: XCTestCase {
@@ -35,7 +36,9 @@ final class MarkdownTextViewTests: XCTestCase {
                     let viewport = scroll.contentSize
                     let expectedWidth = max(1, min(style.maximumWidth, viewport.width - 2 * style.horizontalInset))
                     XCTAssertEqual(container.containerSize.width, expectedWidth, accuracy: 0.001)
-                    XCTAssertEqual(text.textContainerInset.width, max(style.horizontalInset, (viewport.width - expectedWidth) / 2), accuracy: 0.001)
+                    XCTAssertEqual(
+                        text.textContainerInset.width, max(style.horizontalInset, (viewport.width - expectedWidth) / 2),
+                        accuracy: 0.001)
                     XCTAssertEqual(text.textContainerInset.height, 16)
                     XCTAssertEqual(scroll.contentInsets.bottom, 0, accuracy: 0.001)
                     XCTAssertEqual(text.minSize.height, viewport.height, accuracy: 0.001)
@@ -110,7 +113,10 @@ extension MarkdownTextViewTests {
         let delegate = FormattingUndoDelegate()
         text.delegate = delegate
         delegate.manager.groupsByEvent = false
-        for command in [MarkdownCommand.bold, .italic, .strike, .inlineCode, .link, .heading(0), .heading(1), .heading(6), .quote, .bullet, .numbered, .task, .codeBlock, .indent, .outdent] {
+        for command in [
+            MarkdownCommand.bold, .italic, .strike, .inlineCode, .link, .heading(0), .heading(1), .heading(6), .quote,
+            .bullet, .numbered, .task, .codeBlock, .indent, .outdent,
+        ] {
             text.string = "    日本語 👩🏽‍💻\nsecond"
             text.styler.reload()
             let original = text.string
@@ -155,7 +161,8 @@ extension MarkdownTextViewTests {
         XCTAssertEqual(text.string, "- item\n")
 
         text.string = "IME"
-        text.setMarkedText("日本", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: 0, length: 3))
+        text.setMarkedText(
+            "日本", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: 0, length: 3))
         XCTAssertTrue(text.hasMarkedText())
         let marked = text.string
         text.format(.bold)
@@ -173,7 +180,8 @@ extension MarkdownTextViewTests {
         let storage = try XCTUnwrap(text.textStorage)
         let delegate = FormattingUndoDelegate()
         text.delegate = delegate
-        text.string = "# Title\n**bold** and `code`\n```\nfenced\n```\nafter\n" + String(repeating: "plain\n", count: 1000)
+        text.string =
+            "# Title\n**bold** and `code`\n```\nfenced\n```\nafter\n" + String(repeating: "plain\n", count: 1000)
         text.styler.reload()
         let original = text.string
         let font = try XCTUnwrap(storage.attribute(.font, at: 2, effectiveRange: nil) as? NSFont)
@@ -185,14 +193,16 @@ extension MarkdownTextViewTests {
         text.insertText("X", replacementRange: text.selectedRange())
         text.styler.restyle()
         XCTAssertLessThan(text.styler.lastStyledRange.length, 60)
-        XCTAssertEqual(text.string, (original as NSString).replacingCharacters(in: NSRange(location: 2, length: 1), with: "X"))
+        XCTAssertEqual(
+            text.string, (original as NSString).replacingCharacters(in: NSRange(location: 2, length: 1), with: "X"))
         let opening = (text.string as NSString).range(of: "```\n")
         text.insertText("", replacementRange: opening)
         text.styler.restyle()
         let newCode = (text.string as NSString).range(of: "fenced").location
         let after = (text.string as NSString).range(of: "after").location
         XCTAssertNil(storage.attribute(.backgroundColor, at: newCode, effectiveRange: nil))
-        XCTAssertEqual(storage.attribute(.foregroundColor, at: after, effectiveRange: nil) as? NSColor, .secondaryLabelColor)
+        XCTAssertEqual(
+            storage.attribute(.foregroundColor, at: after, effectiveRange: nil) as? NSColor, .secondaryLabelColor)
         let saved = text.string
         text.styler.reload()
         XCTAssertEqual(text.string, saved)
@@ -223,10 +233,15 @@ extension MarkdownTextViewTests {
             XCTAssertEqual(style.bodyFont.fontName, "Menlo-Regular")
             XCTAssertEqual(style.lineHeight, 1.6)
             XCTAssertEqual(style.paragraphStyle.paragraphSpacing, 0)
-            XCTAssertEqual(style.paragraphStyle.defaultTabInterval,
-                           4 * (" " as NSString).size(withAttributes: [.font: style.bodyFont]).width)
-            let source = (1...6).map { String(repeating: "#", count: $0) + " Heading \($0)" }.joined(separator: "\n") + "\nBody **bold** *italic* `code`\n```swift\nfenced\n```\n"
-            for appearance in [NSAppearance.Name.aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua] {
+            XCTAssertEqual(
+                style.paragraphStyle.defaultTabInterval,
+                4 * (" " as NSString).size(withAttributes: [.font: style.bodyFont]).width)
+            let source =
+                (1...6).map { String(repeating: "#", count: $0) + " Heading \($0)" }.joined(separator: "\n")
+                + "\nBody **bold** *italic* `code`\n```swift\nfenced\n```\n"
+            for appearance in [
+                NSAppearance.Name.aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua,
+            ] {
                 host.appearance = NSAppearance(named: appearance)
                 text.string = source
                 text.styler.reload()
@@ -235,10 +250,15 @@ extension MarkdownTextViewTests {
                     let font = try XCTUnwrap(storage.attribute(.font, at: location, effectiveRange: nil) as? NSFont)
                     XCTAssertEqual(font.pointSize, style.bodyFont.pointSize)
                     XCTAssertTrue(NSFontManager.shared.traits(of: font).contains(.boldFontMask))
-                    XCTAssertEqual(storage.attribute(.foregroundColor, at: location, effectiveRange: nil) as? NSColor, .editorHeading)
+                    XCTAssertEqual(
+                        storage.attribute(.foregroundColor, at: location, effectiveRange: nil) as? NSColor,
+                        .editorHeading)
                     for marker in (location - level - 1)..<location {
-                        XCTAssertEqual(storage.attribute(.foregroundColor, at: marker, effectiveRange: nil) as? NSColor, .tertiaryLabelColor)
-                        XCTAssertEqual(storage.attribute(.font, at: marker, effectiveRange: nil) as? NSFont, style.bodyFont)
+                        XCTAssertEqual(
+                            storage.attribute(.foregroundColor, at: marker, effectiveRange: nil) as? NSColor,
+                            .tertiaryLabelColor)
+                        XCTAssertEqual(
+                            storage.attribute(.font, at: marker, effectiveRange: nil) as? NSFont, style.bodyFont)
                     }
                 }
                 let body = (source as NSString).range(of: "Body").location
@@ -266,7 +286,10 @@ extension MarkdownTextViewTests {
     func testSavedWritingPreferencesFeedEditorMetrics() throws {
         let defaults = disposableDefaults("TypographyTests")
         XCTAssertEqual(WritingPreferences.load(from: defaults), WritingPreferences())
-        defaults.set(Data("{\"fontFamily\":\"Helvetica\",\"fontSize\":21,\"lineHeight\":1.75,\"maximumWidth\":900,\"future\":true}".utf8), forKey: "writingPreferences")
+        defaults.set(
+            Data(
+                "{\"fontFamily\":\"Helvetica\",\"fontSize\":21,\"lineHeight\":1.75,\"maximumWidth\":900,\"future\":true}"
+                    .utf8), forKey: "writingPreferences")
         let style = EditorStyle(preferences: WritingPreferences.load(from: defaults))
         XCTAssertEqual(style.bodyFont.familyName, "Helvetica")
         XCTAssertEqual(style.bodyFont.pointSize, 21)

@@ -94,7 +94,9 @@ final class DocumentStatisticsModel {
         return (session.text, NSRange(location: location, length: min(session.selection.length, length - location)))
     }
 
-    nonisolated private static func compute(text: String, selection: NSRange) -> (DocumentStatistics, DocumentStatistics?) {
+    nonisolated private static func compute(text: String, selection: NSRange) -> (
+        DocumentStatistics, DocumentStatistics?
+    ) {
         let document = DocumentStatistics.count(text)
         guard selection.length > 0 else { return (document, nil) }
         return (document, DocumentStatistics.count((text as NSString).substring(with: selection)))

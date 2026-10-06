@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class ColumnLayoutTests: XCTestCase {
@@ -45,7 +46,8 @@ final class ColumnLayoutTests: XCTestCase {
     func testRealListSearchChromeAcrossEmptyPopulatedAndSearchStates() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Empty"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Empty"), withIntermediateDirectories: true)
         try Data("# One".utf8).write(to: root.appendingPathComponent("One.md"))
         defer { try? FileManager.default.removeItem(at: root) }
         let defaults = disposableDefaults("ColumnLayout")
@@ -54,15 +56,19 @@ final class ColumnLayoutTests: XCTestCase {
         workspace.install(try await LibraryScanner.scan(root: root))
         let frames = Frames()
         // Measure against the entire pane, not the intrinsic empty stack height.
-        let host = NSHostingView(rootView: measured(DocumentList(workspace: workspace)
-            .frame(maxWidth: .infinity, maxHeight: .infinity), frames: frames))
+        let host = NSHostingView(
+            rootView: measured(
+                DocumentList(workspace: workspace)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity), frames: frames))
         host.sizingOptions = []
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 560),
-                              styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 560),
+            styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.contentView = nil; window.close() }
-        for size in [NSSize(width: 240, height: 300), NSSize(width: 300, height: 560), NSSize(width: 480, height: 900)] {
+        for size in [NSSize(width: 240, height: 300), NSSize(width: 300, height: 560), NSSize(width: 480, height: 900)]
+        {
             host.setFrameSize(size)
             workspace.session.selectedFolder = ""
             try await settle(host)
@@ -109,13 +115,16 @@ final class ColumnLayoutTests: XCTestCase {
         item.minimumThickness = 420
         item.holdingPriority = NSLayoutConstraint.Priority(240)
         columns.addSplitViewItem(item)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
-                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentViewController = columns
         defer { window.contentViewController = nil; window.close() }
         var emptyStates: [(Frames, CGRect)] = []
-        for size in [NSSize(width: 1400, height: 900), NSSize(width: 1200, height: 560), NSSize(width: 1600, height: 1100)] {
+        for size in [
+            NSSize(width: 1400, height: 900), NSSize(width: 1200, height: 560), NSSize(width: 1600, height: 1100),
+        ] {
             window.setContentSize(size)
             columns.splitView.setPosition(520, ofDividerAt: 0)
             columns.navigationController.splitView.setPosition(220, ofDividerAt: 0)

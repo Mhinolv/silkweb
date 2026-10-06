@@ -1,6 +1,7 @@
 import AppKit
-import XCTest
 import SilkwebCore
+import XCTest
+
 @testable import Silkweb
 
 extension PlainMarkdownTextView {
@@ -42,9 +43,11 @@ final class EditorCaretTests: XCTestCase {
         let fragment = editor.lineFragmentCaretRect(at: location)
         let top = floor(fragment.minY) - 20, left = floor(fragment.minX) - 10
         let height = Int(ceil(fragment.height)) + 40, width = 40
-        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let bitmap = try XCTUnwrap(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
         let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
@@ -67,7 +70,8 @@ final class EditorCaretTests: XCTestCase {
 
     @MainActor
     private func makeEditor(_ source: String, preferences: WritingPreferences = WritingPreferences())
-        throws -> (NSScrollView, PlainMarkdownTextView) {
+        throws -> (NSScrollView, PlainMarkdownTextView)
+    {
         let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle(preferences: preferences))
         scroll.frame = NSRect(x: 0, y: 0, width: 900, height: 700)
         scroll.tile()
@@ -92,7 +96,8 @@ final class EditorCaretTests: XCTestCase {
         }
         let character = min(location, source.length - 1)
         let glyph = layout.glyphIndexForCharacter(at: character)
-        let fragment = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).offsetBy(dx: origin.x, dy: origin.y)
+        let fragment = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).offsetBy(
+            dx: origin.x, dy: origin.y)
         // A visible glyph reports its own baseline; an empty line's newline glyph does not,
         // so it sits like the extra fragment, with the leading above.
         if source.character(at: character) == 0x0A, character == 0 || source.character(at: character - 1) == 0x0A {
@@ -102,18 +107,27 @@ final class EditorCaretTests: XCTestCase {
     }
 
     @MainActor
-    private func assertTextHeightCaret(_ editor: PlainMarkdownTextView, at location: Int, _ label: String,
-                                       file: StaticString = #filePath, line: UInt = #line) throws {
-        let rows = try XCTUnwrap(try paintedRows(editor, at: location), "no caret painted for \(label)", file: file, line: line)
+    private func assertTextHeightCaret(
+        _ editor: PlainMarkdownTextView, at location: Int, _ label: String,
+        file: StaticString = #filePath, line: UInt = #line
+    ) throws {
+        let rows = try XCTUnwrap(
+            try paintedRows(editor, at: location), "no caret painted for \(label)", file: file, line: line)
         let font = editor.typingAttributes[.font] as? NSFont ?? editor.style.bodyFont
         let height = CGFloat(rows.count)
         let limit = font.ascender + abs(font.descender) + 2
-        XCTAssertLessThanOrEqual(height, limit, "\(label): caret \(height)pt spans the line gap", file: file, line: line)
-        XCTAssertGreaterThanOrEqual(height, editor.style.bodyFont.pointSize, "\(label): caret too short", file: file, line: line)
+        XCTAssertLessThanOrEqual(
+            height, limit, "\(label): caret \(height)pt spans the line gap", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(
+            height, editor.style.bodyFont.pointSize, "\(label): caret too short", file: file, line: line)
         let (base, fragment) = baseline(editor, at: location, font: font)
         // Touches the baseline: ascender above it, descender below it, inside the fragment.
-        XCTAssertEqual(CGFloat(rows.lowerBound), base - font.ascender, accuracy: 1.5, "\(label): caret top", file: file, line: line)
-        XCTAssertEqual(CGFloat(rows.upperBound + 1), base + abs(font.descender), accuracy: 2.5, "\(label): caret bottom", file: file, line: line)
+        XCTAssertEqual(
+            CGFloat(rows.lowerBound), base - font.ascender, accuracy: 1.5, "\(label): caret top", file: file, line: line
+        )
+        XCTAssertEqual(
+            CGFloat(rows.upperBound + 1), base + abs(font.descender), accuracy: 2.5, "\(label): caret bottom",
+            file: file, line: line)
         XCTAssertGreaterThanOrEqual(CGFloat(rows.lowerBound), floor(fragment.minY), label, file: file, line: line)
         XCTAssertLessThanOrEqual(CGFloat(rows.upperBound + 1), ceil(fragment.maxY), label, file: file, line: line)
     }
@@ -146,7 +160,8 @@ final class EditorCaretTests: XCTestCase {
         // IME marked text keeps the same rule.
         let (_, marked) = try makeEditor("IME")
         marked.setSelectedRange(NSRange(location: 3, length: 0))
-        marked.setMarkedText("日本", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: 3, length: 0))
+        marked.setMarkedText(
+            "日本", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: 3, length: 0))
         XCTAssertTrue(marked.hasMarkedText())
         // The marked run's font (CJK fallback included) sets the height, not the fragment.
         let markedRows = try XCTUnwrap(try paintedRows(marked, at: 5))
@@ -163,14 +178,17 @@ final class EditorCaretTests: XCTestCase {
             let original = editor.lineFragmentCaretRect(at: location)
             let rows = try XCTUnwrap(try paintedRows(editor, at: location))
             XCTAssertGreaterThanOrEqual(CGFloat(rows.lowerBound), original.minY, "caret must stay within AppKit's rect")
-            XCTAssertLessThanOrEqual(CGFloat(rows.upperBound + 1), original.maxY, "caret must stay within AppKit's rect")
+            XCTAssertLessThanOrEqual(
+                CGFloat(rows.upperBound + 1), original.maxY, "caret must stay within AppKit's rect")
             XCTAssertLessThan(CGFloat(rows.count), original.height)
         }
         // Empty-document placeholder survives a blink cycle with the shortened rect.
         let (_, empty) = try makeEditor("")
-        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 900, pixelsHigh: 200,
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let bitmap = try XCTUnwrap(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 900, pixelsHigh: 200,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
         let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
@@ -187,14 +205,19 @@ final class EditorCaretTests: XCTestCase {
         let after = Data(bytes: try XCTUnwrap(bitmap.bitmapData), count: bitmap.bytesPerRow * bitmap.pixelsHigh)
         let changed = zip(before, after).enumerated().filter { $0.element.0 != $0.element.1 }
             .map { ($0.offset % bitmap.bytesPerRow / 4, $0.offset / bitmap.bytesPerRow) }
-        XCTAssertEqual(before, after, "caret erase left stale pixels over the placeholder: \(caret); x \(changed.map(\.0).min() ?? -1)...\(changed.map(\.0).max() ?? -1), y \(changed.map(\.1).min() ?? -1)...\(changed.map(\.1).max() ?? -1)")
+        XCTAssertEqual(
+            before, after,
+            "caret erase left stale pixels over the placeholder: \(caret); x \(changed.map(\.0).min() ?? -1)...\(changed.map(\.0).max() ?? -1), y \(changed.map(\.1).min() ?? -1)...\(changed.map(\.1).max() ?? -1)"
+        )
     }
 
     @MainActor
     func testCaretColorFollowsTextColorInEveryAppearance() throws {
         let (_, editor) = try makeEditor("Body")
         XCTAssertEqual(editor.insertionPointColor, NSColor.textColor)
-        for name in [NSAppearance.Name.aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua] {
+        for name in [
+            NSAppearance.Name.aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua,
+        ] {
             let appearance = try XCTUnwrap(NSAppearance(named: name))
             var caret: NSColor?, text: NSColor?
             appearance.performAsCurrentDrawingAppearance {
@@ -219,7 +242,8 @@ final class EditorCaretTests: XCTestCase {
         editor.setSelectedRange(NSRange(location: end, length: 0))
         editor.scrollToEndOfDocument(nil)
         scroll.reflectScrolledClipView(scroll.contentView)
-        XCTAssertTrue(editor.visibleRect.intersects(editor.lineFragmentCaretRect(at: end)), "end caret scrolled out of view")
+        XCTAssertTrue(
+            editor.visibleRect.intersects(editor.lineFragmentCaretRect(at: end)), "end caret scrolled out of view")
         try assertTextHeightCaret(editor, at: end, "long document end")
         let rows = try XCTUnwrap(try paintedRows(editor, at: end))
         XCTAssertGreaterThanOrEqual(CGFloat(rows.lowerBound), editor.visibleRect.minY, "end caret is not visible")

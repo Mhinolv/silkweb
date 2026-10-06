@@ -26,8 +26,10 @@ public struct Breadcrumb: Equatable, Sendable {
     public static let separator = " › "
 
     /// A document's real folder wins over the list scope. `folder` is nil for All Documents and "" for the root.
-    public static func make(libraryName: String, documentPath: String?, documentTitle: String,
-                            folder: String?, tagName: String?) -> Breadcrumb {
+    public static func make(
+        libraryName: String, documentPath: String?, documentTitle: String,
+        folder: String?, tagName: String?
+    ) -> Breadcrumb {
         func ancestors(of path: String) -> [Crumb] {
             var crumbs = [Crumb(title: libraryName, folderPath: "")]
             var prefix = ""
@@ -38,7 +40,8 @@ public struct Breadcrumb: Equatable, Sendable {
             return crumbs
         }
         if let documentPath {
-            return Breadcrumb(crumbs: ancestors(of: (documentPath as NSString).deletingLastPathComponent), current: documentTitle)
+            return Breadcrumb(
+                crumbs: ancestors(of: (documentPath as NSString).deletingLastPathComponent), current: documentTitle)
         }
         if let tagName { return Breadcrumb(crumbs: [Crumb(title: "Tags", folderPath: nil)], current: tagName) }
         guard let folder else { return Breadcrumb(crumbs: [], current: "All Documents") }
@@ -84,7 +87,8 @@ public struct Breadcrumb: Equatable, Sendable {
     /// The truncation ladder, applied in order until the path fits:
     /// 0. drop the count; 1. cap each folder crumb; 2. fold ancestors after the root into `…`, nearest the root first;
     /// 3. fold the root too; 4. middle-truncate the last crumb down to its minimum. The last crumb is never dropped.
-    public static func fit(crumbs: [Double], current: Double, count: Double, available: Double, metrics: Metrics) -> Fit {
+    public static func fit(crumbs: [Double], current: Double, count: Double, available: Double, metrics: Metrics) -> Fit
+    {
         func width(_ fit: Fit) -> Double {
             let visible = crumbs.indices.filter { !fit.collapsed.contains($0) }
             let items = visible.count + (fit.collapsed.isEmpty ? 0 : 1)
@@ -92,7 +96,8 @@ public struct Breadcrumb: Equatable, Sendable {
                 + Double(items) * metrics.separator + fit.currentWidth + (fit.showsCount ? count : 0)
         }
         func measured(_ fit: Fit) -> Fit { var fit = fit; fit.width = width(fit); return fit }
-        var fit = measured(Fit(showsCount: count > 0, collapsed: 0..<0, crumbWidths: crumbs, currentWidth: current, width: 0))
+        var fit = measured(
+            Fit(showsCount: count > 0, collapsed: 0..<0, crumbWidths: crumbs, currentWidth: current, width: 0))
         if fit.width <= available { return fit }
         fit.showsCount = false
         fit = measured(fit)

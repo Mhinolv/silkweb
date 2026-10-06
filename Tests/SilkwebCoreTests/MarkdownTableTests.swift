@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class MarkdownTableTests: XCTestCase {
@@ -6,12 +7,17 @@ final class MarkdownTableTests: XCTestCase {
         for columns in 1...20 {
             for rows in 1...100 {
                 for alignment in TableAlignment.allCases {
-                    let source = MarkdownTable.source(options: TableOptions(columns: columns, rows: rows, alignment: alignment))
+                    let source = MarkdownTable.source(
+                        options: TableOptions(columns: columns, rows: rows, alignment: alignment))
                     let lines = source.components(separatedBy: "\n")
                     XCTAssertEqual(lines.count, rows + 2)
-                    XCTAssertEqual(lines[0], "| " + (1...columns).map { "Column \($0)" }.joined(separator: " | ") + " |")
-                    XCTAssertEqual(lines[1], "| " + Array(repeating: alignment.marker, count: columns).joined(separator: " | ") + " |")
-                    XCTAssertTrue(lines.dropFirst(2).allSatisfy { $0 == String(repeating: "|  ", count: columns) + "|" })
+                    XCTAssertEqual(
+                        lines[0], "| " + (1...columns).map { "Column \($0)" }.joined(separator: " | ") + " |")
+                    XCTAssertEqual(
+                        lines[1],
+                        "| " + Array(repeating: alignment.marker, count: columns).joined(separator: " | ") + " |")
+                    XCTAssertTrue(
+                        lines.dropFirst(2).allSatisfy { $0 == String(repeating: "|  ", count: columns) + "|" })
                     for line in lines {
                         XCTAssertEqual(line.filter { $0 == "|" }.count, columns + 1)
                         XCTAssertTrue(line.hasPrefix("| ") && line.hasSuffix(" |"), line)
@@ -34,10 +40,12 @@ final class MarkdownTableTests: XCTestCase {
     func testCompactExactOutput() {
         let expected: [TableAlignment: String] = [.default: "---", .left: ":---", .center: ":---:", .right: "---:"]
         for (alignment, marker) in expected {
-            XCTAssertEqual(MarkdownTable.source(options: TableOptions(columns: 3, rows: 1, alignment: alignment)),
-                           "| Column 1 | Column 2 | Column 3 |\n| \(marker) | \(marker) | \(marker) |\n|  |  |  |")
-            XCTAssertEqual(MarkdownTable.source(options: TableOptions(columns: 1, rows: 1, alignment: alignment)),
-                           "| Column 1 |\n| \(marker) |\n|  |")
+            XCTAssertEqual(
+                MarkdownTable.source(options: TableOptions(columns: 3, rows: 1, alignment: alignment)),
+                "| Column 1 | Column 2 | Column 3 |\n| \(marker) | \(marker) | \(marker) |\n|  |  |  |")
+            XCTAssertEqual(
+                MarkdownTable.source(options: TableOptions(columns: 1, rows: 1, alignment: alignment)),
+                "| Column 1 |\n| \(marker) |\n|  |")
         }
     }
     func testEscapingWithoutPadding() {
@@ -51,15 +59,18 @@ final class MarkdownTableTests: XCTestCase {
         for alignment in TableAlignment.allCases {
             for columns in [1, 20] {
                 for rows in [1, 100] {
-                    let source = MarkdownTable.source(options: TableOptions(columns: columns, rows: rows, alignment: alignment), headers: ["A|B"])
-                    guard case .table(let header, let markers, let body) = MarkdownParser.parse(source).blocks.first else {
+                    let source = MarkdownTable.source(
+                        options: TableOptions(columns: columns, rows: rows, alignment: alignment), headers: ["A|B"])
+                    guard case .table(let header, let markers, let body) = MarkdownParser.parse(source).blocks.first
+                    else {
                         XCTFail("Generated source must parse as a table"); continue
                     }
                     XCTAssertEqual(header.count, columns)
                     XCTAssertEqual(body.count, rows)
                     XCTAssertTrue(body.allSatisfy { $0.count == columns })
                     XCTAssertEqual(header[0].map(\.plainText).joined(), "A|B")
-                    let expected: MarkdownTableAlignment? = alignment == .default ? nil : MarkdownTableAlignment(rawValue: alignment.rawValue)
+                    let expected: MarkdownTableAlignment? =
+                        alignment == .default ? nil : MarkdownTableAlignment(rawValue: alignment.rawValue)
                     XCTAssertEqual(markers, Array(repeating: expected, count: columns))
                 }
             }
@@ -71,7 +82,8 @@ final class MarkdownTableTests: XCTestCase {
         for before in ["", "before", "before\n", "before\n\n", "before\n\n\n", "😀"] {
             for after in ["", "after", "\nafter", "\n\nafter", "\n\n\nafter", "日本語"] {
                 let text = before + "REPLACE" + after
-                let edit = MarkdownTable.insertion(text: text, selection: NSRange(location: before.utf16.count, length: 7), options: options)
+                let edit = MarkdownTable.insertion(
+                    text: text, selection: NSRange(location: before.utf16.count, length: 7), options: options)
                 let result = edit.applying(to: text)
                 let prefix = before.isEmpty || before.hasSuffix("\n\n") ? "" : before.hasSuffix("\n") ? "\n" : "\n\n"
                 let suffix = after.isEmpty || after.hasPrefix("\n\n") ? "" : after.hasPrefix("\n") ? "\n" : "\n\n"

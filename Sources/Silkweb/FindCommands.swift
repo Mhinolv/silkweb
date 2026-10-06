@@ -14,7 +14,8 @@ struct FindMenu: View {
             Button("Find Next") { workspace.find(.nextMatch) }.keyboardShortcut("g").disabled(!state.canFind)
             Button("Find Previous") { workspace.find(.previousMatch) }
                 .keyboardShortcut("g", modifiers: [.command, .shift]).disabled(!state.canFind)
-            Button("Use Selection for Find") { workspace.find(.setSearchString) }.keyboardShortcut("e").disabled(!state.canFind)
+            Button("Use Selection for Find") { workspace.find(.setSearchString) }.keyboardShortcut("e").disabled(
+                !state.canFind)
             Button("Jump to Selection") { workspace.jumpToSelection() }.keyboardShortcut("j").disabled(!state.canFind)
             Divider()
             Button("Search Library…") { workspace.search.focusRequest += 1 }
@@ -47,7 +48,7 @@ extension LibraryWorkspace {
 
 extension PlainMarkdownTextView {
     func find(_ action: NSTextFinder.Action) {
-        if (action == .showFindInterface || action == .showReplaceInterface), selectedRange().length > 0 {
+        if action == .showFindInterface || action == .showReplaceInterface, selectedRange().length > 0 {
             find(.setSearchString)
         }
         let sender = NSMenuItem()
@@ -57,7 +58,8 @@ extension PlainMarkdownTextView {
 
     override func performTextFinderAction(_ sender: Any?) {
         let tag = (sender as? NSMenuItem)?.tag ?? (sender as? NSControl)?.tag
-        let replacesAll = tag == NSTextFinder.Action.replaceAll.rawValue || tag == NSTextFinder.Action.replaceAllInSelection.rawValue
+        let replacesAll =
+            tag == NSTextFinder.Action.replaceAll.rawValue || tag == NSTextFinder.Action.replaceAllInSelection.rawValue
         if replacesAll {
             breakUndoCoalescing()
             undoManager?.beginUndoGrouping()
@@ -88,7 +90,6 @@ final class EditorScrollView: NSScrollView {
     }
 
     override func cancelOperation(_ sender: Any?) {
-        if isFindBarVisible { isFindBarVisible = false }
-        else { super.cancelOperation(sender) }
+        if isFindBarVisible { isFindBarVisible = false } else { super.cancelOperation(sender) }
     }
 }

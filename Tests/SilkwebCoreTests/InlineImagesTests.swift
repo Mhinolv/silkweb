@@ -1,12 +1,16 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class InlineImagesTests: XCTestCase {
     func testParagraphDetection() {
-        let references = InlineImages.paragraph("Text ![a [nested] label](one.png) and ![two](two%20words.png \"title\")\n")
+        let references = InlineImages.paragraph(
+            "Text ![a [nested] label](one.png) and ![two](two%20words.png \"title\")\n")
         XCTAssertEqual(references.map(\.alt), ["a [nested] label", "two"])
         XCTAssertEqual(references.map(\.destination), ["one.png", "two%20words.png"])
-        for source in ["`![x](a.png)`", "`` ![x](a.png) ``", #"\![x](a.png)"#, "```\n![x](a.png)\n```", "~~~\n![x](a.png)\n~~~"] {
+        for source in [
+            "`![x](a.png)`", "`` ![x](a.png) ``", #"\![x](a.png)"#, "```\n![x](a.png)\n```", "~~~\n![x](a.png)\n~~~",
+        ] {
             XCTAssertTrue(InlineImages.paragraph(source).isEmpty, source)
         }
         // silkweb-1.72: the parser has no indented code, so indented (nested list) lines show their images.
@@ -28,7 +32,8 @@ final class InlineImagesTests: XCTestCase {
         XCTAssertEqual(resolve("https://example.invalid/a.png"), .remote)
         XCTAssertEqual(resolve("http://example.invalid/a.png"), .remote)
         XCTAssertEqual(resolve("../outside.png"), .outsideLibrary)
-        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("escape"), withDestinationURL: root.deletingLastPathComponent())
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("escape"), withDestinationURL: root.deletingLastPathComponent())
         XCTAssertEqual(resolve("escape/missing.png"), .outsideLibrary)
         XCTAssertEqual(resolve("%5Cevil.png"), .unreadable)
     }
@@ -38,7 +43,8 @@ final class InlineImagesTests: XCTestCase {
             for height in [1.0, 20, 240, 100_000] {
                 for column in [1.0, 100, 720] {
                     for viewport in [1.0, 560, 1200] {
-                        let size = InlineImages.fittedSize(width: width, height: height, column: column, viewport: viewport)
+                        let size = InlineImages.fittedSize(
+                            width: width, height: height, column: column, viewport: viewport)
                         XCTAssertLessThanOrEqual(size.width, min(width, column) + 0.001)
                         XCTAssertLessThanOrEqual(size.height, min(height, viewport * 0.7) + 0.001)
                         XCTAssertEqual(size.width / size.height, width / height, accuracy: 0.001)

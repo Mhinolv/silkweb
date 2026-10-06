@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class TableInsertSheetTests: XCTestCase {
@@ -36,7 +37,9 @@ final class TableInsertSheetTests: XCTestCase {
         let editor = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
         let form = TableInsertForm(options: TableOptions(columns: 1, rows: 1))
         let host = NSHostingView(rootView: TableInsertSheet(form: form, cancel: {}, insert: { _ in }))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 400), styleMask: [.titled], backing: .buffered,
+            defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.contentView = nil; window.close() }
@@ -53,7 +56,8 @@ final class TableInsertSheetTests: XCTestCase {
                 XCTAssertEqual(inserted, MarkdownTable.source(options: options))
                 XCTAssertFalse(inserted.contains("|   "), "compact: no column padding")
                 let tree = StatusBarCountsTests.accessibilityTree(host)
-                let text = try XCTUnwrap(tree.first { $0.accessibilityIdentifier?() == "tableSourcePreviewText" }, "\(options)")
+                let text = try XCTUnwrap(
+                    tree.first { $0.accessibilityIdentifier?() == "tableSourcePreviewText" }, "\(options)")
                 let shown = [StatusBarCountsTests.label(text), StatusBarCountsTests.value(text)].compactMap { $0 }
                 XCTAssertTrue(shown.contains(inserted), "\(options) preview \(shown)")
             }
@@ -68,7 +72,10 @@ final class TableInsertSheetTests: XCTestCase {
         delegate.manager.groupsByEvent = false
         text.delegate = delegate
         for alignment in TableAlignment.allCases {
-            for options in [TableOptions(columns: 1, rows: 1, alignment: alignment), TableOptions(columns: 20, rows: 100, alignment: alignment)] {
+            for options in [
+                TableOptions(columns: 1, rows: 1, alignment: alignment),
+                TableOptions(columns: 20, rows: 100, alignment: alignment),
+            ] {
                 text.string = "before 日本語 after"
                 text.styler.reload()
                 let original = text.string

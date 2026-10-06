@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class OutlineRowStyleTests: XCTestCase {
@@ -26,8 +27,11 @@ final class OutlineRowStyleTests: XCTestCase {
     func testElbowsPointAtTheChildText() {
         let metrics = OutlineRowStyle.threadMetrics()
         for depth in 1...4 {
-            let thread = OutlineRowStyle.Thread(level: depth, isLastChild: true, ancestorContinues: Array(repeating: false, count: depth - 1))
-            guard case .elbow(let x, let cornerY, let radius, let endX) = thread.segments().last else { return XCTFail("depth \(depth)") }
+            let thread = OutlineRowStyle.Thread(
+                level: depth, isLastChild: true, ancestorContinues: Array(repeating: false, count: depth - 1))
+            guard case .elbow(let x, let cornerY, let radius, let endX) = thread.segments().last else {
+                return XCTFail("depth \(depth)")
+            }
             XCTAssertEqual(x, ThreadGuides.guideX(level: depth - 1, metrics: metrics))
             XCTAssertEqual(x, Double(depth - 1) * 12 + 5)
             XCTAssertEqual(cornerY, OutlineRowStyle.rowHeight / 2)
@@ -42,15 +46,17 @@ final class OutlineRowStyleTests: XCTestCase {
         typealias T = OutlineRowStyle.Thread
         // # A / ## B / ### C / image under B's child / ## D / # E / ## F
         let depths = [0, 1, 2, 3, 1, 0, 1]
-        XCTAssertEqual(OutlineRowStyle.threads(depths: depths), [
-            T(level: 0, isLastChild: false, ancestorContinues: []),
-            T(level: 1, isLastChild: false, ancestorContinues: []),
-            T(level: 2, isLastChild: true, ancestorContinues: [true]),
-            T(level: 3, isLastChild: true, ancestorContinues: [true, false]),
-            T(level: 1, isLastChild: true, ancestorContinues: []),
-            T(level: 0, isLastChild: true, ancestorContinues: []),
-            T(level: 1, isLastChild: true, ancestorContinues: [])
-        ])
+        XCTAssertEqual(
+            OutlineRowStyle.threads(depths: depths),
+            [
+                T(level: 0, isLastChild: false, ancestorContinues: []),
+                T(level: 1, isLastChild: false, ancestorContinues: []),
+                T(level: 2, isLastChild: true, ancestorContinues: [true]),
+                T(level: 3, isLastChild: true, ancestorContinues: [true, false]),
+                T(level: 1, isLastChild: true, ancestorContinues: []),
+                T(level: 0, isLastChild: true, ancestorContinues: []),
+                T(level: 1, isLastChild: true, ancestorContinues: []),
+            ])
         // The rail for B's siblings passes through C and its image, so D connects to B.
         XCTAssertEqual(OutlineRowStyle.threads(depths: depths)[3].segments().first, .rail(x: 5))
         XCTAssertTrue(OutlineRowStyle.threads(depths: []).isEmpty)
@@ -78,7 +84,9 @@ final class OutlineRowStyleTests: XCTestCase {
             }
             for (i, thread) in threads.enumerated() {
                 XCTAssertEqual(thread.isLastChild, !continues(after: i, at: depths[i]), "\(depths) row \(i)")
-                XCTAssertEqual(thread.ancestorContinues, (0..<max(0, depths[i] - 1)).map { continues(after: i, at: $0 + 1) }, "\(depths) row \(i)")
+                XCTAssertEqual(
+                    thread.ancestorContinues, (0..<max(0, depths[i] - 1)).map { continues(after: i, at: $0 + 1) },
+                    "\(depths) row \(i)")
             }
         }
     }

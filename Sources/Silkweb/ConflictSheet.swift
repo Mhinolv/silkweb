@@ -7,15 +7,20 @@ struct ConflictSheet: View {
         VStack(spacing: 16) {
             HStack {
                 Text("Your Version (not saved)").frame(maxWidth: .infinity, alignment: .leading)
-                Text("Version on Disk" + (session.diskModified.map { " · modified " + $0.formatted(date: .omitted, time: .shortened) } ?? ""))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(
+                    "Version on Disk"
+                        + (session.diskModified.map { " · modified " + $0.formatted(date: .omitted, time: .shortened) }
+                            ?? "")
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
             }.font(.headline)
             ConflictComparison(mine: session.text, disk: session.diskText ?? "")
             HStack {
                 Spacer()
                 Button("Cancel") { session.showingComparison = false }.keyboardShortcut(.cancelAction)
                 Button("Use Disk Version") { Task { await session.resolveConflict(keepMine: false) } }
-                Button("Keep My Version") { Task { await session.resolveConflict(keepMine: true) } }.keyboardShortcut(.defaultAction)
+                Button("Keep My Version") { Task { await session.resolveConflict(keepMine: true) } }.keyboardShortcut(
+                    .defaultAction)
             }.disabled(session.loading)
         }.padding(20).frame(width: 760, height: 520)
     }
@@ -37,7 +42,9 @@ struct ConflictComparison: NSViewRepresentable {
     private var synchronizing = false
     init() {
         panes = ["Your version", "Version on disk"].map { label in
-            let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle(fontSize: 13, lineHeight: 1.2, horizontalInset: 12, topInset: 12), followsSettings: false)
+            let scroll = MarkdownTextView.makeEditorScrollView(
+                style: EditorStyle(fontSize: 13, lineHeight: 1.2, horizontalInset: 12, topInset: 12),
+                followsSettings: false)
             let text = scroll.documentView as! NSTextView
             text.isEditable = false
             text.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
@@ -50,9 +57,12 @@ struct ConflictComparison: NSViewRepresentable {
         stack.spacing = 16
         for pane in panes { stack.addArrangedSubview(pane) }
         for index in panes.indices {
-            observers.append(NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: panes[index].contentView, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.synchronize(from: index) }
-            })
+            observers.append(
+                NotificationCenter.default.addObserver(
+                    forName: NSView.boundsDidChangeNotification, object: panes[index].contentView, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.synchronize(from: index) }
+                })
         }
     }
     func load(mine: String, disk: String) {

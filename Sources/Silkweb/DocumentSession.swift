@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 /// Owns the visible buffer. Actor work is ordered so a flush includes every edit.
 @MainActor @Observable
@@ -53,9 +53,13 @@ final class DocumentSession {
         if externalDeleted { return "“\(name)” was moved to the Trash or deleted outside Silkweb." }
         if let error { return error }
         if case .failed = state { return "Silkweb couldn’t save “\(name)”. Your text is safe in this window." }
-        if case .conflict = state { return "This document changed on disk. Your text is safe in this window. Save a copy to keep it." }
+        if case .conflict = state {
+            return "This document changed on disk. Your text is safe in this window. Save a copy to keep it."
+        }
         if recovered { return "Silkweb recovered unsaved changes to this document." }
-        if let conflictCopy { return "The other version was saved as “\(conflictCopy.deletingPathExtension().lastPathComponent)”." }
+        if let conflictCopy {
+            return "The other version was saved as “\(conflictCopy.deletingPathExtension().lastPathComponent)”."
+        }
         return nil
     }
 
@@ -115,7 +119,9 @@ final class DocumentSession {
             }
         } catch let failure as NSError where failure.code == NSFileReadInapplicableStringEncodingError {
             self.readOnly = true
-            text = (try? await Task.detached { String(decoding: try Data(contentsOf: destination), as: UTF8.self) }.value) ?? ""
+            text =
+                (try? await Task.detached { String(decoding: try Data(contentsOf: destination), as: UTF8.self) }.value)
+                ?? ""
             error = "This file isn’t UTF-8 text, so Silkweb opened it read-only."
             announce()
         } catch {
@@ -163,7 +169,9 @@ final class DocumentSession {
             state = await coordinator.state(for: target) ?? state
             if state == .clean, pendingEdits == 0, let disk { text = disk.text }
             diskText = disk?.text
-            diskModified = try? await Task.detached { try target.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }.value
+            diskModified = try? await Task.detached {
+                try target.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            }.value
             observe(target)
             if externalConflict || externalDeleted { announce() }
         } catch {
@@ -226,22 +234,25 @@ final class DocumentSession {
             guard alert.runModal() == .alertSecondButtonReturn else { return }
         }
         await tail?.value
-        do { try await coordinator.discardRecovery(url); await didCloseWindow() }
-        catch { self.error = error.localizedDescription; announce() }
+        do { try await coordinator.discardRecovery(url); await didCloseWindow() } catch {
+            self.error = error.localizedDescription; announce()
+        }
     }
 
     /// Closing an orphan draft's tab keeps its latest text as the recovery draft.
     func preserveOrphanDraft() async -> Bool {
         guard orphanDraft else { return false }
         await tail?.value
-        do { try await coordinator.preserveUnsavedDrafts(); return true }
-        catch { self.error = "Recovery draft couldn’t be saved: \(error.localizedDescription)"; announce(); return false }
+        do { try await coordinator.preserveUnsavedDrafts(); return true } catch {
+            self.error = "Recovery draft couldn’t be saved: \(error.localizedDescription)"; announce(); return false
+        }
     }
 
     func libraryDisappeared() async {
         await reconcileExternalChange()
-        do { try await coordinator.preserveUnsavedDrafts() }
-        catch { self.error = "Recovery draft couldn’t be saved: \(error.localizedDescription)"; announce() }
+        do { try await coordinator.preserveUnsavedDrafts() } catch {
+            self.error = "Recovery draft couldn’t be saved: \(error.localizedDescription)"; announce()
+        }
     }
 
     func edit(_ value: String) {
@@ -306,8 +317,9 @@ final class DocumentSession {
                 recovered = false
                 state = .clean
                 text = ""
-                do { text = try await coordinator.open(url).text }
-                catch { readOnly = true; self.error = error.localizedDescription }
+                do { text = try await coordinator.open(url).text } catch {
+                    readOnly = true; self.error = error.localizedDescription
+                }
             } catch { self.error = error.localizedDescription }
         }
     }
@@ -319,8 +331,8 @@ final class DocumentSession {
             guard response == .OK, let target = panel.url, let self else { return }
             let value = self.text
             Task {
-                do { try await Task.detached { try Data(value.utf8).write(to: target, options: .atomic) }.value }
-                catch { self.error = error.localizedDescription; self.announce() }
+                do { try await Task.detached { try Data(value.utf8).write(to: target, options: .atomic) }.value } catch
+                { self.error = error.localizedDescription; self.announce() }
             }
         }
     }
@@ -330,8 +342,9 @@ final class DocumentSession {
         loading = true
         defer { loading = wasLoading }
         if await flush() { return true }
-        do { try await coordinator.preserveUnsavedDrafts() }
-        catch { self.error = "Recovery draft couldn’t be saved: \(error.localizedDescription)"; announce(); return false }
+        do { try await coordinator.preserveUnsavedDrafts() } catch {
+            self.error = "Recovery draft couldn’t be saved: \(error.localizedDescription)"; announce(); return false
+        }
         let alert = NSAlert()
         alert.messageText = "Some changes couldn’t be saved."
         alert.informativeText = "They’ll be kept as a recovery draft and offered the next time you open Silkweb."
@@ -354,7 +367,8 @@ final class DocumentSession {
     func announce() {
         guard let banner else { return }
         // `NSApplication.shared`, not `NSApp`: the global is nil until something creates the application (#63).
-        NSAccessibility.post(element: NSApplication.shared.mainWindow ?? NSApplication.shared, notification: .announcementRequested,
-                             userInfo: [.announcement: banner, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        NSAccessibility.post(
+            element: NSApplication.shared.mainWindow ?? NSApplication.shared, notification: .announcementRequested,
+            userInfo: [.announcement: banner, .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 }

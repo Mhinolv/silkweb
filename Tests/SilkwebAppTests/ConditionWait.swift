@@ -5,9 +5,11 @@ import XCTest
 /// against a production debounce: a loaded CI runner can resume the debounce late, and a longer sleep only
 /// moves the flake. Negative checks ("nothing happened") should follow a positive wait, not replace it.
 @MainActor @discardableResult
-func waitUntil(_ description: @autoclosure () -> String, timeout: Duration = .seconds(5),
-               file: StaticString = #filePath, line: UInt = #line,
-               _ condition: () throws -> Bool) async throws -> Bool {
+func waitUntil(
+    _ description: @autoclosure () -> String, timeout: Duration = .seconds(5),
+    file: StaticString = #filePath, line: UInt = #line,
+    _ condition: () throws -> Bool
+) async throws -> Bool {
     let deadline = ContinuousClock.now + timeout
     while try !condition() {
         guard ContinuousClock.now < deadline else {

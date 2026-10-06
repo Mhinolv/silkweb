@@ -1,8 +1,9 @@
 import AppKit
 import ImageIO
+import SilkwebCore
 import UniformTypeIdentifiers
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class OutlineImageTests: XCTestCase {
@@ -13,15 +14,23 @@ final class OutlineImageTests: XCTestCase {
         let defaults = disposableDefaults("OutlineImages")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let source = "![Before](landscape.png)\n# Journey\n## Places\n![Portrait](portrait.png)\n### Detail\n![Transparent](transparent.png)\n## Other\n![Missing](missing.png)\n![Remote](https://example.invalid/image.png)\n"
+        let source =
+            "![Before](landscape.png)\n# Journey\n## Places\n![Portrait](portrait.png)\n### Detail\n![Transparent](transparent.png)\n## Other\n![Missing](missing.png)\n![Remote](https://example.invalid/image.png)\n"
         let document = root.appendingPathComponent("Document.md")
         let original = Data(source.utf8)
         try original.write(to: document)
-        for (name, width, height) in [("landscape.png", 400, 240), ("portrait.png", 80, 240), ("transparent.png", 120, 80)] {
-            let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-            context.setFillColor(NSColor.systemBlue.cgColor); context.fill(CGRect(x: 0, y: 0, width: width / 2, height: height))
-            let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(root.appendingPathComponent(name) as CFURL, UTType.png.identifier as CFString, 1, nil))
+        for (name, width, height) in [
+            ("landscape.png", 400, 240), ("portrait.png", 80, 240), ("transparent.png", 120, 80),
+        ] {
+            let context = try XCTUnwrap(
+                CGContext(
+                    data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.setFillColor(NSColor.systemBlue.cgColor);
+            context.fill(CGRect(x: 0, y: 0, width: width / 2, height: height))
+            let destination = try XCTUnwrap(
+                CGImageDestinationCreateWithURL(
+                    root.appendingPathComponent(name) as CFURL, UTType.png.identifier as CFString, 1, nil))
             CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
             XCTAssertTrue(CGImageDestinationFinalize(destination))
         }
@@ -32,7 +41,9 @@ final class OutlineImageTests: XCTestCase {
         XCTAssertTrue(opened)
         workspace.preview.showsOutline = true
         let controller = LibrarySplitViewController(workspace: workspace)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900), styleMask: [.titled, .resizable],
+            backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.contentViewController = controller
         defer { window.contentViewController = nil; window.close() }
         controller.view.layoutSubtreeIfNeeded()
@@ -42,8 +53,12 @@ final class OutlineImageTests: XCTestCase {
         }
         controller.view.layoutSubtreeIfNeeded()
         let items = workspace.preview.outlineItems
-        XCTAssertEqual(items.map(\.label), ["Before", "Journey", "Places", "Portrait", "Detail", "Transparent", "Other", "Missing", "Remote"])
-        let images = items.filter { if case .image = $0.content { return true }; return false }
+        XCTAssertEqual(
+            items.map(\.label),
+            ["Before", "Journey", "Places", "Portrait", "Detail", "Transparent", "Other", "Missing", "Remote"])
+        let images = items.filter {
+            if case .image = $0.content { return true }; return false
+        }
         XCTAssertEqual(images.count, 5)
         for (index, item) in images.enumerated() {
             guard case .image(let reference) = item.content else { continue }
@@ -51,7 +66,10 @@ final class OutlineImageTests: XCTestCase {
             if index < 3 {
                 let bitmap = try XCTUnwrap(loaded.bitmap)
                 XCTAssertLessThanOrEqual(max(bitmap.width, bitmap.height), 64)
-            } else { XCTAssertNil(loaded.bitmap); XCTAssertEqual(loaded.symbol, index == 3 ? "exclamationmark.triangle" : "photo") }
+            } else {
+                XCTAssertNil(loaded.bitmap);
+                XCTAssertEqual(loaded.symbol, index == 3 ? "exclamationmark.triangle" : "photo")
+            }
         }
         // The offscreen host does not expose SwiftUI Button accessibility nodes.
         // Snapshot scenarios verify the rendered rows; exercise their production
@@ -60,7 +78,9 @@ final class OutlineImageTests: XCTestCase {
         for mode in DocumentViewMode.allCases {
             workspace.preview.mode = mode
             workspace.preview.showsOutline = true
-            for size in [NSSize(width: 1000, height: 500), NSSize(width: 1400, height: 900), NSSize(width: 1900, height: 1200)] {
+            for size in [
+                NSSize(width: 1000, height: 500), NSSize(width: 1400, height: 900), NSSize(width: 1900, height: 1200),
+            ] {
                 window.setContentSize(size); controller.view.layoutSubtreeIfNeeded()
                 // WebKit cannot execute in this host. Verify the retained request
                 // for the next preview load, alongside real editor navigation.
@@ -69,7 +89,9 @@ final class OutlineImageTests: XCTestCase {
                 for item in images {
                     workspace.preview.navigate(item) // Same production action used by Button and Return.
                     XCTAssertEqual(editor.selectedRange().location, item.sourceRange.location)
-                    if mode != .preview { XCTAssertEqual(workspace.preview.currentItem(caret: item.sourceRange.location), item.id) }
+                    if mode != .preview {
+                        XCTAssertEqual(workspace.preview.currentItem(caret: item.sourceRange.location), item.id)
+                    }
                     if mode != .editor { XCTAssertEqual(workspace.preview.pendingAnchor, item.id) }
                 }
                 workspace.preview.webView = webView
@@ -79,7 +101,9 @@ final class OutlineImageTests: XCTestCase {
         workspace.preview.mode = .editor
         for caret in 0...source.utf16.count {
             let image = images.first { NSLocationInRange(caret, $0.sourceRange) }
-            XCTAssertEqual(workspace.preview.currentItem(caret: caret), image?.id ?? workspace.preview.currentHeading(caret: caret))
+            XCTAssertEqual(
+                workspace.preview.currentItem(caret: caret), image?.id ?? workspace.preview.currentHeading(caret: caret)
+            )
         }
         await workspace.editor.flush()
         XCTAssertEqual(try Data(contentsOf: document), original)
@@ -92,11 +116,14 @@ final class OutlineImageTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let file = root.appendingPathComponent("image.png")
         func write(_ width: Int) throws {
-            let context = try XCTUnwrap(CGContext(data: nil, width: width, height: 100, bitsPerComponent: 8, bytesPerRow: width * 4,
-                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            let context = try XCTUnwrap(
+                CGContext(
+                    data: nil, width: width, height: 100, bitsPerComponent: 8, bytesPerRow: width * 4,
+                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
             context.setFillColor(NSColor.systemBlue.cgColor)
             context.fill(CGRect(x: 0, y: 0, width: width, height: 100))
-            let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(file as CFURL, UTType.png.identifier as CFString, 1, nil))
+            let destination = try XCTUnwrap(
+                CGImageDestinationCreateWithURL(file as CFURL, UTType.png.identifier as CFString, 1, nil))
             CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
             XCTAssertTrue(CGImageDestinationFinalize(destination))
         }

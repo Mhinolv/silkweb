@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 enum SettingsTab: String, CaseIterable {
     case editor, preview, appearance, library
@@ -81,8 +81,12 @@ struct SettingsSliderRow: View {
                         .multilineTextAlignment(.trailing)
                         .focused($focused)
                         .onSubmit(commit)
-                        .onKeyPress(.upArrow) { nudge(1); return .handled }
-                        .onKeyPress(.downArrow) { nudge(-1); return .handled }
+                        .onKeyPress(.upArrow) {
+                            nudge(1); return .handled
+                        }
+                        .onKeyPress(.downArrow) {
+                            nudge(-1); return .handled
+                        }
                     Text(unit).foregroundStyle(.secondary).accessibilityHidden(true)
                 }
                 .frame(width: 56)
@@ -119,16 +123,24 @@ struct EditorSettingsTab: View {
     private static let customTag = "\u{0}custom"
 
     private var fontBinding: Binding<String> {
-        Binding(get: { settings.preferences.fontFamily }, set: { family in
-            if family == Self.customTag {
-                FontPanelBridge.shared.show(family: settings.preferences.fontFamily) { settings.preferences.fontFamily = $0 }
-            } else { settings.preferences.fontFamily = family }
-        })
+        Binding(
+            get: { settings.preferences.fontFamily },
+            set: { family in
+                if family == Self.customTag {
+                    FontPanelBridge.shared.show(family: settings.preferences.fontFamily) {
+                        settings.preferences.fontFamily = $0
+                    }
+                } else {
+                    settings.preferences.fontFamily = family
+                }
+            })
     }
 
     private var lineSpacingIndex: Binding<Double> {
-        Binding(get: { Double(WritingPreferences.lineHeights.firstIndex(of: settings.preferences.lineHeight) ?? 2) },
-                set: { settings.preferences.lineHeight = WritingPreferences.lineHeights[min(4, max(0, Int($0.rounded())))] })
+        Binding(
+            get: { Double(WritingPreferences.lineHeights.firstIndex(of: settings.preferences.lineHeight) ?? 2) },
+            set: { settings.preferences.lineHeight = WritingPreferences.lineHeights[min(4, max(0, Int($0.rounded())))] }
+        )
     }
 
     var body: some View {
@@ -146,8 +158,9 @@ struct EditorSettingsTab: View {
                     Divider()
                     Text("Custom…").tag(Self.customTag)
                 }
-                SettingsSliderRow(title: "Size", value: $settings.preferences.fontSize,
-                                  range: WritingPreferences.fontSizes, step: 1, unit: "pt")
+                SettingsSliderRow(
+                    title: "Size", value: $settings.preferences.fontSize,
+                    range: WritingPreferences.fontSizes, step: 1, unit: "pt")
                 LabeledContent("Line spacing") {
                     HStack(spacing: 8) {
                         Slider(value: lineSpacingIndex, in: 0...4, step: 1)
@@ -162,11 +175,15 @@ struct EditorSettingsTab: View {
                 }
             }
             Section {
-                SettingsSliderRow(title: "Text insets", value: $settings.preferences.horizontalInset,
-                                  range: WritingPreferences.horizontalInsets, step: 4, unit: "pt")
-                SettingsSliderRow(title: "Line width", value: $settings.preferences.maximumWidth,
-                                  range: WritingPreferences.maximumWidths, step: 20, unit: "pt")
-            } header: { Text("Layout") } footer: {
+                SettingsSliderRow(
+                    title: "Text insets", value: $settings.preferences.horizontalInset,
+                    range: WritingPreferences.horizontalInsets, step: 4, unit: "pt")
+                SettingsSliderRow(
+                    title: "Line width", value: $settings.preferences.maximumWidth,
+                    range: WritingPreferences.maximumWidths, step: 20, unit: "pt")
+            } header: {
+                Text("Layout")
+            } footer: {
                 Text("Text stays centred and wraps at this width when the window is wider.")
                     .font(.callout).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -184,7 +201,9 @@ struct EditorSettingsTab: View {
                 Toggle("Show images inline in the editor", isOn: $settings.preferences.showsInlineImages)
                 Toggle("Highlight the current line", isOn: $settings.preferences.highlightsCurrentLine)
                 Toggle("Reopen windows and tabs from the last session", isOn: $settings.preferences.reopensSession)
-            } header: { Text("Behaviour") } footer: {
+            } header: {
+                Text("Behaviour")
+            } footer: {
                 RestoreFooter(title: "Restore Defaults", disabled: settings.preferences.editorIsDefault) {
                     settings.preferences.restoreEditorDefaults()
                 }
@@ -244,8 +263,9 @@ struct PreviewSettingsTab: View {
                 Picker("Font", selection: $settings.preferences.previewFont) {
                     ForEach(WritingPreferences.PreviewFont.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
-                SettingsSliderRow(title: "Size", value: $settings.preferences.previewFontSize,
-                                  range: WritingPreferences.previewFontSizes, step: 1, unit: "pt")
+                SettingsSliderRow(
+                    title: "Size", value: $settings.preferences.previewFontSize,
+                    range: WritingPreferences.previewFontSizes, step: 1, unit: "pt")
             }
             Section {
                 Picker("Line breaks", selection: $settings.preferences.keepsLineBreaks) {
@@ -254,7 +274,9 @@ struct PreviewSettingsTab: View {
                 }
                 .pickerStyle(.radioGroup)
                 Toggle("Show a table of contents for [TOC]", isOn: $settings.preferences.showsTableOfContents)
-            } header: { Text("Rendering") } footer: {
+            } header: {
+                Text("Rendering")
+            } footer: {
                 RestoreFooter(title: "Restore Defaults", disabled: settings.preferences.previewIsDefault) {
                     settings.preferences.restorePreviewDefaults()
                 }
@@ -330,21 +352,26 @@ struct ColorSlotRow: View {
     let caption: String
 
     private var color: Binding<Color> {
-        Binding(get: { Color(nsColor: settings.editedColors.resolved(slot, dark: settings.editingDark).nsColor) },
-                set: { value in
-                    guard let rgb = HexColor(NSColor(value)), rgb != settings.editedColors[slot] else { return }
-                    settings.editedColors[slot] = rgb
-                })
+        Binding(
+            get: { Color(nsColor: settings.editedColors.resolved(slot, dark: settings.editingDark).nsColor) },
+            set: { value in
+                guard let rgb = HexColor(NSColor(value)), rgb != settings.editedColors[slot] else { return }
+                settings.editedColors[slot] = rgb
+            })
     }
 
     var body: some View {
         LabeledContent {
             HStack(spacing: 8) {
                 if settings.editedColors[slot] != nil {
-                    Button { settings.editedColors[slot] = nil } label: { Image(systemName: "arrow.counterclockwise") }
-                        .buttonStyle(.borderless)
-                        .help("Reset \(title)")
-                        .accessibilityLabel("Reset \(title)")
+                    Button {
+                        settings.editedColors[slot] = nil
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Reset \(title)")
+                    .accessibilityLabel("Reset \(title)")
                 }
                 ColorPicker(title, selection: color, supportsOpacity: false)
                     .labelsHidden()
@@ -373,8 +400,9 @@ struct ContrastWarningView: View {
     }
 
     private func announce() {
-        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
-                             userInfo: [.announcement: warning.message, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+        NSAccessibility.post(
+            element: NSApp as Any, notification: .announcementRequested,
+            userInfo: [.announcement: warning.message, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
 }
 
@@ -393,7 +421,8 @@ struct ColorPreviewCard: View {
                 Text("Drafts")
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: colors.selection(dark: dark).nsColor)))
+                    .background(
+                        RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: colors.selection(dark: dark).nsColor)))
                 Text("Archive").padding(.horizontal, 8).padding(.vertical, 3)
                 Spacer(minLength: 0)
             }
@@ -445,12 +474,16 @@ struct LibrarySettingsTab: View {
                     .disabled(workspace.root == nil)
                     Button("Choose Library…") { workspace.chooseFolder() }
                 }
-            } header: { Text("Library") } footer: {
-                Text("Your library is an ordinary folder of Markdown files. Back it up like any other folder, for example with Time Machine. To move it, quit Silkweb, move the folder in Finder, then choose it here. Silkweb's index files travel with the folder.")
-                    .font(.callout).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("Library")
+            } footer: {
+                Text(
+                    "Your library is an ordinary folder of Markdown files. Back it up like any other folder, for example with Time Machine. To move it, quit Silkweb, move the folder in Finder, then choose it here. Silkweb's index files travel with the folder."
+                )
+                .font(.callout).foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

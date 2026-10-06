@@ -20,7 +20,9 @@ public enum MediaDirectory {
         }
         // An unreadable tree cannot be proven free of notes; do not adopt it.
         func containsNotes(_ directory: URL) throws -> Bool {
-            for url in try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]) {
+            for url in try fm.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            {
                 let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
                 if ["md", "markdown"].contains(url.pathExtension.lowercased()) { return true }
                 if values.isSymbolicLink != true, values.isDirectory == true, try containsNotes(url) { return true }
@@ -35,7 +37,8 @@ public enum MediaDirectory {
             if !fm.fileExists(atPath: directory.path) {
                 try fm.createDirectory(at: directory, withIntermediateDirectories: false)
             } else if (try? directory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != true
-                        || (try? containsNotes(directory)) != false {
+                || (try? containsNotes(directory)) != false
+            {
                 name = number == 2 ? "Media Assets" : "Media Assets \(number - 1)"
                 number += 1
                 continue

@@ -39,13 +39,15 @@ struct MenuCommandValues: Equatable {
         trashTitle = workspace.trashMenuTitle
         canTrash = workspace.canTrashSelection
         hasLibrary = workspace.snapshot != nil
-        canOpenTab = hasLibrary && !workspace.mutating && (workspace.selectedDocument != nil || workspace.editor.url != nil)
+        canOpenTab =
+            hasLibrary && !workspace.mutating && (workspace.selectedDocument != nil || workspace.editor.url != nil)
         canExport = workspace.canExport
         canPrint = workspace.canPrint
         canFind = workspace.canFind
         canReplace = canFind && !workspace.editor.readOnly
         usesTextUndo = workspace.usesTextUndo
-        undoTitle = usesTextUndo
+        undoTitle =
+            usesTextUndo
             ? (NSApp.keyWindow?.firstResponder as? NSTextView)?.undoManager?.undoMenuItemTitle ?? "Undo"
             : workspace.libraryUndo.last?.title ?? "Undo"
         canUndo = usesTextUndo || workspace.canUndoLibrary
@@ -76,10 +78,13 @@ struct MenuCommandValues: Equatable {
         // Responder/undo state is AppKit-owned. Sample it at menu open, and when undo or
         // key-window state changes (key equivalents skip tracking), rather than polling
         // or publishing every caret movement. `refresh` publishes only real changes.
-        for name in [NSMenu.didBeginTrackingNotification, .NSUndoManagerDidCloseUndoGroup,
-                     .NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange,
-                     NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
-            NotificationCenter.default.addObserver(self, selector: #selector(appKitStateChanged), name: name, object: nil)
+        for name in [
+            NSMenu.didBeginTrackingNotification, .NSUndoManagerDidCloseUndoGroup,
+            .NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange,
+            NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
+        ] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(appKitStateChanged), name: name, object: nil)
         }
     }
 

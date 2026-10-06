@@ -31,7 +31,9 @@ public struct OutlineRowStyle: Equatable, Sendable {
     /// Thread geometry in the row's text-column coordinates. The Outline has no disclosure slot, so the
     /// "icon" an elbow points at is the row's text at `indent(depth:)`.
     public static func threadMetrics(rowHeight: Double = rowHeight) -> ThreadGuides.Metrics {
-        ThreadGuides.Metrics(leadingInset: -1, indentation: indentStep, slotWidth: 12, chevronWidth: 9, iconInset: -7, rowHeight: rowHeight)
+        ThreadGuides.Metrics(
+            leadingInset: -1, indentation: indentStep, slotWidth: 12, chevronWidth: 9, iconInset: -7,
+            rowHeight: rowHeight)
     }
 
     /// One row's thread: what `ThreadGuides.segments` needs, from the depths of every visible row.
@@ -41,8 +43,9 @@ public struct OutlineRowStyle: Equatable, Sendable {
         public var ancestorContinues: [Bool]
 
         public func segments(rowHeight: Double = OutlineRowStyle.rowHeight) -> [ThreadGuides.Segment] {
-            ThreadGuides.segments(level: level, isLastChild: isLastChild, ancestorContinues: ancestorContinues,
-                                  hasChildren: false, metrics: OutlineRowStyle.threadMetrics(rowHeight: rowHeight))
+            ThreadGuides.segments(
+                level: level, isLastChild: isLastChild, ancestorContinues: ancestorContinues,
+                hasChildren: false, metrics: OutlineRowStyle.threadMetrics(rowHeight: rowHeight))
         }
     }
 
@@ -54,8 +57,10 @@ public struct OutlineRowStyle: Equatable, Sendable {
         result.reserveCapacity(depths.count)
         for raw in depths.reversed() {
             let depth = min(maximumDepth, max(0, raw))
-            result.append(Thread(level: depth, isLastChild: !following[depth],
-                                 ancestorContinues: depth > 1 ? Array(following[1..<depth]) : []))
+            result.append(
+                Thread(
+                    level: depth, isLastChild: !following[depth],
+                    ancestorContinues: depth > 1 ? Array(following[1..<depth]) : []))
             for k in following.indices where k > depth { following[k] = false }
             following[depth] = true
         }

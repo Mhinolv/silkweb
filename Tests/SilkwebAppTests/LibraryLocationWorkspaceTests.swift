@@ -1,5 +1,6 @@
-import XCTest
 import SilkwebCore
+import XCTest
+
 @testable import Silkweb
 
 final class LibraryLocationWorkspaceTests: XCTestCase {
@@ -25,7 +26,8 @@ final class LibraryLocationWorkspaceTests: XCTestCase {
         // Same entry point used by the folder panel, without presenting a GUI.
         chosen.open(root)
         try await waitForOpen(chosen, defaults: defaults)
-        let saved = try JSONDecoder().decode(LibraryLocation.self, from: XCTUnwrap(defaults.data(forKey: "libraryLocation")))
+        let saved = try JSONDecoder().decode(
+            LibraryLocation.self, from: XCTUnwrap(defaults.data(forKey: "libraryLocation")))
         XCTAssertEqual(saved.version, 1)
         XCTAssertEqual(saved.path, expectedPath)
         XCTAssertNotNil(saved.bookmark)

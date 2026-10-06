@@ -1,5 +1,5 @@
-import Foundation
 import CoreServices
+import Foundation
 
 /// FSEvents watches descendants recursively, including atomic replacements. Only
 /// the coalesced callback reaches the workspace; scanning runs on a worker.
@@ -19,17 +19,23 @@ import CoreServices
         self.changed = changed
         guard let root else { return }
         rootPath = LibraryWatcher.canonicalRoot(root)
-        var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil)
-        stream = FSEventStreamCreate(nil, { _, info, _, paths, _, _ in
-            guard let info else { return }
-            let paths = unsafeBitCast(paths, to: NSArray.self) as? [String] ?? []
-            MainActor.assumeIsolated {
-                let watcher = Unmanaged<LibraryWatcher>.fromOpaque(info).takeUnretainedValue()
-                watcher.observeEvents?(paths)
-                if LibraryWatcher.isLibraryChange(paths, root: watcher.rootPath) { watcher.notifyChange() }
-            }
-        }, &context, [rootPath] as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 0.15,
-        FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagWatchRoot | kFSEventStreamCreateFlagUseCFTypes))
+        var context = FSEventStreamContext(
+            version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil
+        )
+        stream = FSEventStreamCreate(
+            nil,
+            { _, info, _, paths, _, _ in
+                guard let info else { return }
+                let paths = unsafeBitCast(paths, to: NSArray.self) as? [String] ?? []
+                MainActor.assumeIsolated {
+                    let watcher = Unmanaged<LibraryWatcher>.fromOpaque(info).takeUnretainedValue()
+                    watcher.observeEvents?(paths)
+                    if LibraryWatcher.isLibraryChange(paths, root: watcher.rootPath) { watcher.notifyChange() }
+                }
+            }, &context, [rootPath] as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 0.15,
+            FSEventStreamCreateFlags(
+                kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagWatchRoot
+                    | kFSEventStreamCreateFlagUseCFTypes))
         if let stream {
             FSEventStreamSetDispatchQueue(stream, .main)
             if !FSEventStreamStart(stream) { stop() }
@@ -42,10 +48,11 @@ import CoreServices
     /// `/System/Volumes/Data` firmlink prefix on either side still matches.
     nonisolated static func isLibraryChange(_ paths: [String], root: String) -> Bool {
         let metadata = eventPathForm(root) + "/.silkweb"
-        return paths.isEmpty || paths.contains {
-            let path = eventPathForm($0)
-            return path != metadata && !path.hasPrefix(metadata + "/")
-        }
+        return paths.isEmpty
+            || paths.contains {
+                let path = eventPathForm($0)
+                return path != metadata && !path.hasPrefix(metadata + "/")
+            }
     }
 
     /// The root as FSEvents reports it, resolved once at start. `realpath` resolves
@@ -81,7 +88,7 @@ import CoreServices
                 try await Task.sleep(for: delay)
                 try Task.checkCancellation()
                 await changed()
-            } catch { }
+            } catch {}
         }
     }
 

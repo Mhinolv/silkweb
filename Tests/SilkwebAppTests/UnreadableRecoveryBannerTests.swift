@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 /// silkweb-1.70: the workspace strip for a recovery file that was set aside.
@@ -38,13 +39,17 @@ final class UnreadableRecoveryBannerTests: XCTestCase {
         StatusBarCountsTests.exposeAccessibility(true)
         defer { StatusBarCountsTests.exposeAccessibility(false) }
         let host = NSHostingView(rootView: UnreadableRecoveryBanner(workspace: workspace))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 40), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 40), styleMask: [.titled], backing: .buffered,
+            defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.contentView = nil; window.close() }
         func labels() async throws -> [String] {
             for _ in 0..<3 { host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(20)) }
-            return StatusBarCountsTests.accessibilityTree(host).flatMap { [StatusBarCountsTests.label($0), StatusBarCountsTests.value($0)].compactMap { $0 } }
+            return StatusBarCountsTests.accessibilityTree(host).flatMap {
+                [StatusBarCountsTests.label($0), StatusBarCountsTests.value($0)].compactMap { $0 }
+            }
         }
         for width: CGFloat in [1400, 900, 420] {
             window.setContentSize(NSSize(width: width, height: 40))
@@ -63,7 +68,8 @@ final class UnreadableRecoveryBannerTests: XCTestCase {
         try Data("null".utf8).write(to: recovery.appendingPathComponent("worse.json"))
         let again = try await open()
         XCTAssertNil(again.unreadableRecoveryFile)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: recovery.appendingPathComponent("Unreadable/worse.json").path))
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: recovery.appendingPathComponent("Unreadable/worse.json").path))
         await workspace.didCloseWindow()
         await again.didCloseWindow()
     }

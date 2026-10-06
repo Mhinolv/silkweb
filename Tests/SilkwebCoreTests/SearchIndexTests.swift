@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+
 @testable import SilkwebCore
 
 final class SearchIndexTests: XCTestCase {
@@ -61,8 +62,10 @@ final class SearchIndexTests: XCTestCase {
         let changed = try await index.reconcile(refreshed)
         XCTAssertTrue(changed)
         let scanned = try await LibraryScanner.scan(root: root, previousSnapshot: refreshed)
-        XCTAssertEqual(scanned.documents.first { $0.id == saved.id }?.fileIdentity,
-                       refreshed.documents.first { $0.id == saved.id }?.fileIdentity, "date refresh must also refresh the file identity")
+        XCTAssertEqual(
+            scanned.documents.first { $0.id == saved.id }?.fileIdentity,
+            refreshed.documents.first { $0.id == saved.id }?.fileIdentity,
+            "date refresh must also refresh the file identity")
         XCTAssertTrue(scanned.documents == refreshed.documents)
         let rescanned = try await index.reconcile(scanned)
         XCTAssertFalse(rescanned, "watcher rescan after a save must not re-index the saved note")
@@ -79,7 +82,8 @@ final class SearchIndexTests: XCTestCase {
         XCTAssertEqual(json["formatVersion"] as? Int, 1)
         let records = try XCTUnwrap(json["records"] as? [[String: Any]])
         XCTAssertEqual(records.count, 12)
-        XCTAssertEqual(records.first { $0["path"] as? String == "Note-3.md" }?["body"] as? String, "freshly typed zanzibar")
+        XCTAssertEqual(
+            records.first { $0["path"] as? String == "Note-3.md" }?["body"] as? String, "freshly typed zanzibar")
         // A relaunch loads the debounced cache and reads no body.
         try FileManager.default.removeItem(at: root.appendingPathComponent("Note-3.md"))
         let warm = SearchIndex(root: root)
@@ -90,7 +94,11 @@ final class SearchIndexTests: XCTestCase {
 
     func testRankingLiteralMatchingAndSnippets() async throws {
         for name in ["Café", "Cafe society", "My cafe", "Decafeinated", "Body"] {
-            try note(name + ".md", name == "Body" ? String(repeating: "intro ", count: 20) + "# **café** `tea` " + String(repeating: "tail ", count: 40) : "tea")
+            try note(
+                name + ".md",
+                name == "Body"
+                    ? String(repeating: "intro ", count: 20) + "# **café** `tea` "
+                        + String(repeating: "tail ", count: 40) : "tea")
         }
         try note("Symbols.md", "literal \"quote\" tag:tea")
         let index = SearchIndex(root: root)
@@ -138,7 +146,8 @@ final class SearchIndexTests: XCTestCase {
         try await index.reconcile(snapshot)
         for mode in [SearchQuery.Mode.library, .quickOpen] {
             for descendants in [false, true] {
-                let results = try await index.query(SearchQuery("", scope: .folder(folder.id, includeSubfolders: descendants), mode: mode))
+                let results = try await index.query(
+                    SearchQuery("", scope: .folder(folder.id, includeSubfolders: descendants), mode: mode))
                 XCTAssertEqual(results.count, descendants ? 2 : 1)
             }
             for limit in [-1, 0, 1, Int.max] {
@@ -175,8 +184,10 @@ final class SearchIndexTests: XCTestCase {
         try await index.reconcile(snapshot)
         let external = try await index.query(SearchQuery("externalbody"))
         XCTAssertEqual(external.count, 1)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Moved"), withIntermediateDirectories: true)
-        try FileManager.default.moveItem(at: root.appendingPathComponent("First.md"), to: root.appendingPathComponent("Moved/Renamed.md"))
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Moved"), withIntermediateDirectories: true)
+        try FileManager.default.moveItem(
+            at: root.appendingPathComponent("First.md"), to: root.appendingPathComponent("Moved/Renamed.md"))
         snapshot = try await LibraryScanner.scan(root: root, previousSnapshot: snapshot)
         try await index.reconcile(snapshot)
         let moved = try await index.query(SearchQuery("externalbody"))
@@ -211,9 +222,13 @@ final class SearchIndexTests: XCTestCase {
             _ = await iterator.next()
             try await index.reconcile(snapshot)
             let firstState = await iterator.next()
-            if cache == "broken" { XCTAssertEqual(firstState, .rebuilding(reason: .corrupt)) }
-            else if cache != "{}" { XCTAssertEqual(firstState, .rebuilding(reason: .unsupportedVersion)) }
-            else { XCTAssertEqual(firstState, .building(indexed: 0, total: 1)) }
+            if cache == "broken" {
+                XCTAssertEqual(firstState, .rebuilding(reason: .corrupt))
+            } else if cache != "{}" {
+                XCTAssertEqual(firstState, .rebuilding(reason: .unsupportedVersion))
+            } else {
+                XCTAssertEqual(firstState, .building(indexed: 0, total: 1))
+            }
             let state = await index.state
             XCTAssertEqual(state, .ready)
             let hits = try await index.query(SearchQuery("legacy"))
@@ -259,8 +274,7 @@ final class SearchIndexTests: XCTestCase {
             try await cancelledIndex.reconcile(snapshot)
         }
         cancelled.cancel()
-        do { try await cancelled.value; XCTFail("Expected cancellation") }
-        catch is CancellationError { }
+        do { try await cancelled.value; XCTFail("Expected cancellation") } catch is CancellationError {}
         try await cancelledIndex.reconcile(snapshot)
         let ready = await cancelledIndex.state
         XCTAssertEqual(ready, .ready)
@@ -298,7 +312,9 @@ final class SearchIndexTests: XCTestCase {
         let queryStart = Date()
         let results = try await index.query(SearchQuery("needle cafe", limit: 10000))
         let queryTime = Date().timeIntervalSince(queryStart)
-        print("Search benchmark: 10,000 documents / 1,000 folders; scan \(scanTime)s (10s budget), index \(buildTime)s (10s budget), query \(queryTime)s (1s budget)")
+        print(
+            "Search benchmark: 10,000 documents / 1,000 folders; scan \(scanTime)s (10s budget), index \(buildTime)s (10s budget), query \(queryTime)s (1s budget)"
+        )
         XCTAssertEqual(results.count, 10000)
         XCTAssertLessThan(scanTime, 10)
         XCTAssertLessThan(buildTime, 10)
@@ -308,16 +324,14 @@ final class SearchIndexTests: XCTestCase {
             return try await index.query(SearchQuery("needle", limit: 10000))
         }
         cancelled.cancel()
-        do { _ = try await cancelled.value; XCTFail("Expected cancellation") }
-        catch is CancellationError { }
+        do { _ = try await cancelled.value; XCTFail("Expected cancellation") } catch is CancellationError {}
         // Pre-cancelled calls exercise propagation into the detached query worker.
         let gated = Task {
             while !Task.isCancelled { await Task.yield() }
             return try await index.query(SearchQuery("needle", limit: 10000))
         }
         gated.cancel()
-        do { _ = try await gated.value; XCTFail("Expected cancellation") }
-        catch is CancellationError { }
+        do { _ = try await gated.value; XCTFail("Expected cancellation") } catch is CancellationError {}
         let subsequent = try await index.query(SearchQuery("Note-0", mode: .quickOpen))
         XCTAssertEqual(subsequent.count, 100)
         // Land the coalesced cache write now: on a loaded runner it otherwise fires ~2 s after `reconcile`,

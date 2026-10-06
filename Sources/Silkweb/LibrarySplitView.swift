@@ -1,7 +1,7 @@
 import AppKit
-import SwiftUI
 import QuartzCore
 import SilkwebCore
+import SwiftUI
 
 /// SwiftUI's column width hints do not control which pane absorbs a resize.
 /// AppKit owns the dividers; the hosted panes keep their existing observation and focus.
@@ -52,7 +52,9 @@ final class LibrarySplitViewController: NSSplitViewController {
 
         navigationController.addSplitViewItem(sidebar)
         navigationController.addSplitViewItem(list)
-        if let autosaveName { navigationController.splitView.autosaveName = NSSplitView.AutosaveName(autosaveName + ".Navigation") }
+        if let autosaveName {
+            navigationController.splitView.autosaveName = NSSplitView.AutosaveName(autosaveName + ".Navigation")
+        }
 
         // Two nested native splits isolate the first divider from the editor.
         // The outer divider resizes this group; its list yields before its sidebar.
@@ -68,14 +70,18 @@ final class LibrarySplitViewController: NSSplitViewController {
         addSplitViewItem(detail)
         if let autosaveName { splitView.autosaveName = NSSplitView.AutosaveName(autosaveName) }
         workspace.librarySplitController = self
-        navigationObserver = NotificationCenter.default.addObserver(forName: NSSplitView.didResizeSubviewsNotification,
-            object: navigationController.splitView, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    let collapsed = self.sidebarItem.isCollapsed || self.navigationController.splitViewItems[1].isCollapsed
-                    if self.workspace.libraryColumnCollapsed != collapsed { self.workspace.libraryColumnCollapsed = collapsed }
+        navigationObserver = NotificationCenter.default.addObserver(
+            forName: NSSplitView.didResizeSubviewsNotification,
+            object: navigationController.splitView, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let collapsed = self.sidebarItem.isCollapsed || self.navigationController.splitViewItems[1].isCollapsed
+                if self.workspace.libraryColumnCollapsed != collapsed {
+                    self.workspace.libraryColumnCollapsed = collapsed
                 }
             }
+        }
     }
 
     deinit {
@@ -117,10 +123,13 @@ final class LibrarySplitViewController: NSSplitViewController {
         return super.validateUserInterfaceItem(item)
     }
 
-    override func splitView(_ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+    override func splitView(
+        _ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat, ofSubviewAt dividerIndex: Int
+    ) -> CGFloat {
         // This optional delegate method has no base implementation on some macOS
         // versions, even though the Swift interface exposes it as overridable.
-        let position = Self.baseConstrainsSplitPosition
+        let position =
+            Self.baseConstrainsSplitPosition
             ? super.splitView(splitView, constrainSplitPosition: proposedPosition, ofSubviewAt: dividerIndex)
             : proposedPosition
         if navigationItem.isCollapsed { return proposedPosition }
@@ -136,14 +145,18 @@ final class LibrarySplitViewController: NSSplitViewController {
     func applySidebars(animated: Bool) {
         let hidden = workspace.sidebarsHidden
         if hidden, let window = view.window, let responder = window.firstResponder as? NSView,
-           responder.isDescendant(of: navigationController.view) {
+            responder.isDescendant(of: navigationController.view)
+        {
             workspace.focusColumn = 2
-            let target: NSView? = workspace.editor.url == nil ? nil
+            let target: NSView? =
+                workspace.editor.url == nil
+                ? nil
                 : (workspace.preview.mode == .preview ? workspace.preview.webView : workspace.preview.editor)
             window.makeFirstResponder(target)
         }
         // Unordered hosts have no presentation animation clock. Apply final geometry directly.
-        let shouldAnimate = animated && view.window?.isVisible == true
+        let shouldAnimate =
+            animated && view.window?.isVisible == true
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let changes = {
             if !hidden {
@@ -163,7 +176,9 @@ final class LibrarySplitViewController: NSSplitViewController {
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 changes()
             }
-        } else { changes() }
+        } else {
+            changes()
+        }
     }
 
     func updateRequests() {
@@ -217,7 +232,9 @@ private struct LibrarySidebarPane: View {
             Menu {
                 Button("New Folder") { workspace.create(folder: true) }
                 Button("New Document") { workspace.create(folder: false) }
-            } label: { Image(systemName: "plus") }
+            } label: {
+                Image(systemName: "plus")
+            }
             .menuStyle(.borderlessButton).fixedSize().padding(8)
             .accessibilityLabel("Add").help("Add")
             .disabled(!workspace.canMutate)

@@ -1,6 +1,6 @@
 import Foundation
-import WebKit
 import SilkwebCore
+import WebKit
 
 /// Each WebView owns one page in memory. Asset reads run off the main thread;
 /// cancelled WebKit tasks never receive callbacks.
@@ -28,7 +28,9 @@ final class PreviewSchemeHandler: NSObject, WKURLSchemeHandler {
                 do {
                     if let pageData { return .success(pageData) }
                     // Recheck containment immediately before reading, including symlinks.
-                    guard let libraryRoot, let checked = PreviewResource.fileURL(for: url, root: libraryRoot), checked == file else {
+                    guard let libraryRoot, let checked = PreviewResource.fileURL(for: url, root: libraryRoot),
+                        checked == file
+                    else {
                         throw URLError(.noPermissionsToReadFile)
                     }
                     return .success(try Data(contentsOf: checked))
@@ -38,7 +40,10 @@ final class PreviewSchemeHandler: NSObject, WKURLSchemeHandler {
             self.tasks.removeValue(forKey: id)
             switch result {
             case .success(let data):
-                urlSchemeTask.didReceive(URLResponse(url: url, mimeType: mime, expectedContentLength: data.count, textEncodingName: mime == "text/html" ? "utf-8" : nil))
+                urlSchemeTask.didReceive(
+                    URLResponse(
+                        url: url, mimeType: mime, expectedContentLength: data.count,
+                        textEncodingName: mime == "text/html" ? "utf-8" : nil))
                 urlSchemeTask.didReceive(data)
                 urlSchemeTask.didFinish()
             case .failure(let error): urlSchemeTask.didFailWithError(error)

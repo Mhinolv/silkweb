@@ -1,8 +1,9 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import UniformTypeIdentifiers
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class LibraryMoveTests: XCTestCase {
@@ -49,12 +50,14 @@ final class LibraryMoveTests: XCTestCase {
         XCTAssertEqual(workspace.snapshot?.documents.first { $0.relativePath == "B/One.md" }?.id, id)
         XCTAssertEqual(workspace.editor.url, root.appendingPathComponent("B/One.md"))
         XCTAssertEqual(workspace.editor.text, "dirty [two](../Two.md)")
-        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("Two.md"), encoding: .utf8), "[one](B/One.md)")
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("Two.md"), encoding: .utf8), "[one](B/One.md)")
         workspace.undoLibrary()
         try await wait(workspace)
         XCTAssertEqual(workspace.editor.url, root.appendingPathComponent("A/One.md"))
         XCTAssertEqual(workspace.editor.text, "dirty [two](../Two.md)")
-        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("Two.md"), encoding: .utf8), "[one](A/One.md)")
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("Two.md"), encoding: .utf8), "[one](A/One.md)")
     }
     /// silkweb-1.72: renaming a document or folder rewrites incoming links; one undo restores name and links.
     @MainActor
@@ -62,15 +65,18 @@ final class LibraryMoveTests: XCTestCase {
         let (root, workspace) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }
         func two() throws -> String { try String(contentsOf: root.appendingPathComponent("Two.md"), encoding: .utf8) }
-        for (item, expected, renamed) in [(LibraryRename(path: "A/One.md", isFolder: false), "[one](A/Renamed.md)", "A/Renamed.md"),
-                                          (LibraryRename(path: "A", isFolder: true), "[one](Renamed/One.md)", "Renamed/One.md")] {
+        for (item, expected, renamed) in [
+            (LibraryRename(path: "A/One.md", isFolder: false), "[one](A/Renamed.md)", "A/Renamed.md"),
+            (LibraryRename(path: "A", isFolder: true), "[one](Renamed/One.md)", "Renamed/One.md"),
+        ] {
             workspace.rename = item
             workspace.finishRename(item, value: "Renamed")
             try await wait(workspace)
             XCTAssertNil(workspace.mutationError)
             XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(renamed).path))
             XCTAssertEqual(try two(), expected)
-            XCTAssertEqual(try String(contentsOf: root.appendingPathComponent(renamed), encoding: .utf8), "[two](../Two.md)")
+            XCTAssertEqual(
+                try String(contentsOf: root.appendingPathComponent(renamed), encoding: .utf8), "[two](../Two.md)")
             XCTAssertEqual(workspace.libraryUndo.last?.title, "Undo Rename")
             XCTAssertTrue(workspace.canUndoLibrary)
             workspace.undoLibrary()
@@ -128,7 +134,9 @@ final class LibraryMoveTests: XCTestCase {
         XCTAssertTrue(coordinator.allowsDrop(["A/One.md", "Two.md"], item: coordinator.itemsByPath["B"]))
         XCTAssertTrue(coordinator.allowsDrop(["A/One.md"], item: coordinator.itemsByPath[""]))
         XCTAssertNil(coordinator.outlineView(outline, pasteboardWriterForItem: coordinator.itemsByPath[""]!))
-        let writer = try XCTUnwrap(coordinator.outlineView(outline, pasteboardWriterForItem: coordinator.itemsByPath["A"]!) as? NSPasteboardItem)
+        let writer = try XCTUnwrap(
+            coordinator.outlineView(outline, pasteboardWriterForItem: coordinator.itemsByPath["A"]!)
+                as? NSPasteboardItem)
         let board = NSPasteboard.withUniqueName()
         defer { board.releaseGlobally() }
         board.writeObjects([writer])
@@ -160,7 +168,10 @@ final class LibraryMoveTests: XCTestCase {
         let picker = NSHostingView(rootView: MovePicker(workspace: workspace, request: MoveRequest(paths: ["A"])))
         let list = NSHostingView(rootView: DocumentList(workspace: workspace))
         host.addSubview(picker); host.addSubview(list)
-        for size in [NSSize.zero, NSSize(width: 1, height: 1), NSSize(width: 440, height: 480), NSSize(width: 4096, height: 2160)] {
+        for size in [
+            NSSize.zero, NSSize(width: 1, height: 1), NSSize(width: 440, height: 480),
+            NSSize(width: 4096, height: 2160),
+        ] {
             picker.setFrameSize(size); list.setFrameSize(size)
             picker.layoutSubtreeIfNeeded(); list.layoutSubtreeIfNeeded()
         }

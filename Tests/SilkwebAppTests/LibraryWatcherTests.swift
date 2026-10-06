@@ -1,6 +1,7 @@
 import AppKit
-import XCTest
 import SilkwebCore
+import XCTest
+
 @testable import Silkweb
 
 final class LibraryWatcherTests: XCTestCase {
@@ -22,9 +23,12 @@ final class LibraryWatcherTests: XCTestCase {
     @MainActor
     func testRecursiveFilesystemNotifications() async throws {
         if ProcessInfo.processInfo.environment["CODEX_SANDBOX"] == "seatbelt" {
-            throw XCTSkip("Managed seatbelt sandbox does not deliver FSEvents; debounce and reconciliation are tested separately.")
+            throw XCTSkip(
+                "Managed seatbelt sandbox does not deliver FSEvents; debounce and reconciliation are tested separately."
+            )
         }
-        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".build/watcher-\(UUID().uuidString)")
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(
+            ".build/watcher-\(UUID().uuidString)")
         let nested = root.appendingPathComponent("nested/deep")
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -56,9 +60,13 @@ final class LibraryWatcherTests: XCTestCase {
     @MainActor
     func testSilkwebMetadataWritesDoNotTriggerRescan() async throws {
         if ProcessInfo.processInfo.environment["CODEX_SANDBOX"] == "seatbelt" {
-            throw XCTSkip("Managed seatbelt sandbox does not deliver FSEvents; debounce and reconciliation are tested separately.")
+            throw XCTSkip(
+                "Managed seatbelt sandbox does not deliver FSEvents; debounce and reconciliation are tested separately."
+            )
         }
-        try await assertMetadataWritesDoNotTriggerRescan(root: URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".build/watcher-\(UUID().uuidString)"))
+        try await assertMetadataWritesDoNotTriggerRescan(
+            root: URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(
+                ".build/watcher-\(UUID().uuidString)"))
     }
 
     /// #50: a library opened through a symlinked path (`/tmp` → `/private/tmp`).
@@ -67,11 +75,16 @@ final class LibraryWatcherTests: XCTestCase {
     @MainActor
     func testSilkwebMetadataWritesDoNotTriggerRescanUnderSymlinkedRoot() async throws {
         if ProcessInfo.processInfo.environment["CODEX_SANDBOX"] == "seatbelt" {
-            throw XCTSkip("Managed seatbelt sandbox does not deliver FSEvents; debounce and reconciliation are tested separately.")
+            throw XCTSkip(
+                "Managed seatbelt sandbox does not deliver FSEvents; debounce and reconciliation are tested separately."
+            )
         }
-        try await assertMetadataWritesDoNotTriggerRescan(root: URL(fileURLWithPath: "/tmp/silkweb-watcher-\(UUID().uuidString)"))
-        try await assertMetadataWritesDoNotTriggerRescan(root: URL(fileURLWithPath: "/private/tmp/silkweb-watcher-\(UUID().uuidString)"))
-        let target = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".build/watcher-\(UUID().uuidString)")
+        try await assertMetadataWritesDoNotTriggerRescan(
+            root: URL(fileURLWithPath: "/tmp/silkweb-watcher-\(UUID().uuidString)"))
+        try await assertMetadataWritesDoNotTriggerRescan(
+            root: URL(fileURLWithPath: "/private/tmp/silkweb-watcher-\(UUID().uuidString)"))
+        let target = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(
+            ".build/watcher-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: target) }
         let link = URL(fileURLWithPath: "/tmp/silkweb-watcher-link-\(UUID().uuidString)")
@@ -80,7 +93,9 @@ final class LibraryWatcherTests: XCTestCase {
     }
 
     @MainActor
-    private func assertMetadataWritesDoNotTriggerRescan(root: URL, file: StaticString = #filePath, line: UInt = #line) async throws {
+    private func assertMetadataWritesDoNotTriggerRescan(root: URL, file: StaticString = #filePath, line: UInt = #line)
+        async throws
+    {
         let metadata = root.appendingPathComponent(".silkweb")
         try FileManager.default.createDirectory(at: metadata, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -94,12 +109,18 @@ final class LibraryWatcherTests: XCTestCase {
         rescans = 0
         events.paths = []
         for round in 0..<3 {
-            try Data("{\"formatVersion\":1,\"records\":[\(round)]}".utf8).write(to: metadata.appendingPathComponent("search-index.json"), options: .atomic)
+            try Data("{\"formatVersion\":1,\"records\":[\(round)]}".utf8).write(
+                to: metadata.appendingPathComponent("search-index.json"), options: .atomic)
             try Data("{}".utf8).write(to: metadata.appendingPathComponent("search-recents.json"), options: .atomic)
         }
         try await events.barrier(root, file: file, line: line)
-        XCTAssertTrue(events.paths.contains { $0.hasSuffix("/.silkweb/search-index.json") }, "metadata writes were not delivered: \(events.paths)", file: file, line: line)
-        XCTAssertEqual(rescans, 0, "search-index.json writes under .silkweb/ enqueued a library rescan; root \(root.path), FSEvents paths \(events.paths)", file: file, line: line)
+        XCTAssertTrue(
+            events.paths.contains { $0.hasSuffix("/.silkweb/search-index.json") },
+            "metadata writes were not delivered: \(events.paths)", file: file, line: line)
+        XCTAssertEqual(
+            rescans, 0,
+            "search-index.json writes under .silkweb/ enqueued a library rescan; root \(root.path), FSEvents paths \(events.paths)",
+            file: file, line: line)
         try Data("note".utf8).write(to: root.appendingPathComponent("Note.md"), options: .atomic)
         try await events.barrier(root, file: file, line: line)
         XCTAssertGreaterThan(rescans, 0, file: file, line: line)
@@ -127,7 +148,8 @@ final class LibraryWatcherTests: XCTestCase {
             for _ in 0..<200 where !paths.contains(where: { $0.hasSuffix(name) }) {
                 try await Task.sleep(for: .milliseconds(50))
             }
-            XCTAssertTrue(paths.contains { $0.hasSuffix(name) }, "FSEvents never delivered the barrier", file: file, line: line)
+            XCTAssertTrue(
+                paths.contains { $0.hasSuffix(name) }, "FSEvents never delivered the barrier", file: file, line: line)
             await watcher.pending?.value
         }
     }
@@ -136,11 +158,14 @@ final class LibraryWatcherTests: XCTestCase {
     /// same atomic replace must be a no-op (no second install, index or cache write).
     @MainActor
     func testAutosaveDateRefreshMakesWatcherRescanNoOp() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Folder"), withIntermediateDirectories: true)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            .resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Folder"), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         for number in 0..<300 {
-            try Data("body \(number)".utf8).write(to: root.appendingPathComponent(number % 2 == 0 ? "Note-\(number).md" : "Folder/Note-\(number).md"))
+            try Data("body \(number)".utf8).write(
+                to: root.appendingPathComponent(number % 2 == 0 ? "Note-\(number).md" : "Folder/Note-\(number).md"))
         }
         let workspace = LibraryWorkspace()
         workspace.root = root
@@ -163,14 +188,20 @@ final class LibraryWatcherTests: XCTestCase {
         await workspace.reconcileFinderChanges()
         await workspace.search.waitForIndex()
         XCTAssertEqual(workspace.revision, revision, "watcher rescan after autosave reinstalled the library")
-        XCTAssertEqual(workspace.search.revision, searchRevision, "watcher rescan after autosave re-indexed the saved note")
+        XCTAssertEqual(
+            workspace.search.revision, searchRevision, "watcher rescan after autosave re-indexed the saved note")
     }
 
     func testMetadataEventPathFilter() {
         let root = "/Volumes/Notes/Library"
-        XCTAssertFalse(LibraryWatcher.isLibraryChange(["/Volumes/Notes/Library/.silkweb/search-index.json"], root: root))
-        XCTAssertFalse(LibraryWatcher.isLibraryChange(["/Volumes/Notes/Library/.silkweb", "/Volumes/Notes/Library/.silkweb/.dat.nosync1.x"], root: root))
-        XCTAssertTrue(LibraryWatcher.isLibraryChange(["/Volumes/Notes/Library/.silkweb/x", "/Volumes/Notes/Library/a.md"], root: root))
+        XCTAssertFalse(
+            LibraryWatcher.isLibraryChange(["/Volumes/Notes/Library/.silkweb/search-index.json"], root: root))
+        XCTAssertFalse(
+            LibraryWatcher.isLibraryChange(
+                ["/Volumes/Notes/Library/.silkweb", "/Volumes/Notes/Library/.silkweb/.dat.nosync1.x"], root: root))
+        XCTAssertTrue(
+            LibraryWatcher.isLibraryChange(
+                ["/Volumes/Notes/Library/.silkweb/x", "/Volumes/Notes/Library/a.md"], root: root))
         XCTAssertTrue(LibraryWatcher.isLibraryChange(["/Volumes/Notes/Library/.silkwebnotes/a.md"], root: root))
         XCTAssertTrue(LibraryWatcher.isLibraryChange(["/Volumes/Notes/Library/Sub/.silkweb/a.md"], root: root))
         XCTAssertTrue(LibraryWatcher.isLibraryChange(["/Volumes/Notes/Library"], root: root))
@@ -184,16 +215,25 @@ final class LibraryWatcherTests: XCTestCase {
         for root in forms {
             for event in forms {
                 let base = event.hasSuffix("/") ? String(event.dropLast()) : event
-                XCTAssertFalse(LibraryWatcher.isLibraryChange([base + "/.silkweb/search-index.json"], root: root), "\(event) vs root \(root)")
-                XCTAssertFalse(LibraryWatcher.isLibraryChange([base + "/.silkweb/"], root: root), "\(event) vs root \(root)")
-                XCTAssertTrue(LibraryWatcher.isLibraryChange([base + "/Note.md"], root: root), "\(event) vs root \(root)")
-                XCTAssertTrue(LibraryWatcher.isLibraryChange([base + "/.silkwebnotes/a.md"], root: root), "\(event) vs root \(root)")
+                XCTAssertFalse(
+                    LibraryWatcher.isLibraryChange([base + "/.silkweb/search-index.json"], root: root),
+                    "\(event) vs root \(root)")
+                XCTAssertFalse(
+                    LibraryWatcher.isLibraryChange([base + "/.silkweb/"], root: root), "\(event) vs root \(root)")
+                XCTAssertTrue(
+                    LibraryWatcher.isLibraryChange([base + "/Note.md"], root: root), "\(event) vs root \(root)")
+                XCTAssertTrue(
+                    LibraryWatcher.isLibraryChange([base + "/.silkwebnotes/a.md"], root: root),
+                    "\(event) vs root \(root)")
                 XCTAssertTrue(LibraryWatcher.isLibraryChange([base], root: root), "\(event) vs root \(root)")
             }
         }
-        XCTAssertFalse(LibraryWatcher.isLibraryChange(["/System/Volumes/Data/Users/me/Notes/.silkweb/x"], root: "/Users/me/Notes"))
-        XCTAssertFalse(LibraryWatcher.isLibraryChange(["/Users/me/Notes/.silkweb/x"], root: "/System/Volumes/Data/Users/me/Notes"))
-        XCTAssertFalse(LibraryWatcher.isLibraryChange(["/private/var/folders/x/Lib/.silkweb/x"], root: "/var/folders/x/Lib"))
+        XCTAssertFalse(
+            LibraryWatcher.isLibraryChange(["/System/Volumes/Data/Users/me/Notes/.silkweb/x"], root: "/Users/me/Notes"))
+        XCTAssertFalse(
+            LibraryWatcher.isLibraryChange(["/Users/me/Notes/.silkweb/x"], root: "/System/Volumes/Data/Users/me/Notes"))
+        XCTAssertFalse(
+            LibraryWatcher.isLibraryChange(["/private/var/folders/x/Lib/.silkweb/x"], root: "/var/folders/x/Lib"))
         XCTAssertTrue(LibraryWatcher.isLibraryChange(["/private/tmpfoo/Lib/.silkweb/x"], root: "/tmp/Lib"))
         XCTAssertTrue(LibraryWatcher.isLibraryChange(["/System/Volumes/DataX/Lib/.silkweb/x"], root: "/Lib"))
         XCTAssertEqual(LibraryWatcher.eventPathForm("/"), "/")
@@ -209,10 +249,14 @@ final class LibraryWatcherTests: XCTestCase {
         let link = URL(fileURLWithPath: "/tmp/\(name)-link")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: URL(fileURLWithPath: "/tmp/\(name)"))
         defer { try? FileManager.default.removeItem(at: link) }
-        for url in [real, URL(fileURLWithPath: "/tmp/\(name)"), URL(fileURLWithPath: "/tmp/\(name)/"), link, URL(fileURLWithPath: "/tmp/\(name)/sub/..")] {
+        for url in [
+            real, URL(fileURLWithPath: "/tmp/\(name)"), URL(fileURLWithPath: "/tmp/\(name)/"), link,
+            URL(fileURLWithPath: "/tmp/\(name)/sub/.."),
+        ] {
             XCTAssertEqual(LibraryWatcher.canonicalRoot(url), real.path, url.path)
         }
-        XCTAssertEqual(LibraryWatcher.canonicalRoot(URL(fileURLWithPath: "/tmp/\(name)-missing")), "/private/tmp/\(name)-missing")
+        XCTAssertEqual(
+            LibraryWatcher.canonicalRoot(URL(fileURLWithPath: "/tmp/\(name)-missing")), "/private/tmp/\(name)-missing")
     }
 
     @MainActor
@@ -239,15 +283,21 @@ final class LibraryWatcherTests: XCTestCase {
         workspace.editor.edit("mine")
         try Data("disk".utf8).write(to: moved, options: .atomic)
         await workspace.reconcileFinderChanges()
-        XCTAssertTrue(workspace.editor.externalConflict, "state: \(workspace.editor.state), error: \(String(describing: workspace.editor.error)), url: \(String(describing: workspace.editor.url))")
+        XCTAssertTrue(
+            workspace.editor.externalConflict,
+            "state: \(workspace.editor.state), error: \(String(describing: workspace.editor.error)), url: \(String(describing: workspace.editor.url))"
+        )
         XCTAssertEqual(workspace.editor.text, "mine")
         workspace.editor.edit("mine continued")
         await workspace.editor.resolveConflict(keepMine: false)
         XCTAssertEqual(workspace.editor.text, "disk")
-        XCTAssertEqual(try String(contentsOf: XCTUnwrap(workspace.editor.conflictCopy), encoding: .utf8), "mine continued")
+        XCTAssertEqual(
+            try String(contentsOf: XCTUnwrap(workspace.editor.conflictCopy), encoding: .utf8), "mine continued")
         try FileManager.default.removeItem(at: moved)
         await workspace.reconcileFinderChanges()
-        XCTAssertTrue(workspace.editor.externalDeleted, "state: \(workspace.editor.state), error: \(String(describing: workspace.editor.error))")
+        XCTAssertTrue(
+            workspace.editor.externalDeleted,
+            "state: \(workspace.editor.state), error: \(String(describing: workspace.editor.error))")
         XCTAssertEqual(workspace.editor.text, "disk")
         await workspace.editor.saveAgain()
         XCTAssertEqual(try String(contentsOf: moved, encoding: .utf8), "disk")
@@ -260,7 +310,9 @@ final class LibraryWatcherTests: XCTestCase {
         for width in [1.0, 420, 1200, 4096] {
             scroll.setFrameSize(NSSize(width: width, height: 520))
             for value in ["", "👩🏽‍💻", String(repeating: "line\n", count: 1000)] {
-                MarkdownTextView.reload(text, in: scroll, value: value, selection: NSRange(location: 100000, length: 1000), position: NSPoint(x: 0, y: 100000))
+                MarkdownTextView.reload(
+                    text, in: scroll, value: value, selection: NSRange(location: 100000, length: 1000),
+                    position: NSPoint(x: 0, y: 100000))
                 scroll.layoutSubtreeIfNeeded()
                 XCTAssertEqual(text.string, value)
                 XCTAssertEqual(text.selectedRange().location, (value as NSString).length)

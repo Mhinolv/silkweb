@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SilkwebCore
 
 final class CountPresentationTests: XCTestCase {
@@ -10,8 +11,9 @@ final class CountPresentationTests: XCTestCase {
         XCTAssertEqual(CountPresentation.label(2, unit: .heading), "2 headings")
         for unit in CountPresentation.Unit.allCases {
             for count in [0, 1, 2, 999, 1_204, 10_000, Int.max] {
-                XCTAssertEqual(CountPresentation.label(count, unit: unit),
-                               count.formatted() + " " + unit.rawValue + (count == 1 ? "" : "s"))
+                XCTAssertEqual(
+                    CountPresentation.label(count, unit: unit),
+                    count.formatted() + " " + unit.rawValue + (count == 1 ? "" : "s"))
             }
         }
     }
@@ -20,8 +22,14 @@ final class CountPresentationTests: XCTestCase {
         for direct in [0, 1, 2, 1_204, Int.max] {
             for recursive in [direct, Int.max] {
                 let count = FolderDocumentCount(direct: direct, recursive: recursive)
-                XCTAssertEqual(count.tooltip, CountPresentation.label(direct, unit: .document) + " · " + recursive.formatted() + " including subfolders")
-                XCTAssertEqual(count.accessibilityValue, CountPresentation.label(direct, unit: .document) + ", " + recursive.formatted() + " including subfolders")
+                XCTAssertEqual(
+                    count.tooltip,
+                    CountPresentation.label(direct, unit: .document) + " · " + recursive.formatted()
+                        + " including subfolders")
+                XCTAssertEqual(
+                    count.accessibilityValue,
+                    CountPresentation.label(direct, unit: .document) + ", " + recursive.formatted()
+                        + " including subfolders")
             }
         }
     }

@@ -1,5 +1,5 @@
-import SwiftUI
 import SilkwebCore
+import SwiftUI
 
 /// Additional document sections can join the outline here without changing the detail panes.
 struct InspectorView: View {
@@ -18,17 +18,24 @@ struct InspectorView: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Inspector", selection: Binding(get: { workspace.inspectorInfo }, set: { workspace.inspectorInfo = $0 })) {
+            Picker(
+                "Inspector", selection: Binding(get: { workspace.inspectorInfo }, set: { workspace.inspectorInfo = $0 })
+            ) {
                 Text("Outline").tag(false)
                 Text("Info").tag(true)
             }.pickerStyle(.segmented).labelsHidden().columnLayoutAnchor("outline-title").padding(12)
-            if workspace.inspectorInfo { DocumentInfo(workspace: workspace).frame(maxWidth: .infinity, maxHeight: .infinity) } else { outline }
+            if workspace.inspectorInfo {
+                DocumentInfo(workspace: workspace).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                outline
+            }
         }
         .background(Color.silkwebPaneBackground.ignoresSafeArea())
     }
     private var outline: some View {
         let current = preview.currentItem(caret: workspace.editor.caretLocation)
-        let items = preview.outlineItems.isEmpty ? OutlineItem.parse("", headings: preview.headings) : preview.outlineItems
+        let items =
+            preview.outlineItems.isEmpty ? OutlineItem.parse("", headings: preview.headings) : preview.outlineItems
         let imageCount = items.count - preview.headings.count
         let summary = [(preview.headings.count, CountPresentation.Unit.heading), (imageCount, .image)]
             .filter { $0.0 > 0 }.map { CountPresentation.label($0.0, unit: $0.1) }.joined(separator: " · ")
@@ -42,7 +49,9 @@ struct InspectorView: View {
         } content: {
             if items.isEmpty {
                 ColumnEmptyState {
-                    ContentUnavailableView("No Headings", systemImage: "list.bullet.indent", description: Text("Start a line with # to add a heading."))
+                    ContentUnavailableView(
+                        "No Headings", systemImage: "list.bullet.indent",
+                        description: Text("Start a line with # to add a heading."))
                 }
             } else {
                 ScrollViewReader { proxy in
@@ -57,14 +66,18 @@ struct InspectorView: View {
                             } label: {
                                 Group {
                                     switch item.content {
-                                    case .heading(let heading): row(heading, depth: item.depth, current: current == item.id)
+                                    case .heading(let heading):
+                                        row(heading, depth: item.depth, current: current == item.id)
                                     case .image:
-                                        OutlineImageRow(item: item, document: preview.renderedURL, root: workspace.root,
+                                        OutlineImageRow(
+                                            item: item, document: preview.renderedURL, root: workspace.root,
                                             current: current == item.id, selected: showsSelection(item.id))
                                     }
                                 }
-                                .outlineRowChrome(thread: thread, indent: item.indent, current: current == item.id,
-                                                  selected: showsSelection(item.id))
+                                .outlineRowChrome(
+                                    thread: thread, indent: item.indent, current: current == item.id,
+                                    selected: showsSelection(item.id)
+                                )
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain).tag(item.id).id(item.id)
@@ -77,10 +90,12 @@ struct InspectorView: View {
                     .focused($outlineFocused)
                     .onHover { outlineHovered = $0 }
                     // Native live-scroll notifications do not fire for programmatic scrolling.
-                    .onReceive(NotificationCenter.default.publisher(for: NSScrollView.willStartLiveScrollNotification)) { _ in
+                    .onReceive(NotificationCenter.default.publisher(for: NSScrollView.willStartLiveScrollNotification))
+                    { _ in
                         if outlineHovered { manualScrollUntil = .distantFuture }
                     }
-                    .onReceive(NotificationCenter.default.publisher(for: NSScrollView.didEndLiveScrollNotification)) { _ in
+                    .onReceive(NotificationCenter.default.publisher(for: NSScrollView.didEndLiveScrollNotification)) {
+                        _ in
                         if manualScrollUntil == .distantFuture { manualScrollUntil = Date().addingTimeInterval(2) }
                     }
                     .task(id: ScrollRequest(heading: current, resume: manualScrollUntil)) {
@@ -126,8 +141,11 @@ struct InspectorView: View {
         let selected = showsSelection(heading.id)
         return Text(heading.text)
             .font(.system(size: OutlineRowStyle.fontSize, weight: style.isSemibold ? .semibold : .regular))
-            .foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor) :
-                                Color(nsColor: current || !style.isSecondary ? .labelColor : .secondaryLabelColor))
+            .foregroundStyle(
+                selected
+                    ? Color(nsColor: .alternateSelectedControlTextColor)
+                    : Color(nsColor: current || !style.isSecondary ? .labelColor : .secondaryLabelColor)
+            )
             .lineLimit(1).truncationMode(.tail)
             .help(heading.text)
             .accessibilityElement(children: .ignore)
@@ -162,7 +180,9 @@ struct OutlineRowChrome: ViewModifier {
                         }
                     }
                     OutlineThreadShape(thread: thread)
-                        .stroke(Color.silkwebThread, style: StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .round))
+                        .stroke(
+                            Color.silkwebThread, style: StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .round)
+                        )
                         .padding(.leading, Self.leading)
                         .accessibilityHidden(true)
                 }
@@ -192,8 +212,9 @@ struct OutlineThreadShape: Shape {
                 let x = rect.minX + x, y = rect.minY + cornerY
                 path.move(to: CGPoint(x: x, y: rect.minY))
                 path.addLine(to: CGPoint(x: x, y: y - radius))
-                path.addCurve(to: CGPoint(x: x + radius, y: y), control1: CGPoint(x: x, y: y - radius + k),
-                              control2: CGPoint(x: x + radius - k, y: y))
+                path.addCurve(
+                    to: CGPoint(x: x + radius, y: y), control1: CGPoint(x: x, y: y - radius + k),
+                    control2: CGPoint(x: x + radius - k, y: y))
                 path.addLine(to: CGPoint(x: rect.minX + endX, y: y))
             }
         }

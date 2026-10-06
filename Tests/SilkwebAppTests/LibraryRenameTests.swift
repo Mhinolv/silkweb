@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 final class LibraryRenameTests: XCTestCase {
@@ -17,10 +18,12 @@ final class LibraryRenameTests: XCTestCase {
     }
 
     @MainActor private func key(_ window: NSWindow, text: String, code: UInt16) throws {
-        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
-            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: window.windowNumber, context: nil, characters: text,
-            charactersIgnoringModifiers: text, isARepeat: false, keyCode: code))
+        let event = try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero,
+                modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, characters: text,
+                charactersIgnoringModifiers: text, isARepeat: false, keyCode: code))
         window.sendEvent(event)
     }
 
@@ -29,15 +32,17 @@ final class LibraryRenameTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Folder"), withIntermediateDirectories: false)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Folder"), withIntermediateDirectories: false)
         try Data("Body".utf8).write(to: root.appendingPathComponent("Note.md"))
         let workspace = LibraryWorkspace()
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
         await workspace.editor.configure(root: root)
         let host = NSHostingView(rootView: LibrarySplitView(workspace: workspace))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 760),
-                              styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 760),
+            styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = host // Never ordered front or made key.
         defer { window.contentView = nil }
         try await settle(host)
@@ -50,9 +55,10 @@ final class LibraryRenameTests: XCTestCase {
                 workspace.focusColumn = folder ? 0 : 1
                 if !folder { _ = await workspace.editor.open(root.appendingPathComponent(path), readOnly: false) }
                 try await settle(host)
-                let table = try XCTUnwrap(descendants(host).compactMap { $0 as? NSTableView }.first {
-                    folder ? $0 is SidebarOutlineView : !($0 is SidebarOutlineView)
-                }, "\(folder) \(mode), documents: \(workspace.documents.map(\.relativePath))")
+                let table = try XCTUnwrap(
+                    descendants(host).compactMap { $0 as? NSTableView }.first {
+                        folder ? $0 is SidebarOutlineView : !($0 is SidebarOutlineView)
+                    }, "\(folder) \(mode), documents: \(workspace.documents.map(\.relativePath))")
                 if mode == "create" {
                     workspace.create(folder: folder, parent: "")
                 } else if mode == "menu" {
@@ -61,11 +67,16 @@ final class LibraryRenameTests: XCTestCase {
                         row = (0..<outline.numberOfRows).first {
                             (outline.item(atRow: $0) as? FolderSidebar.Item)?.folder?.relativePath == path
                         }!
-                    } else { row = workspace.documents.firstIndex { $0.relativePath == path }! }
+                    } else {
+                        row = workspace.documents.firstIndex { $0.relativePath == path }!
+                    }
                     let point = table.convert(NSPoint(x: 60, y: table.rect(ofRow: row).midY), to: nil)
-                    let event = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: point,
-                        modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                        windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+                    let event = try XCTUnwrap(
+                        NSEvent.mouseEvent(
+                            with: .rightMouseDown, location: point,
+                            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                            windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)
+                    )
                     let menu = try XCTUnwrap(table.menu(for: event))
                     let index = menu.indexOfItem(withTitle: "Rename…")
                     XCTAssertGreaterThanOrEqual(index, 0)
@@ -103,15 +114,20 @@ final class LibraryRenameTests: XCTestCase {
                 XCTAssertEqual(field.stringValue, name)
                 try key(window, text: "\r", code: 36)
                 // Return validates asynchronously before the rename mutation starts.
-                try await waitUntil("\(folder) \(mode): rename committed") { workspace.rename == nil && !workspace.mutating }
+                try await waitUntil("\(folder) \(mode): rename committed") {
+                    workspace.rename == nil && !workspace.mutating
+                }
                 try await settle(host)
                 XCTAssertNil(workspace.rename)
                 XCTAssertNil(workspace.mutationError)
                 let newPath = folder ? name : name + ".md"
                 XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(newPath).path))
                 XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path))
-                if folder { XCTAssertEqual(workspace.session.selectedFolder, newPath) }
-                else { XCTAssertEqual(workspace.session.selectedDocuments, [newPath]) }
+                if folder {
+                    XCTAssertEqual(workspace.session.selectedFolder, newPath)
+                } else {
+                    XCTAssertEqual(workspace.session.selectedDocuments, [newPath])
+                }
                 path = newPath
             }
             // Invalid Return retains the draft; Escape and a focus change cancel it.
@@ -140,7 +156,9 @@ final class LibraryRenameTests: XCTestCase {
                 try await settle(host)
                 XCTAssertNil(workspace.rename)
                 XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path))
-                XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(folder ? "Discarded" : "Discarded.md").path))
+                XCTAssertFalse(
+                    FileManager.default.fileExists(
+                        atPath: root.appendingPathComponent(folder ? "Discarded" : "Discarded.md").path))
             }
         }
         for width: CGFloat in [960, 1200, 4096] {

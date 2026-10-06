@@ -1,7 +1,8 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 import XCTest
-import SilkwebCore
+
 @testable import Silkweb
 
 /// silkweb-1.25: §6 shortcut map, focus-dependent enablement, context-menu wording and the §7
@@ -48,14 +49,19 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
     /// Every `.keyboardShortcut("k", modifiers: …)` and `KeyboardShortcut("k", …)` in the app sources.
     static func declaredShortcuts() throws -> [String] {
         let sources = repository.appendingPathComponent("Sources/Silkweb")
-        let files = try FileManager.default.contentsOfDirectory(at: sources, includingPropertiesForKeys: nil).filter { $0.pathExtension == "swift" }
-        let pattern = try NSRegularExpression(pattern: #"[kK]eyboardShortcut\((?:"([^"]+)"|\.(delete))(?:,\s*modifiers:\s*(\[[^\]]*\]|\.[a-z]+))?\)"#)
+        let files = try FileManager.default.contentsOfDirectory(at: sources, includingPropertiesForKeys: nil).filter {
+            $0.pathExtension == "swift"
+        }
+        let pattern = try NSRegularExpression(
+            pattern: #"[kK]eyboardShortcut\((?:"([^"]+)"|\.(delete))(?:,\s*modifiers:\s*(\[[^\]]*\]|\.[a-z]+))?\)"#)
         var result: [String] = []
         for file in files {
             let text = try String(contentsOf: file, encoding: .utf8)
             for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
                 let ns = text as NSString
-                let key = match.range(at: 1).location != NSNotFound ? ns.substring(with: match.range(at: 1)) : ns.substring(with: match.range(at: 2))
+                let key =
+                    match.range(at: 1).location != NSNotFound
+                    ? ns.substring(with: match.range(at: 1)) : ns.substring(with: match.range(at: 2))
                 var modifiers: Set<String> = ["command"]
                 if match.range(at: 3).location != NSNotFound {
                     let list = ns.substring(with: match.range(at: 3))
@@ -78,8 +84,10 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
     }
 
     func testShortcutMapMatchesDesignSystemAndSources() throws {
-        let doc = try String(contentsOf: Self.repository.appendingPathComponent("docs/design-system.md"), encoding: .utf8)
-        let section = try XCTUnwrap(doc.components(separatedBy: "## 6. Keyboard shortcut map").last?.components(separatedBy: "## 7.").first)
+        let doc = try String(
+            contentsOf: Self.repository.appendingPathComponent("docs/design-system.md"), encoding: .utf8)
+        let section = try XCTUnwrap(
+            doc.components(separatedBy: "## 6. Keyboard shortcut map").last?.components(separatedBy: "## 7.").first)
         let mapped = Self.shortcutMap.map(\.shortcut)
         // No duplicate bindings in the map.
         XCTAssertEqual(Set(mapped).count, mapped.count, "duplicate shortcut in the §6 string table")
@@ -90,7 +98,8 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
             XCTAssertTrue(declared.contains(shortcut), "\(command) \(shortcut) is in §6 but not declared")
             if !documentedAsStandard.contains(shortcut) {
                 // Range rows (⌃⌘1…⌃⌘6) cover the individual headings.
-                let documented = section.contains(shortcut) || (command.hasPrefix("Heading ") && section.contains("⌃⌘1…⌃⌘6"))
+                let documented =
+                    section.contains(shortcut) || (command.hasPrefix("Heading ") && section.contains("⌃⌘1…⌃⌘6"))
                 XCTAssertTrue(documented, "\(command) \(shortcut) is declared but missing from design-system §6")
             }
         }
@@ -119,9 +128,12 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
     private func library() async throws -> Library {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebAudit-" + UUID().uuidString)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("Coffee/Brewing"), withIntermediateDirectories: true)
-        try Data("# Pour-Over\n\n## Grind\n\nMedium-fine.\n\n![Kettle](kettle.png)\n".utf8).write(to: root.appendingPathComponent("Coffee/Brewing/Pour-Over.md"))
-        try Data("# Cold Brew\n\nSteep overnight.".utf8).write(to: root.appendingPathComponent("Coffee/Brewing/Cold Brew.md"))
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Coffee/Brewing"), withIntermediateDirectories: true)
+        try Data("# Pour-Over\n\n## Grind\n\nMedium-fine.\n\n![Kettle](kettle.png)\n".utf8).write(
+            to: root.appendingPathComponent("Coffee/Brewing/Pour-Over.md"))
+        try Data("# Cold Brew\n\nSteep overnight.".utf8).write(
+            to: root.appendingPathComponent("Coffee/Brewing/Cold Brew.md"))
         try Data("# Kyoto\n\nTemples.".utf8).write(to: root.appendingPathComponent("Coffee/Kyoto.md"))
         let defaults = disposableDefaults("Audit")
         let workspace = LibraryWorkspace(defaults: defaults)
@@ -133,8 +145,9 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
     }
 
     private func window(_ root: some View) -> (NSWindow, NSHostingController<AnyView>) {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         let controller = NSHostingController(rootView: AnyView(root))
         controller.sizingOptions = []
@@ -227,7 +240,9 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
         let table = try XCTUnwrap(Self.descendants(window.contentView!).compactMap { $0 as? DocumentTableView }.first)
         let coordinator = try XCTUnwrap(table.coordinator)
         let menu = coordinator.menu(path: path)
-        XCTAssertEqual(menu.items.map(\.title), ["Open in New Tab", "", "Rename…", "Move To…", "Reveal in Finder", "Export", "", "Tags", "Move to Trash"])
+        XCTAssertEqual(
+            menu.items.map(\.title),
+            ["Open in New Tab", "", "Rename…", "Move To…", "Reveal in Finder", "Export", "", "Tags", "Move to Trash"])
         let export = try XCTUnwrap(menu.items.first { $0.title == "Export" }?.submenu)
         // Same titles and order as File ▸ Export; no key equivalents in the context menu.
         XCTAssertEqual(export.items.map(\.title), ["HTML…", "PDF…"])
@@ -251,18 +266,24 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
     func testInsertTablePreviewSitsTopLeftWhenItFits() async throws {
         StatusBarCountsTests.exposeAccessibility(true)
         defer { StatusBarCountsTests.exposeAccessibility(false) }
-        for options in [TableOptions(columns: 1, rows: 1), TableOptions(columns: 2, rows: 1), TableOptions(columns: 20, rows: 100)] {
+        for options in [
+            TableOptions(columns: 1, rows: 1), TableOptions(columns: 2, rows: 1), TableOptions(columns: 20, rows: 100),
+        ] {
             let form = TableInsertForm(options: options)
             let host = NSHostingView(rootView: TableInsertSheet(form: form, cancel: {}, insert: { _ in }))
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 360, height: 400), styleMask: [.titled], backing: .buffered,
+                defer: false)
             window.isReleasedWhenClosed = false
             window.contentView = host
             defer { window.contentView = nil; window.close() }
             window.setContentSize(host.fittingSize)
             for _ in 0..<3 { host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(40)) }
             let tree = StatusBarCountsTests.accessibilityTree(host)
-            let box = try XCTUnwrap(tree.first { StatusBarCountsTests.label($0) == "Table source preview" }, "\(options)")
-            let text = try XCTUnwrap(tree.first { $0.accessibilityIdentifier?() == "tableSourcePreviewText" }, "\(options)")
+            let box = try XCTUnwrap(
+                tree.first { StatusBarCountsTests.label($0) == "Table source preview" }, "\(options)")
+            let text = try XCTUnwrap(
+                tree.first { $0.accessibilityIdentifier?() == "tableSourcePreviewText" }, "\(options)")
             let boxFrame = StatusBarCountsTests.frame(box), textFrame = StatusBarCountsTests.frame(text)
             let context = "\(options) box \(boxFrame) text \(textFrame)"
             XCTAssertGreaterThan(textFrame.width, 10, context)
@@ -286,7 +307,9 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
         func recurse(_ element: AnyObject, depth: Int) {
             guard depth < 60, seen.insert(ObjectIdentifier(element)).inserted else { return }
             if let role = element.accessibilityRole?() ?? nil { visit(element, role) }
-            for child in (element.accessibilityChildren?() ?? nil) ?? [] { recurse(child as AnyObject, depth: depth + 1) }
+            for child in (element.accessibilityChildren?() ?? nil) ?? [] {
+                recurse(child as AnyObject, depth: depth + 1)
+            }
         }
         recurse(window, depth: 0)
         if let frame = window.contentView?.superview { recurse(frame, depth: 0) }
@@ -295,18 +318,24 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
     static func unlabeledControls(in window: NSWindow) -> [String] {
         var missing: [String] = []
         // Window chrome (close/minimize/zoom/full screen) belongs to AppKit.
-        let chrome: Set<NSAccessibility.Subrole> = [.closeButton, .minimizeButton, .zoomButton, .fullScreenButton, .toolbarButton]
+        let chrome: Set<NSAccessibility.Subrole> = [
+            .closeButton, .minimizeButton, .zoomButton, .fullScreenButton, .toolbarButton,
+        ]
         walk(window) { element, role in
             guard controlRoles.contains(role) else { return }
             // VoiceOver also reads a linked title element (a Form row's label).
             let titleElement: AnyObject? = (element.accessibilityTitleUIElement?() ?? nil).map { $0 as AnyObject }
-            let names: [String?] = [element.accessibilityLabel?() ?? nil, element.accessibilityTitle?() ?? nil,
-                                    titleElement.flatMap { $0.accessibilityLabel?() ?? nil },
-                                    titleElement.flatMap { StatusBarCountsTests.value($0) }]
+            let names: [String?] = [
+                element.accessibilityLabel?() ?? nil, element.accessibilityTitle?() ?? nil,
+                titleElement.flatMap { $0.accessibilityLabel?() ?? nil },
+                titleElement.flatMap { StatusBarCountsTests.value($0) },
+            ]
             let name = names.compactMap { $0 }.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
             let subrole = element.accessibilitySubrole?() ?? nil
             if name == nil, !(subrole.map(chrome.contains) ?? false) {
-                missing.append("\(role.rawValue) \(type(of: element)) id=\(element.accessibilityIdentifier?() ?? "") help=\((element.accessibilityHelp?() ?? nil) ?? "")")
+                missing.append(
+                    "\(role.rawValue) \(type(of: element)) id=\(element.accessibilityIdentifier?() ?? "") help=\((element.accessibilityHelp?() ?? nil) ?? "")"
+                )
             }
         }
         return missing
@@ -339,7 +368,10 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
         workspace.setWritingModes(focus: true, typewriter: false)
         workspace.editor.state = .dirty
         var visited: [String] = []
-        for (mode, outline, info) in [(DocumentViewMode.editor, true, false), (.split, true, true), (.preview, false, false), (.editor, true, true)] {
+        for (mode, outline, info) in [
+            (DocumentViewMode.editor, true, false), (.split, true, true), (.preview, false, false),
+            (.editor, true, true),
+        ] {
             workspace.preview.mode = mode
             workspace.preview.showsOutline = outline
             workspace.inspectorInfo = info
