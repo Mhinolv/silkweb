@@ -1,0 +1,3 @@
+# Commits that only reformat code. GitHub's blame view skips them automatically;
+# locally: git config blame.ignoreRevsFile .git-blame-ignore-revs
+# #84: one-time swift-format pass
