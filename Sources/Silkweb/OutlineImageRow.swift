@@ -87,7 +87,7 @@ struct OutlineImageRow: View {
             case .local(let url):
                 guard FileManager.default.fileExists(atPath: url.path) else {
                     return Loaded(
-                        bitmap: nil, message: "Missing image: \(url.lastPathComponent)",
+                        bitmap: nil, message: ImagePlaceholder.missing(reference.destination),
                         symbol: "exclamationmark.triangle", state: "missing")
                 }
                 guard let thumbnail = await ImageThumbnailCache.shared.load(url, pixels: pixels) else {

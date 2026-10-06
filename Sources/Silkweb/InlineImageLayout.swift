@@ -321,6 +321,8 @@ final class InlineImageView: NSView, @preconcurrency QLPreviewPanelDataSource, @
                 ?? (content.reference.alt.isEmpty
                     ? "Image, \(content.url?.lastPathComponent ?? "")" : content.reference.alt))
         setAccessibilityHelp(content.message == nil ? "Double-click to open in Quick Look" : "Select image source line")
+        // The chip truncates in the middle; the tooltip carries the full placeholder text.
+        toolTip = content.message
     }
 
     func refit(column: CGFloat, viewport: CGFloat) {

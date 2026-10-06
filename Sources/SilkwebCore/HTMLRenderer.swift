@@ -181,8 +181,10 @@ public enum HTMLRenderer {
                     return "<span class=\"sw-blocked-link\"" + interaction
                         + " title=\"Link not opened: this kind of link isn’t allowed.\">" + content + "</span>"
                 }
-                return "<a href=\"" + escape(localDestination(destination, options: options)) + "\""
-                    + titleAttribute(title) + ">" + content + "</a>"
+                let local = localDestination(destination, options: options)
+                // The preview's attachment menu copies the destination as written (#109).
+                let source = local == destination ? "" : " data-sw-destination=\"" + escape(destination) + "\""
+                return "<a href=\"" + escape(local) + "\"" + source + titleAttribute(title) + ">" + content + "</a>"
             case .image(let alt, let destination, let title):
                 if let images = options.exportImages {
                     if let source = images[destination] {
@@ -214,7 +216,8 @@ public enum HTMLRenderer {
                     let url = URL(string: source), url.isFileURL
                 {
                     guard FileManager.default.fileExists(atPath: url.path) else {
-                        return "<span class=\"sw-missing-image\">Missing image: " + escape(destination) + "</span>"
+                        return "<span class=\"sw-missing-image\">" + escape(ImagePlaceholder.missing(destination))
+                            + "</span>"
                     }
                     guard let asset = PreviewResource.assetURL(for: url, root: root) else {
                         return "<span class=\"sw-missing-image\">Image outside library: " + escape(alt) + "</span>"

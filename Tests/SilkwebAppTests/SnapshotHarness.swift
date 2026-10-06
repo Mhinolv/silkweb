@@ -145,6 +145,8 @@ struct SnapshotScenario {
             name: "editor-image-heading-edited-wide", document: "Snapshot Fixtures/Image Heading Edits.md",
             sidebarsHidden: true, editImageHeading: true),
         .init(name: "editor-image-placeholders", document: "Snapshot Fixtures/Image States.md"),
+        // #109: editor chips and the preview name a missing image by its path as written.
+        .init(name: "split-image-placeholders", document: "Snapshot Fixtures/Missing Images.md", mode: .split),
         .init(name: "preview-headings", document: "Snapshot Fixtures/Preview Headings.md", mode: .preview),
         .init(name: "preview-mode", document: pourOver, mode: .preview),
         .init(name: "split-mode", document: pourOver, mode: .split),
@@ -477,8 +479,17 @@ final class SnapshotHarness {
         try Data(imageText.utf8).write(to: fixtures.appendingPathComponent("Image Fixture.md"), options: .atomic)
         try Data("not an image".utf8).write(to: fixtures.appendingPathComponent("unreadable.png"))
         let imageStates =
-            "# Image states\n\n![Remote](https://example.invalid/snapshot.png)\n\n![Missing](missing.png)\n\n![Outside](../../outside.png)\n\n![Unreadable](unreadable.png)\n"
+            "# Image states\n\n![Remote](https://example.invalid/snapshot.png)\n\n![Missing](media/photo.png)\n\n"
+            // #109: a long nested path shows the middle-truncated label; percent-escapes are decoded.
+            + "![Missing nested](media/2026/Field%20Trips/Lake%20Erie%20Shoreline%20Campgrounds/Presque%20Isle%20State%20Park/sunrise-over-the-bay.png)\n\n"
+            + "![Outside](../../outside.png)\n\n![Unreadable](unreadable.png)\n"
         try Data(imageStates.utf8).write(to: fixtures.appendingPathComponent("Image States.md"), options: .atomic)
+        // #109: only missing references, so the split preview has no unreadable image to wait for.
+        let missingImages =
+            "# Missing images\n\n![Missing](media/photo.png)\n\n"
+            + "![Missing nested](media/2026/Field%20Trips/Lake%20Erie%20Shoreline%20Campgrounds/Presque%20Isle%20State%20Park/sunrise-over-the-bay.png)\n"
+        try Data(missingImages.utf8).write(
+            to: fixtures.appendingPathComponent("Missing Images.md"), options: .atomic)
         let typography =
             "# Heading one\n\n## Heading two\n\n### Heading three\n\n#### Heading four\n\n##### Heading five\n\n###### Heading six\n\nBody: café, 日本語, 👩🏽‍💻. **Strong**, *emphasis*, ~~strike~~ and `code`.\n\n> A quote\n\n- [ ] A task with [a link](https://example.invalid)\n\n```swift\nlet source = true\n```\n"
         try Data(typography.utf8).write(to: fixtures.appendingPathComponent("Editor Typography.md"), options: .atomic)
