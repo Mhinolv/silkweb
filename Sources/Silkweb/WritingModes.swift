@@ -403,7 +403,10 @@ import SwiftUI
     func reveal(_ location: Int) {
         guard let editor, let layout = editor.layoutManager, let scroll = editor.enclosingScrollView else { return }
         if typewriter { scrollLine(at: location, toFraction: Self.anchor); return }
-        guard location < editor.string.utf16.count else { return }
+        guard location < editor.string.utf16.count else {
+            editor.scrollRangeToVisible(NSRange(location: location, length: 0))
+            return
+        }
         layout.ensureLayout(forCharacterRange: NSRange(location: location, length: 0))
         let rect = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: location), effectiveRange: nil)
         scroll.contentView.scroll(

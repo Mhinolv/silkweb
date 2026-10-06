@@ -215,7 +215,8 @@ final class PreviewCoordinator {
         return currentHeading(caret: caret)
     }
 
-    /// The Outline keeps keyboard focus after a click or Return (`focusEditor: false`).
+    /// An Outline click focuses the editor at the jumped-to line ("jump and write", #89); Return
+    /// keeps the Outline focused for ↑/↓ (`focusEditor: false`). Preview mode never focuses the editor.
     func navigate(_ item: OutlineItem, focusEditor: Bool = true) {
         navigate(id: item.id, range: item.sourceRange, focusEditor: focusEditor)
     }
@@ -230,10 +231,17 @@ final class PreviewCoordinator {
         guard let editor, range.location != NSNotFound else { return }
         let location = min(range.location, editor.string.utf16.count)
         editor.setSelectedRange(NSRange(location: location, length: 0))
-        editor.scrollRangeToVisible(NSRange(location: location, length: 0))
-        // Upper third, or Typewriter's 40% anchor while it is on (1.27).
+        // One scroll: upper third, or Typewriter's 40% anchor while it is on (1.27).
         editor.writingModes.reveal(location)
         if focusEditor, mode != .preview { editor.window?.makeFirstResponder(editor) }
+    }
+
+    /// Esc in the Inspector (#89): keyboard focus back to the editor, or to the preview while it shows alone.
+    func focusDocument() -> Bool {
+        guard let target: NSView = mode == .preview ? webView : editor, let window = target.window else {
+            return false
+        }
+        return window.makeFirstResponder(target)
     }
 
     func scrollPreview(to anchor: String) {

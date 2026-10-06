@@ -31,6 +31,8 @@ struct InspectorView: View {
             }
         }
         .background(Color.silkwebPaneBackground.ignoresSafeArea())
+        // Esc returns keyboard focus to the document (#89). Text fields handle their own Esc first.
+        .onKeyPress(.escape) { preview.focusDocument() ? .handled : .ignored }
     }
     private var outline: some View {
         let current = preview.currentItem(caret: workspace.editor.caretLocation)
@@ -59,10 +61,11 @@ struct InspectorView: View {
                     List(selection: $selectedHeading) {
                         ForEach(Array(zip(items, threads)), id: \.0.id) { item, thread in
                             Button {
-                                // A click selects and focuses the Outline so ↑/↓ work right away.
+                                // A click jumps and focuses the editor (owner decision #89, replacing #72's
+                                // focused Outline). The row stays selected, so ↑/↓ resume there once the
+                                // Outline is focused again (Tab or a click on its background).
                                 selectedHeading = item.id
-                                outlineFocused = true
-                                preview.navigate(item, focusEditor: false)
+                                preview.navigate(item)
                             } label: {
                                 Group {
                                     switch item.content {
