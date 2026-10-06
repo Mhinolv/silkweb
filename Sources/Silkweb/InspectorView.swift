@@ -8,7 +8,6 @@ struct InspectorView: View {
     @State private var outlineHovered = false
     @State private var manualScrollUntil = Date.distantPast
     @FocusState private var outlineFocused: Bool
-    @Environment(\.controlActiveState) private var activeState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var preview: PreviewCoordinator { workspace.preview }
 
@@ -38,6 +37,8 @@ struct InspectorView: View {
         // Until the editor catches up with a list click (#87), the caret belongs to another note.
         let followsEditor = preview.outlineURL == workspace.editor.url && !preview.outlinePending
         let current = followsEditor ? preview.currentItem(caret: workspace.editor.caretLocation) : nil
+        // #90: one capsule, on the keyboard selection while the Outline is focused, else on the caret's section.
+        let highlight = outlineFocused ? selectedHeading ?? current : current
         let items =
             preview.outlineItems.isEmpty ? OutlineItem.parse("", headings: preview.headings) : preview.outlineItems
         let imageCount = items.count - preview.headings.count
@@ -63,10 +64,11 @@ struct InspectorView: View {
                     List(selection: $selectedHeading) {
                         ForEach(Array(zip(items, threads).enumerated()), id: \.offset) { position, pair in
                             let (item, thread) = pair
+                            let highlighted = highlight == item.id
                             Button {
                                 // A click jumps and focuses the editor (owner decision #89, replacing #72's
-                                // focused Outline). The row stays selected, so ↑/↓ resume there once the
-                                // Outline is focused again (Tab or a click on its background).
+                                // focused Outline). The caret is then in the clicked section, so ↑/↓ resume
+                                // there once the Outline is focused again (Tab or a click on its background).
                                 guard followsEditor else { return }
                                 selectedHeading = item.id
                                 preview.navigate(item)
@@ -74,21 +76,22 @@ struct InspectorView: View {
                                 Group {
                                     switch item.content {
                                     case .heading(let heading):
-                                        row(heading, depth: item.depth, current: current == item.id)
+                                        row(
+                                            heading, depth: item.depth, current: current == item.id,
+                                            highlighted: highlighted)
                                     case .image:
                                         OutlineImageRow(
                                             item: item, document: preview.outlineURL, root: workspace.root,
-                                            current: current == item.id, selected: showsSelection(item.id))
+                                            current: current == item.id, highlighted: highlighted)
                                     }
                                 }
-                                .outlineRowChrome(
-                                    thread: thread, indent: item.indent, current: current == item.id,
-                                    selected: showsSelection(item.id)
-                                )
+                                .outlineRowChrome(thread: thread, indent: item.indent, highlighted: highlighted)
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain).tag(item.id).id(position)
                             .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                            // #90: only Silkweb's capsule shows; the List's system-accent fill never does.
+                            .background(SelectionHighlightSuppressor())
                         }
                     }
                     .listStyle(.sidebar)
@@ -133,8 +136,9 @@ struct InspectorView: View {
                         if let selectedHeading, !ids.contains(selectedHeading) { self.selectedHeading = nil }
                     }
                     .onChange(of: outlineFocused) { _, focused in
-                        // Tab into the Outline starts at the current row.
-                        if focused, selectedHeading == nil { selectedHeading = current ?? items.first?.id }
+                        // Tab into the Outline starts at the current row; leaving it drops the keyboard
+                        // selection, so the capsule returns to the caret's section (#90).
+                        selectedHeading = focused ? current ?? selectedHeading ?? items.first?.id : nil
                     }
                     .onKeyPress(.return) {
                         guard followsEditor, let item = items.first(where: { $0.id == selectedHeading }) else {
@@ -150,20 +154,12 @@ struct InspectorView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    /// The List draws the accent fill only while focused in the key window.
-    private func showsSelection(_ id: String) -> Bool {
-        outlineFocused && activeState == .key && selectedHeading == id
-    }
-
-    private func row(_ heading: MarkdownHeading, depth: Int, current: Bool) -> some View {
+    private func row(_ heading: MarkdownHeading, depth: Int, current: Bool, highlighted: Bool) -> some View {
         let style = OutlineRowStyle(level: heading.level, depth: depth)
-        let selected = showsSelection(heading.id)
         return Text(heading.text)
             .font(.system(size: OutlineRowStyle.fontSize, weight: style.isSemibold ? .semibold : .regular))
             .foregroundStyle(
-                selected
-                    ? Color(nsColor: .alternateSelectedControlTextColor)
-                    : Color(nsColor: current || !style.isSecondary ? .labelColor : .secondaryLabelColor)
+                Color(nsColor: highlighted || current || !style.isSecondary ? .labelColor : .secondaryLabelColor)
             )
             .lineLimit(1).truncationMode(.tail)
             .help(heading.text)
@@ -174,15 +170,16 @@ struct InspectorView: View {
 }
 
 /// #72 thread tree: a fixed-height row hanging from the sidebar's 1.5 pt `SilkwebThread` guides, with the
-/// current section on the sidebar's `SilkwebSelection` capsule. Keyboard selection keeps the List's own fill.
+/// highlighted row on the sidebar's capsule (#90): `SilkwebSelection` in the key window, focused or not, and
+/// `SilkwebSelectionInactive` in a background window. The List's own selection fill is suppressed.
 struct OutlineRowChrome: ViewModifier {
     static let leading: CGFloat = 6
     static let trailing: CGFloat = 8
     let thread: OutlineRowStyle.Thread
     let indent: Double
-    let current: Bool
-    let selected: Bool
+    let highlighted: Bool
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.controlActiveState) private var activeState
 
     func body(content: Content) -> some View {
         content
@@ -192,9 +189,11 @@ struct OutlineRowChrome: ViewModifier {
             .frame(height: OutlineRowStyle.rowHeight)
             .background {
                 ZStack(alignment: .leading) {
-                    if current && !selected {
-                        RoundedRectangle(cornerRadius: 6).fill(Color.silkwebSelection)
-                        if contrast == .increased {
+                    if highlighted {
+                        let key = activeState == .key
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(key ? Color.silkwebSelection : Color.silkwebSelectionInactive)
+                        if key && contrast == .increased {
                             RoundedRectangle(cornerRadius: 6).strokeBorder(Color.silkwebAccent, lineWidth: 1)
                         }
                     }
@@ -210,8 +209,8 @@ struct OutlineRowChrome: ViewModifier {
 }
 
 extension View {
-    func outlineRowChrome(thread: OutlineRowStyle.Thread, indent: Double, current: Bool, selected: Bool) -> some View {
-        modifier(OutlineRowChrome(thread: thread, indent: indent, current: current, selected: selected))
+    func outlineRowChrome(thread: OutlineRowStyle.Thread, indent: Double, highlighted: Bool) -> some View {
+        modifier(OutlineRowChrome(thread: thread, indent: indent, highlighted: highlighted))
     }
 }
 

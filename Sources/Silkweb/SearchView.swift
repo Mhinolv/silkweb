@@ -193,7 +193,8 @@ struct SearchResultCapsule: View {
 }
 
 /// Turns off the hosting table's own selection fill so only the capsule shows; selection itself is unchanged.
-private struct SelectionHighlightSuppressor: NSViewRepresentable {
+/// Search results and the Outline (#90).
+struct SelectionHighlightSuppressor: NSViewRepresentable {
     func makeNSView(context: Context) -> Probe { Probe() }
     func updateNSView(_ view: Probe, context: Context) { view.suppress() }
 
