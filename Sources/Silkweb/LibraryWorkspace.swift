@@ -181,7 +181,7 @@ final class LibraryWorkspace {
                 + (includesSubfolders ? " (with subfolders)" : "")
             : CountPresentation.label(filteredSearchResults.count, unit: .result)
     }
-    /// The toolbar path: the open document's real folder, else the list scope. Reads no document text.
+    /// The status bar path (#91): the open document's real folder, else the list scope. Reads no document text.
     var breadcrumb: Breadcrumb {
         let rootURL = snapshot?.rootURL ?? root
         let library =
@@ -824,11 +824,11 @@ struct LibraryWorkspaceView: View {
                     .help("Filter by Tag").disabled(workspace.tags.isEmpty).toolbarGlyph()
                 }
                 ToolbarItem(placement: .navigation) {
-                    ToolbarBreadcrumb(workspace: workspace)
+                    ToolbarGap(workspace: workspace)
                 }
             }
-            // The compact bar has no title row; the breadcrumb replaces it. The title still feeds the
-            // Window menu, Mission Control and VoiceOver.
+            // The compact bar has no title row and no path (#91: the path is in the status bar). The title and
+            // the count still feed the Window menu, Mission Control and VoiceOver.
             .toolbar(removing: .title)
             .navigationTitle(workspace.editor.url == nil ? workspace.folderName : workspace.editor.name)
             .navigationSubtitle(workspace.subtitle)

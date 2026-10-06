@@ -2,17 +2,18 @@ import AppKit
 import SilkwebCore
 import SwiftUI
 
-/// Toolbar geometry for the one-line breadcrumb (silkweb-1.65). Only the breadcrumb observes it.
+/// Toolbar geometry for the empty middle of the compact bar (silkweb-1.65; #91 moved the path to the status bar).
+/// Only the gap observes it.
 @MainActor @Observable
 final class ToolbarMetrics {
-    /// The breadcrumb item's width, including its leading gap. It fills the bar between Filter by Tag and the
-    /// trailing items, which also keeps those items at the trailing edge now that the title is removed.
-    var breadcrumbWidth: CGFloat = 320
+    /// The gap item's width. It fills the bar between Filter by Tag and the trailing items, which keeps those items
+    /// at the trailing edge now that the title is removed (macOS 15 has no SwiftUI flexible toolbar spacer).
+    var gapWidth: CGFloat = 320
     @ObservationIgnored let controller = CompactToolbarController()
     init() { controller.metrics = self }
 }
 
-/// Keeps the compact bar laid out: sizes the breadcrumb to the room the other items leave, sets overflow
+/// Keeps the compact bar laid out: sizes the empty gap to the room the other items leave, sets overflow
 /// priorities, and slides the leading items into the traffic-light area only while no window button shows
 /// (hidden buttons, or the concealed full-screen titlebar; AppKit doesn't reflow for them) and AppKit lets the
 /// row take the freed room.
@@ -25,8 +26,8 @@ final class ToolbarMetrics {
     private var scheduled = false
     /// The last width each item took in the bar, viewer padding included, so items in the » menu still count.
     private var slotWidths: [ObjectIdentifier: CGFloat] = [:]
-    /// The breadcrumb viewer's padding, last seen while it was placed.
-    private var crumbPadding: CGFloat?
+    /// The gap viewer's padding, last seen while it was placed.
+    private var gapPadding: CGFloat?
     /// AppKit's own toolbar-view frame while the leading items are shifted; nil when nothing is shifted.
     private var naturalFrame: NSRect?
     private var shiftedFrame: NSRect?
@@ -48,7 +49,8 @@ final class ToolbarMetrics {
     static let trailingGlyphInset: CGFloat = 10 - trailingOverhang
     /// Room after the last item's viewer.
     static let rowEndInset = trailingInset - trailingGlyphInset
-    static let minimumBreadcrumbWidth: CGFloat = 120
+    /// 16 pt between the library and view groups at the least, the design system's gap between groups.
+    static let minimumGapWidth = Spacing.medium
     static let nudgeLimit = 3
     /// AppKit starts the row about 10 pt after the zoom button; a row starting further in follows a section.
     static let sectionSlack: CGFloat = 24
@@ -56,9 +58,9 @@ final class ToolbarMetrics {
     static var predictsSections = true
     /// How far short of its end the shifted row may stop before it counts as refused (rounding, viewer padding).
     static let rowEndSlack: CGFloat = 12
-    /// The breadcrumb gives way first: it shortens through its `…` ladder, and only below its minimum width does
-    /// it go into the » menu. The buttons follow in this order; the sidebar toggle and mode control never do.
-    static let breadcrumbPriority = -2000
+    /// The gap gives way first: it shrinks to its minimum, and only below that does it go into the » menu. The
+    /// buttons follow in this order, Filter by Tag first; the sidebar toggle and mode control never do.
+    static let gapPriority = -2000
     static let overflowPriorities: [String: Int] = [
         "Filter by Tag": -1000, "Sort By": -800, "Show Outline": -600, "Show Document Info": -400, "New Document": -200,
     ]
@@ -72,7 +74,7 @@ final class ToolbarMetrics {
             self.window = window
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
             let center = NotificationCenter.default
-            // Resize updates at once, so the breadcrumb shrinks with the window instead of after it.
+            // Resize updates at once, so the gap shrinks with the window instead of after it.
             observers =
                 [
                     center.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) {
@@ -151,13 +153,13 @@ final class ToolbarMetrics {
 
     func update() {
         guard let window, let anchor, let toolbar = window.toolbar,
-            let crumbItem = toolbar.items.first(where: { $0.view.map { anchor.isDescendant(of: $0) } == true }),
-            let crumb = crumbItem.view
+            let gapItem = toolbar.items.first(where: { $0.view.map { anchor.isDescendant(of: $0) } == true }),
+            let gap = gapItem.view
         else { return }
         for item in toolbar.items {
             let priority =
-                item === crumbItem
-                ? Self.breadcrumbPriority
+                item === gapItem
+                ? Self.gapPriority
                 : Self.overflowPriorities[item.label] ?? NSToolbarItem.VisibilityPriority.user.rawValue
             if item.visibilityPriority.rawValue != priority {
                 item.visibilityPriority = NSToolbarItem.VisibilityPriority(rawValue: priority)
@@ -173,8 +175,8 @@ final class ToolbarMetrics {
         else { return }
         for view in placed { slotWidths[ObjectIdentifier(view)] = view.superview!.frame.width }
         let padding = placed.first.map { $0.superview!.frame.width - $0.frame.width } ?? 8
-        // The breadcrumb's viewer may pad it differently from the buttons'; the row's end depends on its own.
-        if placed.contains(where: { $0 === crumb }) { crumbPadding = crumb.superview!.frame.width - crumb.frame.width }
+        // The gap's viewer may pad it differently from the buttons'; the row's end depends on its own.
+        if placed.contains(where: { $0 === gap }) { gapPadding = gap.superview!.frame.width - gap.frame.width }
         func slot(_ view: NSView) -> CGFloat { slotWidths[ObjectIdentifier(view)] ?? view.fittingSize.width + padding }
 
         // Leading edge. AppKit lays the row out itself (after the traffic lights, or after the sidebar column);
@@ -219,35 +221,35 @@ final class ToolbarMetrics {
             move(toolbarView, to: target, in: window)
         }
 
-        // The breadcrumb takes the room the other items leave, so the trailing items stay at the trailing edge.
+        // The gap takes the room the other items leave, so the trailing items stay at the trailing edge.
         // The row ends at the bar's edge or where AppKit reserves the titlebar over the Outline inspector.
-        // While shifted, the breadcrumb also takes the freed space.
+        // While shifted, the gap also takes the freed space.
         let grows = shiftedFrame != nil
         let leading = grows ? target.minX + firstViewer : naturalLeading
         var limit = grows ? target.maxX : natural.maxX
         for region in regions where region.minX > naturalLeading + 1 {
             limit = min(limit, region.minX)
         }
-        let others = views.filter { $0 !== crumb }.reduce(CGFloat(0)) { $0 + slot($1) }
-        let available = floor(limit - Self.rowEndInset - leading - others - (crumbPadding ?? padding))
-        let width = max(Self.minimumBreadcrumbWidth, available)
-        let changed = metrics.map { abs($0.breadcrumbWidth - width) > 0.5 } ?? false
+        let others = views.filter { $0 !== gap }.reduce(CGFloat(0)) { $0 + slot($1) }
+        let available = floor(limit - Self.rowEndInset - leading - others - (gapPadding ?? padding))
+        let width = max(Self.minimumGapWidth, available)
+        let changed = metrics.map { abs($0.gapWidth - width) > 0.5 } ?? false
         if changed {
-            metrics?.breadcrumbWidth = width
+            metrics?.gapWidth = width
             nudges = 0
         }
-        // Once the breadcrumb has its width, a row that still stops short of its end wasn't given the room.
+        // Once the gap has its width, a row that still stops short of its end wasn't given the room.
         let rowEnd = toolbarView.frame.minX + (placed.map { $0.superview!.frame.maxX }.max() ?? 0)
         let rowShort =
             grows && !animating && toolbarView.frame == target && !changed && placed.count == views.count
-            && available >= Self.minimumBreadcrumbWidth
-            && abs(crumb.frame.width - width) < 1 && rowEnd < limit - Self.rowEndInset - Self.rowEndSlack
+            && available >= Self.minimumGapWidth
+            && abs(gap.frame.width - width) < 1 && rowEnd < limit - Self.rowEndInset - Self.rowEndSlack
         if grows, rowShort || (placed.count < views.count && nudges >= Self.nudgeLimit) {
             // AppKit didn't give the shifted row the freed space after all: keep AppKit's placement instead, so
-            // the breadcrumb keeps its room and the trailing items their edge.
+            // the trailing items keep their edge.
             shiftGrowthFailed = true
             scheduleUpdate()
-        } else if placed.count < views.count, available >= Self.minimumBreadcrumbWidth {
+        } else if placed.count < views.count, available >= Self.minimumGapWidth {
             nudge(toolbar, toolbarView: toolbarView)
         } else if changed {
             // Confirm the row once SwiftUI applies the width.
@@ -295,7 +297,7 @@ final class ToolbarMetrics {
         }
     }
 
-    /// NSToolbar doesn't re-measure items already in the » menu, so once the breadcrumb fits again, ask it to
+    /// NSToolbar doesn't re-measure items already in the » menu, so once the gap fits again, ask it to
     /// lay the row out (after SwiftUI applies the new width). Bounded: a window narrower than the fixed items
     /// legitimately keeps the » menu.
     private func nudge(_ toolbar: NSToolbar, toolbarView: NSView) {
@@ -317,83 +319,113 @@ final class ToolbarMetrics {
     }
 }
 
-/// `Library › Vanlife › Settling In` with a quiet count suffix, in one line of the compact bar.
-struct ToolbarBreadcrumb: View {
+/// The empty middle of the compact bar (#91): library group · gap · view group. No path, no title.
+struct ToolbarGap: View {
     let workspace: LibraryWorkspace
 
     var body: some View {
-        BreadcrumbRepresentable(workspace: workspace)
-            .frame(width: workspace.toolbarMetrics.breadcrumbWidth, height: 22)
+        ToolbarAnchor(controller: workspace.toolbarMetrics.controller)
+            .frame(width: workspace.toolbarMetrics.gapWidth, height: 22)
+            .accessibilityHidden(true)
     }
 }
 
-private struct BreadcrumbRepresentable: NSViewRepresentable {
+/// Hands the window to the controller and marks the gap's item, which the controller sizes.
+private struct ToolbarAnchor: NSViewRepresentable {
+    let controller: CompactToolbarController
+    func makeNSView(context: Context) -> ToolbarAnchorView { ToolbarAnchorView(controller: controller) }
+    func updateNSView(_ view: ToolbarAnchorView, context: Context) {}
+}
+
+final class ToolbarAnchorView: NSView {
+    let controller: CompactToolbarController
+    init(controller: CompactToolbarController) {
+        self.controller = controller
+        super.init(frame: .zero)
+        setAccessibilityElement(false)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { controller.attach(anchor: self) }
+    }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// `Library › Vanlife › Settling In`, leading in the status bar (#91): the document's real folder. Reads no text.
+struct StatusBarPath: NSViewRepresentable {
     let workspace: LibraryWorkspace
     func makeNSView(context: Context) -> BreadcrumbView {
-        BreadcrumbView(controller: workspace.toolbarMetrics.controller) { [weak workspace] in
-            workspace?.selectFolder($0)
-        }
+        BreadcrumbView { [weak workspace] in workspace?.selectFolder($0) }
     }
     func updateNSView(_ view: BreadcrumbView, context: Context) {
-        // Observes navigation and counts only; the path never depends on document text.
-        view.update(path: workspace.breadcrumb, count: workspace.subtitle)
+        view.update(path: workspace.breadcrumb)
+    }
+    /// Unspecified: the whole path; zero: the folded path; otherwise the offered width up to the whole path. Below
+    /// the folded path's width the view clips rather than overlap the trailing cluster.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView view: BreadcrumbView, context: Context) -> CGSize? {
+        let width =
+            switch proposal.width {
+            case nil: view.idealWidth
+            case 0: view.minimumWidth
+            case let offered?: min(view.idealWidth, offered)
+            }
+        return CGSize(width: width, height: CrumbButton.height)
     }
 }
 
 /// Native buttons, so Full Keyboard Access, VoiceOver and the pointer all reach each crumb.
 final class BreadcrumbView: NSView {
-    let controller: CompactToolbarController
     let select: (String) -> Void
     private(set) var path = Breadcrumb(crumbs: [], current: "")
-    private(set) var count = ""
     private(set) var crumbButtons: [CrumbButton] = []
     private(set) var ellipsis: CrumbButton?
     private var separators: [NSImageView] = []
     let currentLabel = NSTextField(labelWithString: "")
-    let countLabel = NSTextField(labelWithString: "")
     private(set) var fit: Breadcrumb.Fit?
+    /// The whole path and the fully folded one, measured once per path.
+    private(set) var idealWidth: CGFloat = 0
+    private(set) var minimumWidth: CGFloat = 0
 
-    static let crumbFont = NSFont.systemFont(ofSize: 13)
-    static let currentFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
-    static let countFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-    /// Hover padding on each side of a crumb; it also spaces the text from the chevrons (6 pt).
-    static let padding: CGFloat = 6
+    static let crumbFont = NSFont.systemFont(ofSize: 11)
+    static let currentFont = NSFont.systemFont(ofSize: 11, weight: .medium)
+    /// Hover padding on each side of a crumb; it also spaces the text from the chevrons (4 pt).
+    static let padding: CGFloat = 4
     static let separatorWidth: CGFloat = 8
-    /// 16 pt from Filter by Tag to the first crumb's text.
-    static let leadingGap = Spacing.medium - padding
-    static let countGap = Spacing.xSmall
+    static let ellipsisWidth = textWidth("…", crumbFont) + 2 * padding
+    static let metrics = Breadcrumb.Metrics(separator: Double(separatorWidth), ellipsis: Double(ellipsisWidth))
 
-    init(controller: CompactToolbarController, select: @escaping (String) -> Void) {
-        self.controller = controller
+    init(select: @escaping (String) -> Void) {
         self.select = select
-        super.init(frame: NSRect(x: 0, y: 0, width: 320, height: 22))
+        super.init(frame: NSRect(x: 0, y: 0, width: 320, height: CrumbButton.height))
         currentLabel.font = Self.currentFont
         currentLabel.textColor = .labelColor
         currentLabel.lineBreakMode = .byTruncatingMiddle
-        countLabel.font = Self.countFont
-        countLabel.textColor = .tertiaryLabelColor
-        countLabel.setAccessibilityElement(false)
         addSubview(currentLabel)
-        addSubview(countLabel)
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Path")
+        setAccessibilityIdentifier("statusPath")
+        // At its folded minimum the title can still be wider than a very narrow bar; it never spills over.
+        clipsToBounds = true
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        if window != nil { controller.attach(anchor: self) }
-    }
 
     static func textWidth(_ text: String, _ font: NSFont) -> CGFloat {
         ceil((text as NSString).size(withAttributes: [.font: font]).width)
     }
 
-    func update(path: Breadcrumb, count: String) {
-        guard path != self.path || count != self.count else { return }
+    /// Each crumb's and the document title's width, hover padding included.
+    private var measured: (crumbs: [Double], current: Double) {
+        (
+            path.crumbs.map { Double(Self.textWidth($0.title, Self.crumbFont) + 2 * Self.padding) },
+            Double(Self.textWidth(path.current, Self.currentFont) + 2 * Self.padding)
+        )
+    }
+
+    func update(path: Breadcrumb) {
+        guard path != self.path else { return }
         self.path = path
-        self.count = count
         for view in crumbButtons + separators { view.removeFromSuperview() }
         crumbButtons = path.crumbs.map { crumb in
             let button = CrumbButton(title: crumb.title, link: crumb.folderPath != nil)
@@ -410,7 +442,7 @@ final class BreadcrumbView: NSView {
         separators = (0...path.crumbs.count).map { _ in
             let image = NSImageView()
             image.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)?
-                .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
+                .withSymbolConfiguration(.init(pointSize: 8, weight: .semibold))
             image.contentTintColor = .tertiaryLabelColor
             image.setAccessibilityElement(false)
             addSubview(image)
@@ -418,20 +450,22 @@ final class BreadcrumbView: NSView {
         }
         currentLabel.stringValue = path.current
         currentLabel.toolTip = path.current
-        countLabel.stringValue = count
-        setAccessibilityValue(path.accessibilityValue(count: count))
+        setAccessibilityValue(path.accessibilityValue)
+        let (crumbs, current) = measured
+        idealWidth = ceil(
+            Breadcrumb.fit(crumbs: crumbs, current: current, available: .infinity, metrics: Self.metrics).width)
+        minimumWidth = ceil(
+            Breadcrumb.fit(crumbs: crumbs, current: current, available: 0, metrics: Self.metrics).width)
         needsLayout = true
     }
 
     override func layout() {
         super.layout()
-        let ellipsisWidth = Self.textWidth("…", Self.crumbFont) + 2 * Self.padding
+        let ellipsisWidth = Self.ellipsisWidth
+        let (crumbs, current) = measured
         let fit = Breadcrumb.fit(
-            crumbs: path.crumbs.map { Double(Self.textWidth($0.title, Self.crumbFont) + 2 * Self.padding) },
-            current: Double(Self.textWidth(path.current, Self.currentFont) + 2 * Self.padding),
-            count: count.isEmpty ? 0 : Double(Self.countGap - Self.padding + Self.textWidth(count, Self.countFont)),
-            available: Double(bounds.width - Self.leadingGap),
-            metrics: .init(separator: Double(Self.separatorWidth), ellipsis: Double(ellipsisWidth)))
+            // Half a point of slack, so a frame rounded to the pixel grid doesn't fold a path that fits.
+            crumbs: crumbs, current: current, available: Double(bounds.width) + 0.5, metrics: Self.metrics)
         self.fit = fit
         // The `…` pull-down exists only while ancestors are folded.
         if fit.collapsed.isEmpty {
@@ -457,7 +491,7 @@ final class BreadcrumbView: NSView {
                 menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY - 4), in: button)
             }
         }
-        // Crumbs, the current crumb and the count share one text baseline.
+        // Crumbs and the current crumb share one text baseline.
         let height = bounds.height
         let baseline = floor(
             (height - Self.crumbFont.ascender + Self.crumbFont.descender) / 2 - Self.crumbFont.descender)
@@ -467,7 +501,7 @@ final class BreadcrumbView: NSView {
                 x: x, y: baseline + view.firstBaselineOffsetFromTop - size.height, width: max(0, width),
                 height: size.height)
         }
-        var x = Self.leadingGap
+        var x: CGFloat = 0
         var separatorIndex = 0
         func separator() {
             let image = separators[separatorIndex]
@@ -491,9 +525,6 @@ final class BreadcrumbView: NSView {
         for image in separators[separatorIndex...] { image.isHidden = true }
         // Labels inset their text by 2 pt on each side; widen the frames so measured text isn't truncated.
         place(currentLabel, x: x + Self.padding - 2, width: CGFloat(fit.currentWidth) - 2 * Self.padding + 4)
-        x += CGFloat(fit.currentWidth)
-        countLabel.isHidden = !fit.showsCount
-        place(countLabel, x: x + Self.countGap - Self.padding - 2, width: Self.textWidth(count, Self.countFont) + 4)
         setAccessibilityChildren((ellipsis.map { [$0] } ?? []) + crumbButtons.filter { !$0.isHidden } + [currentLabel])
     }
 

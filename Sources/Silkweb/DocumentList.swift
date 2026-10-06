@@ -243,12 +243,15 @@ struct DocumentDetail: View {
     }
 }
 
-/// Writing metrics lead (1.25 fills `statusCounts`); save state trails. Pane surface and one hairline only.
+/// The path leads, writing metrics sit on the midline (1.25 fills `statusCounts`), save state trails (#91).
+/// Pane surface and one hairline only.
 struct DocumentStatusBar: View {
     let session: DocumentSession
     let readOnlyLibrary: Bool
     /// Supplies the Focus/Typewriter chip (1.27).
     var workspace: LibraryWorkspace? = nil
+    /// The layout left the counts no room (the last narrow rule); flips only when that changes.
+    @State private var countsHidden = false
 
     enum SaveLabel: String {
         case saved = "Saved", edited = "Edited", notSaved = "Not Saved", readOnly = "Read-only"
@@ -267,12 +270,26 @@ struct DocumentStatusBar: View {
     var label: SaveLabel { SaveLabel(state: session.state, readOnly: readOnlyLibrary || session.readOnly) }
 
     var body: some View {
-        HStack(spacing: 0) {
+        StatusBarLayout {
+            // Only an open library document has a path; a bare session (tests, previews) shows none.
+            if let workspace, workspace.editor === session, session.url != nil {
+                StatusBarPath(workspace: workspace)
+            } else {
+                Color.clear.frame(width: 0, height: 0)
+            }
             DocumentStatusCounts(
                 statistics: session.statistics,
-                showsSelection: workspace?.preview.mode != .preview)
-            Spacer(minLength: 8)
-            Group {
+                showsSelection: workspace?.preview.mode != .preview
+            )
+            .opacity(countsHidden ? 0 : 1).accessibilityHidden(countsHidden)
+            // Takes exactly the width the layout offers; zero hides the counts.
+            .frame(minWidth: 0, maxWidth: .infinity).clipped()
+            .onGeometryChange(for: Bool.self) {
+                $0.size.width < 1
+            } action: {
+                countsHidden = $0
+            }
+            HStack(spacing: 0) {
                 if let workspace {
                     WritingModesChip(workspace: workspace).padding(.trailing, 12 - 6)
                 }
@@ -284,9 +301,8 @@ struct DocumentStatusBar: View {
                     .accessibilityValue(label.rawValue)
                     .accessibilityIdentifier("statusSaveState")
             }
-            .layoutPriority(1)
+            .fixedSize()
         }
-        .padding(.horizontal, Spacing.medium)
         .frame(height: Spacing.statusBarHeight)
         .paneStrip(hairline: .top)
         .accessibilityElement(children: .contain)
@@ -301,7 +317,50 @@ struct DocumentStatusBar: View {
     }
 }
 
-/// Leading status-bar counts (silkweb-1.25): `1,204 words · 6,830 characters`, or the selection
+/// The status bar's three zones (#91), in order: path, counts, trailing cluster. `StatusBarArrangement` decides
+/// the widths: the path folds first, then the counts leave the midline, narrow, and hide; the trailing cluster
+/// never shrinks.
+struct StatusBarLayout: Layout {
+    static let padding = Spacing.medium
+    static let gap = Spacing.small
+    /// Below this the counts hide rather than show a sliver.
+    static let countsMinimum: CGFloat = 48
+    /// The first crumb's text starts at the padding; its hover capsule reaches into it.
+    static var pathLeading: CGFloat { padding - BreadcrumbView.padding }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let ideal = subviews.reduce(2 * Self.padding + 2 * Self.gap) { $0 + $1.sizeThatFits(.unspecified).width }
+        return CGSize(width: proposal.width ?? ideal, height: proposal.height ?? Spacing.statusBarHeight)
+    }
+
+    func arrangement(width: CGFloat, subviews: Subviews) -> StatusBarArrangement? {
+        guard subviews.count == 3 else { return nil }
+        let (path, counts, trailing) = (subviews[0], subviews[1], subviews[2])
+        return StatusBarArrangement.arrange(
+            width: Double(width), pathLeading: Double(Self.pathLeading), trailingEdge: Double(width - Self.padding),
+            gap: Double(Self.gap), pathMinimum: Double(path.sizeThatFits(.init(width: 0, height: nil)).width),
+            pathIdeal: Double(path.sizeThatFits(.unspecified).width),
+            counts: { offered in
+                Double(counts.sizeThatFits(.init(width: offered.isFinite ? CGFloat(offered) : nil, height: nil)).width)
+            },
+            countsMinimum: Double(Self.countsMinimum), trailing: Double(trailing.sizeThatFits(.unspecified).width))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let zones = arrangement(width: bounds.width, subviews: subviews) else { return }
+        func place(_ index: Int, x: Double, width: Double) {
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + CGFloat(x), y: bounds.midY), anchor: .leading,
+                proposal: .init(width: CGFloat(width), height: nil))
+        }
+        // Zero would ask the path for its folded width; a sliver keeps it clipped instead.
+        place(0, x: Double(Self.pathLeading), width: max(zones.pathWidth, 1))
+        place(1, x: zones.countsX, width: zones.countsWidth)
+        place(2, x: zones.trailingX, width: Double(bounds.width - Self.padding) - zones.trailingX)
+    }
+}
+
+/// Centred status-bar counts (silkweb-1.25; centred since #91): `1,204 words · 6,830 characters`, or the selection
 /// against the totals. Narrow strips drop the characters segment, then truncate. No animation.
 struct DocumentStatusCounts: View {
     let statistics: DocumentStatisticsModel

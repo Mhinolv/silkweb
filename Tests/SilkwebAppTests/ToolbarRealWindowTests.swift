@@ -43,14 +43,16 @@ final class ToolbarRealWindowTests: XCTestCase {
             let label = label == "Hide Sidebars" ? workspace.sidebarsTitle : label
             return toolbar.items.first { $0.label == label }?.view
         }
-        var crumbItem: NSToolbarItem? {
+        /// The empty middle between the library and view groups (#91).
+        var gapItem: NSToolbarItem? {
             toolbar.items.first { item in
-                item.view.map { ToolbarRealWindowTests.descendants($0).contains { $0 is BreadcrumbView } } == true
+                item.view.map { ToolbarRealWindowTests.descendants($0).contains { $0 is ToolbarAnchorView } } == true
             }
         }
-        var breadcrumb: BreadcrumbView? {
-            crumbItem?.view.flatMap {
-                ToolbarRealWindowTests.descendants($0).compactMap { $0 as? BreadcrumbView }.first
+        /// Any path control left in the bar (#91 moved it to the status bar).
+        var toolbarPaths: [BreadcrumbView] {
+            toolbar.items.compactMap(\.view).flatMap(ToolbarRealWindowTests.descendants).compactMap {
+                $0 as? BreadcrumbView
             }
         }
         var buttons: [NSButton] {
@@ -71,9 +73,8 @@ final class ToolbarRealWindowTests: XCTestCase {
         /// Every item's placement and frame, for failure messages.
         var geometry: String {
             toolbar.items.map { item in
-                "\(item.label.isEmpty ? "breadcrumb" : item.label): placed=\(item.view?.window === window) frame=\(item.view.map(frame) ?? .zero)"
-            }.joined(separator: "; ")
-                + "; breadcrumbWidth=\(workspace.toolbarMetrics.breadcrumbWidth) window=\(window.frame.width)"
+                "\(item.label.isEmpty ? "unlabelled" : item.label): placed=\(item.view?.window === window) frame=\(item.view.map(frame) ?? .zero)"
+            }.joined(separator: "; ") + "; gapWidth=\(workspace.toolbarMetrics.gapWidth) window=\(window.frame.width)"
         }
     }
 
@@ -158,7 +159,8 @@ final class ToolbarRealWindowTests: XCTestCase {
         }
     }
 
-    /// (c) nothing in the » menu: every control and the breadcrumb are placed, left to right in design order.
+    /// (c) nothing in the » menu: every control is placed, left to right in design order, and the bar holds only
+    /// the seven controls and the empty gap between the groups: no path and no count (#91).
     @MainActor private func assertNothingOverflows(
         _ h: Harness, _ context: String, file: StaticString = #filePath, line: UInt = #line
     ) throws {
@@ -168,13 +170,15 @@ final class ToolbarRealWindowTests: XCTestCase {
                 view.window === h.window, "\(context): \(label) overflowed into » — \(h.geometry)", file: file,
                 line: line)
         }
-        let crumb = try XCTUnwrap(h.crumbItem?.view, context, file: file, line: line)
         XCTAssertTrue(
-            crumb.window === h.window, "\(context): breadcrumb overflowed into » — \(h.geometry)", file: file,
-            line: line)
+            h.toolbarPaths.isEmpty, "\(context): the bar shows no path — \(h.geometry)", file: file, line: line)
+        let gap = try XCTUnwrap(h.gapItem?.view, "\(context): the empty gap", file: file, line: line)
+        XCTAssertEqual(
+            h.toolbar.items.count, Self.controls.count + 1, "\(context): only the controls and the gap — \(h.geometry)",
+            file: file, line: line)
         guard h.placed.count == h.toolbar.items.count else { return }
         let order =
-            ["Hide Sidebars", "New Document", "Sort By", "Filter by Tag"].compactMap { h.view($0) } + [crumb]
+            ["Hide Sidebars", "New Document", "Sort By", "Filter by Tag"].compactMap { h.view($0) } + [gap]
             + ["View Mode", "Show Outline", "Show Document Info"].compactMap { h.view($0) }
         for (left, right) in zip(order, order.dropFirst()) {
             XCTAssertLessThanOrEqual(
@@ -184,14 +188,14 @@ final class ToolbarRealWindowTests: XCTestCase {
     }
 
     /// Before and after opening a long-titled document in a deep folder, at 1400 and 900 pt, with and without
-    /// the Outline inspector: clear of the traffic lights, nothing in », and at 900 pt only the breadcrumb shortens.
+    /// the Outline inspector: clear of the traffic lights, nothing in », the view group at the trailing edge and
+    /// empty space between the groups (#91).
     @MainActor
     func testRealWindowKeepsEveryItemBesideTheTrafficLightsBeforeAndAfterOpeningADocument() async throws {
         for outline in [false, true] {
             let h = try await makeHarness(width: 1400, outline: outline)
             defer { h.cleanUp() }
             XCTAssertFalse(h.window.isVisible)
-            var widths: [CGFloat: CGFloat] = [:]
             for opened in [false, true] {
                 if opened {
                     h.workspace.navigate(folder: Self.deep, documents: [Self.document], pinned: true)
@@ -203,17 +207,16 @@ final class ToolbarRealWindowTests: XCTestCase {
                     let context = "\(Int(width)) pt, outline \(outline), document open \(opened)"
                     try assertClearOfWindowButtons(h, context)
                     try assertNothingOverflows(h, context)
-                    let crumb = try XCTUnwrap(h.crumbItem?.view)
-                    widths[width] = h.frame(crumb).width
-                    if opened, width == 900, let breadcrumb = h.breadcrumb, let fit = breadcrumb.fit {
-                        // Only the breadcrumb gives way: its ancestors fold into `…`; the title stays.
-                        XCTAssertFalse(fit.collapsed.isEmpty, context)
-                        XCTAssertFalse(breadcrumb.currentLabel.isHidden, context)
-                        XCTAssertLessThanOrEqual(
-                            breadcrumb.currentLabel.frame.maxX, breadcrumb.bounds.maxX + 0.5, context)
-                    }
+                    XCTAssertLessThanOrEqual(
+                        try trailingGap(h), CompactToolbarController.rowEndInset + 12,
+                        "\(context): view group at the trailing edge — \(h.geometry)")
+                    let gap =
+                        h.frame(try XCTUnwrap(h.view("View Mode"))).minX
+                        - h.frame(try XCTUnwrap(h.view("Filter by Tag"))).maxX
+                    XCTAssertGreaterThanOrEqual(
+                        gap, CompactToolbarController.minimumGapWidth,
+                        "\(context): empty middle between the groups — \(h.geometry)")
                 }
-                XCTAssertLessThan(widths[900] ?? 0, widths[1400] ?? 0, "the breadcrumb is what shrinks")
             }
             // Back to the default width, the row is whole again.
             try await h.resize(1400)
@@ -303,7 +306,7 @@ final class ToolbarRealWindowTests: XCTestCase {
         try await h.settle()
         let shown = firstMinX(h)
         let shownGap = try trailingGap(h)
-        let shownWidth = h.workspace.toolbarMetrics.breadcrumbWidth
+        let shownWidth = h.workspace.toolbarMetrics.gapWidth
         try assertClearOfWindowButtons(h, "before hiding")
         let controller = h.workspace.toolbarMetrics.controller
         let reduceMotion = CompactToolbarController.reduceMotion
@@ -319,7 +322,7 @@ final class ToolbarRealWindowTests: XCTestCase {
             XCTAssertEqual(
                 try trailingGap(h), shownGap, accuracy: 0.5, "\(context): trailing items at the edge — \(h.geometry)")
             XCTAssertEqual(
-                h.workspace.toolbarMetrics.breadcrumbWidth, shownWidth, accuracy: 0.5, "\(context) — \(h.geometry)")
+                h.workspace.toolbarMetrics.gapWidth, shownWidth, accuracy: 0.5, "\(context) — \(h.geometry)")
             XCTAssertNil(controller.lastMoveAnimated, "\(context): nothing moved")
             try assertNothingOverflows(h, context)
             for button in h.buttons { button.isHidden = false }
@@ -404,11 +407,11 @@ final class ToolbarRealWindowTests: XCTestCase {
     }
 
     /// #54, the owner's repro on 3aa32f2: in full screen with the titlebar concealed the leading items slid to
-    /// the 12 pt inset, but the breadcrumb collapsed to `… › Syst…ions` and the trailing group sat right after
-    /// it with the rest of the bar empty. The bar must look like the windowed one: the breadcrumb fills the room
-    /// and the trailing group ends at the bar's edge, or at the titlebar area AppKit reserves over the Outline.
+    /// the 12 pt inset, and the trailing group sat right after them with the rest of the bar empty. The bar must
+    /// look like the windowed one: the trailing group ends at the bar's edge, or at the titlebar area AppKit
+    /// reserves over the Outline.
     @MainActor
-    func testFullScreenConcealedTitlebarKeepsTheBreadcrumbWholeAndTheTrailingItemsAtTheEdge() async throws {
+    func testFullScreenConcealedTitlebarKeepsTheTrailingItemsAtTheEdge() async throws {
         for outline in [false, true] {
             let h = try await makeHarness(width: 1400, outline: outline)
             defer { h.cleanUp() }
@@ -439,18 +442,6 @@ final class ToolbarRealWindowTests: XCTestCase {
                     XCTAssertLessThanOrEqual(
                         gap, CompactToolbarController.rowEndInset + 12,
                         "\(context): trailing items sit at the edge — \(h.geometry)")
-                    if width >= 1400, let fit = h.breadcrumb?.fit {
-                        XCTAssertTrue(fit.collapsed.isEmpty, "\(context): ancestors folded — \(h.geometry)")
-                        XCTAssertTrue(fit.showsCount, "\(context): count dropped — \(h.geometry)")
-                        if let breadcrumb = h.breadcrumb {
-                            let full =
-                                BreadcrumbView.textWidth(breadcrumb.path.current, BreadcrumbView.currentFont) + 2
-                                * BreadcrumbView.padding
-                            XCTAssertGreaterThanOrEqual(
-                                CGFloat(fit.currentWidth), full - 0.5,
-                                "\(context): current crumb truncated — \(h.geometry)")
-                        }
-                    }
                     // Hover reveal: the buttons show again, nothing sits under them, the trailing group stays put.
                     for button in h.buttons { button.isHidden = false }
                     try await h.settle()
@@ -474,11 +465,11 @@ final class ToolbarRealWindowTests: XCTestCase {
     @MainActor private final class SectionlessToolbar: NSObject, NSToolbarDelegate {
         static let leadingLabels = ["Hide Sidebars", "New Document", "Sort By", "Filter by Tag"]
         static let trailingLabels = ["View Mode", "Show Outline", "Show Document Info"]
-        static let crumbIdentifier = NSToolbarItem.Identifier("breadcrumb")
         let workspace: LibraryWorkspace
         init(workspace: LibraryWorkspace) { self.workspace = workspace }
+        static let gapIdentifier = NSToolbarItem.Identifier("gap")
         var identifiers: [NSToolbarItem.Identifier] {
-            Self.leadingLabels.map { NSToolbarItem.Identifier($0) } + [Self.crumbIdentifier]
+            Self.leadingLabels.map { NSToolbarItem.Identifier($0) } + [Self.gapIdentifier]
                 + Self.trailingLabels.map { NSToolbarItem.Identifier($0) }
         }
         func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { identifiers }
@@ -488,8 +479,8 @@ final class ToolbarRealWindowTests: XCTestCase {
             willBeInsertedIntoToolbar flag: Bool
         ) -> NSToolbarItem? {
             let item = NSToolbarItem(itemIdentifier: identifier)
-            if identifier == Self.crumbIdentifier {
-                item.view = NSHostingView(rootView: ToolbarBreadcrumb(workspace: workspace))
+            if identifier == Self.gapIdentifier {
+                item.view = NSHostingView(rootView: ToolbarGap(workspace: workspace))
             } else {
                 item.label = identifier.rawValue
                 item.view = NSButton(
@@ -501,7 +492,7 @@ final class ToolbarRealWindowTests: XCTestCase {
     }
 
     /// Without a section to grow past, AppKit gives the shifted row the freed room: the leading items slide to
-    /// the 12 pt inset, the breadcrumb widens by as much, and the trailing items keep the edge (#54). They slide
+    /// the 12 pt inset, the empty middle widens by as much, and the trailing items keep the edge (#54). They slide
     /// (0.2 s), or jump into place under Reduce Motion, and return beside the buttons when those show again.
     @MainActor
     func testWithoutASidebarSectionTheLeadingItemsSlideAndTheTrailingItemsKeepTheEdge() async throws {
@@ -541,10 +532,10 @@ final class ToolbarRealWindowTests: XCTestCase {
         func gap() -> CGFloat { window.frame.width - frame("Show Document Info").maxX }
         var geometry: String {
             toolbar.items.map {
-                "\($0.label.isEmpty ? "breadcrumb" : $0.label): placed=\($0.view?.window != nil) frame=\($0.view.map { $0.convert($0.bounds, to: nil) } ?? .zero)"
+                "\($0.label.isEmpty ? "unlabelled" : $0.label): placed=\($0.view?.window != nil) frame=\($0.view.map { $0.convert($0.bounds, to: nil) } ?? .zero)"
             }
             .joined(separator: "; ")
-                + "; breadcrumbWidth=\(workspace.toolbarMetrics.breadcrumbWidth) failed=\(controller.shiftGrowthFailed)"
+                + "; gapWidth=\(workspace.toolbarMetrics.gapWidth) failed=\(controller.shiftGrowthFailed)"
         }
         func assertWhole(_ context: String, line: UInt = #line) {
             for item in toolbar.items {
@@ -556,7 +547,7 @@ final class ToolbarRealWindowTests: XCTestCase {
                 "\(context): trailing items at the edge — \(geometry)", line: line)
         }
         let shown = firstMinX()
-        let shownWidth = workspace.toolbarMetrics.breadcrumbWidth
+        let shownWidth = workspace.toolbarMetrics.gapWidth
         let zoom = try XCTUnwrap(window.standardWindowButton(.zoomButton))
         XCTAssertGreaterThan(shown, zoom.convert(zoom.bounds, to: nil).maxX, geometry)
         XCTAssertLessThan(
@@ -579,8 +570,8 @@ final class ToolbarRealWindowTests: XCTestCase {
             XCTAssertLessThanOrEqual(
                 firstMinX(), Spacing.small + 0.5, "\(context): items at the leading inset — \(geometry)")
             XCTAssertEqual(
-                workspace.toolbarMetrics.breadcrumbWidth, shownWidth + shown - firstMinX(), accuracy: 2,
-                "\(context): the breadcrumb takes the freed room — \(geometry)")
+                workspace.toolbarMetrics.gapWidth, shownWidth + shown - firstMinX(), accuracy: 2,
+                "\(context): the gap takes the freed room — \(geometry)")
             assertWhole(context)
             for button in buttons { button.isHidden = false }
             controller.update()
@@ -589,13 +580,13 @@ final class ToolbarRealWindowTests: XCTestCase {
             try await settle()
             XCTAssertEqual(
                 firstMinX(), shown, accuracy: 0.5, "buttons shown again, Reduce Motion \(reduced): \(geometry)")
-            XCTAssertEqual(workspace.toolbarMetrics.breadcrumbWidth, shownWidth, accuracy: 0.5, geometry)
+            XCTAssertEqual(workspace.toolbarMetrics.gapWidth, shownWidth, accuracy: 0.5, geometry)
             assertWhole("buttons shown again, Reduce Motion \(reduced)")
         }
     }
 
     /// The orchestrator's fallback (#54): when AppKit refuses the shifted row the freed width, the items return
-    /// to AppKit's placement instead of shrinking the breadcrumb or leaving the trailing edge, and stay there
+    /// to AppKit's placement instead of leaving the trailing edge, and stay there
     /// while the buttons are hidden. Section prediction is off so the controller really tries.
     @MainActor
     func testRefusedShiftKeepsAppKitsPlacementAndTheTrailingEdge() async throws {
@@ -610,7 +601,7 @@ final class ToolbarRealWindowTests: XCTestCase {
         let controller = h.workspace.toolbarMetrics.controller
         let shown = firstMinX(h)
         let shownGap = try trailingGap(h)
-        let shownWidth = h.workspace.toolbarMetrics.breadcrumbWidth
+        let shownWidth = h.workspace.toolbarMetrics.gapWidth
         for button in h.buttons { button.isHidden = true }
         controller.update()
         XCTAssertNotNil(controller.lastMoveAnimated, "the controller tries the slide — \(h.geometry)")
@@ -619,7 +610,7 @@ final class ToolbarRealWindowTests: XCTestCase {
         XCTAssertTrue(controller.shiftGrowthFailed, "AppKit refuses the row after the sidebar section — \(h.geometry)")
         XCTAssertEqual(firstMinX(h), shown, accuracy: 0.5, "back at AppKit's placement — \(h.geometry)")
         XCTAssertEqual(try trailingGap(h), shownGap, accuracy: 0.5, "trailing items at the edge — \(h.geometry)")
-        XCTAssertEqual(h.workspace.toolbarMetrics.breadcrumbWidth, shownWidth, accuracy: 0.5, h.geometry)
+        XCTAssertEqual(h.workspace.toolbarMetrics.gapWidth, shownWidth, accuracy: 0.5, h.geometry)
         try assertNothingOverflows(h, "refused shift")
         // No retry while the buttons stay hidden; the next reveal clears the refusal.
         controller.update()

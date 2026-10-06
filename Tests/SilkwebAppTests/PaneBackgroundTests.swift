@@ -180,8 +180,9 @@ final class PaneBackgroundTests: XCTestCase {
             XCTAssertEqual(
                 abs(below(0) - (view.isFlipped ? editorFrame.maxY : editorFrame.minY)), 26, accuracy: 1.5,
                 "status strip under the editor in \(name.rawValue)")
-            // Mid-strip: the leading counts slot is empty and “Saved” sits at the trailing edge.
-            assertColor(try pixel(NSPoint(x: editorFrame.midX, y: below(13))), token, "status bar")
+            // Between the centred counts and “Saved” at the trailing edge the strip is empty (#91).
+            let emptyX = editorFrame.minX + editorFrame.width * 0.75
+            assertColor(try pixel(NSPoint(x: emptyX, y: below(13))), token, "status bar")
             XCTAssertNotEqual(
                 try pixel(NSPoint(x: editorFrame.midX, y: below(25.75))), token, "status hairline in \(name.rawValue)")
             // 1.65 folder tab: the active tab is open at the bottom onto the editor surface, with no underline.
