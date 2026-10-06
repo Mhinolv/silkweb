@@ -3,6 +3,7 @@ name: CI
 # ready or leaves draft, again only when the `run-ci` label is added, and manually
 # via workflow_dispatch. Branch pushes don't run it (those commits passed on the PR).
 # PRs that touch none of the paths below get no CI run at all.
+# Owner decision (#84): CI only proves the app builds; the test suite runs locally (engineer, QA, post-merge).
 on:
   pull_request:
     types: [opened, reopened, ready_for_review, labeled]
@@ -43,5 +44,3 @@ jobs:
         run: swift --version
       - name: Build
         run: ./scripts/build.sh
-      - name: Test
-        run: ./scripts/build.sh test
