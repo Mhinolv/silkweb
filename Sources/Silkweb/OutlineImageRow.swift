@@ -5,7 +5,6 @@ struct OutlineImageRow: View {
     let item: OutlineItem
     let document: URL?
     let root: URL?
-    let indent: Double
     let current: Bool
     let selected: Bool
     @Environment(\.displayScale) private var scale
@@ -14,32 +13,26 @@ struct OutlineImageRow: View {
     @State private var symbol: String?
     @State private var state = ""
 
+    /// #72: a 16×12 thumbnail hanging from the thread; `OutlineRowChrome` draws the indent, capsule and guides.
+    static let thumbnail = CGSize(width: 16, height: 12)
+
     var body: some View {
-        HStack(spacing: 8) {
-            Rectangle().fill(current && !selected ? Color.silkwebAccent : .clear).frame(width: 3)
-            HStack(spacing: 6) {
-                ZStack {
-                    Color(nsColor: .quaternarySystemFill)
-                    if let bitmap {
-                        Image(decorative: bitmap, scale: scale).resizable().scaledToFit()
-                    } else if let symbol {
-                        Image(systemName: symbol).font(.system(size: 11)).foregroundStyle(.secondary)
-                    }
+        HStack(spacing: 6) {
+            ZStack {
+                Color(nsColor: .quaternarySystemFill)
+                if let bitmap {
+                    Image(decorative: bitmap, scale: scale).resizable().scaledToFit()
+                } else if let symbol {
+                    Image(systemName: symbol).font(.system(size: 8)).foregroundStyle(.secondary)
                 }
-                .frame(width: 32, height: 24)
-                .clipShape(.rect(cornerRadius: 3))
-                .overlay { RoundedRectangle(cornerRadius: 3).strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5) }
-                .accessibilityHidden(true)
-                Text(item.label).font(.system(size: 12))
-                    .foregroundStyle(Color(nsColor: selected ? .alternateSelectedControlTextColor : current ? .labelColor : .secondaryLabelColor))
-                    .lineLimit(1).truncationMode(.middle)
             }
-            .padding(.leading, indent)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, 2)
-        .background {
-            if current && !selected { RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: .unemphasizedSelectedContentBackgroundColor)) }
+            .frame(width: Self.thumbnail.width, height: Self.thumbnail.height)
+            .clipShape(.rect(cornerRadius: 2))
+            .overlay { RoundedRectangle(cornerRadius: 2).strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5) }
+            .accessibilityHidden(true)
+            Text(item.label).font(.system(size: 12))
+                .foregroundStyle(Color(nsColor: selected ? .alternateSelectedControlTextColor : current ? .labelColor : .secondaryLabelColor))
+                .lineLimit(1).truncationMode(.tail)
         }
         .help(tooltip)
         .accessibilityElement(children: .ignore)
@@ -49,7 +42,7 @@ struct OutlineImageRow: View {
         .task(id: "\(document?.absoluteString ?? "")|\(root?.absoluteString ?? "")|\(reference?.destination ?? "")|\(scale)") {
             bitmap = nil; message = nil; symbol = nil; state = ""
             guard let reference, let document, let root else { return }
-            let result = await Self.load(reference, document: document, root: root, pixels: max(1, Int(32 * scale)))
+            let result = await Self.load(reference, document: document, root: root, pixels: max(1, Int(Self.thumbnail.width * scale)))
             guard !Task.isCancelled else { return }
             bitmap = result.bitmap; message = result.message; symbol = result.symbol; state = result.state
         }

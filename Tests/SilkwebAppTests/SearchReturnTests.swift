@@ -51,7 +51,11 @@ final class SearchReturnTests: XCTestCase {
     @MainActor
     private func waitForOpen(_ workspace: LibraryWorkspace) async throws {
         // A loaded runner can resume the open well past any fixed budget (#63).
-        try await waitUntil("Return to open a document") { !workspace.session.selectedDocuments.isEmpty }
+        // The list selects at once (#70); the open is done once the editor shows it and the search UI is dismissed.
+        try await waitUntil("Return to open a document") {
+            !workspace.session.selectedDocuments.isEmpty && workspace.editor.url != nil
+                && !workspace.search.showsQuickOpen && workspace.search.text.isEmpty
+        }
         await workspace.waitForNavigation()
     }
 
@@ -72,6 +76,54 @@ final class SearchReturnTests: XCTestCase {
         try await waitForOpen(workspace)
         XCTAssertEqual(workspace.session.selectedDocuments, ["Coffee.md"])
         XCTAssertFalse(workspace.search.showsQuickOpen)
+    }
+
+    /// #81: a waiter that joins the navigation while Return's open is still in flight (as `waitForOpen` does on a
+    /// loaded CI runner) must already see Quick Open dismissed once navigation finishes.
+    @MainActor
+    func testQuickOpenDismissedWhenReturnNavigationFinishes() async throws {
+        let (workspace, root) = try await makeWorkspace()
+        defer { try? FileManager.default.removeItem(at: root) }
+        workspace.search.toggleQuickOpen()
+        let (host, window) = host(QuickOpenPanel(workspace: workspace), width: 900)
+        defer { window.contentView = nil }
+        // Hold the navigation queue so Return's navigation is still pending when the test joins it.
+        var release: CheckedContinuation<Void, Never>?
+        let gate = Task { await workspace.afterNavigation { await withCheckedContinuation { release = $0 } } }
+        try await waitUntil("the navigation gate to hold") { release != nil }
+        host.layoutSubtreeIfNeeded()
+        try typeAndReturn("coffee", host: host, window: window)
+        // Settling the query and queueing the navigation happen in one main-actor turn.
+        try await waitUntil("Return to settle its query") {
+            !workspace.search.quickHasPendingQuery && !workspace.search.quickResults.isEmpty
+        }
+        XCTAssertTrue(workspace.session.selectedDocuments.isEmpty)
+        release?.resume()
+        await workspace.waitForNavigation()
+        XCTAssertEqual(workspace.session.selectedDocuments, ["Coffee.md"])
+        XCTAssertFalse(workspace.search.showsQuickOpen, "Quick Open must close as part of the successful open")
+        await gate.value
+    }
+
+    /// #81: when Return's navigation doesn't happen (here a library change refuses it), the panel stays open with its query.
+    @MainActor
+    func testQuickOpenStaysOpenWhenReturnNavigationIsRefused() async throws {
+        let (workspace, root) = try await makeWorkspace()
+        defer { try? FileManager.default.removeItem(at: root) }
+        workspace.search.toggleQuickOpen()
+        let (host, window) = host(QuickOpenPanel(workspace: workspace), width: 900)
+        defer { window.contentView = nil }
+        host.layoutSubtreeIfNeeded()
+        workspace.mutating = true
+        try typeAndReturn("coffee", host: host, window: window)
+        try await waitUntil("Return to settle its query") {
+            !workspace.search.quickHasPendingQuery && !workspace.search.quickResults.isEmpty
+        }
+        await workspace.waitForNavigation()
+        workspace.mutating = false
+        XCTAssertTrue(workspace.session.selectedDocuments.isEmpty)
+        XCTAssertTrue(workspace.search.showsQuickOpen)
+        XCTAssertEqual(workspace.search.quickText, "coffee")
     }
 
     @MainActor

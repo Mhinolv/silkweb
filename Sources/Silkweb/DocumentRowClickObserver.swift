@@ -45,6 +45,7 @@ final class DocumentRowClickView: NSView, NSDraggingSource {
     private var mouseDownEvent: NSEvent?
     private var dragPaths: [String] = []
     private var wasSingleSelected = false
+    private var selectedOnPress = false
 
     // Substitute only the OS session call in offscreen tests: the sandbox cannot
     // contact the drag/pasteboard service. Hit testing and mouse tracking stay real.
@@ -109,6 +110,20 @@ final class DocumentRowClickView: NSView, NSDraggingSource {
         dragPaths = workspace.documentDragPaths(path)
         window?.makeFirstResponder(nativeTable)
         workspace.focusColumn = 1
+        // Finder's rule (#70): a plain press selects an unselected row at once. A selected row keeps the
+        // selection until mouseUp, so dragging a multi-row selection still carries every row.
+        selectedOnPress = event.clickCount == 1 && event.modifierFlags.intersection([.command, .shift, .control, .option]).isEmpty
+            && !workspace.session.selectedDocuments.contains(path)
+        if selectedOnPress {
+            pointerState?.anchor = path
+            select([path], in: workspace)
+        }
+    }
+
+    /// Selects in the workspace and shows it in the native table in the same frame.
+    private func select(_ paths: Set<String>, in workspace: LibraryWorkspace) {
+        workspace.selectDocuments(paths)
+        (nativeTable as? DocumentTableView)?.coordinator?.syncSelection()
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -154,7 +169,7 @@ final class DocumentRowClickView: NSView, NSDraggingSource {
             extendRange: down.modifierFlags.contains(.shift), toggle: down.modifierFlags.contains(.command))
         if !down.modifierFlags.contains(.shift) { pointerState?.anchor = path }
         if down.clickCount == 2, !hasModifiers { workspace.openSelectionInNewTab(path) }
-        else { workspace.selectDocuments(selection) }
+        else if !selectedOnPress { select(selection, in: workspace) }
         if pointerState?.timing.click(path: path, timestamp: down.timestamp, clickCount: down.clickCount,
                         wasSingleSelected: wasSingleSelected, isSingleSelected: selection == [path],
                         hasModifiers: hasModifiers) == true {
