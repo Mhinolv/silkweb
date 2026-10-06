@@ -60,6 +60,16 @@ struct SnapshotScenario {
     var concealedTitlebar = false
     /// Captures at this window width instead of the harness's (#91 narrow status bar at the 900 pt minimum).
     var windowWidth: CGFloat? = nil
+    /// #87: the Outline's rows while a note too large to parse within a frame is still parsing (dimmed, inert).
+    var outlinePending = false
+    /// #90: the user's Accent (Settings ▸ Appearance) in both colour sets, restored after the capture.
+    var accent: HexColor? = nil
+    /// Draws the key window's state through `controlActiveState`; an offscreen window is never key.
+    var keyWindow = false
+    /// ↓ presses sent to the focused Outline (`focusOutline`).
+    var outlineArrows = 0
+    /// Moves the editor caret to this heading after `outlineJump` (focus stays in the editor).
+    var caretAfterJump: String? = nil
 
     static let deepFolder =
         "Field Notes/Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
@@ -68,6 +78,8 @@ struct SnapshotScenario {
     static let longOutline = "Snapshot Fixtures/Outline Long Headings.md"
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
+    /// #90: the owner's non-default amber Accent.
+    static let amberAccent = HexColor(0xD08A2E)
     static let image = "Snapshot Fixtures/Image Fixture.md"
     static let initial: [SnapshotScenario] = [
         .init(name: "library-overview"),
@@ -143,6 +155,7 @@ struct SnapshotScenario {
             name: "split-scroll-entry", document: "Snapshot Fixtures/Scroll Preview.md", mode: .split, outline: true,
             previewScrollState: "entry"),
         .init(name: "inspector-outline", document: pourOver, outline: true),
+        .init(name: "inspector-outline-pending", document: pourOver, outline: true, outlinePending: true),
         .init(
             name: "outline-images-split", document: "Snapshot Fixtures/Outline Images.md", mode: .split, outline: true,
             caretImage: "![Portrait]"),
@@ -152,7 +165,7 @@ struct SnapshotScenario {
             name: "outline-images", document: "Snapshot Fixtures/Outline Images.md", outline: true,
             caretImage: "![Portrait]"),
         // Outline focused with the second image row selected. The unordered host window is never
-        // key, so the List draws its non-key selection; the accent fill needs a key window.
+        // key, so the capsule is `SilkwebSelectionInactive` (#90); `keyWindow` draws the key state.
         .init(
             name: "outline-images-focused", document: "Snapshot Fixtures/Outline Images.md", outline: true,
             caretImage: "![Portrait]", focusOutline: true),
@@ -163,6 +176,23 @@ struct SnapshotScenario {
         .init(
             name: "outline-long-headings", document: longOutline, outline: true,
             caretHeading: "Presque Isle State Park and the Long Drive Along the Shoreline"),
+        // #90: one Outline capsule in the user's amber Accent (`SilkwebSelection`), never the system accent.
+        .init(
+            name: "outline-accent-current", document: "Snapshot Fixtures/Outline Hierarchy.md", outline: true,
+            caretHeading: "Grind size", accent: amberAccent, keyWindow: true),
+        .init(
+            name: "outline-accent-keyboard", document: "Snapshot Fixtures/Outline Hierarchy.md", outline: true,
+            caretHeading: "Grind size", focusOutline: true, accent: amberAccent, keyWindow: true, outlineArrows: 2),
+        .init(
+            name: "outline-accent-click", document: "Snapshot Fixtures/Outline Hierarchy.md", outline: true,
+            outlineJump: "Water temperature", accent: amberAccent, keyWindow: true),
+        .init(
+            name: "outline-accent-caret-moved", document: "Snapshot Fixtures/Outline Hierarchy.md", outline: true,
+            outlineJump: "Water temperature", accent: amberAccent, keyWindow: true, caretAfterJump: "Technique"),
+        // A background window fades the capsule to `SilkwebSelectionInactive`, as the sidebar does.
+        .init(
+            name: "outline-accent-inactive", document: "Snapshot Fixtures/Outline Hierarchy.md", outline: true,
+            caretHeading: "Grind size", accent: amberAccent),
         .init(name: "rename-active", document: pourOver, rename: true),
         .init(name: "quick-open", quickQuery: "brew"),
         .init(name: "search-results", searchQuery: "coffee"),
@@ -670,6 +700,12 @@ final class SnapshotHarness {
         let oldAppearance = NSApp.appearance
         let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
         NSApp.appearance = appearance
+        let oldPreferences = LivePreferences.shared.current
+        if let accent = scenario.accent {
+            LivePreferences.shared.current.colors.light.accent = accent
+            LivePreferences.shared.current.colors.dark.accent = accent
+            ColorRevision.shared.bump()
+        }
         // Native window chrome and production content, never entered into the window list.
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
@@ -682,6 +718,10 @@ final class SnapshotHarness {
             window.contentViewController = nil
             window.close()
             NSApp.appearance = oldAppearance
+            if scenario.accent != nil {
+                LivePreferences.shared.current = oldPreferences
+                ColorRevision.shared.bump()
+            }
             preferences.remove()
             try? FileManager.default.removeItem(at: temporary)
         }
@@ -750,10 +790,10 @@ final class SnapshotHarness {
             } else {
                 content = AnyView(LibraryWorkspaceView(workspace: workspace))
             }
+            let themed = content.environment(\.colorScheme, dark ? .dark : .light)
             let controller = NSHostingController(
-                rootView: AnyView(
-                    content
-                        .environment(\.colorScheme, dark ? .dark : .light)))
+                rootView: scenario.keyWindow
+                    ? AnyView(themed.environment(\.controlActiveState, .key)) : AnyView(themed))
             controller.sizingOptions = []
             host = controller
             window.contentViewController = controller
@@ -879,6 +919,18 @@ final class SnapshotHarness {
                 window.makeFirstResponder(table)
                 controller.view.layoutSubtreeIfNeeded()
                 try await Task.sleep(for: .milliseconds(300))
+                for _ in 0..<scenario.outlineArrows {
+                    guard
+                        let down = NSEvent.keyEvent(
+                            with: .keyDown, location: .zero, modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                            context: nil, characters: "\u{f701}", charactersIgnoringModifiers: "\u{f701}",
+                            isARepeat: false, keyCode: 125)
+                    else { throw SnapshotFailure.error("Cannot make ↓ key event") }
+                    window.sendEvent(down)
+                    controller.view.layoutSubtreeIfNeeded()
+                    try await Task.sleep(for: .milliseconds(100))
+                }
             }
             if scenario.outline {
                 for split in Self.descendants(controller.view).compactMap({ $0 as? NSSplitView }) {
@@ -888,6 +940,12 @@ final class SnapshotHarness {
                     }
                 }
                 controller.view.layoutSubtreeIfNeeded()
+            }
+            if scenario.outlinePending {
+                // The state a list click on a large note leaves up until its background parse lands.
+                workspace.preview.outlinePending = true
+                controller.view.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(100))
             }
             if let text = scenario.outlineJump {
                 // The production action of an Outline row click: jump, anchor and focus the editor.
@@ -899,6 +957,15 @@ final class SnapshotHarness {
                 // Focus fade (150 ms) and the Outline's current-row update.
                 try await Task.sleep(for: .milliseconds(500))
                 controller.view.layoutSubtreeIfNeeded()
+                if let text = scenario.caretAfterJump {
+                    guard let heading = workspace.preview.headings.first(where: { $0.text == text }),
+                        let editor = workspace.preview.editor
+                    else { throw SnapshotFailure.error("Missing caret heading") }
+                    editor.setSelectedRange(NSRange(location: heading.sourceRange.location, length: 0))
+                    workspace.editor.caretLocation = heading.sourceRange.location
+                    try await Task.sleep(for: .milliseconds(300))
+                    controller.view.layoutSubtreeIfNeeded()
+                }
             }
             if scenario.legacyScroller, let scroll = workspace.preview.editor?.enclosingScrollView {
                 scroll.scrollerStyle = .legacy

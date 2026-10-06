@@ -38,6 +38,11 @@ final class PreviewCoordinator {
     var showsStatusBar: Bool { didSet { defaults.set(showsStatusBar, forKey: "Silkweb.Detail.StatusBar") } }
     var headings: [MarkdownHeading] = []
     var outlineItems: [OutlineItem] = []
+    /// The note `headings` and `outlineItems` describe (#87). Leads `renderedURL` on a note switch: the Outline
+    /// follows the list click before the editor buffer, and the debounced HTML, catch up.
+    var outlineURL: URL?
+    /// A switch to a note too large to parse within a frame: the previous rows stay up, dimmed and inert.
+    var outlinePending = false
     var visibleHeading: String?
     var html = ""
     var renderedURL: URL?
@@ -48,6 +53,13 @@ final class PreviewCoordinator {
     @ObservationIgnored private var loadingDocument: URL?
     @ObservationIgnored private var finishedDocument: URL?
     @ObservationIgnored private var input: RenderInput?
+    @ObservationIgnored private var outlineText: String?
+    /// The note a list click asked the Outline to show; editor renders of other notes leave the Outline alone.
+    @ObservationIgnored private var outlineTarget: URL?
+    @ObservationIgnored private var outlineTask: Task<Void, Never>?
+    @ObservationIgnored private var outlineRevision = 0
+    /// Notes up to this many UTF-8 bytes parse on the main thread, inside the click's frame.
+    static let immediateOutlineLimit = 128 * 1024
     #if DEBUG
         @ObservationIgnored private(set) var renderCount = 0
     #endif
@@ -137,12 +149,21 @@ final class PreviewCoordinator {
             keepsLineBreaks: preferences.keepsLineBreaks, showsTableOfContents: preferences.showsTableOfContents)
         let settings = Self.settingsStyle(preferences)
         guard next != input else { return }
+        // A note switch or turning on the Outline skips the typing debounce for the outline (#87).
+        let immediateOutline = next.outline && (input?.outline != true || document != input?.document)
         input = next
         revision += 1
         let request = revision
         task?.cancel()
         if document != renderedURL {
-            headings = []; outlineItems = []; html = ""; scrollAnchor = nil; scrollRatio = 0; pendingAnchor = nil
+            html = ""; scrollAnchor = nil; scrollRatio = 0; pendingAnchor = nil
+        }
+        if outlineTarget == document { outlineTarget = nil }
+        if !next.outline, document != outlineURL {
+            // Hidden: nothing to keep up, and nothing stale to show when the Outline comes back.
+            clearOutline()
+        } else if immediateOutline, outlineTarget == nil {
+            updateOutline(text: text, document: document)
         }
         guard next.html || next.outline else { endLoading(); return }
         if next.html { beginLoading(document: document) } else { endLoading() }
@@ -167,11 +188,105 @@ final class PreviewCoordinator {
                 return (parsed.headings, page, items)
             }.value
             guard !Task.isCancelled, let self, request == self.revision else { return }
-            self.headings = result.0
-            self.outlineItems = result.2
+            // A list click may already have moved the Outline on to a newer note.
+            if self.outlineTarget == nil, self.outlineURL != document || self.outlineText != text {
+                self.publishOutline(result.0, result.2, text: text, document: document)
+            }
             self.renderedURL = document
             self.html = result.1
         }
+    }
+
+    /// A list click (#87): the Outline shows the clicked note in the list selection's own frame, before the editor
+    /// buffer loads. `text` is an open tab's buffer; otherwise the file is read here, inline when small enough to
+    /// parse within the frame. (Deferring the publish past the click's frame queues it behind the editor swap.)
+    func followDocument(_ document: URL, text: String? = nil) {
+        guard showsOutline else { return }
+        outlineTarget = document
+        if let text {
+            updateOutline(text: text, document: document)
+            return
+        }
+        guard document != outlineURL else {
+            cancelPendingOutline()
+            return
+        }
+        let size = (try? document.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? Int.max
+        if size <= Self.immediateOutlineLimit, let text = try? String(contentsOf: document, encoding: .utf8) {
+            updateOutline(text: text, document: document)
+        } else {
+            parseOutlineInBackground(document: document) { try String(contentsOf: document, encoding: .utf8) }
+        }
+    }
+
+    /// The editor kept its note (a refused switch): the Outline goes back to it.
+    func stopFollowing(text: String, document: URL?) {
+        guard outlineTarget != nil else { return }
+        outlineTarget = nil
+        guard showsOutline else { return }
+        updateOutline(text: text, document: document)
+    }
+
+    private func updateOutline(text: String, document: URL?) {
+        guard document != outlineURL || text != outlineText else {
+            cancelPendingOutline()
+            return
+        }
+        guard text.utf8.count <= Self.immediateOutlineLimit else {
+            parseOutlineInBackground(document: document) { text }
+            return
+        }
+        let parsed = MarkdownParser.parse(text)
+        publishOutline(
+            parsed.headings, OutlineItem.parse(text, headings: parsed.headings), text: text, document: document)
+    }
+
+    private func cancelPendingOutline() {
+        outlineTask?.cancel()
+        outlineRevision += 1
+        if outlinePending { outlinePending = false }
+    }
+
+    /// Large notes parse off the main thread; the previous outline stays up, pending, until they land.
+    private func parseOutlineInBackground(document: URL?, text: @escaping @Sendable () throws -> String) {
+        outlineTask?.cancel()
+        outlineRevision += 1
+        let request = outlineRevision
+        if document != outlineURL { outlinePending = true }
+        outlineTask = Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                () -> (String, [MarkdownHeading], [OutlineItem])? in
+                guard let text = try? text() else { return nil }
+                let parsed = MarkdownParser.parse(text)
+                return (text, parsed.headings, OutlineItem.parse(text, headings: parsed.headings))
+            }.value
+            guard !Task.isCancelled, let self, request == self.outlineRevision else { return }
+            if let result {
+                self.publishOutline(result.1, result.2, text: result.0, document: document)
+            } else if self.outlinePending {
+                self.outlinePending = false
+            }
+        }
+    }
+
+    /// Rows, count caption and threads swap in one update, never cleared first (#87).
+    private func publishOutline(_ headings: [MarkdownHeading], _ items: [OutlineItem], text: String, document: URL?) {
+        outlineTask?.cancel()
+        outlineRevision += 1
+        self.headings = headings
+        outlineItems = items
+        outlineText = text
+        if outlineURL != document { outlineURL = document }
+        if outlinePending { outlinePending = false }
+    }
+
+    private func clearOutline() {
+        cancelPendingOutline()
+        outlineTarget = nil
+        outlineText = nil
+        if !headings.isEmpty { headings = [] }
+        if !outlineItems.isEmpty { outlineItems = [] }
+        if outlineURL != nil { outlineURL = nil }
     }
 
     func beginLoading(document: URL?) {

@@ -6,7 +6,7 @@ struct OutlineImageRow: View {
     let document: URL?
     let root: URL?
     let current: Bool
-    let selected: Bool
+    let highlighted: Bool
     @Environment(\.displayScale) private var scale
     @State private var bitmap: CGImage?
     @State private var message: String?
@@ -31,11 +31,7 @@ struct OutlineImageRow: View {
             .overlay { RoundedRectangle(cornerRadius: 2).strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5) }
             .accessibilityHidden(true)
             Text(item.label).font(.system(size: 12))
-                .foregroundStyle(
-                    Color(
-                        nsColor: selected
-                            ? .alternateSelectedControlTextColor : current ? .labelColor : .secondaryLabelColor)
-                )
+                .foregroundStyle(Color(nsColor: highlighted || current ? .labelColor : .secondaryLabelColor))
                 .lineLimit(1).truncationMode(.tail)
         }
         .help(tooltip)
