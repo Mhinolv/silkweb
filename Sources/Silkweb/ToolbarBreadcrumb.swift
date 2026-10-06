@@ -25,6 +25,8 @@ final class ToolbarMetrics {
     private var scheduled = false
     /// The last width each item took in the bar, viewer padding included, so items in the » menu still count.
     private var slotWidths: [ObjectIdentifier: CGFloat] = [:]
+    /// The breadcrumb viewer's padding, last seen while it was placed.
+    private var crumbPadding: CGFloat?
     /// AppKit's own toolbar-view frame while the leading items are shifted; nil when nothing is shifted.
     private var naturalFrame: NSRect?
     private var shiftedFrame: NSRect?
@@ -36,8 +38,16 @@ final class ToolbarMetrics {
     private(set) var lastMoveAnimated: Bool?
     static var reduceMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
     static let leadingInset = Spacing.small
-    /// Room after the last item's viewer, to the bar's edge or the inspector's titlebar area.
-    static let trailingInset: CGFloat = 8
+    /// From the Info glyph to the bar's edge or the inspector's titlebar area, mirroring the leading inset (#68).
+    static let trailingInset = Spacing.small
+    /// How far the Info button's bezel overhangs its item into the viewer's 4 pt trailing padding. AppKit keeps the
+    /// row 4 pt from the bar's edge, which alone would leave the glyph 14 pt from it.
+    static let trailingOverhang: CGFloat = 3
+    /// What the last item keeps after its glyph: the 6 pt a toolbar button leaves around its 13 pt glyph and the
+    /// viewer's 4 pt padding, less the overhang.
+    static let trailingGlyphInset: CGFloat = 10 - trailingOverhang
+    /// Room after the last item's viewer.
+    static let rowEndInset = trailingInset - trailingGlyphInset
     static let minimumBreadcrumbWidth: CGFloat = 120
     static let nudgeLimit = 3
     /// AppKit starts the row about 10 pt after the zoom button; a row starting further in follows a section.
@@ -140,6 +150,8 @@ final class ToolbarMetrics {
               placed.allSatisfy({ $0.superview?.superview === toolbarView }) else { return }
         for view in placed { slotWidths[ObjectIdentifier(view)] = view.superview!.frame.width }
         let padding = placed.first.map { $0.superview!.frame.width - $0.frame.width } ?? 8
+        // The breadcrumb's viewer may pad it differently from the buttons'; the row's end depends on its own.
+        if placed.contains(where: { $0 === crumb }) { crumbPadding = crumb.superview!.frame.width - crumb.frame.width }
         func slot(_ view: NSView) -> CGFloat { slotWidths[ObjectIdentifier(view)] ?? view.fittingSize.width + padding }
 
         // Leading edge. AppKit lays the row out itself (after the traffic lights, or after the sidebar column);
@@ -190,7 +202,7 @@ final class ToolbarMetrics {
             limit = min(limit, region.minX)
         }
         let others = views.filter { $0 !== crumb }.reduce(CGFloat(0)) { $0 + slot($1) }
-        let available = floor(limit - Self.trailingInset - leading - others - padding) - 2
+        let available = floor(limit - Self.rowEndInset - leading - others - (crumbPadding ?? padding))
         let width = max(Self.minimumBreadcrumbWidth, available)
         let changed = metrics.map { abs($0.breadcrumbWidth - width) > 0.5 } ?? false
         if changed {
@@ -201,7 +213,7 @@ final class ToolbarMetrics {
         let rowEnd = toolbarView.frame.minX + (placed.map { $0.superview!.frame.maxX }.max() ?? 0)
         let rowShort = grows && !animating && toolbarView.frame == target && !changed && placed.count == views.count
             && available >= Self.minimumBreadcrumbWidth
-            && abs(crumb.frame.width - width) < 1 && rowEnd < limit - Self.trailingInset - Self.rowEndSlack
+            && abs(crumb.frame.width - width) < 1 && rowEnd < limit - Self.rowEndInset - Self.rowEndSlack
         if grows, rowShort || (placed.count < views.count && nudges >= Self.nudgeLimit) {
             // AppKit didn't give the shifted row the freed space after all: keep AppKit's placement instead, so
             // the breadcrumb keeps its room and the trailing items their edge.

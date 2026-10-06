@@ -130,8 +130,10 @@ final class DocumentListTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(50))
             let previous = starts.count
             try send(.leftMouseDown)
-            // Run navigation/layout between down and drag to catch row invalidation.
-            await workspace.waitForNavigation()
+            // Run layout between down and drag to catch row invalidation. A press on an unselected row now selects it
+            // and starts navigation (#70); this harness's rows are force-realized outside the table's visible rect, so
+            // a run-loop turn would recycle them. Drags across a finished navigation are covered in a real window by
+            // DocumentSelectionLatencyTests.testPressSelectsOnlyUnselectedRowsAndModifiersActOnRelease.
             controller.view.layoutSubtreeIfNeeded()
             try send(.leftMouseDragged, offset: 2)
             XCTAssertEqual(starts.count, previous, "Below threshold must remain a click")
@@ -143,6 +145,7 @@ final class DocumentListTests: XCTestCase {
                                selected.isEmpty ? [paths[0]] : selected)
             }
             XCTAssertNil(workspace.rename)
+            await workspace.waitForNavigation()
         }
         workspace.mutating = true
         let previous = starts.count

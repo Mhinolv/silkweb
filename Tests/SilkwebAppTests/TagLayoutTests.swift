@@ -8,110 +8,135 @@ final class TagLayoutTests: XCTestCase {
     @MainActor private func descendants(_ view: NSView) -> [NSView] {
         [view] + view.subviews.flatMap { descendants($0) }
     }
-    @MainActor private func scrollContainerHeight(_ field: NSTokenField) -> CGFloat {
-        field.enclosingScrollView?.superview?.frame.height ?? 0
-    }
     @MainActor private func settle(_ view: NSView) async throws {
         for _ in 0..<8 { view.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(20)) }
     }
 
-    @MainActor func testRoundedTokensRemainUnselectedAcrossFocusAndResize() async throws {
+    @MainActor private func chips(_ names: [String], mixed: Set<String> = []) -> [TagChip] {
+        names.map { TagChip(tag: LibraryTag(name: $0), mixed: mixed.contains($0)) }
+    }
+    @MainActor private func chipField(_ chips: [TagChip], enabled: Bool = true, focus: Int = 0) -> TagChipField {
+        TagChipField(chips: chips, suggestions: [], focusRequest: focus, enabled: enabled, onAdd: { _ in }, onRemove: { _ in })
+    }
+
+    /// #72 Tags A: real SwiftUI-hosted chip field through load, appearance, count, width and focus sweeps.
+    @MainActor func testChipFieldFlowsChipsAndFieldAcrossFocusAndResize() async throws {
         _ = NSApplication.shared
-        let host = NSHostingController(rootView: TagTokenField(names: ["coffee", "research"], suggestions: [], focusRequest: 0, enabled: true, onChange: { _ in }))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 216, height: 200), styleMask: [.borderless], backing: .buffered, defer: false)
+        let host = NSHostingController(rootView: chipField(chips(["coffee", "research"])))
+        host.sizingOptions = [] // The Inspector column sets the width; the field never sizes the window.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 216, height: 400), styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentViewController = host
         defer { window.contentViewController = nil }
         try await settle(host.view)
-        let field = try XCTUnwrap(descendants(host.view).compactMap { $0 as? TagInputField }.first)
+        let container = try XCTUnwrap(descendants(host.view).compactMap { $0 as? TagChipContainer }.first)
+        let field = container.field
+        XCTAssertFalse(descendants(host.view).contains { $0 is NSTokenField }, "Tags A replaces the token field")
+        XCTAssertFalse(descendants(host.view).contains { $0 is NSScrollView }, "No bezeled viewport: the Info pane scrolls")
+        XCTAssertEqual(field.placeholderString, "Add tag…")
+        XCTAssertFalse(field.isBezeled); XCTAssertFalse(field.isBordered); XCTAssertFalse(field.drawsBackground)
 
         for appearance in [NSAppearance.Name.aqua, .darkAqua] {
             window.appearance = NSAppearance(named: appearance)
             for count in [0, 1, 2, 20, 100] {
-                let names = (0..<count).map { "research topic \($0)" }
-                host.rootView = TagTokenField(names: names, suggestions: [], focusRequest: 0, enabled: true, onChange: { _ in })
+                let names = (0..<count).map { $0 == 3 ? String(repeating: "long tag name ", count: 4) + "end" : "research topic \($0)" }
+                host.rootView = chipField(chips(names, mixed: count > 1 ? [names[1]] : []))
                 for width: CGFloat in [180, 216, 400] {
-                    host.view.setFrameSize(NSSize(width: width, height: 200))
+                    host.view.setFrameSize(NSSize(width: width, height: 400))
                     try await settle(host.view)
-                    XCTAssertNil(field.currentEditor(), "Loading and resizing must not focus or select the tokens")
-                    XCTAssertEqual(field.tokenStyle, .rounded)
-                    XCTAssertEqual((field.cell as? NSTokenFieldCell)?.tokenStyle, .rounded)
-                    XCTAssertFalse(try XCTUnwrap(field.cell).isHighlighted)
-                    let value = field.attributedStringValue
-                    var tokenCount = 0
-                    value.enumerateAttribute(.attachment, in: NSRange(location: 0, length: value.length)) { attachment, _, _ in
-                        guard let attachment = attachment as? NSTextAttachment else { return }
-                        tokenCount += 1
-                        XCTAssertEqual((attachment.attachmentCell as? NSCell)?.isHighlighted, false,
-                                       "Check the actual native attachments, not just the field's configured style")
+                    XCTAssertNil(field.currentEditor(), "Loading and resizing must not focus the field")
+                    XCTAssertEqual(container.chipButtons.map(\.name), names)
+                    XCTAssertEqual(container.chipButtons.map(\.mixed), names.map { count > 1 && $0 == names[1] })
+                    let frames = container.chipButtons.map(\.frame) + [field.frame]
+                    for frame in frames {
+                        XCTAssertGreaterThanOrEqual(frame.minX, 0)
+                        XCTAssertLessThanOrEqual(frame.maxX, container.bounds.width + 0.5, "Chips wrap within the column")
+                        XCTAssertLessThanOrEqual(frame.maxY, container.bounds.height)
                     }
-                    XCTAssertEqual(tokenCount, count)
+                    for (i, a) in frames.enumerated() { for b in frames[(i + 1)...] { XCTAssertFalse(a.intersects(b), "\(a) overlaps \(b)") } }
+                    XCTAssertGreaterThanOrEqual(field.frame.width, min(TagChipContainer.fieldMinWidth, container.bounds.width),
+                                                "“Add tag…” always stays visible")
+                    XCTAssertEqual(container.frame.height, container.measuredHeight(width: container.bounds.width), accuracy: 1,
+                                   "The hosted height follows the flow, so later rows keep their spacing")
+                    let lines = Set(frames.map { (($0.midY) / (TagChipContainer.chipHeight + TagChipContainer.spacing)).rounded(.down) }).count
+                    XCTAssertEqual(container.measuredHeight(width: container.bounds.width),
+                                   CGFloat(lines) * TagChipContainer.chipHeight + CGFloat(lines - 1) * TagChipContainer.spacing
+                                   + TagChipContainer.bottomInset + 1, accuracy: 0.5)
                 }
-                // Keyboard focus goes through selectText; AppKit selects all AFTER
-                // textDidBeginEditing, so that callback alone cannot place the caret.
+                // Keyboard focus goes through selectText and leaves the caret in the empty field.
                 field.selectText(nil)
                 let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
-                XCTAssertEqual(editor.selectedRange(), NSRange(location: (editor.string as NSString).length, length: 0),
-                               "Focusing must put the caret after the tokens without selecting them")
+                XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: 0))
                 XCTAssertTrue(window.makeFirstResponder(nil))
                 try await settle(host.view)
                 XCTAssertNil(field.currentEditor())
-                XCTAssertEqual(field.objectValue as? [String], names)
             }
         }
-        // Exercise teardown and reattachment as the Info tab is hidden and shown.
+        // Read-only: no × targets and a disabled field; chips narrow to their names.
+        host.rootView = chipField(chips(["coffee"]), enabled: true)
+        try await settle(host.view)
+        let editable = try XCTUnwrap(container.chipButtons.first)
+        let editableWidth = editable.frame.width
+        XCTAssertGreaterThan(editable.removeRect.width, 0)
+        host.rootView = chipField(chips(["coffee"]), enabled: false)
+        try await settle(host.view)
+        XCTAssertFalse(field.isEnabled)
+        XCTAssertFalse(editable.isEnabled)
+        XCTAssertEqual(editable.removeRect, .zero)
+        XCTAssertLessThan(editable.frame.width, editableWidth)
+        // Exercise teardown and reattachment as the Info tab is hidden and shown; a focus request made while
+        // detached is fulfilled on reattachment.
         window.contentViewController = nil
+        host.rootView = chipField(chips(["coffee"]), focus: 1)
         window.contentViewController = host
         try await settle(host.view)
-        XCTAssertNil(field.currentEditor())
-        XCTAssertEqual(field.tokenStyle, .rounded)
+        XCTAssertNotNil(field.currentEditor())
+        XCTAssertEqual(field.fulfilledFocus, 1)
     }
 
-    @MainActor func testTokenFieldWrapsGrowsAndScrollsOnlyVertically() async throws {
+    /// Mouse targets: only the × removes; a mixed chip's name applies it to every selected document.
+    @MainActor func testChipRemoveTargetAndMixedApply() async throws {
         _ = NSApplication.shared
-        let host = NSHostingController(rootView: TagTokenField(names: ["draft"], suggestions: [], focusRequest: 0, enabled: true, onChange: { _ in }))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 216, height: 200), styleMask: [.borderless], backing: .buffered, defer: false)
+        var added: [[String]] = [], removed: [UUID] = []
+        let tags = [LibraryTag(name: "coffee"), LibraryTag(name: "research")]
+        let host = NSHostingController(rootView: TagChipField(chips: [TagChip(tag: tags[0], mixed: false), TagChip(tag: tags[1], mixed: true)],
+            suggestions: [], focusRequest: 0, enabled: true, onAdd: { added.append($0) }, onRemove: { removed.append($0) }))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 200), styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentViewController = host
         defer { window.contentViewController = nil }
         try await settle(host.view)
-        let field = try XCTUnwrap(descendants(host.view).compactMap { $0 as? TagInputField }.first)
-        let small = field.enclosingScrollView?.superview?.intrinsicContentSize.height ?? field.intrinsicContentSize.height
-        field.objectValue = (0..<20).map { "research topic \($0)" }
-        for width: CGFloat in [216, 300, 180, 400, 216] {
-            host.view.setFrameSize(NSSize(width: width, height: 200))
-            try await settle(host.view)
-            XCTAssertEqual(scrollContainerHeight(field), field.enclosingScrollView?.frame.height ?? 0, accuracy: 1)
-            XCTAssertTrue(field.cell?.wraps == true, "Token cell must word-wrap")
-            XCTAssertFalse(field.cell?.isScrollable ?? true, "Token cell must not scroll horizontally")
-            XCTAssertFalse(field.cell?.usesSingleLineMode ?? true)
-            let scroll = try XCTUnwrap(field.enclosingScrollView, "Many tags need a vertical scroll container")
-            XCTAssertFalse(scroll.hasHorizontalScroller)
-            XCTAssertTrue(scroll.hasVerticalScroller)
-            XCTAssertEqual(field.frame.width, scroll.contentSize.width, accuracy: 1)
-            XCTAssertGreaterThan(scroll.superview!.intrinsicContentSize.height, small, "Many tokens must grow the visible field")
-            XCTAssertEqual(scroll.superview!.intrinsicContentSize.height, 108, accuracy: 1)
-            XCTAssertGreaterThan(field.frame.height, scroll.contentSize.height)
+        let container = try XCTUnwrap(descendants(host.view).compactMap { $0 as? TagChipContainer }.first)
+        let (coffee, research) = (container.chipButtons[0], container.chipButtons[1])
+        func click(_ button: NSButton, at point: NSPoint) throws {
+            let location = button.convert(point, to: nil)
+            let time = ProcessInfo.processInfo.systemUptime
+            let down = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: location, modifierFlags: [], timestamp: time,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+            let up = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseUp, location: location, modifierFlags: [], timestamp: time + 0.01,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0))
+            NSApp.postEvent(up, atStart: true) // The button's tracking loop ends on this mouse-up.
+            button.mouseDown(with: down)
+            _ = NSApp.nextEvent(matching: .leftMouseUp, until: Date(), inMode: .default, dequeue: true)
         }
-        for count in [0, 1, 2, 4, 8, 20, 100] {
-            field.objectValue = (0..<count).map { "topic \($0)" }
-            try await settle(host.view)
-            let container = try XCTUnwrap(field.enclosingScrollView?.superview)
-            let height = container.intrinsicContentSize.height
-            XCTAssertTrue((28...108).contains(height))
-            XCTAssertEqual((height - 28).truncatingRemainder(dividingBy: 20), 0)
-            if count <= 1 { XCTAssertEqual(height, 28) }
-            if count == 100 { XCTAssertEqual(height, 108) }
-        }
-        field.selectText(nil)
-        try await settle(host.view)
-        let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
-        XCTAssertFalse(editor.isHorizontallyResizable)
-        XCTAssertTrue(editor.textContainer?.widthTracksTextView == true)
-        field.objectValue = []
-        try await settle(host.view)
-        XCTAssertEqual(field.enclosingScrollView?.superview?.intrinsicContentSize.height, 28)
-        host.view.removeFromSuperview()
-        window.contentViewController = host
-        try await settle(host.view)
+        try click(coffee, at: NSPoint(x: 12, y: coffee.bounds.midY))
+        XCTAssertTrue(removed.isEmpty, "Clicking a chip's name never removes it")
+        XCTAssertTrue(added.isEmpty, "A fully applied chip has nothing to apply")
+        try click(research, at: NSPoint(x: 12, y: research.bounds.midY))
+        XCTAssertEqual(added, [["research"]], "A mixed chip's name applies it to all selected documents")
+        // The × hands the click to NSButton's own tracking (act on mouse-up, cancel by dragging off);
+        // an unordered window cannot run that loop, so check the target and press the button.
+        XCTAssertTrue(coffee.removeRect.contains(NSPoint(x: coffee.bounds.maxX - 8, y: coffee.bounds.midY)))
+        XCTAssertFalse(coffee.removeRect.contains(NSPoint(x: 12, y: coffee.bounds.midY)))
+        coffee.performClick(nil)
+        XCTAssertEqual(removed, [tags[0].id], "The × removes")
+        research.performClick(nil) // Space / VoiceOver press.
+        XCTAssertEqual(removed, [tags[0].id, tags[1].id])
+        XCTAssertEqual(coffee.accessibilityLabel(), "Tag coffee, remove")
+        XCTAssertEqual(coffee.accessibilityValue() as? String, "applied")
+        XCTAssertEqual(research.accessibilityValue() as? String, "applied to some selected documents")
+        XCTAssertEqual(research.accessibilityCustomActions()?.map(\.name), ["Apply to All Selected Documents"])
+        XCTAssertEqual(coffee.accessibilityCustomActions()?.isEmpty ?? true, true)
+        _ = research.accessibilityCustomActions()?.first?.handler?()
+        XCTAssertEqual(added, [["research"], ["research"]])
     }
 
     @MainActor func testTagsAreOutlineSiblingCollapsePersistsAndSelectionRestores() async throws {

@@ -29,21 +29,20 @@ struct RecentTagFlow: Layout {
     }
 }
 
-/// Native button action/focus semantics inside the SwiftUI flow, including mixed selection.
+/// A Suggested tag (#72): an outlined “+ tag” pill for a recent tag the selection doesn't carry yet.
+/// Native button action/focus semantics inside the SwiftUI flow; VoiceOver reads an unchecked checkbox.
 struct RecentTagPill: NSViewRepresentable {
     let tag: LibraryTag
-    let state: NSControl.StateValue
     let enabled: Bool
     let action: () -> Void
     func makeNSView(context: Context) -> TagPillButton { TagPillButton() }
     func updateNSView(_ button: TagPillButton, context: Context) {
         button.title = tag.name
-        button.state = state
         button.isEnabled = enabled
         button.onToggle = action
         button.setAccessibilityLabel(tag.name)
-        button.setAccessibilityValue(state == .on ? "applied" : state == .mixed ? "applied to some selected documents" : "not applied")
-        button.setAccessibilityHelp("Adds or removes this tag")
+        button.setAccessibilityValue("not applied")
+        button.setAccessibilityHelp("Adds this tag")
         button.invalidateIntrinsicContentSize()
         button.needsDisplay = true
     }
@@ -59,7 +58,6 @@ final class TagPillButton: NSButton {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setButtonType(.momentaryChange)
-        allowsMixedState = true
         isBordered = false
         font = .systemFont(ofSize: 12)
         focusRingType = .exterior
@@ -68,8 +66,10 @@ final class TagPillButton: NSButton {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     @objc private func toggleTag(_ sender: NSButton) { onToggle?() }
+    /// “+” and its gap.
+    private static let plusWidth: CGFloat = 12
     override var intrinsicContentSize: NSSize {
-        NSSize(width: ceil((title as NSString).size(withAttributes: [.font: font!]).width) + 20 + (state == .off ? 0 : 13), height: 22)
+        NSSize(width: ceil((title as NSString).size(withAttributes: [.font: font!]).width) + 18 + Self.plusWidth, height: 22)
     }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -80,40 +80,22 @@ final class TagPillButton: NSButton {
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
     override func draw(_ dirtyRect: NSRect) {
-        let selected = state != .off
-        let fill: NSColor
-        if selected {
-            let alpha: CGFloat = isHighlighted ? 0.7 : hovering && isEnabled ? 0.85 : 1
-            fill = NSColor.silkwebSelection.withAlphaComponent(alpha)
-        } else {
-            fill = isHighlighted ? .secondarySystemFill : hovering && isEnabled ? .tertiarySystemFill : .quaternarySystemFill
-        }
         NSGraphicsContext.saveGraphicsState()
         if !isEnabled { NSGraphicsContext.current?.cgContext.setAlpha(0.5) }
-        let capsule = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 11, yRadius: 11)
-        fill.setFill(); capsule.fill()
-        if state != .on {
-            (state == .mixed ? NSColor.silkwebAccent : NSColor.separatorColor).setStroke()
-            capsule.lineWidth = state == .mixed ? 1 : 0.5; capsule.stroke()
+        let capsule = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 10.5, yRadius: 10.5)
+        if isHighlighted || hovering && isEnabled {
+            (isHighlighted ? NSColor.tertiarySystemFill : .quaternarySystemFill).setFill(); capsule.fill()
         }
-        let color: NSColor = state == .on ? .silkwebAccent : .labelColor
-        var x: CGFloat = 10
-        if selected {
-            let symbol = state == .on ? "checkmark" : "minus"
-            let glyph = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-                .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
-            if let glyph {
-                let tinted = NSImage(size: glyph.size, flipped: false) { rect in
-                    glyph.draw(in: rect); color.setFill(); rect.fill(using: .sourceAtop); return true
-                }
-                tinted.draw(in: NSRect(x: x, y: (bounds.height - 9) / 2, width: 9, height: 9))
-            }
-            x += 13
-        }
-        let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byTruncatingMiddle
-        let attributes: [NSAttributedString.Key: Any] = [.font: font!, .foregroundColor: color, .paragraphStyle: paragraph]
+        NSColor.separatorColor.setStroke()
+        capsule.lineWidth = 1; capsule.stroke()
+        let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byTruncatingTail
+        let plus: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.silkwebAccent]
+        let plusHeight = ("+" as NSString).size(withAttributes: plus).height
+        ("+" as NSString).draw(at: NSPoint(x: 9, y: (bounds.height - plusHeight) / 2), withAttributes: plus)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font!, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: paragraph]
         let height = (title as NSString).size(withAttributes: attributes).height
-        (title as NSString).draw(in: NSRect(x: x, y: (bounds.height - height) / 2, width: max(0, bounds.width - x - 10), height: height), withAttributes: attributes)
+        let x = 9 + Self.plusWidth
+        (title as NSString).draw(in: NSRect(x: x, y: (bounds.height - height) / 2, width: max(0, bounds.width - x - 9), height: height), withAttributes: attributes)
         NSGraphicsContext.restoreGraphicsState()
     }
     override var focusRingMaskBounds: NSRect { bounds }
@@ -187,20 +169,12 @@ extension TagInputField {
         }
     }
     @objc func acceptCompletion(_ sender: NSButton) {
-        guard let coordinator = delegate as? TagTokenField.Coordinator,
+        guard let coordinator = delegate as? TagChipField.Coordinator,
               let name = coordinator.suggestions.first(where: { $0 == sender.title }) else { return }
-        var names = coordinator.presentedNames ?? (objectValue as? [String] ?? [])
-        if !names.contains(where: { $0.compare(name, options: .caseInsensitive) == .orderedSame }) { names.append(name) }
         dismissCompletions()
-        // Cancel the uncommitted prefix before replacing tokens, then restore the caret.
-        abortEditing()
-        objectValue = names
-        coordinator.presentedNames = names
-        coordinator.commit(self)
-        window?.makeFirstResponder(self)
-        if let editor = currentEditor() as? NSTextView {
-            editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
-        }
-        contentChanged()
+        stringValue = ""
+        coordinator.onAdd([name])
+        // A mouse acceptance must leave the field focused for the next tag.
+        if currentEditor() == nil { window?.makeFirstResponder(self) }
     }
 }

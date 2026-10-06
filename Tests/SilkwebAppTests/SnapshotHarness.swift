@@ -58,6 +58,8 @@ struct SnapshotScenario {
 
     static let deepFolder = "Field Notes/Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
     static let deepDocument = deepFolder + "/Settling In at the Campground.md"
+    /// #72: long place-name headings at every depth for Outline tail truncation; written only for its scenario.
+    static let longOutline = "Snapshot Fixtures/Outline Long Headings.md"
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
     static let image = "Snapshot Fixtures/Image Fixture.md"
@@ -128,6 +130,8 @@ struct SnapshotScenario {
         // key, so the List draws its non-key selection; the accent fill needs a key window.
         .init(name: "outline-images-focused", document: "Snapshot Fixtures/Outline Images.md", outline: true, caretImage: "![Portrait]", focusOutline: true),
         .init(name: "outline-hierarchy", document: "Snapshot Fixtures/Outline Hierarchy.md", outline: true, caretHeading: "Grind size"),
+        // #72 thread tree: tail truncation (full title in the tooltip) with the current capsule on a long, deep heading.
+        .init(name: "outline-long-headings", document: longOutline, outline: true, caretHeading: "Presque Isle State Park and the Long Drive Along the Shoreline"),
         .init(name: "rename-active", document: pourOver, rename: true),
         .init(name: "quick-open", quickQuery: "brew"),
         .init(name: "search-results", searchQuery: "coffee"),
@@ -283,8 +287,22 @@ final class SnapshotHarness {
         ("Road Notes.md", "# Road Notes\n"),
     ]
 
-    func makeFixture(at root: URL, deepPath: Bool = false) throws {
+    func makeFixture(at root: URL, deepPath: Bool = false, longOutline: Bool = false) throws {
         try FileManager.default.copyItem(at: library, to: root)
+        if longOutline {
+            let text = """
+            # Settling In
+            ## Jamestown Campground, Pennsylvania, on the Shore of Pymatuning Lake
+            ![IMG_4050 at the Jamestown campground in the morning light](fixture.png)
+            # Building A Life with No Home and Other Stories From the Road
+            ## Lake Erie State Park, NY
+            ### Presque Isle State Park and the Long Drive Along the Shoreline
+            ## Finding Balance
+            """
+            let url = root.appendingPathComponent(SnapshotScenario.longOutline)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url, options: .atomic)
+        }
         if deepPath {
             // Only the breadcrumb scenario gets the deep path, so other sidebars are unchanged.
             let folder = root.appendingPathComponent(SnapshotScenario.deepFolder)
@@ -535,7 +553,8 @@ final class SnapshotHarness {
         }
         do {
             try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
-            try makeFixture(at: root, deepPath: scenario.document == SnapshotScenario.deepDocument)
+            try makeFixture(at: root, deepPath: scenario.document == SnapshotScenario.deepDocument,
+                            longOutline: scenario.document == SnapshotScenario.longOutline)
             workspace.root = root
             workspace.recoveryDirectory = root.appendingPathComponent("Snapshot Recovery")
             let snapshot = try await bounded("library scan") { try await LibraryScanner.scan(root: root) }

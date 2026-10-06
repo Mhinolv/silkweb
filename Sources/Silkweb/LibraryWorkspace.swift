@@ -74,6 +74,7 @@ final class LibraryWorkspace {
     private var watcher: LibraryWatcher?
     private var reconciling = false
     private var navigationTask: Task<Void, Never>?
+    @ObservationIgnored private var navigationGeneration = 0
     var snapshot: LibrarySnapshot?
     var session = LibrarySession()
     var loading = false
@@ -527,20 +528,34 @@ final class LibraryWorkspace {
 
     func navigate(folder: String?, documents: Set<String>, pinned: Bool = false, tag: UUID? = nil, changesScope: Bool = false) {
         guard !loading, !mutating else { return }
+        // The list follows the click at once (#70); the editor swaps in when the buffer has loaded.
+        let shown = (folder: session.selectedFolder, documents: session.selectedDocuments, tag: session.selectedTagID, filters: tagFilters)
+        var next = session
+        next.selectedFolder = folder
+        next.selectedDocuments = documents
+        if changesScope { next.selectedTagID = tag }
+        session = next
+        // Install the new tag scope before clearing toolbar filters: never expose the full library.
+        if changesScope && tag != nil { tagFilters = [] }
+        navigationGeneration += 1
+        let generation = navigationGeneration
         let previous = navigationTask
         navigationTask = Task {
             await previous?.value
+            // Rapid clicks coalesce: a navigation already replaced by a newer one opens nothing.
+            guard generation == navigationGeneration else { return }
             let document = documents.count == 1 ? documents.first.flatMap { path in
                 snapshot?.documents.first(where: { $0.relativePath == path })
             } : nil
-            if let document { guard await openTab(document, pinned: pinned) else { return } }
-            var next = session
-            next.selectedFolder = folder
-            next.selectedDocuments = documents
-            if changesScope { next.selectedTagID = tag }
-            session = next
-            // Install the new tag scope before clearing toolbar filters: never expose the full library.
-            if changesScope && tag != nil { tagFilters = [] }
+            if let document, !(await openTab(document, pinned: pinned)) {
+                // The editor kept its document (unsaved text): the list goes back to it.
+                guard generation == navigationGeneration else { return }
+                session.selectedFolder = shown.folder
+                session.selectedDocuments = shown.documents
+                session.selectedTagID = shown.tag
+                tagFilters = shown.filters
+                return
+            }
             if let path = documents.count == 1 ? documents.first : nil,
                let id = snapshot?.metadata.IDsByPath[path], let index = search.index {
                 try? await index.recordOpened(id, persist: snapshot?.isReadOnly == false)
@@ -676,6 +691,8 @@ struct LibraryWorkspaceView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button("Show Document Info", systemImage: "info.circle") { workspace.toggleInspector(.info) }
                     .help("Show Document Info").toolbarGlyph(selected: workspace.inspectorSegment == .info)
+                    // The glyph ends 12 pt from the bar's edge (#68).
+                    .padding(.trailing, -CompactToolbarController.trailingOverhang)
             }
             ToolbarItem(placement: .navigation) {
                 Button(workspace.sidebarsTitle, systemImage: "sidebar.left") { workspace.toggleSidebars() }

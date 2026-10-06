@@ -3,7 +3,7 @@ import SwiftUI
 import Observation
 import XCTest
 @testable import Silkweb
-import SilkwebCore
+@testable import SilkwebCore
 
 final class TagRefinementTests: XCTestCase {
     @MainActor private func descendants(_ view: NSView) -> [NSView] {
@@ -44,45 +44,78 @@ final class TagRefinementTests: XCTestCase {
         defer { window.contentViewController = nil }
         try await settle(host.view)
         let field = try XCTUnwrap(descendants(host.view).compactMap { $0 as? TagInputField }.first)
-        let coordinator = try XCTUnwrap(field.delegate as? TagTokenField.Coordinator)
-        XCTAssertEqual(coordinator.tokenField(field, completionsForSubstring: "CO", indexOfToken: 0, indexOfSelectedItem: nil) as? [String], ["coffee"])
+        let coordinator = try XCTUnwrap(field.delegate as? TagChipField.Coordinator)
         field.selectText(nil)
         let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
-        editor.string = "CO"; editor.setSelectedRange(NSRange(location: 2, length: 0))
-        coordinator.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
-        let accept = NSSelectorFromString("acceptCompletion:")
-        if field.responds(to: accept) {
-            let click = try XCTUnwrap(NSApp.windows.flatMap { $0.contentView.map(descendants) ?? [] }
-                .compactMap { $0 as? NSButton }.first { $0.target as? TagInputField === field && $0.action == accept },
-                "Completion popup must wire its real rows to acceptance")
-            click.performClick(nil)
-        } else {
-            // Before the fix, drive the native completion mouse-acceptance callback.
-            editor.insertCompletion("coffee", forPartialWordRange: NSRange(location: 0, length: 2), movement: NSReturnTextMovement, isFinal: true)
-            for _ in 0..<8 { await Task.yield() }
+        func type(_ text: String) {
+            editor.string = text; editor.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+            coordinator.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
         }
+        type("CO")
+        XCTAssertEqual(field.completionRows.map(\.title), ["coffee"])
+        let accept = NSSelectorFromString("acceptCompletion:")
+        let click = try XCTUnwrap(NSApp.windows.flatMap { $0.contentView.map(descendants) ?? [] }
+            .compactMap { $0 as? NSButton }.first { $0.target as? TagInputField === field && $0.action == accept },
+            "Completion popup must wire its real rows to acceptance")
+        click.performClick(nil)
         await workspace.tagEditTask?.value
         XCTAssertEqual(workspace.commonTagNames, ["coffee"], "Click must apply the existing tag")
         XCTAssertNotNil(field.currentEditor(), "Completion must retain field focus")
-        workspace.editTags([]); await workspace.tagEditTask?.value
-        editor.string = "CO"; editor.setSelectedRange(NSRange(location: 2, length: 0))
-        coordinator.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
+        XCTAssertEqual(field.stringValue, "", "The accepted prefix is cleared")
+        try await settle(host.view)
+        // An applied tag is no longer offered.
+        type("CO")
+        XCTAssertTrue(field.completionRows.isEmpty)
+        workspace.removeTag(try XCTUnwrap(workspace.tags.first { $0.name == "coffee" }).id); await workspace.tagEditTask?.value
+        try await settle(host.view)
+        type("CO")
         XCTAssertTrue(coordinator.control(field, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:))), "Return must accept the highlighted completion")
         await workspace.tagEditTask?.value
         XCTAssertEqual(workspace.commonTagNames, ["coffee"], "Return must apply the existing spelling")
-        editor.string = "DR"; editor.setSelectedRange(NSRange(location: 2, length: 0))
-        coordinator.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
+        type("DR")
         XCTAssertTrue(coordinator.control(field, textView: editor, doCommandBy: #selector(NSResponder.moveDown(_:))))
         XCTAssertTrue(coordinator.control(field, textView: editor, doCommandBy: #selector(NSResponder.moveUp(_:))))
         XCTAssertTrue(coordinator.control(field, textView: editor, doCommandBy: #selector(NSResponder.cancelOperation(_:))))
         XCTAssertEqual(editor.string, "DR", "Escape must keep the uncommitted prefix")
         XCTAssertFalse(coordinator.control(field, textView: editor, doCommandBy: #selector(NSResponder.cancelOperation(_:))), "Second Escape behaves natively")
-        XCTAssertNotNil(field.currentEditor())
+        // Return without a completion commits the typed name as a new tag.
+        type("  Kyoto  trip ")
+        XCTAssertTrue(field.completionRows.isEmpty)
+        XCTAssertTrue(coordinator.control(field, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:))))
+        await workspace.tagEditTask?.value
+        XCTAssertEqual(Set(workspace.commonTagNames), ["coffee", "Kyoto trip"])
+        XCTAssertEqual(workspace.libraryUndo.last?.title, "Undo Add Tag “Kyoto trip”")
+        XCTAssertEqual(editor.string, "")
+        // A comma commits what precedes it; pasted lists commit together and keep the remainder.
+        type("alpha, beta,gam")
+        await workspace.tagEditTask?.value
+        XCTAssertEqual(Set(workspace.commonTagNames), ["alpha", "beta", "coffee", "Kyoto trip"])
+        XCTAssertEqual(workspace.libraryUndo.last?.title, "Undo Add Tags")
+        XCTAssertEqual(field.stringValue, "gam")
+        // Tab commits typed text and stays; with an empty field it moves on natively.
+        XCTAssertTrue(coordinator.control(field, textView: editor, doCommandBy: #selector(NSResponder.insertTab(_:))))
+        await workspace.tagEditTask?.value
+        XCTAssertTrue(workspace.commonTagNames.contains("gam"))
+        XCTAssertFalse(coordinator.control(field, textView: editor, doCommandBy: #selector(NSResponder.insertTab(_:))))
+        // ⌫ in the empty field removes the last chip; with text it deletes text natively.
+        try await settle(host.view)
+        let last = try XCTUnwrap(descendants(host.view).compactMap { $0 as? TagChipButton }.last?.name)
+        XCTAssertTrue(coordinator.control(field, textView: editor, doCommandBy: #selector(NSResponder.deleteBackward(_:))))
+        await workspace.tagEditTask?.value
+        XCTAssertFalse(workspace.commonTagNames.contains(last))
+        XCTAssertEqual(workspace.libraryUndo.last?.title, "Undo Remove Tag “\(last)”")
+        type("x")
+        XCTAssertFalse(coordinator.control(field, textView: editor, doCommandBy: #selector(NSResponder.deleteBackward(_:))))
+        // Focus requests (⌘8, Edit Tags…) put the caret at the end without selecting.
         field.requestedFocus = 1; field.focusIfNeeded()
         try await settle(host.view)
-        XCTAssertEqual(field.tokenStyle, .rounded)
-        XCTAssertEqual(editor.selectedRange().length, 0)
-        XCTAssertEqual(editor.selectedRange().location, (editor.string as NSString).length)
+        let focused = try XCTUnwrap(field.currentEditor() as? NSTextView)
+        XCTAssertEqual(focused.selectedRange().length, 0)
+        XCTAssertEqual(focused.selectedRange().location, (focused.string as NSString).length)
+        // Leaving the field commits pending text, as the token field did.
+        XCTAssertTrue(window.makeFirstResponder(nil))
+        await workspace.tagEditTask?.value
+        XCTAssertTrue(workspace.commonTagNames.contains("x"))
         for width: CGFloat in [180, 320, 240] {
             host.view.setFrameSize(NSSize(width: width, height: 700)); try await settle(host.view)
         }
@@ -90,7 +123,8 @@ final class TagRefinementTests: XCTestCase {
         XCTAssertFalse(NSApp.windows.contains { $0.parent === window })
     }
 
-    @MainActor func testRecentPillActionTogglesMixedSelectionAndUndo() async throws {
+    /// #72: mixed tags show as dashed chips; Suggested lists only recent tags the selection doesn't carry.
+    @MainActor func testSuggestedAndMixedChipsApplyRemoveAndUndo() async throws {
         let workspace = try await fixture()
         workspace.session.selectedFolder = nil; workspace.session.selectedDocuments = ["A.md", "B.md"]
         let host = NSHostingController(rootView: DocumentInfo(workspace: workspace))
@@ -98,24 +132,62 @@ final class TagRefinementTests: XCTestCase {
         window.contentViewController = host
         defer { window.contentViewController = nil }
         try await settle(host.view)
-        let pill = try XCTUnwrap(descendants(host.view).compactMap { $0 as? NSButton }.first { $0.title == "coffee" }, "Recent must expose clickable tag pills")
-        XCTAssertEqual(pill.state, .mixed)
-        pill.performClick(nil); await workspace.tagEditTask?.value
+        func chips() -> [TagChipButton] { descendants(host.view).compactMap { $0 as? TagChipButton } }
+        func pills() -> [TagPillButton] { descendants(host.view).compactMap { $0 as? TagPillButton } }
+        XCTAssertEqual(chips().map(\.name), ["coffee", "draft"])
+        XCTAssertEqual(chips().map(\.mixed), [true, true])
+        XCTAssertTrue(pills().isEmpty, "Each tag appears once: applied tags are not suggested")
+        // The mixed chip's name applies it to every selected document.
+        try XCTUnwrap(chips().first).onApply?(); await workspace.tagEditTask?.value
         XCTAssertEqual(workspace.commonTagNames, ["coffee"])
         XCTAssertEqual(workspace.libraryUndo.last?.title, "Undo Add Tag “coffee”")
         try await settle(host.view)
+        XCTAssertEqual(chips().map(\.mixed), [false, true])
         let appliedRecency = try recency(workspace)
-        pill.performClick(nil); await workspace.tagEditTask?.value
+        // A press (× / Space / VoiceOver) removes the tag from all of them, mixed or not.
+        try XCTUnwrap(chips().first).performClick(nil); await workspace.tagEditTask?.value
         XCTAssertTrue(workspace.commonTagNames.isEmpty)
         XCTAssertEqual(workspace.libraryUndo.last?.title, "Undo Remove Tag “coffee”")
         workspace.undoLibrary()
         for _ in 0..<100 where workspace.mutating { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(workspace.commonTagNames, ["coffee"])
         XCTAssertEqual(try recency(workspace), appliedRecency)
+        try await settle(host.view)
+        try XCTUnwrap(chips().last).performClick(nil); await workspace.tagEditTask?.value
+        XCTAssertEqual(workspace.libraryUndo.last?.title, "Undo Remove Tag “draft”")
+        try await settle(host.view)
+        XCTAssertEqual(chips().map(\.name), ["coffee"])
+        XCTAssertTrue(pills().isEmpty, "draft is gone from the library once unused")
+        workspace.undoLibrary()
+        for _ in 0..<100 where workspace.mutating { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(workspace.tags.map(\.name), ["coffee", "draft"])
+
+        // A document without tags: recent tags are suggested; applying one moves it into the chips.
+        workspace.session.selectedDocuments = ["Other.md"]
+        try await settle(host.view)
+        XCTAssertTrue(chips().isEmpty)
+        XCTAssertEqual(pills().map(\.title), ["coffee", "draft"])
+        let pill = try XCTUnwrap(pills().first)
+        XCTAssertEqual(pill.accessibilityRole(), .checkBox)
+        XCTAssertEqual(pill.accessibilityValue() as? String, "not applied")
+        pill.performClick(nil); await workspace.tagEditTask?.value
+        XCTAssertEqual(workspace.commonTagNames, ["coffee"])
+        try await settle(host.view)
+        XCTAssertEqual(chips().map(\.name), ["coffee"])
+        XCTAssertEqual(pills().map(\.title), ["draft"])
         for width: CGFloat in [100, 180, 320, 240] {
             host.view.setFrameSize(NSSize(width: width, height: 700)); try await settle(host.view)
-            XCTAssertLessThanOrEqual(pill.frame.width, width)
+            for view in chips() as [NSView] + pills() { XCTAssertLessThanOrEqual(view.frame.width, width) }
         }
+        // Read-only libraries keep the chips but disable every control.
+        let snapshot = try XCTUnwrap(workspace.snapshot)
+        workspace.install(LibrarySnapshot(rootURL: snapshot.rootURL, folders: snapshot.folders, documents: snapshot.documents,
+            presentation: snapshot.presentation, metadata: snapshot.metadata, recoveredMetadataURL: nil, isReadOnly: true))
+        try await settle(host.view)
+        XCTAssertFalse(workspace.canEditTags)
+        XCTAssertTrue(chips().allSatisfy { !$0.isEnabled })
+        XCTAssertTrue(pills().allSatisfy { !$0.isEnabled })
+        XCTAssertFalse(try XCTUnwrap(descendants(host.view).compactMap { $0 as? TagInputField }.first).isEnabled)
     }
 
     @MainActor func testSidebarScopeSequenceNeverPublishesAllDocuments() async throws {
@@ -196,6 +268,6 @@ final class TagRefinementTests: XCTestCase {
         workspace.session.selectedFolder = nil; workspace.session.selectedDocuments = ["A.md"]
         let host = NSHostingView(rootView: DocumentInfo(workspace: workspace))
         host.setFrameSize(NSSize(width: 240, height: 700)); try await settle(host)
-        XCTAssertTrue(descendants(host).compactMap { $0 as? NSButton }.filter { $0.accessibilityHelp() == "Adds or removes this tag" }.isEmpty)
+        XCTAssertTrue(descendants(host).compactMap { $0 as? NSButton }.filter { $0.accessibilityHelp() == "Adds this tag" }.isEmpty)
     }
 }

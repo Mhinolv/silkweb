@@ -91,8 +91,7 @@ struct DocumentTable: NSViewRepresentable {
                     host.rootView = rowView(documents[row])
                 }
             }
-            let selected = IndexSet(documents.indices.filter { workspace.session.selectedDocuments.contains(documents[$0].relativePath) })
-            if table.selectedRowIndexes != selected { table.selectRowIndexes(selected, byExtendingSelection: false) }
+            let selected = syncSelection()
             if lastRename != workspace.rename, let rename = workspace.rename, !rename.isFolder,
                let row = documents.firstIndex(where: { $0.relativePath == rename.path }) {
                 table.scrollRowToVisible(row)
@@ -101,6 +100,20 @@ struct DocumentTable: NSViewRepresentable {
                     !table.visibleRect.intersects(table.rect(ofRow: row)) { table.scrollRowToVisible(row) }
             lastRename = workspace.rename
             lastRevision = workspace.revision
+        }
+
+        /// Shows the session's selection in the native table. A click calls it directly so the capsule moves in the
+        /// same frame (#70) instead of waiting for SwiftUI's next update.
+        @discardableResult func syncSelection() -> IndexSet {
+            guard let table else { return [] }
+            let selected = IndexSet(documents.indices.filter { workspace.session.selectedDocuments.contains(documents[$0].relativePath) })
+            if table.selectedRowIndexes != selected {
+                let wasUpdating = updating
+                updating = true
+                table.selectRowIndexes(selected, byExtendingSelection: false)
+                updating = wasUpdating
+            }
+            return selected
         }
 
         private func rowView(_ document: LibraryDocument) -> DocumentRow {
