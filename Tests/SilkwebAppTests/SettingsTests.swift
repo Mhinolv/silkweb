@@ -8,7 +8,7 @@ import XCTest
 final class SettingsTests: XCTestCase {
     private var savedPreferences = WritingPreferences()
     private var savedAppearance: NSAppearance?
-    private var suites: [String] = []
+    private var suites: [TestPreferences] = []
 
     @MainActor override func setUp() async throws {
         _ = NSApplication.shared
@@ -21,13 +21,13 @@ final class SettingsTests: XCTestCase {
         LivePreferences.shared.current = savedPreferences
         EditorRegistry.apply(savedPreferences)
         NSApp.appearance = savedAppearance
-        for suite in suites { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        for suite in suites { suite.remove() }
     }
 
     @MainActor private func makeSettings(live: Bool = true) throws -> WritingSettings {
-        let suite = "Silkweb.Settings." + UUID().uuidString
+        let suite = TestPreferences("Settings")
         suites.append(suite)
-        return WritingSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: suite)), live: live)
+        return WritingSettings(defaults: suite.defaults, live: live)
     }
 
     @MainActor private func makeEditor(_ source: String) throws -> (NSWindow, PlainMarkdownTextView) {
@@ -54,7 +54,7 @@ final class SettingsTests: XCTestCase {
     @MainActor
     func testSettingsWindowBuildsEveryTabWithItsControls() async throws {
         let settings = try makeSettings(live: false)
-        let workspace = LibraryWorkspace(defaults: settings.defaults, columnAutosaveName: suites.last!)
+        let workspace = LibraryWorkspace(defaults: settings.defaults)
         workspace.canSaveWindowSession = false
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebSettingsLibrary-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -306,7 +306,7 @@ final class SettingsTests: XCTestCase {
     func testZoomIsTemporaryAndActualSizeRestoresSettingsSize() throws {
         let settings = try makeSettings()
         settings.preferences.fontSize = 15
-        let workspace = LibraryWorkspace(defaults: settings.defaults, columnAutosaveName: suites.last!)
+        let workspace = LibraryWorkspace(defaults: settings.defaults)
         workspace.canSaveWindowSession = false
         let (window, text) = try makeEditor("Body")
         defer { window.close() }

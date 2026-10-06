@@ -193,13 +193,7 @@ final class TagLayoutTests: XCTestCase {
         XCTAssertTrue(outline.isItemExpanded(group), "Restoring a selected tag must reveal it")
         XCTAssertEqual((outline.item(atRow: outline.selectedRow) as? FolderSidebar.Item)?.title, workspace.tags.first!.name)
         // Exercise the actual sidebar/list split with tag rows present (1.55).
-        let autosave = "Silkweb.TagLayout." + UUID().uuidString
-        defer {
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(autosave) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
-        }
-        let split = LibrarySplitViewController(workspace: workspace, autosaveName: autosave)
+        let split = LibrarySplitViewController(workspace: workspace)
         window.contentViewController = split
         split.view.setFrameSize(NSSize(width: 1400, height: 900))
         try await settle(split.view)

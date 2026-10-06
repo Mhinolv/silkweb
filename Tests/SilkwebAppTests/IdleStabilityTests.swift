@@ -12,7 +12,7 @@ final class IdleStabilityTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try "".write(to: root.appendingPathComponent("Empty.md"), atomically: true, encoding: .utf8)
         try "coffee coffee".write(to: root.appendingPathComponent("Coffee.md"), atomically: true, encoding: .utf8)
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.Idle." + UUID().uuidString))
+        let defaults = disposableDefaults("Idle")
         let workspace = LibraryWorkspace(defaults: defaults)
         workspace.open(root)
         for _ in 0..<200 {

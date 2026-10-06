@@ -26,7 +26,7 @@ final class PrintCommandsTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let defaults = disposableDefaults("PrintCommands")
         let workspace = LibraryWorkspace(defaults: defaults)
         XCTAssertFalse(workspace.canPrint)
         let file = root.appendingPathComponent("Print.md")
@@ -78,7 +78,7 @@ final class PrintCommandsTests: XCTestCase {
         guard !SnapshotHarness.isWebKitUnavailable(environment: ProcessInfo.processInfo.environment, activationPolicy: NSApp.activationPolicy().rawValue) else {
             throw XCTSkip("The native save panel requires an outside-sandbox connection to its XPC service")
         }
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let defaults = disposableDefaults("PrintCommands")
         defaults.set("/tmp/print-folder", forKey: ExportCommands.directoryKey)
         let panel = ExportCommands.savePanel(name: "Title", defaults: defaults, pdf: true)
         XCTAssertEqual(panel.allowedContentTypes, [.pdf])
@@ -649,7 +649,7 @@ final class PrintCommandsTests: XCTestCase {
     /// silkweb-1.79: a delay that elapses just as rendering finishes must not open a sheet
     /// that nothing closes. The delay ignores cancellation, like a sleep that already returned.
     @MainActor func testDelayedProgressNeverAppearsAfterRenderFinished() async throws {
-        let workspace = LibraryWorkspace(defaults: try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString)))
+        let workspace = LibraryWorkspace(defaults: disposableDefaults("PrintCommands"))
         var release: CheckedContinuation<Void, Never>?
         var delayFinished = false
         let value = try await workspace.withDelayedProgress("Fast", delay: {
@@ -670,7 +670,7 @@ final class PrintCommandsTests: XCTestCase {
 
     /// A slow render shows the sheet, whose Cancel reaches the render; any outcome closes it.
     @MainActor func testDelayedProgressShowsWhileRunningAndClosesOnEveryOutcome() async throws {
-        let workspace = LibraryWorkspace(defaults: try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString)))
+        let workspace = LibraryWorkspace(defaults: disposableDefaults("PrintCommands"))
         var cancelled = false
         let value = try await workspace.withDelayedProgress("Slow", delay: {}, cancel: { cancelled = true }) {
             for _ in 0..<200 where workspace.pdfProgress == nil { try await Task.sleep(for: .milliseconds(5)) }

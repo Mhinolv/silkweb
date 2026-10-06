@@ -72,10 +72,9 @@ final class ToolbarRealWindowTests: XCTestCase {
         try Data("# Settling In\n\nThe first night by the lake.\n".utf8).write(to: root.appendingPathComponent(Self.document))
         try FileManager.default.createDirectory(at: root.appendingPathComponent(Self.short), withIntermediateDirectories: true)
         try Data("# Notes\n".utf8).write(to: root.appendingPathComponent(Self.shortDocument))
-        let suite = "Silkweb.RealWindow." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("RealWindow")
         defaults.set(outline, forKey: "Silkweb.Detail.Outline")
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.recoveryDirectory = container.appendingPathComponent("Recovery")
@@ -95,10 +94,6 @@ final class ToolbarRealWindowTests: XCTestCase {
             window.contentViewController = nil
             window.close()
             NSApp.appearance = oldAppearance
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
             try? FileManager.default.removeItem(at: container)
         }
         try await harness.resize(width)

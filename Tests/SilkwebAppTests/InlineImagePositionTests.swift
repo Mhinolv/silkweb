@@ -15,13 +15,10 @@ final class InlineImagePositionTests: XCTestCase {
     func testImagesStayVisibleInTheirSlotAtEveryDisplay() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let suite = "Silkweb.ImagePositions." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("ImagePositions")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer {
             try? FileManager.default.removeItem(at: root)
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) { UserDefaults.standard.removeObject(forKey: key) }
         }
         // Large enough that a wider column requests a sharper decode (Split -> Editor).
         let context = try XCTUnwrap(CGContext(data: nil, width: 1600, height: 400, bitsPerComponent: 8, bytesPerRow: 6400,
@@ -33,13 +30,13 @@ final class InlineImagePositionTests: XCTestCase {
             + String(repeating: "A paragraph with words.\n\n", count: 1000)
             + "![Middle](image.png)\n\nMore words.\n\n![Last](image.png)\n\nClosing words.\n"
         try Data(source.utf8).write(to: root.appendingPathComponent("Document.md"))
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false; workspace.root = root
         workspace.preview.mode = .editor
         workspace.install(try await LibraryScanner.scan(root: root))
         let opened = await workspace.openTab(try XCTUnwrap(workspace.snapshot?.documents.first), pinned: true)
         XCTAssertTrue(opened)
-        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: suite)
+        let controller = LibrarySplitViewController(workspace: workspace)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         defer { window.contentViewController = nil; window.close() }

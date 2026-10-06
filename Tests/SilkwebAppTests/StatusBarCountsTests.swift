@@ -30,12 +30,8 @@ final class StatusBarCountsTests: XCTestCase {
     }
 
     private struct Library {
-        let root: URL, suite: String, defaults: UserDefaults, workspace: LibraryWorkspace
+        let root: URL, defaults: UserDefaults, workspace: LibraryWorkspace
         func cleanUp() {
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
             try? FileManager.default.removeItem(at: root)
         }
     }
@@ -45,13 +41,12 @@ final class StatusBarCountsTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebStatusCounts-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try Data(body.utf8).write(to: root.appendingPathComponent("Note.md"))
-        let suite = "Silkweb.StatusCounts." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let defaults = disposableDefaults("StatusCounts")
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
-        return Library(root: root, suite: suite, defaults: defaults, workspace: workspace)
+        return Library(root: root, defaults: defaults, workspace: workspace)
     }
 
     /// The real window hierarchy: counts leading, “Saved” trailing, selection “of” counts, Focus chip in between.
@@ -175,10 +170,8 @@ final class StatusBarCountsTests: XCTestCase {
     func testNarrowWidthsDropCharactersBeforeTouchingTrailingCluster() async throws {
         Self.exposeAccessibility(true)
         defer { Self.exposeAccessibility(false) }
-        let suite = "Silkweb.StatusCountsSweep." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let defaults = disposableDefaults("StatusCountsSweep")
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         let session = DocumentSession()
         session.text = String(repeating: "word ", count: 1_204)

@@ -48,9 +48,7 @@ final class ColumnLayoutTests: XCTestCase {
         try FileManager.default.createDirectory(at: root.appendingPathComponent("Empty"), withIntermediateDirectories: true)
         try Data("# One".utf8).write(to: root.appendingPathComponent("One.md"))
         defer { try? FileManager.default.removeItem(at: root) }
-        let suite = "Silkweb.ColumnLayout." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = disposableDefaults("ColumnLayout")
         let workspace = LibraryWorkspace(defaults: defaults)
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))
@@ -96,15 +94,11 @@ final class ColumnLayoutTests: XCTestCase {
     @MainActor
     func testRealOutlineTitleRemainsPinnedAcrossContentModesAndResize() async throws {
         _ = NSApplication.shared
-        let suite = "Silkweb.OutlineLayout." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = disposableDefaults("OutlineLayout")
         let workspace = LibraryWorkspace(defaults: defaults)
         let frames = Frames()
         workspace.preview.showsOutline = true
-        let columns = LibrarySplitViewController(workspace: workspace, autosaveName: suite)
-        columns.splitView.autosaveName = nil
-        columns.navigationController.splitView.autosaveName = nil
+        let columns = LibrarySplitViewController(workspace: workspace)
         // Keep the production native columns and DocumentDetail's SwiftUI inspector.
         // Only the overlay reads geometry; it imposes no frame on InspectorView.
         let detail = NSHostingController(rootView: measured(DocumentDetail(workspace: workspace), frames: frames))

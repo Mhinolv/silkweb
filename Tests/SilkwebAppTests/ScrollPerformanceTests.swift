@@ -53,13 +53,10 @@ final class ScrollPerformanceTests: XCTestCase {
     private func momentumScroll(focus: Bool, typewriter: Bool) async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let suite = "Silkweb.ScrollPerformance." + UUID().uuidString
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("ScrollPerformance")
         defer {
             try? FileManager.default.removeItem(at: root)
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) { UserDefaults.standard.removeObject(forKey: key) }
         }
         let imageCount = 20, paragraphs = 2_000
         for index in 0..<imageCount {
@@ -80,7 +77,7 @@ final class ScrollPerformanceTests: XCTestCase {
         }
         try text.write(to: root.appendingPathComponent("Long.md"), atomically: true, encoding: .utf8)
 
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         workspace.root = root
         workspace.preview.showsOutline = true
@@ -88,7 +85,7 @@ final class ScrollPerformanceTests: XCTestCase {
         workspace.install(try await LibraryScanner.scan(root: root))
         let opened = await workspace.openTab(try XCTUnwrap(workspace.snapshot?.documents.first { $0.relativePath == "Long.md" }), pinned: true)
         XCTAssertTrue(opened)
-        let controller = LibrarySplitViewController(workspace: workspace, autosaveName: suite)
+        let controller = LibrarySplitViewController(workspace: workspace)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentViewController = controller

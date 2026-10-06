@@ -15,9 +15,7 @@ final class DocumentPaneTransitionTests: XCTestCase {
         try Data(source.utf8).write(to: url)
         let otherURL = root.appendingPathComponent("Other.md")
         try Data("# Other tab".utf8).write(to: otherURL)
-        let suite = "Silkweb.PaneTransition." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = disposableDefaults("PaneTransition")
         let workspace = LibraryWorkspace(defaults: defaults)
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))

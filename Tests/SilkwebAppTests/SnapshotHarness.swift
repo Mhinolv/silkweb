@@ -531,9 +531,9 @@ final class SnapshotHarness {
         }
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebSnapshot-" + UUID().uuidString)
         let root = temporary.appendingPathComponent("Silkweb Snapshot Library")
-        let suite = "Silkweb.Snapshots." + UUID().uuidString
-        let defaults = UserDefaults(suiteName: suite)!
-        let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
+        let preferences = TestPreferences("Snapshots")
+        let defaults = preferences.defaults
+        let workspace = LibraryWorkspace(defaults: defaults)
         workspace.canSaveWindowSession = false
         let oldAppearance = NSApp.appearance
         let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
@@ -548,10 +548,7 @@ final class SnapshotHarness {
             window.contentViewController = nil
             window.close()
             NSApp.appearance = oldAppearance
-            defaults.removePersistentDomain(forName: suite)
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(suite) {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
+            preferences.remove()
             try? FileManager.default.removeItem(at: temporary)
         }
         do {
@@ -611,8 +608,6 @@ final class SnapshotHarness {
             try await Task.sleep(for: .milliseconds(200))
             // Use the production controller and explicit standard column widths, avoiding owner autosaves.
             if let columns = Self.descendants(controller.view).compactMap({ ($0 as? NSSplitView)?.delegate as? LibrarySplitViewController }).first {
-                columns.splitView.autosaveName = nil
-                columns.navigationController.splitView.autosaveName = nil
                 columns.splitView.setPosition(220 + columns.navigationController.splitView.dividerThickness + 300, ofDividerAt: 0)
                 controller.view.layoutSubtreeIfNeeded()
                 columns.navigationController.splitView.setPosition(220, ofDividerAt: 0)

@@ -22,7 +22,7 @@ final class RecoveryDraftTests: XCTestCase {
     override func tearDown() async throws { try? FileManager.default.removeItem(at: container) }
 
     private func workspace() throws -> LibraryWorkspace {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "SilkwebRecovery-\(UUID().uuidString)"))
+        let defaults = disposableDefaults("Recovery")
         let workspace = LibraryWorkspace(defaults: defaults)
         workspace.recoveryDirectory = recovery
         return workspace

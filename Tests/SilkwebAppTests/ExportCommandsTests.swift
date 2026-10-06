@@ -12,7 +12,7 @@ final class ExportCommandsTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let file = root.appendingPathComponent("Note.md")
         try Data("Old".utf8).write(to: file)
-        let workspace = LibraryWorkspace(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let workspace = LibraryWorkspace(defaults: disposableDefaults("ExportCommands"))
         XCTAssertFalse(workspace.canExport)
         workspace.root = root
         workspace.install(try await LibraryScanner.scan(root: root))

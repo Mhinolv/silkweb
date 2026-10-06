@@ -264,9 +264,7 @@ extension MarkdownTextViewTests {
 
     @MainActor
     func testSavedWritingPreferencesFeedEditorMetrics() throws {
-        let suite = "SilkwebTypographyTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = disposableDefaults("TypographyTests")
         XCTAssertEqual(WritingPreferences.load(from: defaults), WritingPreferences())
         defaults.set(Data("{\"fontFamily\":\"Helvetica\",\"fontSize\":21,\"lineHeight\":1.75,\"maximumWidth\":900,\"future\":true}".utf8), forKey: "writingPreferences")
         let style = EditorStyle(preferences: WritingPreferences.load(from: defaults))

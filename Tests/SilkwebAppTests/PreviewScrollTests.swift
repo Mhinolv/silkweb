@@ -13,11 +13,10 @@ final class PreviewScrollTests: XCTestCase {
         if SnapshotHarness.isWebKitUnavailable(environment: ProcessInfo.processInfo.environment, activationPolicy: NSApp.activationPolicy().rawValue) {
             throw XCTSkip("Split scroll sampling needs real WebKit in a registered offscreen host outside the agent sandbox; run this test on both pre-fix and fixed builds there.")
         }
-        let suite = "Silkweb.Scroll." + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = disposableDefaults("Scroll")
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
+        defer { try? FileManager.default.removeItem(at: root) }
         let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 40, pixelsHigh: 80, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 160, bitsPerPixel: 32))
         for x in 0..<40 { for y in 0..<80 { bitmap.setColor(.systemBlue, atX: x, y: y) } }
         try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: root.appendingPathComponent("local.png"))

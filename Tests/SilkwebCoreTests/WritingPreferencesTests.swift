@@ -43,9 +43,7 @@ final class WritingPreferencesTests: XCTestCase {
         expected.fontFamily = "Helvetica"; expected.fontSize = 21; expected.maximumWidth = 720
         XCTAssertEqual(legacy, expected)
 
-        let suite = "SilkwebWritingPreferences-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = disposableDefaults("WritingPreferences")
         XCTAssertEqual(WritingPreferences.load(from: defaults), WritingPreferences())
         XCTAssertNil(defaults.data(forKey: WritingPreferences.defaultsKey), "Reading must not write")
         defaults.set(Data("{\"fontFamily\":\"Menlo\",\"fontSize\":18}".utf8), forKey: WritingPreferences.defaultsKey)

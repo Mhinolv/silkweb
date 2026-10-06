@@ -21,10 +21,10 @@ final class LibraryWorkspace {
     let search = LibrarySearch()
     let toolbarMetrics = ToolbarMetrics()
     let preview: PreviewCoordinator
-    let columnAutosaveName: String
+    let columnAutosaveName: String?
     @ObservationIgnored private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = AppDefaults.store, columnAutosaveName: String = "Silkweb.LibraryColumns") {
+    init(defaults: UserDefaults = AppDefaults.store, columnAutosaveName: String? = AppDefaults.columnAutosaveName) {
         self.defaults = defaults
         self.columnAutosaveName = columnAutosaveName
         preview = PreviewCoordinator(defaults: defaults)

@@ -13,7 +13,7 @@ final class AssetMigrationWorkspaceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         try Data([1]).write(to: root.appendingPathComponent(".silkweb-assets/id/image.png"))
         try Data("![x](.silkweb-assets/id/image.png)".utf8).write(to: root.appendingPathComponent("note.md"))
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "SilkwebMigrationOpen-" + UUID().uuidString))
+        let defaults = disposableDefaults("MigrationOpen")
         let workspace = LibraryWorkspace(defaults: defaults)
         workspace.open(root)
         let deadline = Date().addingTimeInterval(5)
@@ -73,7 +73,7 @@ final class AssetMigrationWorkspaceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         try Data([1]).write(to: root.appendingPathComponent(".silkweb-assets/id/image.png"))
         for name in ["A", "B"] { try Data("![x](.silkweb-assets/id/image.png)".utf8).write(to: root.appendingPathComponent(name + ".md")) }
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "SilkwebMigration-" + UUID().uuidString))
+        let defaults = disposableDefaults("Migration")
         let workspace = LibraryWorkspace(defaults: defaults)
         workspace.root = root
         workspace.recoveryDirectory = root.appendingPathComponent(".recovery")

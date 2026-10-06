@@ -35,7 +35,7 @@ final class PreviewTests: XCTestCase {
         @media (prefers-contrast: more) { :root { --sw-heading: #1F5570; } }
         @media (prefers-color-scheme: dark) and (prefers-contrast: more) { :root { --sw-heading: #A6D3E6; } }
         """)
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.PreviewPalette." + UUID().uuidString))
+        let defaults = disposableDefaults("PreviewPalette")
         let preview = PreviewCoordinator(defaults: defaults)
         preview.mode = .preview
         preview.schedule(text: "# Title\n###### Subtitle", document: nil, root: nil)
@@ -92,7 +92,7 @@ final class PreviewTests: XCTestCase {
 
     @MainActor
     func testInitialLoadingDelayAndRetryKeepsFailureUntilSuccess() async throws {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.LoadingPreview." + UUID().uuidString))
+        let defaults = disposableDefaults("LoadingPreview")
         let preview = PreviewCoordinator(defaults: defaults)
         let document = URL(fileURLWithPath: "/tmp/preview-tests/note.md")
         preview.mode = .preview
@@ -111,7 +111,7 @@ final class PreviewTests: XCTestCase {
 
     @MainActor
     func testDebounceLatestResultModesAndOutlineNavigation() async throws {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.PreviewTests." + UUID().uuidString))
+        let defaults = disposableDefaults("PreviewTests")
         let preview = PreviewCoordinator(defaults: defaults)
         let document = URL(fileURLWithPath: "/tmp/preview-tests/note.md")
         let root = document.deletingLastPathComponent()
@@ -150,7 +150,7 @@ final class PreviewTests: XCTestCase {
         if SnapshotHarness.isWebKitUnavailable(environment: ProcessInfo.processInfo.environment, activationPolicy: NSApp.activationPolicy().rawValue) {
             throw XCTSkip("Real WebKit DOM/image regression requires an unsandboxed registered offscreen host; WebKit is unavailable in this sandbox.")
         }
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.WebTests." + UUID().uuidString))
+        let defaults = disposableDefaults("WebTests")
         let workspace = LibraryWorkspace(defaults: defaults)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root.appendingPathComponent("img"), withIntermediateDirectories: true)
@@ -255,7 +255,7 @@ final class PreviewTests: XCTestCase {
 
     @MainActor
     func testHiddenPreviewAndIdenticalInputDoNotRender() async throws {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.IdlePreview." + UUID().uuidString))
+        let defaults = disposableDefaults("IdlePreview")
         let preview = PreviewCoordinator(defaults: defaults)
         let document = URL(fileURLWithPath: "/tmp/preview-tests/note.md")
         preview.mode = .editor
@@ -289,7 +289,7 @@ final class PreviewTests: XCTestCase {
     @MainActor
     func testRealPaneLifecycleAndHeightOnlyResizePreservesBuffer() async throws {
         _ = NSApplication.shared
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "Silkweb.PaneTests." + UUID().uuidString))
+        let defaults = disposableDefaults("PaneTests")
         let workspace = LibraryWorkspace(defaults: defaults)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
