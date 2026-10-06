@@ -388,7 +388,7 @@ final class ToolbarRealWindowTests: XCTestCase {
                     try assertNothingOverflows(h, context)
                     let gap = try trailingGap(h)
                     XCTAssertLessThanOrEqual(gap, windowed + 1, "\(context): trailing items left the edge (windowed gap \(windowed)) — \(h.geometry)")
-                    XCTAssertLessThanOrEqual(gap, CompactToolbarController.trailingInset + 12,
+                    XCTAssertLessThanOrEqual(gap, CompactToolbarController.rowEndInset + 12,
                                              "\(context): trailing items sit at the edge — \(h.geometry)")
                     if width >= 1400, let fit = h.breadcrumb?.fit {
                         XCTAssertTrue(fit.collapsed.isEmpty, "\(context): ancestors folded — \(h.geometry)")
@@ -484,7 +484,7 @@ final class ToolbarRealWindowTests: XCTestCase {
             for item in toolbar.items {
                 XCTAssertNotNil(item.view?.window, "\(context): \(item.label) overflowed into » — \(geometry)", line: line)
             }
-            XCTAssertLessThanOrEqual(gap(), CompactToolbarController.trailingInset + 12, "\(context): trailing items at the edge — \(geometry)", line: line)
+            XCTAssertLessThanOrEqual(gap(), CompactToolbarController.rowEndInset + 12, "\(context): trailing items at the edge — \(geometry)", line: line)
         }
         let shown = firstMinX()
         let shownWidth = workspace.toolbarMetrics.breadcrumbWidth
@@ -571,6 +571,63 @@ final class ToolbarRealWindowTests: XCTestCase {
         XCTAssertFalse(CompactToolbarController.rowFollowsSection(naturalLeading: 185, regions: [], buttonsEnd: nil))
         let inspector = NSRect(x: 1000, y: 0, width: 400, height: 38)
         XCTAssertFalse(CompactToolbarController.rowFollowsSection(naturalLeading: 76, regions: [inspector], buttonsEnd: 66), "the inspector's area is trailing")
+    }
+
+    /// #68, the owner's report on 827620b: the Info glyph ended about 30 pt short of the bar's edge in full screen
+    /// (20 pt offscreen, windowed and full screen alike; 3aa32f2 measured the same 20 pt windowed). It ends 12 pt
+    /// from the edge, mirroring the 12 pt leading inset, or 12 pt before the titlebar area AppKit reserves over the
+    /// Outline inspector: windowed, full screen with the titlebar concealed and revealed, wide and narrow.
+    @MainActor
+    func testTrailingGlyphEndsTwelvePointsFromTheEdge() async throws {
+        for outline in [false, true] {
+            let h = try await makeHarness(width: 1440, outline: outline)
+            defer { h.cleanUp() }
+            h.workspace.navigate(folder: Self.short, documents: [Self.shortDocument], pinned: true)
+            await h.workspace.waitForNavigation()
+            try await h.settle()
+            let window = try XCTUnwrap(h.window as? SimulatedFullScreenWindow)
+            for width: CGFloat in [1440, 1201, 900] {
+                try await h.resize(width)
+                for state in ["windowed", "full screen, titlebar concealed", "full screen, titlebar revealed"] {
+                    window.simulatesFullScreen = state != "windowed"
+                    for button in h.buttons { button.isHidden = state == "full screen, titlebar concealed" }
+                    h.workspace.toolbarMetrics.controller.scheduleUpdate()
+                    try await h.settle()
+                    try await h.settle()
+                    let context = "\(Int(width)) pt, outline \(outline), \(state)"
+                    try assertNothingOverflows(h, context)
+                    let gap = try glyphGap(h)
+                    XCTAssertEqual(gap, 12, accuracy: 1,
+                                   "\(context): Info glyph ends \(gap) pt from the edge — \(h.geometry)")
+                    // The overhanging bezel (hover fill, focus ring) stays inside the item's viewer.
+                    let info = try XCTUnwrap(h.view("Show Document Info"))
+                    let viewer = try XCTUnwrap(info.superview)
+                    let bezel = try XCTUnwrap(Self.descendants(info).first { $0 is NSButton })
+                    XCTAssertLessThanOrEqual(bezel.convert(bezel.bounds, to: viewer).maxX, viewer.bounds.maxX + 0.5,
+                                             "\(context): Info bezel clipped by its viewer — \(h.geometry)")
+                }
+                for button in h.buttons { button.isHidden = false }
+                window.simulatesFullScreen = false
+            }
+        }
+    }
+
+    /// From the Info button's painted glyph to the end of the row (the bar's edge or the inspector's area).
+    @MainActor private func glyphGap(_ h: Harness) throws -> CGFloat {
+        let info = try XCTUnwrap(h.view("Show Document Info"))
+        let bar = try XCTUnwrap(info.superview?.superview?.superview)
+        let rep = try XCTUnwrap(info.bitmapImageRepForCachingDisplay(in: info.bounds))
+        info.cacheDisplay(in: info.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / info.bounds.width
+        let column = stride(from: rep.pixelsWide - 1, through: 0, by: -1).first { x in
+            (0..<rep.pixelsHigh).contains { (rep.colorAt(x: x, y: $0)?.alphaComponent ?? 0) > 0.2 }
+        }
+        let glyphEnd = info.convert(NSPoint(x: CGFloat(try XCTUnwrap(column, "Info glyph painted") + 1) / scale, y: 0), to: bar).x
+        var limit = bar.bounds.maxX
+        for region in CompactToolbarController.reservedRegions(in: bar) where region.minX >= glyphEnd - 1 {
+            limit = min(limit, region.minX)
+        }
+        return limit - glyphEnd
     }
 
     /// From the last trailing item to the end of the row: the bar's edge, or the reserved inspector titlebar area.
