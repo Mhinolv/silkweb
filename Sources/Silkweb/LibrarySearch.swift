@@ -203,12 +203,18 @@ extension LibraryWorkspace {
         let url = snapshot.rootURL.appendingPathComponent(document.relativePath)
         let folder = snapshot.folders.first { $0.id == document.folderID }?.relativePath
         navigate(folder: folder, documents: [document.relativePath], pinned: pinned)
-        await waitForNavigation()
-        guard editor.url == url, session.selectedDocuments == [document.relativePath] else { return }
-        search.dismissQuickOpen(restoreFocus: false)
-        search.text = ""
-        revision += 1
-        focus(2)
+        // Judge the open inside the navigation queue, so anyone awaiting navigation sees Quick Open
+        // already dismissed and no other navigation can land in between (#81).
+        var opened = false
+        await afterNavigation { [self] in
+            guard editor.url == url, session.selectedDocuments == [document.relativePath] else { return }
+            opened = true
+            search.dismissQuickOpen(restoreFocus: false)
+            search.text = ""
+            revision += 1
+            focus(2)
+        }
+        guard opened else { return }
         if let findText, !findText.isEmpty {
             NSPasteboard(name: .find).clearContents()
             NSPasteboard(name: .find).setString(findText, forType: .string)
