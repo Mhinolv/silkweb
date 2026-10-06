@@ -92,7 +92,8 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         for index in 0..<Self.documentCount {
             var text = "# Day \(index + 1) on the Road\n\n"
             for section in 0..<6 {
-                text += "## Stop \(section + 1)\n\n"
+                // Distinct heading sets per note, so a stale Outline never matches the clicked one (#87).
+                text += "## Stop \(section + 1) of Day \(index + 1)\n\n"
                 text +=
                     String(
                         repeating: "We pulled in after a long drive and set up camp before the light went. ", count: 8)
@@ -348,5 +349,120 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         await h.workspace.waitForNavigation()
         XCTAssertEqual(h.editorURL, h.url(3))
         XCTAssertNil(h.workspace.rename, "a fast click-through never starts a rename")
+    }
+
+    // MARK: - #87: the Outline inspector follows the list
+
+    /// One outline sample per display pass after a press.
+    private enum OutlineSample { case current, empty, stale }
+
+    @MainActor private func expectedOutline(_ h: Harness, _ row: Int) throws -> [String] {
+        let text = try String(contentsOf: h.url(row), encoding: .utf8)
+        return OutlineItem.parse(text, headings: MarkdownParser.parse(text).headings).map(\.label)
+    }
+    @MainActor private func outlineSample(_ h: Harness, expected: [String]) -> OutlineSample {
+        let labels = h.workspace.preview.outlineItems.map(\.label)
+        return labels == expected ? .current : labels.isEmpty ? .empty : .stale
+    }
+
+    /// Within this long of the press (two 60 Hz frames), the Outline shows the clicked note. Locally the shared
+    /// pass that shows the capsule and the Outline measures about 18 ms; before #87 it took the editor swap plus the
+    /// 250 ms typing debounce.
+    static let outlineBudget = TestEnvironment.frameBudget(33)
+
+    /// The benchmark (p50/p95 printed for the PR) and regression guard for #87: with Show Outline on, the Outline
+    /// shows the clicked note's headings in the same display pass as the list capsule, never flashing No Headings.
+    @MainActor
+    func testOutlineFollowsEachClickWithinOneFrame() async throws {
+        let h = try await makeHarness()
+        defer { h.cleanUp() }
+        h.workspace.preview.mode = .editor
+        h.workspace.preview.showsOutline = true
+        let rows = try order(h)
+        // Warm up: the first open realizes the editor and the inspector's list.
+        _ = try await clickThrough(h, rows: [rows[2], rows[1]])
+        try await waitUntil("the warm-up outline", timeout: .seconds(2)) {
+            try outlineSample(h, expected: expectedOutline(h, rows[1])) == .current
+        }
+        var latencies: [Double] = []
+        var empty = 0
+        var behindList = 0
+        for (index, row) in rows.enumerated() {
+            let expected = try expectedOutline(h, row)
+            let (source, down, up) = try h.click(row)
+            let start = ContinuousClock.now
+            source.mouseDown(with: down)
+            source.mouseUp(with: up)
+            var done: Duration?
+            var listShown = false
+            let deadline = start + .seconds(2)
+            while ContinuousClock.now < deadline {
+                try await h.pump()
+                let sample = outlineSample(h, expected: expected)
+                if sample == .empty { empty += 1 }
+                if sample == .current {
+                    done = ContinuousClock.now - start
+                    break
+                }
+                // A pass that shows the capsule but not this note's Outline: the inspector lags the list.
+                if h.shows(row), !listShown {
+                    listShown = true
+                    behindList += 1
+                }
+            }
+            XCTAssertNotNil(done, "click \(index): the Outline never showed row \(row)")
+            latencies.append(Self.milliseconds(done ?? (ContinuousClock.now - start)))
+            await h.workspace.waitForNavigation()
+            try await waitUntil("click \(index): the editor shows row \(row)") { h.editorURL == h.url(row) }
+            // The editor's own render must keep the same outline (no step back, no blank).
+            try await Task.sleep(for: .milliseconds(20))
+            XCTAssertEqual(outlineSample(h, expected: expected), .current, "click \(index): the outline after the swap")
+        }
+        // Past the typing debounce, the editor's own render still keeps the last note's outline.
+        try await Task.sleep(for: .milliseconds(350))
+        XCTAssertEqual(
+            outlineSample(h, expected: try expectedOutline(h, try XCTUnwrap(rows.last))), .current,
+            "the outline after the debounced render")
+        let summary = String(
+            format:
+                "DocumentSelectionLatency outline: p50 %.2f ms p95 %.2f ms; behind the list on %d, empty frames %d over %d clicks",
+            Run.percentile(latencies, 0.5), Run.percentile(latencies, 0.95), behindList, empty, latencies.count)
+        print(summary)
+        XCTAssertEqual(behindList, 0, "the Outline must update in the list capsule's pass: \(summary)")
+        XCTAssertEqual(empty, 0, "the Outline must not flash No Headings between notes: \(summary)")
+        XCTAssertLessThanOrEqual(
+            Run.percentile(latencies, 0.95), Self.outlineBudget, "outline p95 over two frames: \(summary)")
+    }
+
+    /// A rapid burst with the Outline open: it settles on the last clicked note and never steps back to an
+    /// earlier one while the coalesced editor opens drain.
+    @MainActor
+    func testRapidClickThroughSettlesTheOutlineOnTheLastDocument() async throws {
+        let h = try await makeHarness()
+        defer { h.cleanUp() }
+        h.workspace.preview.mode = .editor
+        h.workspace.preview.showsOutline = true
+        let rows = try order(h)
+        _ = try await clickThrough(h, rows: Array(rows.prefix(3)))
+        for row in rows {
+            let (source, down, up) = try h.click(row)
+            source.mouseDown(with: down)
+            source.mouseUp(with: up)
+            try await h.pump()
+        }
+        let last = try XCTUnwrap(rows.last)
+        let expected = try expectedOutline(h, last)
+        // From the end of the burst until well past the typing debounce, every pass shows the last note.
+        var samples: [OutlineSample] = []
+        let deadline = ContinuousClock.now + .milliseconds(600)
+        while ContinuousClock.now < deadline {
+            try await h.pump()
+            samples.append(outlineSample(h, expected: expected))
+        }
+        await h.workspace.waitForNavigation()
+        XCTAssertEqual(h.editorURL, h.url(last))
+        XCTAssertEqual(outlineSample(h, expected: expected), .current, "the Outline settles on the last clicked note")
+        let off = samples.filter { $0 != .current }.count
+        XCTAssertEqual(off, 0, "passes after the burst not showing the last note's outline: \(off) of \(samples.count)")
     }
 }

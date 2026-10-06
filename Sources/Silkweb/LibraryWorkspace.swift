@@ -595,6 +595,14 @@ final class LibraryWorkspace {
         session = next
         // Install the new tag scope before clearing toolbar filters: never expose the full library.
         if changesScope && tag != nil { tagFilters = [] }
+        // The Outline follows in the same frame (#87), unless the editor is about to refuse the switch.
+        if preview.showsOutline, documents.count == 1, let path = documents.first, let snapshot,
+            !editor.recovered, !editor.externalConflict, !editor.externalDeleted,
+            let document = snapshot.documents.first(where: { $0.relativePath == path })
+        {
+            preview.followDocument(
+                snapshot.rootURL.appendingPathComponent(path), text: tabs.first { $0.id == document.id }?.editor.text)
+        }
         navigationGeneration += 1
         let generation = navigationGeneration
         let previous = navigationTask
@@ -610,12 +618,15 @@ final class LibraryWorkspace {
             if let document, !(await openTab(document, pinned: pinned)) {
                 // The editor kept its document (unsaved text): the list goes back to it.
                 guard generation == navigationGeneration else { return }
+                preview.stopFollowing(text: editor.text, document: editor.url)
                 session.selectedFolder = shown.folder
                 session.selectedDocuments = shown.documents
                 session.selectedTagID = shown.tag
                 tagFilters = shown.filters
                 return
             }
+            // The latest navigation has landed: the Outline describes the editor's note again.
+            if generation == navigationGeneration { preview.stopFollowing(text: editor.text, document: editor.url) }
             if let path = documents.count == 1 ? documents.first : nil,
                 let id = snapshot?.metadata.IDsByPath[path], let index = search.index
             {

@@ -35,7 +35,9 @@ struct InspectorView: View {
         .onKeyPress(.escape) { preview.focusDocument() ? .handled : .ignored }
     }
     private var outline: some View {
-        let current = preview.currentItem(caret: workspace.editor.caretLocation)
+        // Until the editor catches up with a list click (#87), the caret belongs to another note.
+        let followsEditor = preview.outlineURL == workspace.editor.url && !preview.outlinePending
+        let current = followsEditor ? preview.currentItem(caret: workspace.editor.caretLocation) : nil
         let items =
             preview.outlineItems.isEmpty ? OutlineItem.parse("", headings: preview.headings) : preview.outlineItems
         let imageCount = items.count - preview.headings.count
@@ -59,11 +61,13 @@ struct InspectorView: View {
                 ScrollViewReader { proxy in
                     let threads = OutlineRowStyle.threads(depths: items.map(\.depth))
                     List(selection: $selectedHeading) {
-                        ForEach(Array(zip(items, threads)), id: \.0.id) { item, thread in
+                        ForEach(Array(zip(items, threads).enumerated()), id: \.offset) { position, pair in
+                            let (item, thread) = pair
                             Button {
                                 // A click jumps and focuses the editor (owner decision #89, replacing #72's
                                 // focused Outline). The row stays selected, so ↑/↓ resume there once the
                                 // Outline is focused again (Tab or a click on its background).
+                                guard followsEditor else { return }
                                 selectedHeading = item.id
                                 preview.navigate(item)
                             } label: {
@@ -73,7 +77,7 @@ struct InspectorView: View {
                                         row(heading, depth: item.depth, current: current == item.id)
                                     case .image:
                                         OutlineImageRow(
-                                            item: item, document: preview.renderedURL, root: workspace.root,
+                                            item: item, document: preview.outlineURL, root: workspace.root,
                                             current: current == item.id, selected: showsSelection(item.id))
                                     }
                                 }
@@ -83,13 +87,16 @@ struct InspectorView: View {
                                 )
                                 .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain).tag(item.id).id(item.id)
+                            .buttonStyle(.plain).tag(item.id).id(position)
                             .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                         }
                     }
                     .listStyle(.sidebar)
                     .scrollContentBackground(.hidden)
                     .environment(\.defaultMinListRowHeight, 1)
+                    // A large note still parsing: the previous rows must not look current.
+                    .opacity(preview.outlinePending ? 0.4 : 1)
+                    .allowsHitTesting(!preview.outlinePending)
                     .focused($outlineFocused)
                     .onHover { outlineHovered = $0 }
                     // Native live-scroll notifications do not fire for programmatic scrolling.
@@ -102,18 +109,25 @@ struct InspectorView: View {
                         if manualScrollUntil == .distantFuture { manualScrollUntil = Date().addingTimeInterval(2) }
                     }
                     .task(id: ScrollRequest(heading: current, resume: manualScrollUntil)) {
-                        guard let current, manualScrollUntil != .distantFuture else { return }
+                        guard let target = items.firstIndex(where: { $0.id == current }),
+                            manualScrollUntil != .distantFuture
+                        else { return }
                         let delay = manualScrollUntil.timeIntervalSinceNow
                         if delay > 0 {
                             do { try await Task.sleep(for: .seconds(delay)) } catch { return }
                         }
                         guard !Task.isCancelled else { return }
                         // With no anchor, ScrollViewReader moves only enough to reveal the row.
-                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(current) }
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(target) }
                     }
-                    .onChange(of: preview.renderedURL) {
+                    .onChange(of: preview.outlineURL) {
                         selectedHeading = nil
                         manualScrollUntil = .distantPast
+                        // A new note starts at the top with no scroll animation (#87). Rows are identified by
+                        // position, so the List reuses them instead of rebuilding on every switch.
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) { proxy.scrollTo(0, anchor: .top) }
                     }
                     .onChange(of: items.map(\.id)) { _, ids in
                         if let selectedHeading, !ids.contains(selectedHeading) { self.selectedHeading = nil }
@@ -123,7 +137,9 @@ struct InspectorView: View {
                         if focused, selectedHeading == nil { selectedHeading = current ?? items.first?.id }
                     }
                     .onKeyPress(.return) {
-                        guard let item = items.first(where: { $0.id == selectedHeading }) else { return .ignored }
+                        guard followsEditor, let item = items.first(where: { $0.id == selectedHeading }) else {
+                            return .ignored
+                        }
                         preview.navigate(item, focusEditor: false)
                         return .handled
                     }
