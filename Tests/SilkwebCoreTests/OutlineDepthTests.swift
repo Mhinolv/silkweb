@@ -5,7 +5,7 @@ final class OutlineDepthTests: XCTestCase {
     private func indents(_ text: String) -> [Double] {
         OutlineItem.parse(text).map { item in
             switch item.content {
-            case .heading(let heading): return OutlineRowStyle(level: heading.level, depth: item.depth, isFirst: false).indent
+            case .heading(let heading): return OutlineRowStyle(level: heading.level, depth: item.depth).indent
             case .image: return item.indent
             }
         }
@@ -15,16 +15,16 @@ final class OutlineDepthTests: XCTestCase {
     func testSkippedLevelsIndentByTreeDepth() {
         let text = "# Settling In\n###### Jamestown\n![](a.png)\n### Building\n###### Lake Erie\n![](b.png)\n"
         XCTAssertEqual(OutlineItem.parse(text).map(\.depth), [0, 1, 2, 1, 2, 3])
-        XCTAssertEqual(indents(text), [0, 10, 20, 10, 20, 30])
+        XCTAssertEqual(indents(text), [0, 16, 28, 16, 28, 40])
     }
 
     func testCapPreHeadingImagesAndShallowerLaterHeadings() {
-        // Every level nested: depths 0...5, the image 6; all clamp to depth 4 (40 pt).
+        // Every level nested: depths 0...5, the image 6; all clamp to depth 4 (52 pt).
         let chain = (1...6).map { String(repeating: "#", count: $0) + " H\($0)" }.joined(separator: "\n") + "\n![](deep.png)\n"
         XCTAssertEqual(OutlineItem.parse(chain).map(\.depth), [0, 1, 2, 3, 4, 5, 6])
-        XCTAssertEqual(indents(chain), [0, 10, 20, 30, 40, 40, 40])
+        XCTAssertEqual(indents(chain), [0, 16, 28, 40, 52, 52, 52])
         // Images before the first heading stay at depth 0; a later shallower heading resets.
-        XCTAssertEqual(indents("![](a.png)\n## Two\n![](b.png)\n# One\n### Three\n## Two again\n"), [0, 0, 10, 0, 10, 10])
+        XCTAssertEqual(indents("![](a.png)\n## Two\n![](b.png)\n# One\n### Three\n## Two again\n"), [0, 0, 16, 0, 16, 16])
         XCTAssertEqual(indents("![](only.png)\n![](also.png)\n"), [0, 0])
         XCTAssertEqual(indents("###### Six\n###### Six\n# One\n"), [0, 0, 0])
         XCTAssertTrue(indents("").isEmpty)
@@ -43,7 +43,7 @@ final class OutlineDepthTests: XCTestCase {
                 expected.append(stack.count); stack.append(level)
             }
             XCTAssertEqual(items.map(\.depth), expected + [expected[2] + 1], text)
-            XCTAssertTrue(items.allSatisfy { (0...40).contains($0.indent) })
+            XCTAssertTrue(items.allSatisfy { (0...52).contains($0.indent) })
         } } }
     }
 }

@@ -85,26 +85,19 @@ final class TagEditorTests: XCTestCase {
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         for _ in 0..<30 {
             controller.view.layoutSubtreeIfNeeded()
-            if descendants(controller.view).contains(where: { $0 is NSTokenField }) { break }
+            if descendants(controller.view).contains(where: { $0 is TagInputField }) { break }
             try await Task.sleep(for: .milliseconds(10))
         }
-        let field = try XCTUnwrap(descendants(controller.view).compactMap { $0 as? NSTokenField }.first)
-        let input = try XCTUnwrap(field as? TagInputField)
+        let input = try XCTUnwrap(descendants(controller.view).compactMap { $0 as? TagInputField }.first)
         input.requestedFocus = 1
         input.focusIfNeeded()
         XCTAssertEqual(input.fulfilledFocus, 1)
-        let coordinator = try XCTUnwrap(field.delegate as? TagTokenField.Coordinator)
-        coordinator.suggestions = ["research", "draft"]
-        XCTAssertEqual(coordinator.tokenField(field, completionsForSubstring: "R", indexOfToken: 0, indexOfSelectedItem: nil) as? [String], ["research"])
-        XCTAssertEqual(coordinator.tokenField(field, shouldAdd: ["  Research ", "a,b", String(repeating: "x", count: 65)], at: 0) as? [String], ["research"])
-        let text = NSTextView()
-        text.string = "abc\u{FFFC}"
-        text.setSelectedRange(NSRange(location: 2, length: 0))
-        XCTAssertFalse(TagTokenField.Coordinator.isTokenDeletion(text, backwards: true))
-        text.setSelectedRange(NSRange(location: 4, length: 0))
-        XCTAssertTrue(TagTokenField.Coordinator.isTokenDeletion(text, backwards: true))
-        field.objectValue = ["Research"]
-        coordinator.commit(field)
+        let coordinator = try XCTUnwrap(input.delegate as? TagChipField.Coordinator)
+        XCTAssertTrue(coordinator.chips.isEmpty)
+        // Invalid names (commas are separators, 65 characters is too long) are dropped; valid ones normalize.
+        input.stringValue = "  Research  ,, " + String(repeating: "x", count: 65)
+        coordinator.commit(input)
+        XCTAssertEqual(input.stringValue, "")
         for _ in 0..<100 where workspace.mutating { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(workspace.tags.map(\.name), ["Research"])
         XCTAssertEqual(workspace.snapshot?.metadata.tagsByDocument.count, 2)
