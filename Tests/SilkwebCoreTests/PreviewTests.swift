@@ -100,11 +100,37 @@ final class PreviewTests: XCTestCase {
         XCTAssertEqual(action("https://example.com"), .browser(URL(string: "https://example.com")!))
         for value in [
             "file:///silkweb-preview-test-other/a.md", "file:///tmp/a.md", "file:///silkweb-preview-test/../a.md",
-            "file:///silkweb-preview-test/image.png", "mailto:a@example.com", "javascript:alert(1)",
-            "data:text/html,test",
+            "file:///silkweb-preview-test/image.png", "mailto:", "javascript:alert(1)", "data:text/html,test",
+            "ftp://example.com/a.pdf", "file://server/silkweb-preview-test/a.pdf",
         ] {
             XCTAssertEqual(action(value), .blocked, value)
         }
+    }
+
+    /// #109: a pasted attachment and a `mailto:` link in the preview open instead of beeping.
+    func testNavigationOpensAttachmentsAndMailto() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let media = root.appendingPathComponent("media/note-id")
+        try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
+        let document = root.appendingPathComponent("note.md")
+        let pdf = media.appendingPathComponent("Report 2026.pdf")
+        try Data("%PDF-1.4".utf8).write(to: pdf)
+        let page = URL(string: "silkweb-preview://page/id")!
+        func action(_ url: URL) -> PreviewNavigation.Action {
+            PreviewNavigation.action(for: url, document: document, root: root, page: page)
+        }
+        // The href exactly as the offline preview renders the pasted Markdown link.
+        let options = HTMLRenderer.Options(libraryRoot: root, documentURL: document, offlinePreview: true)
+        let html = HTMLRenderer.render("[Report](media/note-id/Report%202026.pdf)", options: options)
+        let href = try XCTUnwrap(
+            html.components(separatedBy: "href=\"").dropFirst().first?.split(separator: "\"").first)
+        let link = try XCTUnwrap(URL(string: String(href)))
+        let opened = action(link)
+        XCTAssertNotEqual(opened, .blocked, "a library attachment must open, not beep")
+        XCTAssertNotEqual(opened, .document(link.standardizedFileURL), "an attachment is not a Silkweb document")
+        let mail = URL(string: "mailto:user@example.com")!
+        XCTAssertEqual(action(mail), .browser(mail))
     }
 
     /// silkweb-1.72: `.markdown` documents are library documents, so preview links open them like `.md`.

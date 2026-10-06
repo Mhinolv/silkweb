@@ -10,6 +10,7 @@ struct PreviewView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let web = Self.makeWebView()
         web.navigationDelegate = context.coordinator
+        web.linkAction = { [weak coordinator = context.coordinator] in coordinator?.action(for: $0) ?? .blocked }
         context.coordinator.web = web
         workspace.preview.webView = web
         web.configuration.userContentController.add(context.coordinator, contentWorld: .defaultClient, name: "position")
@@ -31,6 +32,12 @@ struct PreviewView: NSViewRepresentable {
             }
             addEventListener('click', blockedLink);
             addEventListener('keydown', event => { if (event.key === 'Enter') blockedLink(event); });
+            // Reported before WebKit asks for the menu, so attachment links get their own items.
+            addEventListener('contextmenu', event => {
+              const link = event.target.closest?.('a[href]');
+              window.webkit.messageHandlers.position.postMessage({contextLink: link?.href || '',
+                destination: link?.dataset.swDestination || link?.getAttribute('href') || ''});
+            });
             report();
             """
         web.configuration.userContentController.addUserScript(
@@ -38,13 +45,13 @@ struct PreviewView: NSViewRepresentable {
         return web
     }
 
-    static func makeWebView() -> WKWebView {
+    static func makeWebView() -> PreviewWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.setURLSchemeHandler(PreviewSchemeHandler(), forURLScheme: PreviewResource.scheme)
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
-        let web = WKWebView(frame: .zero, configuration: configuration)
+        let web = PreviewWebView(frame: .zero, configuration: configuration)
         web.underPageBackgroundColor = .silkwebPaneBackground
         web.setValue(false, forKey: "drawsBackground")
         web.setAccessibilityLabel("Document preview")
@@ -205,9 +212,14 @@ struct PreviewView: NSViewRepresentable {
         func userContentController(
             _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
         ) {
-            guard !restoring, document == workspace.editor.url, message.frameInfo.isMainFrame,
-                let values = message.body as? [String: Any]
-            else { return }
+            guard message.frameInfo.isMainFrame, let values = message.body as? [String: Any] else { return }
+            if let link = values["contextLink"] as? String {
+                (web as? PreviewWebView)?.contextLink = URL(string: link).map {
+                    PreviewWebView.ContextLink(url: $0, destination: values["destination"] as? String ?? link)
+                }
+                return
+            }
+            guard !restoring, document == workspace.editor.url else { return }
             if values["blockedLink"] as? Bool == true { NSSound.beep(); return }
             updatePosition(values)
         }
@@ -292,8 +304,9 @@ struct PreviewView: NSViewRepresentable {
                 decisionHandler(url == page && navigationAction.targetFrame?.isMainFrame == true ? .allow : .cancel)
                 return
             }
-            guard let root = workspace.root, let document else { decisionHandler(.cancel); return }
-            switch PreviewNavigation.action(for: url, document: document, root: root, page: page) {
+            guard let root = workspace.root else { decisionHandler(.cancel); return }
+            // ⌘-click reveals an attachment in Finder (Spotlight's ⌘ convention).
+            switch action(for: url, revealing: navigationAction.modifierFlags.contains(.command)) {
             case .anchor(let id): workspace.preview.scrollPreview(to: id)
             case .document(let url):
                 let path = String(url.path.dropFirst(root.path.count + 1))
@@ -302,11 +315,79 @@ struct PreviewView: NSViewRepresentable {
                 } else {
                     NSSound.beep()
                 }
-            case .browser(let url): NSWorkspace.shared.open(url)
+            case .browser(let url), .attachment(let url): NSWorkspace.shared.open(url)
+            case .reveal(let url): NSWorkspace.shared.activateFileViewerSelecting([url])
             case .blocked: NSSound.beep()
             }
             decisionHandler(.cancel)
         }
+
+        func action(for url: URL, revealing: Bool = false) -> PreviewNavigation.Action {
+            guard let root = workspace.root, let document, let page else { return .blocked }
+            return PreviewNavigation.action(for: url, document: document, root: root, page: page, revealing: revealing)
+        }
+    }
+}
+
+/// #109: right-clicking a library attachment link offers Open, Reveal in Finder and Copy Path (the image
+/// chip's order) in place of WebKit's link items. Other links and selections keep WebKit's menu.
+final class PreviewWebView: WKWebView {
+    struct ContextLink {
+        let url: URL
+        /// The Markdown destination as written, for Copy Path.
+        let destination: String
+    }
+    /// The link under the latest right-click, reported by the preview's isolated-world script.
+    var contextLink: ContextLink?
+    var linkAction: (URL) -> PreviewNavigation.Action = { _ in .blocked }
+
+    static let webKitLinkItems: Set<String> = [
+        "WKMenuItemIdentifierOpenLink", "WKMenuItemIdentifierOpenLinkInNewWindow",
+        "WKMenuItemIdentifierDownloadLinkedFile", "WKMenuItemIdentifierCopyLink",
+    ]
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        attachmentItems(in: menu)
+    }
+
+    func attachmentItems(in menu: NSMenu) {
+        let links = menu.items.filter { Self.webKitLinkItems.contains($0.identifier?.rawValue ?? "") }
+        guard !links.isEmpty, let link = contextLink else { return }
+        let file: URL
+        var opens = true
+        switch linkAction(link.url) {
+        case .attachment(let url): file = url
+        case .reveal(let url): file = url; opens = false
+        default: return
+        }
+        for item in links { menu.removeItem(item) }
+        while menu.items.first?.isSeparatorItem == true { menu.removeItem(at: 0) }
+        var items: [NSMenuItem] = []
+        func add(_ title: String, _ action: Selector, _ value: Any) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = value
+            items.append(item)
+        }
+        if opens { add("Open", #selector(openAttachment(_:)), file) }
+        add("Reveal in Finder", #selector(revealAttachment(_:)), file)
+        items.append(.separator())
+        add("Copy Path", #selector(copyAttachmentPath(_:)), link.destination)
+        if !menu.items.isEmpty { items.append(.separator()) }
+        for (index, item) in items.enumerated() { menu.insertItem(item, at: index) }
+    }
+
+    @objc private func openAttachment(_ sender: NSMenuItem) {
+        if let url = sender.representedObject as? URL { NSWorkspace.shared.open(url) }
+    }
+    @objc private func revealAttachment(_ sender: NSMenuItem) {
+        if let url = sender.representedObject as? URL { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+    }
+    @objc private func copyAttachmentPath(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(path, forType: .string)
     }
 }
 

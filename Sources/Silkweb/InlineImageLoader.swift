@@ -72,7 +72,7 @@ actor InlineImageLoader {
                 case .local(let file):
                     url = file
                     if !FileManager.default.fileExists(atPath: file.path) {
-                        message = "Missing image: \(file.lastPathComponent)"
+                        message = ImagePlaceholder.missing(reference.destination)
                     } else {
                         let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
                         var cached = images[file]
