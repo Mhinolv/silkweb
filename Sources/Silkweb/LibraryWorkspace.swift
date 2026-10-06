@@ -351,30 +351,30 @@ final class LibraryWorkspace {
                     session.selectedFolder = ""
                 }
                 session.selectedDocuments.formIntersection(Set(documents.map(\.relativePath)))
-                var recoveryURL: URL?
                 let recovery = SaveCoordinator(recoveryDirectory: recoveryDirectory)
                 let drafts = (try? await recovery.pendingRecoveryDrafts()) ?? []
                 reportUnreadableRecovery(await recovery.takeUnreadableRecoveryFiles())
-                if let draft = drafts.first(where: { $0.documentURL.path.hasPrefix(scanned.rootURL.path + "/") }) {
-                    recoveryURL = draft.documentURL
-                    session.selectedFolder = nil
-                    session.selectedDocuments = Set(
-                        scanned.documents.filter {
-                            scanned.rootURL.appendingPathComponent($0.relativePath) == draft.documentURL
-                        }.map(\.relativePath))
+                let prefix = scanned.rootURL.path + "/"
+                let documentURLs = Dictionary(
+                    scanned.documents.map { (scanned.rootURL.appendingPathComponent($0.relativePath), $0) },
+                    uniquingKeysWith: { first, _ in first })
+                let inLibrary = drafts.map(\.documentURL).filter { $0.path.hasPrefix(prefix) }
+                // Notes deleted outside Silkweb have no row; every one of their drafts must stay reachable (1.70, #108).
+                let orphans = inLibrary.filter { documentURLs[$0] == nil }.sorted {
+                    $0.path.dropFirst(prefix.count).localizedStandardCompare($1.path.dropFirst(prefix.count))
+                        == .orderedAscending
                 }
-                if let recoveryURL,
-                    let document = scanned.documents.first(where: {
-                        scanned.rootURL.appendingPathComponent($0.relativePath) == recoveryURL
-                    })
-                {
-                    _ = await openTab(document, pinned: true)
-                } else if let recoveryURL {
-                    // The note was deleted outside Silkweb; its draft must stay reachable (1.70).
-                    await openOrphanDraft(recoveryURL.standardizedFileURL)
-                } else if windowSession == nil, let document = selectedDocument {
+                let recovered = inLibrary.lazy.compactMap { documentURLs[$0] }.first
+                if recovered != nil || !orphans.isEmpty {
+                    session.selectedFolder = nil
+                    session.selectedDocuments = Set([recovered?.relativePath].compactMap { $0 })
+                }
+                if let recovered {
+                    _ = await openTab(recovered, pinned: true)
+                } else if orphans.isEmpty, windowSession == nil, let document = selectedDocument {
                     _ = await openTab(document)
                 }
+                await openOrphanDrafts(orphans.map(\.standardizedFileURL))
                 if let id = activeTabID, let document = scanned.documents.first(where: { $0.id == id }) {
                     session.selectedDocuments = [document.relativePath]
                 }

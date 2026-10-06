@@ -178,4 +178,46 @@ final class RecoveryDraftTests: XCTestCase {
         await workspace.didCloseWindow()
         await reopened.didCloseWindow()
     }
+
+    /// #108: every deleted-note draft opens, not only the first.
+    func testEveryDraftForDeletedNotesOpensAfterRestoredTabs() async throws {
+        let first = try workspace()
+        try await open(first)
+        first.navigate(folder: "Notes", documents: ["Notes/Healthy.md"], pinned: true)
+        await first.waitForNavigation()
+        await first.saveSessionNow()
+        await first.didCloseWindow()
+
+        // Same names in different folders; written out of path order.
+        let paths = ["Gone/Zeta.md", "Gone/Alpha.md", "Away/Alpha.md"]
+        for path in paths {
+            try await writeDraft(for: root.appendingPathComponent(path), text: "draft of \(path)")
+        }
+        try FileManager.default.removeItem(at: root.appendingPathComponent("Gone"))
+        try FileManager.default.removeItem(at: root.appendingPathComponent("Away"))
+
+        let workspace = try workspace()
+        try await open(workspace)
+        let expected = ["Notes/Healthy.md", "Away/Alpha.md", "Gone/Alpha.md", "Gone/Zeta.md"]
+        XCTAssertEqual(
+            workspace.tabs.compactMap { $0.editor.url?.path.replacingOccurrences(of: root.path + "/", with: "") },
+            expected, "Orphan tabs follow the restored tabs in library-path order")
+        let orphans = Array(workspace.tabs.dropFirst())
+        XCTAssertEqual(workspace.activeTabID, orphans.first?.id, "The first orphan is active")
+        for (tab, path) in zip(orphans, expected.dropFirst()) {
+            XCTAssertTrue(tab.editor.externalDeleted, path)
+            XCTAssertFalse(tab.editor.readOnly, path)
+            XCTAssertFalse(tab.isPreview, path)
+            XCTAssertEqual(tab.editor.text, "draft of \(path)")
+        }
+
+        let bar = EditorTabBarView(workspace: workspace)
+        bar.frame = NSRect(x: 0, y: 0, width: 900, height: 32)
+        bar.layoutSubtreeIfNeeded()
+        XCTAssertEqual(bar.buttons.map(\.toolTip), ["Healthy"] + expected.dropFirst().map { "\($0) — deleted note" })
+        XCTAssertEqual(
+            bar.buttons.map { $0.accessibilityLabel() },
+            ["Healthy", "Alpha, deleted note", "Alpha, deleted note", "Zeta, deleted note"])
+        await workspace.didCloseWindow()
+    }
 }
