@@ -18,6 +18,7 @@ while [ "$i" -lt "$LOAD" ]; do
 done
 echo "$LOAD load processes on $(sysctl -n hw.ncpu) cores, $RUNS full-suite runs, logs in $LOGS"
 TOTAL=0
+FAILED_RUNS=0
 run=1
 while [ "$run" -le "$RUNS" ]; do
   LOG="$LOGS/run-$run.log"
@@ -25,9 +26,11 @@ while [ "$run" -le "$RUNS" ]; do
   STATUS=$?
   FAILS=$(grep -c ': error: ' "$LOG")
   TOTAL=$((TOTAL + FAILS))
+  # A nonzero exit fails the audit even without `: error:` lines (crash, build failure, timeout).
+  [ "$STATUS" -eq 0 ] || FAILED_RUNS=$((FAILED_RUNS + 1))
   echo "run $run: exit $STATUS, $FAILS failing assertions, $(grep -E '^[[:space:]]*Executed [0-9]+ tests' "$LOG" | tail -1 | sed 's/^[[:space:]]*//')"
   grep ': error: ' "$LOG" | sed 's|^.*/Tests/|  Tests/|'
   run=$((run + 1))
 done
-echo "total failing assertions: $TOTAL"
-[ "$TOTAL" -eq 0 ]
+echo "total failing assertions: $TOTAL, runs with nonzero exit: $FAILED_RUNS"
+[ "$TOTAL" -eq 0 ] && [ "$FAILED_RUNS" -eq 0 ]

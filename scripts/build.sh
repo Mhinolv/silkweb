@@ -4,6 +4,8 @@
 # disabled because nested sandboxing isn't permitted. Usage: scripts/build.sh [test [--filter <pattern>]]
 set -e
 cd "$(dirname "$0")/.."
+# Build and test only with the pinned toolchain (.toolchain-versions), the same one CI uses.
+./scripts/check_toolchain.sh
 export CLANG_MODULE_CACHE_PATH="$PWD/.build/module-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/module-cache"
 FLAGS="--disable-sandbox --cache-path $PWD/.build/swiftpm-cache --config-path $PWD/.build/swiftpm-config --security-path $PWD/.build/swiftpm-security"

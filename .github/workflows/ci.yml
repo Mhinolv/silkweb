@@ -1,38 +1,88 @@
 name: CI
-# The macOS job runs build + format lint (tests run locally). macOS runners are
-# costly, so it runs sparingly: once when a PR is opened
-# ready or leaves draft, again only when the `run-ci` label is added, and manually
-# via workflow_dispatch. Branch pushes don't run it (those commits passed on the PR).
-# PRs that touch none of the paths below get no CI run at all.
+# Three jobs with fixed check names (no job sets `name:`, so the job id is the check name):
+#   classify     (ubuntu) lists the PR's changed files and decides docs-only vs meaningful.
+#   build-format (macOS)  format lint + build; only for ready (non-draft), non-docs-only PRs.
+#   ci-gate      (ubuntu) the required merge check; passes only on the evidence above.
+# Every PR into team/roadmap runs classify + ci-gate (cheap); macOS runs on ready code PRs,
+# including every push to them. workflow_dispatch is for manual diagnostics, not merge evidence.
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, labeled]
-    paths:
-      - "Sources/**"
-      - "Tests/**"
-      - "Package.swift"
-      - "Package.resolved"
-      - "scripts/**"
-      - ".github/workflows/ci.yml"
-      - ".swift-format"
-      - ".toolchain-versions"
+    branches: [team/roadmap]
+    types: [opened, reopened, ready_for_review, synchronize]
   workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: read
 jobs:
-  build-and-test:
-    # Skip drafts and labels other than `run-ci`. A skipped job still posts a check, so
-    # skipped runs are named `ci-skipped` instead: they never add a skipped
-    # `build-and-test` check (which counts as passing) on top of a real failure.
-    # Keep `name` and `if` in sync. Concurrency lives on the job, so a skipped run for
-    # another label (e.g. `qa-pass`) never cancels a real CI run.
-    name: >-
-      ${{ (github.event_name == 'workflow_dispatch' ||
-           (!github.event.pull_request.draft &&
-            (github.event.action != 'labeled' || github.event.label.name == 'run-ci')))
-          && 'build-and-test' || 'ci-skipped' }}
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (!github.event.pull_request.draft &&
-       (github.event.action != 'labeled' || github.event.label.name == 'run-ci'))
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+      draft: ${{ steps.classify.outputs.draft }}
+      head_sha: ${{ steps.classify.outputs.head_sha }}
+    steps:
+      - name: Classify changed files
+        id: classify
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          EXPECTED: ${{ github.event.pull_request.changed_files }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -u
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "PR head SHA: $HEAD_SHA"
+          short=${HEAD_SHA:0:7}
+          if [ "$EVENT" != pull_request ]; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+            echo "Head $short · manual run · meaningful (workflow_dispatch)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "draft=$DRAFT" >> "$GITHUB_OUTPUT"
+          fail() {
+            echo "::error::$1"
+            echo "Could not list changed files — failing so the gate cannot pass silently." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+          # One line per file: new path, tab, old path (renames only). The REST API stops at 3000
+          # files, so a count below the PR's changed_files means the list is incomplete.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files?per_page=100" \
+            --jq '.[] | [.filename, (.previous_filename // "")] | @tsv' > files.tsv \
+            || fail "GitHub API request for the changed files failed"
+          count=$(wc -l < files.tsv | tr -d ' ')
+          [ "$count" -eq "$EXPECTED" ] || fail "Got $count of $EXPECTED changed files"
+          # Docs-only allowlist: every path (old and new, for renames) must match. Anything else,
+          # including unknown paths, is meaningful and needs the macOS build.
+          first=""
+          while IFS=$'\t' read -r path old; do
+            for p in "$path" "$old"; do
+              [ -n "$p" ] || continue
+              case "$p" in
+                Sources/* | Tests/*) first=$p ;;
+                docs/* | .github/pull_request_template.md | .git-blame-ignore-revs | LICENSE | *.md) ;;
+                *) first=$p ;;
+              esac
+              [ -z "$first" ] || break 2
+            done
+          done < files.tsv
+          if [ -z "$first" ]; then
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+            echo "Head $short · $count files · docs-only" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "Head $short · $count files · meaningful (first: $first)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          cat files.tsv
+
+  build-format:
+    needs: classify
+    if: needs.classify.outputs.docs_only == 'false' && needs.classify.outputs.draft == 'false'
+    # Concurrency lives on this job, so a new push cancels the older macOS run of the same PR only.
     concurrency:
       group: ci-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
@@ -44,8 +94,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify toolchain
+        id: toolchain
         run: ./scripts/check_toolchain.sh
       - name: Format check
+        id: format
         run: ./scripts/format.sh --check
       - name: Build
+        id: build
         run: ./scripts/build.sh
+      - name: Summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+          TOOLCHAIN: ${{ steps.toolchain.outcome }}
+          FORMAT: ${{ steps.format.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+        run: |
+          if [ "$STATUS" = success ]; then
+            echo "build-format: PASS — format check and build succeeded" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          step=checkout
+          [ "$TOOLCHAIN" != failure ] || step="toolchain check"
+          [ "$FORMAT" != failure ] || step="format check"
+          [ "$BUILD" != failure ] || step=build
+          [ "$STATUS" != cancelled ] || step="run cancelled"
+          echo "build-format: FAIL — $step. Re-run: gh run rerun ${{ github.run_id }} --failed" >> "$GITHUB_STEP_SUMMARY"
+
+  ci-gate:
+    needs: [classify, build-format]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Decide
+        env:
+          CLASSIFY: ${{ needs.classify.result }}
+          DOCS_ONLY: ${{ needs.classify.outputs.docs_only }}
+          DRAFT: ${{ needs.classify.outputs.draft }}
+          BUILD: ${{ needs.build-format.result }}
+          RERUN: gh run rerun ${{ github.run_id }} --failed
+        run: |
+          pass() { echo "ci-gate: PASS — $1" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; }
+          fail() { echo "ci-gate: FAIL — $1. Re-run: $RERUN" | tee -a "$GITHUB_STEP_SUMMARY"; exit 1; }
+          [ "$CLASSIFY" = success ] || fail "classify $CLASSIFY (changed files must be classified)"
+          [ "$DOCS_ONLY" != true ] || pass "docs-only"
+          [ "$DRAFT" != true ] || pass "draft, macOS deferred until ready"
+          [ "$BUILD" != success ] || pass "build-format succeeded"
+          fail "build-format $BUILD (required for ready code PRs)"
