@@ -191,9 +191,10 @@ final class ToolbarMetrics {
         let naturalLeading = natural.minX + firstViewer
         let regions = Self.reservedRegions(in: bar)
         let buttonsAbsent = windowButtonsAbsent
-        if !buttonsAbsent { shiftGrowthFailed = false } // The slide is worth it only while the row also takes the freed room; otherwise the trailing items would
+        // The slide is worth it only while the row also takes the freed room; otherwise the trailing items would
         // leave the edge (#54). AppKit never grows the row into a section it keeps for the sidebar column, so
         // after one the items stay where AppKit put them, as they do once AppKit refuses the wider row.
+        if !buttonsAbsent { shiftGrowthFailed = false }
         let buttonsEnd = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
             .compactMap { window.standardWindowButton($0) }.filter { $0.window === bar.window }
             .map { $0.convert($0.bounds, to: bar).maxX }.max()
