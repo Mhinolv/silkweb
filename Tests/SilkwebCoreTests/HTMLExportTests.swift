@@ -75,6 +75,34 @@ final class HTMLExportTests: XCTestCase {
         XCTAssertEqual(result.missingAssets, ["table.png", "foot.png"])
     }
 
+    /// #101: the [TOC] option reaches the renderer; it defaults to on, as in Preview.
+    func testTableOfContentsOption() {
+        let root = URL(fileURLWithPath: "/nonexistent-export-fixture")
+        for printOutput in [false, true] {
+            for shows: Bool? in [nil, false, true] {
+                let markdown = "[TOC]\n\n[TOC]\n\n# One\n\n## Two"
+                let document = root.appendingPathComponent("doc.md")
+                let html =
+                    shows.map {
+                        HTMLExport.prepare(
+                            markdown: markdown, title: "", documentURL: document, libraryRoot: root, stylesheet: "",
+                            showsTableOfContents: $0, printOutput: printOutput)
+                    }
+                    ?? HTMLExport.prepare(
+                        markdown: markdown, title: "", documentURL: document, libraryRoot: root, stylesheet: "",
+                        printOutput: printOutput)
+                let body = html.html.components(separatedBy: "<body>")[1]
+                let navs = body.components(separatedBy: "<nav class=\"sw-toc\"").count - 1
+                XCTAssertEqual(navs, shows == false ? 0 : 2, "\(String(describing: shows)) \(printOutput)")
+                XCTAssertEqual(body.components(separatedBy: "<p>[TOC]</p>").count - 1, shows == false ? 2 : 0)
+            }
+        }
+        let empty = HTMLExport.prepare(
+            markdown: "[TOC]", title: "", documentURL: root.appendingPathComponent("doc.md"), libraryRoot: root,
+            stylesheet: "", showsTableOfContents: false)
+        XCTAssertTrue(empty.html.contains("<p>[TOC]</p>"))
+    }
+
     func testPortableCSSAndInlineData() {
         let root = URL(fileURLWithPath: "/tmp")
         for source in [
