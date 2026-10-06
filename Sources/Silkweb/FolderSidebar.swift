@@ -647,15 +647,18 @@ struct FolderSidebar: NSViewRepresentable {
         func outlineViewSelectionDidChange(_ notification: Notification) {
             guard !restoring, let outline, let item = outline.item(atRow: outline.selectedRow) as? Item else { return }
             if item.isTagsGroup { return }
+            let generation = workspace.navigationGeneration
             if let tag = item.tag {
                 workspace.selectTag(tag.id)
             } else {
                 workspace.selectFolder(item.folder?.relativePath)
             }
+            // An accepted scope switch never rolls back, so its completion leaves the outline alone (#88).
+            guard workspace.navigationGeneration == generation else { return }
             Task {
-                // Wait for the guarded switch; restore the row if saving refused it.
+                // Refused: once pending navigation drains, the row moves back to the scope the list shows.
                 await workspace.waitForNavigation()
-                restore()
+                selectScope()
             }
         }
         func outlineViewItemDidExpand(_ notification: Notification) { expansion(notification, expanded: true) }
@@ -839,6 +842,13 @@ final class SidebarOutlineView: NSOutlineView {
             return
         }
         let wasSelected = clicked == selectedRow
+        // Like the list (#70, #88): a plain press selects an unselected row at once. AppKit commits a draggable
+        // row on release, and the press has already focused the outline, so the old row's capsule would light up.
+        if clicked >= 0, !wasSelected, event.clickCount == 1,
+            event.modifierFlags.intersection([.command, .shift, .control, .option]).isEmpty
+        {
+            selectRowIndexes(IndexSet(integer: clicked), byExtendingSelection: false)
+        }
         super.mouseDown(with: event)
         if event.clickCount == 2, toggleGroup?() == true { return }
         if wasSelected, let lastClick, lastClick.0 == clicked, (0.5...1.5).contains(event.timestamp - lastClick.1) {
