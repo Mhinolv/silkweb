@@ -76,7 +76,8 @@ final class LibraryWorkspace {
     private var watcher: LibraryWatcher?
     private var reconciling = false
     private var navigationTask: Task<Void, Never>?
-    @ObservationIgnored private var navigationGeneration = 0
+    /// Bumped by every accepted `navigate`; a refused one leaves it unchanged.
+    @ObservationIgnored private(set) var navigationGeneration = 0
     var snapshot: LibrarySnapshot?
     var session = LibrarySession()
     var loading = false
