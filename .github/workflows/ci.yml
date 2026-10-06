@@ -15,6 +15,7 @@ on:
       - "scripts/**"
       - ".github/workflows/ci.yml"
       - ".swift-format"
+      - ".toolchain-versions"
   workflow_dispatch:
 jobs:
   build-and-test:
@@ -35,18 +36,16 @@ jobs:
     concurrency:
       group: ci-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
-    runs-on: macos-15
-    timeout-minutes: 45
+    # Pinned toolchain (.toolchain-versions): the same Xcode builds and formats here and on the owner's Mac.
+    runs-on: macos-26
+    timeout-minutes: 15
     env:
-      SILKWEB_SNAPSHOT_NO_WEBKIT: "1"
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
-      - name: Swift version
-        run: swift --version
-      # Same command as the local check, so CI and local results can't drift.
+      - name: Verify toolchain
+        run: ./scripts/check_toolchain.sh
       - name: Format check
         run: ./scripts/format.sh --check
-      # Runs even after a format failure so a compile error still shows.
       - name: Build
-        if: ${{ !cancelled() }}
         run: ./scripts/build.sh

@@ -1,0 +1,6 @@
+# The one toolchain Silkweb is built and formatted with, locally and on CI.
+# scripts/check_toolchain.sh enforces it; bump all four together, then re-run ./scripts/format.sh.
+xcode=26.2
+xcode_build=17C52
+swift=6.2.3
+swift_format=6.2.3

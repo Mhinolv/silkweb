@@ -25,6 +25,8 @@ Do **not** open or read the product owner's personal MWeb library/notes content 
 ## Build & Test
 - Build (also bundles `build/Silkweb.app`): `./scripts/build.sh`
 - Unit tests: `./scripts/build.sh test`
+- Toolchain: pinned in `.toolchain-versions` (Xcode 26.2 / 17C52, Swift 6.2.3, swift-format 6.2.3); `./scripts/check_toolchain.sh`
+  verifies it and CI selects the same Xcode via `DEVELOPER_DIR`. Bump all versions together in one PR, then re-run the formatter.
 - Format: `./scripts/format.sh` (formats `Sources/` and `Tests/` in place with the root `.swift-format`) and
   `./scripts/format.sh --check` (strict lint, exits 1 on violations; the same check CI runs). Run the check before
   handing off any Swift change and report it in "How it was tested".
