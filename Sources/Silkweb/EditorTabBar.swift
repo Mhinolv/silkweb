@@ -181,9 +181,18 @@ final class EditorTabButton: NSView {
         close.isHidden = !hovered && !active
         close.setAccessibilityLabel("Close \(tab.editor.name)")
         close.toolTip = "Close \(tab.editor.name)"
-        toolTip = tab.isPreview ? "Preview — edit or double-click to keep this tab open" : tab.editor.name
+        // The library-relative path tells deleted-note drafts with the same name apart (#108).
+        let deleted = tab.editor.externalDeleted
+        let path = tab.editor.url.flatMap { url in
+            bar?.workspace.root.map { String(url.path.dropFirst($0.path.count + 1)) }
+        }
+        toolTip =
+            deleted
+            ? "\(path ?? tab.editor.name) — deleted note"
+            : tab.isPreview ? "Preview — edit or double-click to keep this tab open" : tab.editor.name
         setAccessibilityLabel(
-            tab.editor.name + (tab.editor.state.isDirty ? ", edited" : "") + (tab.isPreview ? ", preview" : ""))
+            tab.editor.name + (deleted ? ", deleted note" : tab.editor.state.isDirty ? ", edited" : "")
+                + (tab.isPreview ? ", preview" : ""))
         setAccessibilityValue(active ? 1 : 0)
         setAccessibilityChildren([close])
         needsLayout = true
