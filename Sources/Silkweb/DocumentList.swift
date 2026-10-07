@@ -40,9 +40,11 @@ struct DocumentList: View {
                         } description: {
                             Text("No documents in “\(workspace.folderName)” have all of these tags.")
                         } actions: {
-                            Button("Clear Filters") {
-                                workspace.tagFilters = []; workspace.session.selectedTagID = nil
-                            }
+                            ColumnEmptyActions(actions: [
+                                .init(title: "Clear Filters") {
+                                    workspace.tagFilters = []; workspace.session.selectedTagID = nil
+                                }
+                            ])
                         }
                     }
                 } else if workspace.documents.isEmpty {
@@ -56,10 +58,7 @@ struct DocumentList: View {
                                 workspace.snapshot?.documents.isEmpty == true
                                     ? "Create a document or folder to get started." : "This folder is empty.")
                         } actions: {
-                            Button("New Document") { workspace.create(folder: false) }.disabled(!workspace.canMutate)
-                            if workspace.snapshot?.documents.isEmpty == true {
-                                Button("New Folder") { workspace.create(folder: true) }.disabled(!workspace.canMutate)
-                            }
+                            ColumnEmptyActions(actions: createActions)
                         }
                     }
                 } else {
@@ -76,6 +75,21 @@ struct DocumentList: View {
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in dateReference = Date()
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemClockDidChange)) { _ in dateReference = Date() }
+    }
+
+    /// An empty library offers New Folder too; an empty folder only New Document.
+    private var createActions: [ColumnEmptyActions.Action] {
+        let workspace = workspace
+        var actions = [
+            ColumnEmptyActions.Action(title: "New Document", isEnabled: workspace.canMutate) {
+                workspace.create(folder: false)
+            }
+        ]
+        if workspace.snapshot?.documents.isEmpty == true {
+            actions.append(
+                .init(title: "New Folder", isEnabled: workspace.canMutate) { workspace.create(folder: true) })
+        }
+        return actions
     }
 }
 
