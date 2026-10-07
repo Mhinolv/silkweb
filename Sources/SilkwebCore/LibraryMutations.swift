@@ -553,6 +553,51 @@ extension LibraryMutations {
         return try stage(LibraryChangeSet(changes: changes), metadata: metadata, collisions: collisions)
     }
 
+    /// Used by Undo Move when the exact reverse plan is stale: stages each item back to its
+    /// original folder and name, with link rewrites from current disk state. The names came
+    /// from disk and may predate the rules for new names, so they get structural checks only.
+    /// `executeMove` rejects the whole plan if any original path is occupied.
+    public func planRestore(_ restore: LibraryChangeSet) throws -> MovePlan {
+        let (metadata, _) = try LibraryMetadataStore.load(root: root)
+        var changes: [LibraryPathChange] = []
+        for change in restore.changes {
+            guard let path = change.oldPath else { continue }
+            let components = try Self.components(change.newPath, allowRoot: false)
+            let parentPath = components.dropLast().joined(separator: "/")
+            let parent = try perform(operation: "moved", name: (parentPath as NSString).lastPathComponent) {
+                try directory(parentPath)
+            }
+            let folder = try perform(
+                operation: "moved", name: LibraryMutationError.displayName((path as NSString).lastPathComponent)
+            ) {
+                let source = try item(path)
+                let values = try source.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
+                let folder = values.isDirectory == true
+                guard
+                    folder
+                        || (values.isRegularFile == true
+                            && ["md", "markdown"].contains(source.pathExtension.lowercased()))
+                else {
+                    throw LibraryMutationError.unsupportedItem(path)
+                }
+                if folder {
+                    var ancestor = parent
+                    while true {
+                        if try sameItem(source, ancestor) { throw LibraryMutationError.folderCycle(path) }
+                        if ancestor.path == root.path { break }
+                        ancestor.deleteLastPathComponent()
+                    }
+                }
+                return folder
+            }
+            changes.append(
+                LibraryPathChange(
+                    id: metadata.IDsByPath[path] ?? change.id, oldPath: path, newPath: change.newPath,
+                    isFolder: folder))
+        }
+        return try stage(LibraryChangeSet(changes: changes), metadata: metadata, collisions: [])
+    }
+
     /// Reads every linking document and stages its rewrite for an immutable plan.
     private func stage(_ changeSet: LibraryChangeSet, metadata: LibraryMetadata, collisions: [String]) throws
         -> MovePlan
