@@ -128,10 +128,75 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
     are read-only, relative to the Library, and validated like any other path.
   - Create folders: `Memory/Projects/<Project>/Memories`, `…/Progress` and `…/Handoffs`, and only
     for `read-create` grants on a qualified filesystem.
-- Containment is checked per path component, ignoring case like APFS: `Memory/Projects/Silkweb2`
-  isn’t inside `Memory/Projects/Silkweb`. Symbolic links and hidden items are never followed or
-  listed. Descriptor-based checks for files that change between the check and the use come in #130.
+- Containment is checked per path component and compared like APFS: Unicode normalization never
+  matters, and case is ignored unless the Library’s volume is case-sensitive.
+  `Memory/Projects/Silkweb2` isn’t inside `Memory/Projects/Silkweb`. Symbolic links and hidden items
+  are never followed or listed.
 - MCP roots and client names may narrow a grant but never widen it.
+
+### Profiles, limits and revocation (#130)
+
+The grant file above stays `version: 1`. These keys are optional, so files saved by the #129 spike
+still load unchanged:
+
+```json
+{
+  "access" : "read",
+  "created_at" : "2026-10-07T09:30:00Z",
+  "extra_read_folders" : [],
+  "label" : "Silkweb project",
+  "library" : { "path" : "/Users/me/Writing", "version" : 1 },
+  "limits" : { "max_read_bytes" : 1048576, "max_results" : 200, "requests_per_minute" : 120 },
+  "project" : "Silkweb",
+  "revoked_at" : "2026-10-08T17:00:00Z"
+}
+```
+
+- **Profiles:** `read` is shown as **Read Only** and `read-create` as **Read and Create**. `read-only`
+  is accepted as another spelling of `read`. Read Only allows capabilities, list, search, read and
+  activity inside the read folders. Read and Create adds create and create-folder, only inside the
+  create folders. Agents can’t replace or delete anything with either profile.
+- The template is called **Project memory** (see the default template above).
+- `label` is the owner-facing name used in messages. When it’s empty, it’s “<Project> project”.
+- `limits` bound one document read (`max_read_bytes`), the rows one search, list or activity page
+  returns (`max_results`) and the operations per rolling minute in one helper session
+  (`requests_per_minute`). A missing or non-positive value uses the default shown.
+- `revoked_at` turns the grant off. Any non-null value counts, even one that can’t be parsed. Removing
+  the date (or the `null` value) turns it back on. Silkweb writes this file atomically with sorted keys.
+- **Revocation fails closed on the next operation.** Before every operation the helper checks the
+  grant file’s modification date, inode and size, which costs one `stat`, and re-reads the file when
+  any of them change. After the owner turns a grant off, removes it or deletes the file, the session’s
+  next operation gets `grant_revoked`. A narrower profile or fewer folders apply on the next operation
+  too. An operation that was already authorized finishes, and a create publishes atomically (#133),
+  so it’s either complete or absent, never half-written.
+- **Scope filtering comes first.** Search, list and activity drop out-of-scope documents before
+  ranking, counting, faceting or building snippets. Totals, “N more”, tag counts and activity rows
+  cover only in-scope documents, so an empty in-scope result looks the same whatever lies outside.
+- **On disk,** every path is opened one component at a time below the Library root without following
+  links, so a Folder swapped for a link between the check and the use can’t redirect a read. Reads
+  accept only regular files. The Library root itself may be a link the owner chose.
+- **MCP roots** are intersected with the grant: a client root inside a granted folder narrows it, a
+  granted folder inside a client root stays as it is, and anything else (including invalid roots) is
+  dropped. An empty list grants nothing.
+
+### Refusals
+
+`error.code` values are stable. Messages are sentence case with curly quotes, and never include
+document text or the requested target.
+
+| Code | Message |
+|---|---|
+| `out_of_scope` | That location is outside this grant’s read folders (Memory › Projects › Silkweb). For creates, “create folders” and the create folders. Whether the target exists is never revealed. |
+| `create_not_allowed` | This grant is Read Only. Ask the owner to switch it to Read and Create. (On an unqualified filesystem: This Library isn’t on a local disk, so agents can only read it.) |
+| `invalid_path` | Paths must stay inside the Library and can’t use “..”, links or special files. One message for traversal, links, special files and `.silkweb` paths. |
+| `excluded_name` | Agents can create only Markdown documents, never instruction files or reserved Folders. |
+| `grant_revoked` | Agent access “Silkweb project” was turned off. Ask the owner to turn it back on. |
+| `rate_limited` | Too many requests. Try again in N seconds. |
+| `too_large` | That document is larger than this grant’s read limit (1 MB). |
+| `not_found` | There’s no document at that location. (Only for targets inside the scope.) |
+
+The Settings ▸ Library ▸ Agent Access section and the commands that set grants up come later
+(#135); they only edit this file.
 
 ## Filesystems
 
@@ -191,7 +256,7 @@ and conflicts keep both versions.
 **Message copy.** Machine output is JSON on stdout. Human messages go to stderr in sentence case,
 with curly quotes around names. Library failures reuse the app’s titles, **“Library Not Found”** and
 **“Can’t Open Library”**. Grant failures use **“No Agent Access”**. Out-of-scope messages name the
-scope, for example: ““Notes › Private” is outside this grant’s read folders.”
+grant’s scope, never the requested target (see [Refusals](#refusals)).
 
 | Exit | Meaning | stdout |
 |---|---|---|
@@ -200,7 +265,8 @@ scope, for example: ““Notes › Private” is outside this grant’s read fo
 | 64 | Usage error | Nothing; usage text on stderr |
 
 Error codes: `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `no_grant`,
-`invalid_grant`, `library_not_found`, `library_unreadable`.
+`invalid_grant`, `library_not_found`, `library_unreadable`, plus the per-operation
+[refusals](#refusals).
 
 ## Helper distribution
 
@@ -278,6 +344,11 @@ Run these once from the repository root. Each step shows its expected output.
      "filesystem" : "qualified",
      "helper_version" : "0.1.0",
      "library" : "/Users/me/Writing",
+     "limits" : {
+       "max_read_bytes" : 1048576,
+       "max_results" : 200,
+       "requests_per_minute" : 120
+     },
      "operations" : [
        "capabilities",
        "list"

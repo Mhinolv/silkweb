@@ -1,7 +1,8 @@
 import Foundation
 
-/// The v2 agent-memory contract (`docs/agent-memory.md`). This spike covers the grants file, scope
-/// rules, filesystem qualification and read-only helper commands; creates arrive with #135/#136.
+/// The v2 agent-memory contract (`docs/agent-memory.md`): the grants file, scope rules, filesystem
+/// qualification and read-only helper commands. Enforcement per operation lives in `AgentAccess.swift`
+/// (#130); creates arrive with #133/#135/#136.
 public enum AgentMemoryContract {
     public static let version = 1
     public static let projectsFolder = "Memory/Projects"
@@ -23,9 +24,24 @@ public enum AgentMemoryContract {
 
 /// One owner-approved project grant. Stored outside the Library so agents can't edit it.
 public struct AgentGrant: Codable, Equatable, Sendable {
+    /// The grant's profile. `read-only` is accepted as a spelling of `read`; `read` is what's saved.
     public enum Access: String, Codable, Sendable {
         case read
         case readCreate = "read-create"
+
+        /// Owner-facing profile names.
+        public var displayName: String { self == .read ? "Read Only" : "Read and Create" }
+
+        public init(from decoder: Decoder) throws {
+            let value = try decoder.singleValueContainer().decode(String.self)
+            switch value {
+            case "read", "read-only": self = .read
+            case "read-create": self = .readCreate
+            default:
+                throw DecodingError.dataCorrupted(
+                    .init(codingPath: decoder.codingPath, debugDescription: "Unknown access level"))
+            }
+        }
     }
 
     public var project: String
@@ -33,19 +49,39 @@ public struct AgentGrant: Codable, Equatable, Sendable {
     public var access: Access
     /// Optional extra read-only folders, relative to the Library.
     public var extraReadFolders: [String]
+    /// Owner-facing name used in refusals; empty means “<Project> project”.
+    public var label: String
+    public var limits: AgentGrantLimits
+    public var createdAt: Date?
+    /// Set when the owner turns access off. Sessions fail closed on their next operation.
+    public var revokedAt: Date?
 
     public init(
-        project: String, library: LibraryLocation, access: Access = .readCreate, extraReadFolders: [String] = []
+        project: String, library: LibraryLocation, access: Access = .readCreate, extraReadFolders: [String] = [],
+        label: String = "", limits: AgentGrantLimits = AgentGrantLimits(), createdAt: Date? = nil,
+        revokedAt: Date? = nil
     ) {
         self.project = project
         self.library = library
         self.access = access
         self.extraReadFolders = extraReadFolders
+        self.label = label
+        self.limits = limits
+        self.createdAt = createdAt
+        self.revokedAt = revokedAt
     }
 
+    public var displayLabel: String {
+        label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? project + " project" : label
+    }
+
+    public var isRevoked: Bool { revokedAt != nil }
+
     private enum CodingKeys: String, CodingKey {
-        case project, library, access
+        case project, library, access, label, limits
         case extraReadFolders = "extra_read_folders"
+        case createdAt = "created_at"
+        case revokedAt = "revoked_at"
     }
 
     public init(from decoder: Decoder) throws {
@@ -55,12 +91,39 @@ public struct AgentGrant: Codable, Equatable, Sendable {
         // An unknown access level from a newer build falls back to the narrower profile.
         access = (try? values.decodeIfPresent(Access.self, forKey: .access)) ?? .read
         extraReadFolders = try values.decodeIfPresent([String].self, forKey: .extraReadFolders) ?? []
+        label = (try? values.decodeIfPresent(String.self, forKey: .label)) ?? ""
+        limits = (try? values.decodeIfPresent(AgentGrantLimits.self, forKey: .limits)) ?? AgentGrantLimits()
+        createdAt = (try? values.decodeIfPresent(String.self, forKey: .createdAt)).flatMap { $0 }.flatMap(Self.date)
+        // Any non-null `revoked_at`, even one that can't be parsed, keeps the grant off (fail closed).
+        if values.contains(.revokedAt), try !values.decodeNil(forKey: .revokedAt) {
+            revokedAt = (try? values.decode(String.self, forKey: .revokedAt)).flatMap(Self.date) ?? .distantPast
+        } else {
+            revokedAt = nil
+        }
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(project, forKey: .project)
+        try values.encode(library, forKey: .library)
+        try values.encode(access, forKey: .access)
+        try values.encode(extraReadFolders, forKey: .extraReadFolders)
+        if !label.isEmpty { try values.encode(label, forKey: .label) }
+        try values.encode(limits, forKey: .limits)
+        try values.encodeIfPresent(createdAt.map(Self.string), forKey: .createdAt)
+        try values.encodeIfPresent(revokedAt.map(Self.string), forKey: .revokedAt)
+    }
+
+    /// ISO 8601 in UTC, whole seconds, so the owner can read and diff the file.
+    private static func date(_ text: String) -> Date? { ISO8601DateFormatter().date(from: text) }
+    private static func string(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
 }
 
 /// `~/Library/Application Support/Silkweb/agent-grants.json`, versioned and decoded tolerantly.
 public struct AgentGrantFile: Codable, Equatable, Sendable {
-    public var version = 1
+    public static let currentVersion = 1
+
+    public var version = currentVersion
     public var grants: [AgentGrant]
 
     public init(grants: [AgentGrant] = []) { self.grants = grants }
@@ -77,6 +140,23 @@ public struct AgentGrantFile: Codable, Equatable, Sendable {
     }
 
     public func grant(for project: String) -> AgentGrant? { grants.first { $0.project == project } }
+
+    /// Turns a grant off (keeping the first revocation date) or back on. False if there's no grant.
+    @discardableResult
+    public mutating func setEnabled(_ enabled: Bool, project: String, at date: Date = Date()) -> Bool {
+        guard let index = grants.firstIndex(where: { $0.project == project }) else { return false }
+        grants[index].revokedAt = enabled ? nil : (grants[index].revokedAt ?? date)
+        return true
+    }
+
+    /// Atomic replace with sorted keys, so the owner can diff it and running helpers see one
+    /// complete file (a new inode) on their next operation.
+    public func write(to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        try encoder.encode(self).write(to: url, options: .atomic)
+    }
 }
 
 public enum AgentScopeError: Error, Equatable {
@@ -101,23 +181,29 @@ public enum AgentScopeError: Error, Equatable {
 }
 
 /// Component-aware read/create containment for one grant. Paths are POSIX and Library-relative.
-/// Callers that touch disk must still reject symbolic links on the way (see #131).
+/// Code that touches disk goes through `AgentSecureFiles`, which refuses links on the way.
 public struct AgentScope: Equatable, Sendable {
     public let project: String
     public let readRoots: [String]
     public let createRoots: [String]
+    /// Matches the Library's volume. Case-insensitive containment on a case-sensitive volume would let
+    /// `memory/…` name a different Folder than `Memory/…`.
+    public let caseSensitive: Bool
 
     /// `createAllowed` is false for read-only grants and for unqualified filesystems.
-    public init(grant: AgentGrant, createAllowed: Bool = true) throws {
+    public init(grant: AgentGrant, createAllowed: Bool = true, caseSensitive: Bool = false) throws {
         guard (try? LibraryMutations.validateName(grant.project)) == grant.project else {
             throw AgentScopeError.invalidProject
         }
         project = grant.project
+        self.caseSensitive = caseSensitive
         let root = AgentMemoryContract.projectRoot(project)
         var reads = [root]
         for folder in grant.extraReadFolders {
             let normalized = try Self.normalize(folder)
-            if !reads.contains(where: { Self.contains($0, normalized) }) { reads.append(normalized) }
+            if !reads.contains(where: { Self.contains($0, normalized, caseSensitive: caseSensitive) }) {
+                reads.append(normalized)
+            }
         }
         readRoots = reads
         createRoots =
@@ -125,25 +211,78 @@ public struct AgentScope: Equatable, Sendable {
             ? AgentMemoryContract.entryFolders.map { root + "/" + $0 } : []
     }
 
+    private init(project: String, readRoots: [String], createRoots: [String], caseSensitive: Bool) {
+        self.project = project
+        self.readRoots = readRoots
+        self.createRoots = createRoots
+        self.caseSensitive = caseSensitive
+    }
+
+    /// Intersects the grant with an MCP client's roots: a client root inside a granted folder narrows
+    /// it, a granted folder inside a client root stays as is, and anything else is dropped. Invalid
+    /// client roots match nothing. The result is never wider than the grant.
+    public func narrowed(to clientRoots: [String]) -> AgentScope {
+        let clients = clientRoots.compactMap { try? Self.normalize($0) }
+        let intersect = { (granted: [String]) -> [String] in
+            var result: [String] = []
+            for root in granted {
+                for client in clients {
+                    let inner =
+                        contains(root, client) ? client : contains(client, root) ? root : nil
+                    if let inner, !result.contains(where: { contains($0, inner) }) {
+                        result.removeAll { contains(inner, $0) }
+                        result.append(inner)
+                    }
+                }
+            }
+            return result
+        }
+        return AgentScope(
+            project: project, readRoots: intersect(readRoots), createRoots: intersect(createRoots),
+            caseSensitive: caseSensitive)
+    }
+
     public func checkRead(_ path: String) throws -> String {
         let normalized = try Self.normalize(path)
-        guard readRoots.contains(where: { Self.contains($0, normalized) }) else {
+        guard readRoots.contains(where: { contains($0, normalized) }) else {
             throw AgentScopeError.outsideRead(normalized)
         }
         return normalized
     }
 
+    /// Keeps only in-scope items. Search, list and activity filter with this **before** ranking,
+    /// counting or building snippets, so totals and “N more” never reflect out-of-scope documents.
+    public func readable<Item>(_ items: some Sequence<Item>, path: (Item) -> String) -> [Item] {
+        items.filter { (try? checkRead(path($0))) != nil }
+    }
+
     /// A new Markdown document inside one of the create folders, never an instruction file.
     public func checkCreate(_ path: String) throws -> String {
+        let normalized = try checkInsideCreateRoot(path)
+        let name = (normalized as NSString).lastPathComponent.lowercased()
+        if AgentMemoryContract.instructionFiles.contains(name) || (name as NSString).pathExtension != "md" {
+            throw AgentScopeError.excluded(normalized)
+        }
+        return normalized
+    }
+
+    /// A new Folder inside one of the create folders, named by the rules for new names.
+    public func checkCreateFolder(_ path: String) throws -> String {
+        let normalized = try checkInsideCreateRoot(path)
+        let name = (normalized as NSString).lastPathComponent
+        guard (try? LibraryMutations.validateName(name)) == name else { throw AgentScopeError.invalidPath(path) }
+        return normalized
+    }
+
+    private func checkInsideCreateRoot(_ path: String) throws -> String {
         let normalized = try Self.normalize(path)
         guard
-            createRoots.contains(where: { $0.lowercased() != normalized.lowercased() && Self.contains($0, normalized) })
+            createRoots.contains(where: {
+                contains($0, normalized) && !contains(normalized, $0)
+            })
         else { throw AgentScopeError.outsideCreate(normalized) }
-        let name = (normalized as NSString).lastPathComponent.lowercased()
         let components = normalized.lowercased().split(separator: "/").map(String.init)
-        if AgentMemoryContract.instructionFiles.contains(name) || (name as NSString).pathExtension != "md"
-            || components.contains(where: AgentMemoryContract.reservedFolders.contains)
-        {
+        if components.contains(where: AgentMemoryContract.reservedFolders.contains) {
             throw AgentScopeError.excluded(normalized)
         }
         return normalized
@@ -159,11 +298,18 @@ public struct AgentScope: Equatable, Sendable {
         return parts.joined(separator: "/")
     }
 
-    /// Case-insensitive like the default APFS volume, so `memory/projects` can't sidestep a root.
-    static func contains(_ root: String, _ path: String) -> Bool {
-        let root = root.lowercased()
-        let path = path.lowercased()
-        return path == root || path.hasPrefix(root + "/")
+    private func contains(_ root: String, _ path: String) -> Bool {
+        Self.contains(root, path, caseSensitive: caseSensitive)
+    }
+
+    /// Whole components only (`Silkweb2` isn't inside `Silkweb`), compared like APFS: Unicode
+    /// normalization never matters, and case matters only on a case-sensitive volume.
+    static func contains(_ root: String, _ path: String, caseSensitive: Bool) -> Bool {
+        let rootParts = root.split(separator: "/")
+        let pathParts = path.split(separator: "/")
+        guard pathParts.count >= rootParts.count else { return false }
+        let options: String.CompareOptions = caseSensitive ? [] : [.caseInsensitive]
+        return zip(rootParts, pathParts).allSatisfy { $0.compare($1, options: options) == .orderedSame }
     }
 }
 
@@ -215,10 +361,12 @@ public enum AgentHelper {
             let options = options(Array(arguments.dropFirst(2))), let project = options["--project"]
         else { return Output(status: 64, stdout: "", stderr: usage) }
         let grantsURL = options["--grants"].map { URL(fileURLWithPath: $0) } ?? AgentGrantFile.defaultURL(home: home)
+        let session = AgentSession(project: project, store: AgentGrantStore(url: grantsURL))
         do {
-            let context = try resolve(project: project, grantsURL: grantsURL)
-            return arguments[1] == "list" ? list(context) : capabilities(context)
-        } catch let failure as Failure {
+            let operation: AgentOperation = arguments[1] == "list" ? .list : .capabilities
+            let authorization = try session.authorize(operation)
+            return operation == .list ? try list(authorization) : capabilities(authorization)
+        } catch let failure as AgentAccessError {
             return Output(
                 status: 1, stdout: json(["error": ["code": failure.code, "title": failure.title]]),
                 stderr: failure.title + ": " + failure.message + "\n")
@@ -227,70 +375,11 @@ public enum AgentHelper {
         }
     }
 
-    struct Failure: Error {
-        let code: String
-        let title: String
-        let message: String
-    }
-
-    struct Context {
-        let library: URL
-        let filesystem: AgentFilesystem
-        let grant: AgentGrant
-        let scope: AgentScope
-    }
-
-    static func resolve(project: String, grantsURL: URL) throws -> Context {
-        let file: AgentGrantFile
-        do {
-            file = try JSONDecoder().decode(AgentGrantFile.self, from: Data(contentsOf: grantsURL))
-        } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError
-        {
-            throw Failure(
-                code: "no_grants_file", title: "No Agent Access",
-                message: "There’s no grants file at “\(grantsURL.path)”.")
-        } catch {
-            throw Failure(
-                code: "invalid_grants_file", title: "No Agent Access",
-                message: "The grants file at “\(grantsURL.path)” can’t be read.")
-        }
-        guard file.version <= 1 else {
-            throw Failure(
-                code: "unsupported_grants_version", title: "No Agent Access",
-                message: "The grants file was saved by a newer version of Silkweb.")
-        }
-        guard let grant = file.grant(for: project) else {
-            throw Failure(
-                code: "no_grant", title: "No Agent Access", message: "There’s no grant for the project “\(project)”.")
-        }
-        let library: URL
-        do {
-            // Same restore path the app uses; the refreshed location is ignored (the helper is read-only).
-            guard let resolved = try LibraryLocationRestore.restore(grant.library) else {
-                throw LibraryLocationError.notFound
-            }
-            library = resolved.url
-        } catch let error as LibraryLocationError {
-            let name = grant.library.path.map { ($0 as NSString).lastPathComponent } ?? "Library"
-            throw Failure(
-                code: error == .notFound ? "library_not_found" : "library_unreadable", title: error.title,
-                message: error == .notFound
-                    ? "The Library “\(name)” can’t be found." : "The Library “\(name)” can’t be read.")
-        }
-        let filesystem = AgentFilesystem.probe(library)
-        do {
-            let scope = try AgentScope(grant: grant, createAllowed: filesystem == .qualified)
-            return Context(library: library, filesystem: filesystem, grant: grant, scope: scope)
-        } catch let error as AgentScopeError {
-            throw Failure(code: "invalid_grant", title: "No Agent Access", message: error.message)
-        }
-    }
-
-    static func capabilities(_ context: Context) -> Output {
+    static func capabilities(_ context: AgentAuthorization) -> Output {
         let root = AgentMemoryContract.projectRoot(context.scope.project)
-        var isFolder: ObjCBool = false
-        let exists = FileManager.default.fileExists(
-            atPath: context.library.appendingPathComponent(root).path, isDirectory: &isFolder)
+        let descriptor = try? AgentSecureFiles.openFolder(library: context.library, path: root)
+        if let descriptor { close(descriptor) }
+        let limits = context.grant.limits
         return emit([
             "contract_version": AgentMemoryContract.version,
             "helper_version": SilkwebCore.version,
@@ -301,39 +390,30 @@ public enum AgentHelper {
             "operations": ["capabilities", "list"],
             "read_roots": context.scope.readRoots,
             "create_roots": context.scope.createRoots,
-            "project_folder_exists": exists && isFolder.boolValue,
+            "project_folder_exists": descriptor != nil,
+            "limits": [
+                "max_read_bytes": limits.maxReadBytes, "max_results": limits.maxResults,
+                "requests_per_minute": limits.requestsPerMinute,
+            ],
         ])
     }
 
-    /// Paths, sizes and dates only — no document bodies. Hidden items and symbolic links are skipped.
-    static func list(_ context: Context) -> Output {
-        var documents: [[String: Any]] = []
+    /// Paths, sizes and dates only — no document bodies. Hidden items, links and special files are
+    /// skipped, and a read folder reached through a link is skipped entirely.
+    static func list(_ context: AgentAuthorization) throws -> Output {
         let dates = ISO8601DateFormatter()
+        var documents: [AgentSecureFiles.Document] = []
         for root in context.scope.readRoots {
-            let base = context.library.appendingPathComponent(root)
-            guard (try? base.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == false,
-                let walker = FileManager.default.enumerator(atPath: base.path)
-            else { continue }
-            while let relative = walker.nextObject() as? String {
-                let type = walker.fileAttributes?[.type] as? FileAttributeType
-                let path = root + "/" + relative
-                if relative.split(separator: "/").contains(where: { $0.hasPrefix(".") }) || type == .typeSymbolicLink {
-                    if type == .typeDirectory { walker.skipDescendants() }
-                    continue
-                }
-                guard type == .typeRegular, (relative as NSString).pathExtension.lowercased() == "md",
-                    (try? context.scope.checkRead(path)) != nil
-                else { continue }
-                let modified = walker.fileAttributes?[.modificationDate] as? Date
-                documents.append([
-                    "path": path,
-                    "size": (walker.fileAttributes?[.size] as? NSNumber)?.intValue ?? 0,
-                    "modified": modified.map(dates.string(from:)) ?? "",
-                ])
+            do {
+                documents += try AgentSecureFiles.documents(library: context.library, under: root)
+            } catch let error as AgentAccessError where error == .invalidPath {
+                continue
             }
         }
-        documents.sort { ($0["path"] as? String ?? "") < ($1["path"] as? String ?? "") }
-        return emit(["project": context.scope.project, "documents": documents])
+        let rows = context.scope.readable(documents, path: \.path).sorted { $0.path < $1.path }.map {
+            ["path": $0.path, "size": $0.size, "modified": dates.string(from: $0.modified)] as [String: Any]
+        }
+        return emit(["project": context.scope.project, "documents": rows])
     }
 
     private static func options(_ arguments: [String]) -> [String: String]? {
