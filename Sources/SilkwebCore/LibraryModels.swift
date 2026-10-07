@@ -32,6 +32,9 @@ public struct LibrarySnapshot: Sendable {
     public let metadata: LibraryMetadata
     public let recoveredMetadataURL: URL?
     public let isReadOnly: Bool
+    /// The index existed but couldn't be read, so tags and IDs were rebuilt (#107). With no
+    /// `recoveredMetadataURL`, no copy could be set aside.
+    public internal(set) var metadataWasReset = false
 }
 
 public enum LibraryError: Error, Equatable {
@@ -39,4 +42,18 @@ public enum LibraryError: Error, Equatable {
     case symbolicLink(URL)
     case invalidRelativePath
     case unsupportedMetadataVersion(Int)
+}
+
+/// Plain messages for Can’t Open Library (#107); never a format number or Cocoa text.
+extension LibraryError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .invalidRoot: "This folder can’t be used as a library."
+        case .symbolicLink(let url):
+            "“\(url.lastPathComponent)” is a symbolic link. Silkweb doesn’t open libraries through links."
+        case .invalidRelativePath: "That location is outside the library."
+        case .unsupportedMetadataVersion:
+            "This library was last used with a newer version of Silkweb. Update Silkweb to open it. Nothing in the library was changed."
+        }
+    }
 }

@@ -22,11 +22,30 @@ public struct LibraryMetadata: Codable, Equatable, Sendable {
         let version = try values.decodeIfPresent(Int.self, forKey: .formatVersion) ?? 1
         // Retain unsupported versions so the store refuses to overwrite them.
         formatVersion = (1...Self.currentVersion).contains(version) ? Self.currentVersion : version
-        tags = try values.decodeIfPresent([LibraryTag].self, forKey: .tags) ?? []
-        tagsByDocument = try values.decodeIfPresent([String: Set<UUID>].self, forKey: .tagsByDocument) ?? [:]
-        tagRecency = (try? values.decode([UUID].self, forKey: .tagRecency)) ?? []
-        IDsByPath = try values.decodeIfPresent([String: UUID].self, forKey: .IDsByPath) ?? [:]
+        // One bad entry drops only that entry (#107); a field of the wrong shape still fails the whole file.
+        tags = try values.decodeIfPresent([Lossy<LibraryTag>].self, forKey: .tags)?.compactMap(\.value) ?? []
+        tagsByDocument =
+            try values.decodeIfPresent([String: Lossy<[Lossy<UUID>]>].self, forKey: .tagsByDocument)?
+            .compactMapValues { $0.value.map { Set($0.compactMap(\.value)) } } ?? [:]
+        tagRecency = (try? values.decode([Lossy<UUID>].self, forKey: .tagRecency))?.compactMap(\.value) ?? []
+        IDsByPath =
+            try values.decodeIfPresent([String: Lossy<UUID>].self, forKey: .IDsByPath)?.compactMapValues(\.value)
+            ?? [:]
     }
+}
+
+/// Decodes one collection entry, or `nil` when that entry alone is invalid.
+private struct Lossy<Value: Decodable>: Decodable {
+    let value: Value?
+    init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(Value.self) }
+}
+
+/// What `LibraryMetadataStore` read. `wasReset`: an existing index couldn't be decoded and was replaced by empty
+/// metadata; `recoveredURL` names the set-aside copy when the folder allowed one.
+struct LoadedLibraryMetadata {
+    var metadata: LibraryMetadata
+    var recoveredURL: URL? = nil
+    var wasReset = false
 }
 
 enum LibraryMetadataStore {
@@ -55,6 +74,11 @@ enum LibraryMetadataStore {
     }
 
     static func load(root: URL) throws -> (LibraryMetadata, URL?) {
+        let loaded = try loadReportingReset(root: root)
+        return (loaded.metadata, loaded.recoveredURL)
+    }
+
+    static func loadReportingReset(root: URL) throws -> LoadedLibraryMetadata {
         let (_, file) = try locations(root: root)
         let data: Data
         do {
@@ -63,7 +87,7 @@ enum LibraryMetadataStore {
             where error.domain == NSCocoaErrorDomain
             && error.code == NSFileReadNoSuchFileError
         {
-            return (LibraryMetadata(), nil)
+            return LoadedLibraryMetadata(metadata: LibraryMetadata())
         }
         let metadata: LibraryMetadata
         do {
@@ -72,10 +96,10 @@ enum LibraryMetadataStore {
             let backup = file.deletingLastPathComponent()
                 .appendingPathComponent("index.corrupt-\(UUID().uuidString).json")
             guard FileManager.default.isWritableFile(atPath: file.deletingLastPathComponent().path) else {
-                return (LibraryMetadata(), nil)
+                return LoadedLibraryMetadata(metadata: LibraryMetadata(), wasReset: true)
             }
             try FileManager.default.moveItem(at: file, to: backup)
-            return (LibraryMetadata(), backup)
+            return LoadedLibraryMetadata(metadata: LibraryMetadata(), recoveredURL: backup, wasReset: true)
         }
         // Never overwrite a newer format this build cannot understand.
         guard metadata.formatVersion <= LibraryMetadata.currentVersion,
@@ -83,7 +107,7 @@ enum LibraryMetadataStore {
         else {
             throw LibraryError.unsupportedMetadataVersion(metadata.formatVersion)
         }
-        return (metadata, nil)
+        return LoadedLibraryMetadata(metadata: metadata)
     }
 
     static func save(_ metadata: LibraryMetadata, root: URL) throws {

@@ -33,6 +33,8 @@ struct SnapshotScenario {
     /// silkweb-1.70 recovery states: "pending" (Keep/Discard), "orphan" (draft for a deleted note), "unreadable" (strip);
     /// #108 "two-orphans": a restored tab followed by two same-named deleted-note drafts.
     var recovery: String? = nil
+    /// #107 index states: "backup" (corrupt index set aside), "no-copy" (unwritable `.silkweb`), "newer-format".
+    var indexRecovery: String? = nil
     var tableInsert: String? = nil
     var exportWarning = false
     var printWarning = false
@@ -113,6 +115,10 @@ struct SnapshotScenario {
         .init(name: "recovery-orphan-draft", folder: "Coffee", recovery: "orphan"),
         .init(name: "recovery-two-orphans", recovery: "two-orphans"),
         .init(name: "recovery-unreadable", document: pourOver, recovery: "unreadable"),
+        // #107: a corrupt index set aside (Reveal in Finder), one that couldn't be, and a newer index format.
+        .init(name: "index-recovery-backup", indexRecovery: "backup"),
+        .init(name: "index-recovery-no-copy", indexRecovery: "no-copy"),
+        .init(name: "library-open-newer-format", indexRecovery: "newer-format"),
         .init(name: "sidebar-resized", folder: "Coffee", resizeSidebar: true),
         // silkweb-1.63: thread guides at both sidebar width limits; no coral node since 1.65 (the capsule marks the scope).
         .init(name: "sidebar-resized-180", folder: "Coffee", resizeSidebar: true, sidebarWidth: 180),
@@ -763,8 +769,38 @@ final class SnapshotHarness {
                 longOutline: scenario.document == SnapshotScenario.longOutline)
             workspace.root = root
             workspace.recoveryDirectory = root.appendingPathComponent("Snapshot Recovery")
-            let snapshot = try await bounded("library scan") { try await LibraryScanner.scan(root: root) }
-            if scenario.resizeSidebar {
+            let metadataDirectory = root.appendingPathComponent(".silkweb")
+            if let state = scenario.indexRecovery {
+                try FileManager.default.createDirectory(at: metadataDirectory, withIntermediateDirectories: true)
+                let index = state == "newer-format" ? #"{"formatVersion":999}"# : "not JSON"
+                try Data(index.utf8).write(to: metadataDirectory.appendingPathComponent("index.json"))
+                if state == "no-copy" {
+                    try FileManager.default.setAttributes(
+                        [.posixPermissions: 0o555], ofItemAtPath: metadataDirectory.path)
+                }
+            }
+            defer {
+                if scenario.indexRecovery == "no-copy" {
+                    try? FileManager.default.setAttributes(
+                        [.posixPermissions: 0o755], ofItemAtPath: metadataDirectory.path)
+                }
+            }
+            let snapshot: LibrarySnapshot?
+            if scenario.indexRecovery == "newer-format" {
+                snapshot = nil
+                // The real scan error, shown through `LibraryWorkspace.open`'s Can’t Open Library fallback.
+                do {
+                    _ = try await LibraryScanner.scan(root: root)
+                    throw SnapshotFailure.error("Newer index format opened")
+                } catch let error as LibraryError {
+                    workspace.errorTitle = "Can’t Open Library"
+                    workspace.errorSymbol = "exclamationmark.triangle"
+                    workspace.error = error.localizedDescription
+                }
+            } else {
+                snapshot = try await bounded("library scan") { try await LibraryScanner.scan(root: root) }
+            }
+            if let snapshot, scenario.resizeSidebar {
                 var folders = snapshot.folders
                 if let index = folders.firstIndex(where: {
                     $0.name == "Private folder with a very long unreadable name"
@@ -778,12 +814,14 @@ final class SnapshotHarness {
                         presentation: LibraryPresentation(folders: folders, documents: snapshot.documents),
                         metadata: snapshot.metadata,
                         recoveredMetadataURL: snapshot.recoveredMetadataURL, isReadOnly: snapshot.isReadOnly))
-            } else {
+            } else if let snapshot {
                 workspace.install(snapshot)
             }
-            try await bounded("scenario configuration") { try await self.configure(scenario, workspace: workspace) }
+            if snapshot != nil {
+                try await bounded("scenario configuration") { try await self.configure(scenario, workspace: workspace) }
+            }
             let content: AnyView
-            if scenario.exportWarning || scenario.printWarning {
+            if scenario.exportWarning || scenario.printWarning, let snapshot {
                 let result = HTMLExport.prepare(
                     markdown: (1...8).map { "![Image \($0)](missing-\($0).png)" }.joined(separator: "\n\n"),
                     title: "Document", documentURL: snapshot.rootURL.appendingPathComponent("Document.md"),
