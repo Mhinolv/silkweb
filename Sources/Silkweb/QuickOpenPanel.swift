@@ -83,7 +83,7 @@ struct QuickOpenPanel: View {
                                 .font(.caption).foregroundStyle(.tertiary).lineLimit(1)
                         }
                         .padding(.horizontal, 16).frame(height: 32).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(selected == result.id ? Color.accentColor.opacity(0.18) : Color.clear)
+                        .background(selected == result.id ? Color.silkwebSelection : Color.clear)
                         .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                         .accessibilityLabel(

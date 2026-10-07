@@ -88,7 +88,7 @@ final class DocumentTabsTests: XCTestCase {
         XCTAssertTrue(a.editor.externalConflict)
         XCTAssertEqual(workspace.tabs.count, 2)
         await a.editor.resolveConflict(keepMine: true)
-        let exited = await workspace.prepareToExit()
+        let exited = await workspace.prepareToExit(.quit)
         XCTAssertTrue(exited)
         XCTAssertEqual(try String(contentsOf: workspace.root!.appendingPathComponent("A.md"), encoding: .utf8), "mine")
         XCTAssertEqual(

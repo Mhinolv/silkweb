@@ -3,7 +3,7 @@ import Foundation
 /// Shared visible and spoken counts. Numbers use the current locale's grouping.
 public enum CountPresentation {
     public enum Unit: String, CaseIterable, Sendable {
-        case document, result, heading, image
+        case document, result, heading, image, item, folder, tag, attachment
     }
 
     public static func label(_ count: Int, unit: Unit) -> String {

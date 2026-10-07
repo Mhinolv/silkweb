@@ -24,6 +24,28 @@ public struct ImportPlan: Sendable {
         }.count
     }
     public var folderCount: Int { entries.filter(\.isFolder).count }
+
+    /// The review sheet's summary line.
+    public var summary: String {
+        Self.summary(
+            documents: documentCount, attachments: assetCount, folders: folderCount, emptyFolders: emptyFolders,
+            folderName: folderName)
+    }
+
+    /// Zero attachment and folder parts, and “(0 empty)”, are left out.
+    public static func summary(documents: Int, attachments: Int, folders: Int, emptyFolders: Int, folderName: String)
+        -> String
+    {
+        var parts = [CountPresentation.label(documents, unit: .document)]
+        if attachments > 0 { parts.append(CountPresentation.label(attachments, unit: .attachment)) }
+        if folders > 0 {
+            parts.append(
+                CountPresentation.label(folders, unit: .folder)
+                    + (emptyFolders > 0 ? " (\(emptyFolders.formatted()) empty)" : ""))
+        }
+        let list = ListFormatter.localizedString(byJoining: parts)
+        return "\(list) will be copied into a new folder “\(folderName)”."
+    }
 }
 
 public enum FolderImportError: LocalizedError {

@@ -775,7 +775,7 @@ struct LibraryWorkspaceView: View {
                     workspace.mutationError = nil
                 }
             }
-            Button("OK") { workspace.mutationError = nil }
+            Button("Dismiss", role: .cancel) { workspace.mutationError = nil }
         } message: {
             Text(workspace.mutationError ?? "")
         }

@@ -6,7 +6,7 @@ import SwiftUI
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         WritingSettings.shared.flush()
         guard let workspace else { return .terminateNow }
-        Task { sender.reply(toApplicationShouldTerminate: await workspace.prepareToExit()) }
+        Task { sender.reply(toApplicationShouldTerminate: await workspace.prepareToExit(.quit)) }
         return .terminateLater
     }
     func applicationDidResignActive(_ notification: Notification) {
@@ -96,7 +96,7 @@ struct EditorWindowLifecycle: NSViewRepresentable {
             guard !checkingClose else { return false }
             checkingClose = true
             Task {
-                let permitted = await workspace.prepareToExit()
+                let permitted = await workspace.prepareToExit(.closeWindow)
                 checkingClose = false
                 if permitted { allowingClose = true; sender.performClose(nil); allowingClose = false }
             }
