@@ -226,4 +226,65 @@ import XCTest
         XCTAssertEqual(effects, [])
         XCTAssertFalse(window.isVisible)
     }
+
+    /// #151: on a case-insensitive volume a link whose letter case differs from the file opens the note under
+    /// its on-disk spelling, folder segments included, and reuses an open tab.
+    func testCaseAliasedDocumentLinkOpensCanonicalNote() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Notes"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        guard
+            try root.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]).volumeSupportsCaseSensitiveNames
+                == false
+        else { throw XCTSkip("The temporary directory is on a case-sensitive volume.") }
+        let note = root.appendingPathComponent("note.md")
+        try Data("[plan](plan%20(final).md)\n".utf8).write(to: note)
+        let plan = root.appendingPathComponent("Plan (Final).md")
+        try Data("# Plan\n".utf8).write(to: plan)
+        let daily = root.appendingPathComponent("Notes/Daily.md")
+        try Data("# Daily\n".utf8).write(to: daily)
+
+        let workspace = LibraryWorkspace(defaults: disposableDefaults("PreviewCaseAlias"))
+        workspace.canSaveWindowSession = false
+        workspace.root = root
+        workspace.recoveryDirectory = root.appendingPathComponent(".recovery")
+        workspace.install(try await LibraryScanner.scan(root: root))
+        workspace.navigate(folder: nil, documents: ["note.md"], pinned: true)
+        await workspace.waitForNavigation()
+        let preview = PreviewView.Coordinator(workspace: workspace)
+        preview.document = note
+        preview.page = URL(string: "silkweb-preview://page/case-alias")!
+        var beeps = 0
+        preview.beep = { beeps += 1 }
+        preview.open = { XCTFail("opened \($0)") }
+
+        preview.activate(root.appendingPathComponent("plan (final).md"), revealing: false)
+        await workspace.waitForNavigation()
+        XCTAssertEqual(beeps, 0, "a case-aliased link must not beep")
+        XCTAssertEqual(workspace.editor.url?.lastPathComponent, "Plan (Final).md")
+        XCTAssertEqual(workspace.session.selectedDocuments, ["Plan (Final).md"], "selection uses the on-disk spelling")
+        XCTAssertEqual(workspace.tabs.count, 2)
+        let planTab = try XCTUnwrap(workspace.tabs.first { $0.editor.url?.lastPathComponent == "Plan (Final).md" })
+        planTab.isPreview = false
+
+        preview.activate(root.appendingPathComponent("notes/DAILY.md"), revealing: false)
+        await workspace.waitForNavigation()
+        XCTAssertEqual(beeps, 0, "folder-segment casing resolves too")
+        XCTAssertEqual(workspace.editor.url?.path.hasSuffix("/Notes/Daily.md"), true)
+        XCTAssertEqual(workspace.session.selectedDocuments, ["Notes/Daily.md"])
+        XCTAssertEqual(workspace.tabs.count, 3)
+
+        preview.activate(root.appendingPathComponent("PLAN (FINAL).md"), revealing: false)
+        await workspace.waitForNavigation()
+        XCTAssertEqual(beeps, 0)
+        XCTAssertTrue(workspace.editor === planTab.editor, "an open target is selected, not reopened")
+        XCTAssertEqual(workspace.tabs.count, 3, "no duplicate tab for an alias")
+        XCTAssertEqual(workspace.session.selectedDocuments, ["Plan (Final).md"])
+
+        preview.activate(root.appendingPathComponent("plan (finale).md"), revealing: false)
+        await workspace.waitForNavigation()
+        XCTAssertEqual(beeps, 1, "a missing note still beeps")
+        XCTAssertTrue(workspace.editor === planTab.editor)
+    }
 }

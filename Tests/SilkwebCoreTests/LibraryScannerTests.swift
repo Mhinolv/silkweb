@@ -354,4 +354,30 @@ final class LibraryScannerTests: XCTestCase {
         XCTAssertEqual(snapshot.folders.count, 1_001)
         XCTAssertLessThan(elapsed, 10)
     }
+
+    /// #151: link targets resolve case aliases only where the volume ignores case, and never fuzzily.
+    func testDocumentLinkedAtResolvesCaseAliasesByVolume() async throws {
+        try write("Plan (Final).md")
+        try write("Notes/Daily.md")
+        let snapshot = try await LibraryScanner.scan(root: root)
+        for caseSensitive in [true, false] {
+            XCTAssertEqual(
+                snapshot.document(linkedAt: "Plan (Final).md", caseSensitive: caseSensitive)?.relativePath,
+                "Plan (Final).md")
+            XCTAssertNil(snapshot.document(linkedAt: "Plan (Finale).md", caseSensitive: caseSensitive))
+            XCTAssertNil(snapshot.document(linkedAt: "Plan Final.md", caseSensitive: caseSensitive))
+            XCTAssertNil(snapshot.document(linkedAt: "", caseSensitive: caseSensitive))
+        }
+        XCTAssertNil(snapshot.document(linkedAt: "plan (final).md", caseSensitive: true))
+        XCTAssertNil(snapshot.document(linkedAt: "notes/daily.md", caseSensitive: true))
+        XCTAssertEqual(
+            snapshot.document(linkedAt: "plan (final).md", caseSensitive: false)?.relativePath, "Plan (Final).md")
+        XCTAssertEqual(
+            snapshot.document(linkedAt: "NOTES/daily.MD", caseSensitive: false)?.relativePath, "Notes/Daily.md")
+        // Without an explicit flag the library volume decides.
+        let volumeIgnoresCase =
+            try root.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]).volumeSupportsCaseSensitiveNames
+            == false
+        XCTAssertEqual(snapshot.document(linkedAt: "plan (final).md") != nil, volumeIgnoresCase)
+    }
 }
