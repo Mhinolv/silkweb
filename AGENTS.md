@@ -86,8 +86,8 @@ QA cannot launch the app or deliver real mouse events, and WebKit does not run i
   lifecycle (load content, resize sweep, mode/tab switches).
 - A regression test for a reported bug must FAIL on the pre-fix code and pass with the fix. The Orchestrator
   verifies this; a test that also passes on the broken build does not prove the fix (happened with 1.34, 1.48).
-- UI changes are checked visually: `run_qa.sh` captures `./scripts/snapshot.sh` PNGs outside the sandbox before
-  QA, and QA must open the relevant light/dark PNGs. Add a snapshot scenario for every new UI state.
+- UI changes are checked visually: `./scripts/snapshot.sh` PNGs are captured outside the sandbox before QA, and
+  QA must open the relevant light/dark PNGs. Add a snapshot scenario for every new UI state.
 - Interaction feel (drag, caret movement, live resize) still needs a product-owner check before closing.
 
 ## Team Roadmap Workflow (multi-agent)
@@ -112,7 +112,8 @@ Rules:
   `team/roadmap` = one PR into `team/roadmap`.
 - Commits: `#<n>: <summary>`. Stage only the files changed for that issue. Never `git add -A`.
 - Every PR uses `.github/pull_request_template.md` (Issue / What changed / How it was tested / Screenshots);
-  the `PR template` check fails otherwise. Use `Refs #n` instead of `Closes #n` while the owner still has to check it.
+  the `PR template` check fails otherwise. Its `## Issue` line uses `Refs #n` while the owner still has to check the
+  issue, otherwise `Closes #n`. Neither keyword closes anything on `team/roadmap` (see below).
 - Merge requires: `qa-pass`, a passing `CI / ci-gate`, a passing `PR template / check` (these two are the required
   checks on `team/roadmap`), and (bugs) the regression test proven to fail on the pre-fix code. Closing keywords don't
   fire on `team/roadmap`, so the Orchestrator closes issues explicitly.

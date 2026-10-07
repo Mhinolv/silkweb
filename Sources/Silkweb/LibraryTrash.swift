@@ -166,7 +166,8 @@ extension LibraryWorkspace {
                     element: NSApplication.shared.mainWindow ?? NSApplication.shared,
                     notification: .announcementRequested,
                     userInfo: [
-                        .announcement: "Moved \(result.items.count) items to the Trash",
+                        .announcement:
+                            "Moved \(CountPresentation.label(result.items.count, unit: .item)) to the Trash",
                         .priority: NSAccessibilityPriorityLevel.high.rawValue,
                     ])
             }

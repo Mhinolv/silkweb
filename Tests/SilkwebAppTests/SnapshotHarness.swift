@@ -145,6 +145,10 @@ struct SnapshotScenario {
         .init(
             name: "editor-document", document: "Snapshot Fixtures/Editor Typography.md",
             tabs: ["Snapshot Fixtures/Editor Typography.md"], visibleCaret: "Body:"),
+        // #111: editor link tokens follow the user's Accent, like preview links.
+        .init(
+            name: "editor-link-accent", document: "Snapshot Fixtures/Editor Typography.md",
+            tabs: ["Snapshot Fixtures/Editor Typography.md"], visibleCaret: "Body:", accent: amberAccent),
         .init(name: "tabs-multi-selection", tabs: [pourOver], selectedDocuments: [pourOver, image]),
         .init(
             name: "editor-long-scrolled-end", document: "Snapshot Fixtures/Long Document.md",
@@ -241,6 +245,8 @@ struct SnapshotScenario {
         // silkweb-1.24: Settings tabs. Appearance edits the Light set with a low-contrast Text so the warning shows.
         .init(name: "settings-editor", settingsTab: .editor),
         .init(name: "settings-appearance", settingsTab: .appearance),
+        // #111: the colour preview card (Writing / Drafts / Archive, “Edited”) with a custom Accent.
+        .init(name: "settings-appearance-accent", settingsTab: .appearance, accent: amberAccent),
         .init(name: "settings-library", settingsTab: .library),
         // silkweb-1.27: caret mid-document with a dimmed inline image; caret near the start at the 40% anchor.
         .init(name: "focus-mode", document: writingModes, visibleCaret: "The caret rests", focusMode: true),
@@ -858,6 +864,7 @@ final class SnapshotHarness {
                 let settings = WritingSettings(defaults: defaults, live: false)
                 settings.editingDark = tab == .appearance ? false : dark
                 if tab == .appearance { settings.preferences.colors.light.text = HexColor(0xA0A0A0) }
+                if let accent = scenario.accent { settings.preferences.colors.light.accent = accent }
                 content = AnyView(
                     SettingsView(settings: settings, workspace: workspace, tab: tab)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

@@ -8,7 +8,7 @@ import XCTest
 /// silkweb-1.70: the workspace strip for a recovery file that was set aside.
 @MainActor
 final class UnreadableRecoveryBannerTests: XCTestCase {
-    func testStripShowsOncePerLaunchWithShowInFinderAndDismiss() async throws {
+    func testStripShowsOncePerLaunchWithRevealInFinderAndDismiss() async throws {
         _ = NSApplication.shared
         let container = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: container) }
@@ -55,7 +55,7 @@ final class UnreadableRecoveryBannerTests: XCTestCase {
             window.setContentSize(NSSize(width: width, height: 40))
             let found = try await labels()
             XCTAssertTrue(found.contains(UnreadableRecoveryBanner.message), "\(width): \(found)")
-            XCTAssertTrue(found.contains("Show in Finder"), "\(width): \(found)")
+            XCTAssertTrue(found.contains("Reveal in Finder"), "\(width): \(found)")
             XCTAssertTrue(found.contains("Dismiss message"), "\(width): \(found)")
             XCTAssertGreaterThanOrEqual(host.fittingSize.height, 36)
         }

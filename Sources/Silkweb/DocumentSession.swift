@@ -122,7 +122,7 @@ final class DocumentSession {
             text =
                 (try? await Task.detached { String(decoding: try Data(contentsOf: destination), as: UTF8.self) }.value)
                 ?? ""
-            error = "This file isn’t UTF-8 text, so Silkweb opened it read-only."
+            error = "This document isn’t UTF-8 text, so Silkweb opened it read-only."
             announce()
         } catch {
             self.readOnly = true
@@ -304,12 +304,17 @@ final class DocumentSession {
         Task { _ = await flush() }
     }
 
-    func discardRecovery() {
+    static func discardRecoveryAlert() -> NSAlert {
         let alert = NSAlert()
-        alert.messageText = "Discard the recovered text? This can’t be undone."
+        alert.messageText = "Discard the recovered text?"
+        alert.informativeText = "This can’t be undone."
         alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Discard Recovered Text")
-        guard alert.runModal() == .alertSecondButtonReturn, let url else { return }
+        alert.addButton(withTitle: "Discard Recovered Text").hasDestructiveAction = true
+        return alert
+    }
+
+    func discardRecovery() {
+        guard Self.discardRecoveryAlert().runModal() == .alertSecondButtonReturn, let url else { return }
         Task {
             await tail?.value
             do {
@@ -337,7 +342,22 @@ final class DocumentSession {
         }
     }
 
-    func prepareToExit() async -> Bool {
+    /// Quitting the app and closing a window share one exit path; only the alert's verb differs (#111).
+    enum ExitReason { case quit, closeWindow }
+
+    /// Cancel stays first and takes Escape; the destructive button has no key equivalent, so Return never discards.
+    static func exitAlert(_ reason: ExitReason) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "Some changes couldn’t be saved."
+        alert.informativeText =
+            "They’ll be kept as a recovery draft and offered the next time you open "
+            + (reason == .quit ? "Silkweb." : "the document.")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: reason == .quit ? "Quit Anyway" : "Close Anyway").hasDestructiveAction = true
+        return alert
+    }
+
+    func prepareToExit(_ reason: ExitReason) async -> Bool {
         let wasLoading = loading
         loading = true
         defer { loading = wasLoading }
@@ -345,12 +365,7 @@ final class DocumentSession {
         do { try await coordinator.preserveUnsavedDrafts() } catch {
             self.error = "Recovery draft couldn’t be saved: \(error.localizedDescription)"; announce(); return false
         }
-        let alert = NSAlert()
-        alert.messageText = "Some changes couldn’t be saved."
-        alert.informativeText = "They’ll be kept as a recovery draft and offered the next time you open Silkweb."
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Quit Anyway")
-        return alert.runModal() == .alertSecondButtonReturn
+        return Self.exitAlert(reason).runModal() == .alertSecondButtonReturn
     }
 
     func didCloseWindow() async {

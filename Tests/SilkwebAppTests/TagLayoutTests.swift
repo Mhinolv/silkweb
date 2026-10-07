@@ -202,6 +202,12 @@ final class TagLayoutTests: XCTestCase {
         XCTAssertEqual(
             (outline.view(atColumn: 0, row: outline.row(forItem: group), makeIfNecessary: true) as? SidebarFolderCell)?
                 .accessibilityValue() as? String, "2 tags")
+        // #111: a tag on one document reads in the singular.
+        let topic = try XCTUnwrap(group.children.first)
+        let topicCell = try XCTUnwrap(
+            outline.view(atColumn: 0, row: outline.row(forItem: topic), makeIfNecessary: true) as? SidebarFolderCell)
+        XCTAssertEqual(topicCell.accessibilityValue() as? String, "1 document")
+        XCTAssertEqual(topicCell.accessibilityLabel(), "topic 2, tag, 1 document")
         outline.collapseItem(group)
         let json =
             try JSONSerialization.jsonObject(with: JSONEncoder().encode(workspace.windowMetadata())) as! [String: Any]

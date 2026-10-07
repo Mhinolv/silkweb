@@ -417,7 +417,7 @@ struct ColorPreviewCard: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Notes").padding(.horizontal, 8).padding(.vertical, 3)
+                Text("Writing").padding(.horizontal, 8).padding(.vertical, 3)
                 Text("Drafts")
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -433,7 +433,7 @@ struct ColorPreviewCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 // The unsaved dot, as on an edited tab (1.65).
                 HStack(spacing: 6) {
-                    Text("Edited note").foregroundStyle(color(.text))
+                    Text("Edited").foregroundStyle(color(.text))
                     Circle().fill(color(.coral)).frame(width: 6, height: 6)
                 }
                 Text("A heading").bold().foregroundStyle(color(.headings))
@@ -468,7 +468,7 @@ struct LibrarySettingsTab: View {
                 }
                 HStack {
                     Spacer()
-                    Button("Show in Finder") {
+                    Button("Reveal in Finder") {
                         if let root = workspace.root { NSWorkspace.shared.activateFileViewerSelecting([root]) }
                     }
                     .disabled(workspace.root == nil)

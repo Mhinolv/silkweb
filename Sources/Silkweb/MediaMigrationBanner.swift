@@ -62,7 +62,7 @@ struct UnreadableRecoveryBanner: View {
                 Image(systemName: "info.circle").foregroundStyle(.secondary)
                 Text(Self.message)
                 Spacer()
-                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
+                Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
                 Button {
                     workspace.unreadableRecoveryFile = nil
                 } label: {

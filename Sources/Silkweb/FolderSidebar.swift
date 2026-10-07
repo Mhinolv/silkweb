@@ -213,7 +213,8 @@ struct FolderSidebar: NSViewRepresentable {
             if item.isTagsGroup || item.tag != nil {
                 let count = item.tag.map { tagCounts[$0.id] ?? 0 } ?? tags.count
                 cell.countBadge.stringValue = FolderDocumentCount(direct: count, recursive: count).inlineSuffix
-                cell.setAccessibilityValue("\(count) \(item.isTagsGroup ? "tags" : "documents")" + currentSuffix(item))
+                cell.setAccessibilityValue(
+                    CountPresentation.label(count, unit: item.isTagsGroup ? .tag : .document) + currentSuffix(item))
                 cell.toolTip = nil
                 return
             }
@@ -435,7 +436,8 @@ struct FolderSidebar: NSViewRepresentable {
                 item.folder?.isUnreadable == true ? "\(label), unreadable, permission denied" : label)
             if item.isTagsGroup { cell.setAccessibilityLabel("Tags") }
             if let tag = item.tag {
-                cell.setAccessibilityLabel("\(tag.name), tag, \(tagCounts[tag.id] ?? 0) documents")
+                cell.setAccessibilityLabel(
+                    "\(tag.name), tag, \(CountPresentation.label(tagCounts[tag.id] ?? 0, unit: .document))")
             }
             applyCount(to: cell, item: item)
             return cell

@@ -281,6 +281,25 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(Self.srgb(.silkwebAccent, dark: false), 0x3F7D64, "Sage is restored")
     }
 
+    /// #111: editor link tokens follow Settings ▸ Accent live, like preview links; no system link blue.
+    @MainActor
+    func testEditorLinksFollowAccentLive() throws {
+        let settings = try makeSettings()
+        let (window, text) = try makeEditor("See [Silkweb](https://example.com) here")
+        defer { window.close() }
+        let source = text.string as NSString
+        let link = source.range(of: "Silkweb").location
+        let color = try XCTUnwrap(
+            text.textStorage?.attribute(.foregroundColor, at: link, effectiveRange: nil) as? NSColor)
+        XCTAssertEqual(color, .silkwebAccent, "Editor links use the Accent token, not linkColor")
+        XCTAssertEqual(Self.srgb(color, dark: false), 0x3F7D64)
+        settings.preferences.colors.light.accent = HexColor(0xAA0000)
+        XCTAssertEqual(Self.srgb(color, dark: false), 0xAA0000, "Changing Accent recolours links without a restyle")
+        XCTAssertEqual(
+            text.textStorage?.attribute(.foregroundColor, at: source.range(of: "[").location, effectiveRange: nil)
+                as? NSColor, .tertiaryLabelColor, "Brackets stay markers")
+    }
+
     @MainActor
     func testAppearanceModeSetsNSAppAppearance() throws {
         let settings = try makeSettings()

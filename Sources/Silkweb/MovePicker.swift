@@ -143,7 +143,7 @@ struct MovePicker: View {
     private func highlightedName(_ name: String) -> AttributedString {
         var value = AttributedString(name)
         if !filter.isEmpty, let range = value.range(of: filter, options: [.caseInsensitive, .diacriticInsensitive]) {
-            value[range].foregroundColor = .accentColor
+            value[range].foregroundColor = Color.silkwebAccent
             value[range].font = .body.bold()
         }
         return value

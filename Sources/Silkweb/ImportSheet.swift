@@ -155,9 +155,7 @@ struct ImportSheet: View {
                     Text("No Markdown documents found").font(.headline)
                     Text("“\(request.source.lastPathComponent)” doesn’t contain any .md or .markdown files.")
                 } else {
-                    Text(
-                        "\(CountPresentation.label(plan.documentCount, unit: .document)), \(plan.assetCount) images and attachments, \(plan.folderCount) folders (\(plan.emptyFolders) empty) will be copied into a new folder “\(plan.folderName)”."
-                    )
+                    Text(plan.summary)
                 }
                 if plan.folderName != request.source.lastPathComponent {
                     Text(
@@ -187,7 +185,7 @@ struct ImportSheet: View {
                 if review.copying {
                     Button("Stop") { review.cancel() }
                 } else if review.message != nil {
-                    Button(review.stopped ? "OK" : "Cancel") { close() }.keyboardShortcut(.cancelAction)
+                    Button(review.stopped ? "Done" : "Cancel") { close() }.keyboardShortcut(.cancelAction)
                 } else {
                     Button("Cancel") { close() }.keyboardShortcut(.cancelAction)
                     if review.plan == nil || (review.plan?.documentCount ?? 0) > 0 {

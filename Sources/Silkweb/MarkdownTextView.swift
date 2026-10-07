@@ -702,7 +702,7 @@ struct EditorBanner: View {
                     }
                 } else if session.recovered {
                     Button("Keep Recovered Text") { session.keepRecovery() }
-                    Button("Discard Recovered Text") { session.discardRecovery() }
+                    Button("Discard Recovered Text", role: .destructive) { session.discardRecovery() }
                 } else if session.state.isDirty {
                     Button("Try Again") { Task { await session.flush() } }
                     Button("Save a Copy…") { session.saveCopy() }

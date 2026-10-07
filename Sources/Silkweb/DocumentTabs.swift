@@ -231,14 +231,14 @@ extension LibraryWorkspace {
         return true
     }
 
-    func prepareToExit() async -> Bool {
+    func prepareToExit(_ reason: DocumentSession.ExitReason) async -> Bool {
         await waitForNavigation()
         guard !mutating else { return false }
         let editors = allEditors
         for editor in editors { editor.loading = true }
         defer { for editor in editors { editor.loading = false } }
         for editor in editors {
-            guard await editor.prepareToExit() else {
+            guard await editor.prepareToExit(reason) else {
                 if let tab = tabs.first(where: { $0.editor === editor }) { activateTab(tab.id) }
                 return false
             }

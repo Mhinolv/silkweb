@@ -115,7 +115,9 @@ import SilkwebCore
                             storage.addAttribute(
                                 .backgroundColor, value: NSColor.quaternarySystemFill, range: tokenRange)
                         }
-                    case .link: storage.addAttribute(.foregroundColor, value: NSColor.linkColor, range: tokenRange)
+                    // The Accent token, like preview links; it resolves at draw time, so Settings recolour it live.
+                    case .link:
+                        storage.addAttribute(.foregroundColor, value: NSColor.silkwebAccent, range: tokenRange)
                     case .quote:
                         storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: tokenRange)
                     }
