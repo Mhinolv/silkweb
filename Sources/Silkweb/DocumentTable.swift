@@ -72,6 +72,9 @@ struct DocumentTable: NSViewRepresentable {
             guard let table else { return }
             updating = true
             defer { updating = false }
+            // A library switch clears the snapshot before SwiftUI swaps the table for the loading state, and this
+            // update can still carry the old library's rows (#152). Show none rather than rows without a root.
+            let documents = workspace.snapshot == nil ? [] : documents
             let structureChanged =
                 self.documents.count != documents.count
                 || zip(self.documents, documents).contains {
@@ -96,8 +99,10 @@ struct DocumentTable: NSViewRepresentable {
             let first = min(visible.location, documents.count)
             let last = min(first + visible.length, documents.count)
             for row in first..<last {
-                if let host = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSHostingView<DocumentRow> {
-                    host.rootView = rowView(documents[row])
+                if let host = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSHostingView<DocumentRow>,
+                    let view = rowView(documents[row])
+                {
+                    host.rootView = view
                 }
             }
             let selected = syncSelection()
@@ -132,9 +137,11 @@ struct DocumentTable: NSViewRepresentable {
             return selected
         }
 
-        private func rowView(_ document: LibraryDocument) -> DocumentRow {
-            DocumentRow(
-                document: document, root: workspace.snapshot!.rootURL, workspace: workspace,
+        /// Nil while no library is loaded: a row can't load its excerpt without the library's root.
+        private func rowView(_ document: LibraryDocument) -> DocumentRow? {
+            guard let root = workspace.snapshot?.rootURL else { return nil }
+            return DocumentRow(
+                document: document, root: root, workspace: workspace,
                 dateReference: dateReference, pointerState: pointerState,
                 location: locationScope.map {
                     DocumentRowPresentation.location(for: document.relativePath, scope: $0.path, scopeName: $0.name)
@@ -158,12 +165,13 @@ struct DocumentTable: NSViewRepresentable {
         }
 
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+            guard documents.indices.contains(row), let view = rowView(documents[row]) else { return nil }
             let identifier = NSUserInterfaceItemIdentifier("documentCell")
             if let host = tableView.makeView(withIdentifier: identifier, owner: self) as? NSHostingView<DocumentRow> {
-                host.rootView = rowView(documents[row])
+                host.rootView = view
                 return host
             }
-            let host = NSHostingView(rootView: rowView(documents[row]))
+            let host = NSHostingView(rootView: view)
             host.identifier = identifier
             host.sizingOptions = []
             return host
