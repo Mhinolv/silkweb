@@ -158,7 +158,7 @@ struct MarkdownTextView: NSViewRepresentable {
             coordinator.url = session.url
             if replacingBuffer { text.string = session.text }
             text.styler.reload()
-            text.inlineImages.schedule()
+            text.inlineImages.schedule(immediate: true)
             if replacingBuffer { text.undoManager?.removeAllActions() }
             let count = (text.string as NSString).length
             text.setSelectedRange(
