@@ -32,6 +32,16 @@ struct PreviewView: NSViewRepresentable {
             }
             addEventListener('click', blockedLink);
             addEventListener('keydown', event => { if (event.key === 'Enter') blockedLink(event); });
+            // WebKit refuses file: and mailto: navigations from this page before Swift sees them (#148), so
+            // every link reports its activation instead and Swift decides. Return arrives as a click (detail 0).
+            addEventListener('click', event => {
+              const link = event.target.closest?.('a[href]');
+              if (!link) return;
+              event.preventDefault();
+              if (event.button !== 0 || event.ctrlKey || event.detail > 1) return;
+              window.webkit.messageHandlers.position.postMessage({link: link.href, reveal: event.metaKey,
+                page: location.href.split('#')[0]});
+            }, true);
             // Reported before WebKit asks for the menu, so attachment links get their own items.
             addEventListener('contextmenu', event => {
               const link = event.target.closest?.('a[href]');
@@ -85,6 +95,10 @@ struct PreviewView: NSViewRepresentable {
         var restoreRatio = 0.0
         init(workspace: LibraryWorkspace) { self.workspace = workspace }
         var retry = -1
+        /// A link's side effects; tests replace them so nothing launches.
+        var open: (URL) -> Void = { NSWorkspace.shared.open($0) }
+        var reveal: (URL) -> Void = { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
+        var beep: () -> Void = { NSSound.beep() }
 
         func load() {
             let preview = workspace.preview
@@ -219,8 +233,16 @@ struct PreviewView: NSViewRepresentable {
                 }
                 return
             }
+            if let link = values["link"] as? String {
+                // A click during a patch or restore still counts; one from a replaced page is ignored.
+                guard document == workspace.editor.url, values["page"] as? String == page?.absoluteString,
+                    let url = URL(string: link)
+                else { return }
+                activate(url, revealing: values["reveal"] as? Bool == true)
+                return
+            }
             guard !restoring, document == workspace.editor.url else { return }
-            if values["blockedLink"] as? Bool == true { NSSound.beep(); return }
+            if values["blockedLink"] as? Bool == true { beep(); return }
             updatePosition(values)
         }
 
@@ -304,22 +326,27 @@ struct PreviewView: NSViewRepresentable {
                 decisionHandler(url == page && navigationAction.targetFrame?.isMainFrame == true ? .allow : .cancel)
                 return
             }
-            guard let root = workspace.root else { decisionHandler(.cancel); return }
-            // ⌘-click reveals an attachment in Finder (Spotlight's ⌘ convention).
-            switch action(for: url, revealing: navigationAction.modifierFlags.contains(.command)) {
+            activate(url, revealing: navigationAction.modifierFlags.contains(.command))
+            decisionHandler(.cancel)
+        }
+
+        /// Performs a link the user activated, whether the page reported the click or WebKit asked first.
+        /// ⌘ reveals an attachment in Finder (Spotlight's ⌘ convention).
+        func activate(_ url: URL, revealing: Bool) {
+            guard let root = workspace.root else { return }
+            switch action(for: url, revealing: revealing) {
             case .anchor(let id): workspace.preview.scrollPreview(to: id)
             case .document(let url):
                 let path = String(url.path.dropFirst(root.path.count + 1))
                 if workspace.snapshot?.documents.contains(where: { $0.relativePath == path }) == true {
                     workspace.showDocument(url)
                 } else {
-                    NSSound.beep()
+                    beep()
                 }
-            case .browser(let url), .attachment(let url): NSWorkspace.shared.open(url)
-            case .reveal(let url): NSWorkspace.shared.activateFileViewerSelecting([url])
-            case .blocked: NSSound.beep()
+            case .browser(let url), .attachment(let url): open(url)
+            case .reveal(let url): reveal(url)
+            case .blocked: beep()
             }
-            decisionHandler(.cancel)
         }
 
         func action(for url: URL, revealing: Bool = false) -> PreviewNavigation.Action {

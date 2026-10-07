@@ -1,5 +1,7 @@
 import AppKit
 import SilkwebCore
+import SwiftUI
+import WebKit
 import XCTest
 
 @testable import Silkweb
@@ -87,6 +89,141 @@ import XCTest
         XCTAssertEqual(copy.title, "Copy Path")
         XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(copy.action), to: copy.target, from: copy))
         XCTAssertEqual(NSPasteboard.general.string(forType: .string), "media/Report%202026.pdf")
+        XCTAssertFalse(window.isVisible)
+    }
+
+    /// #148: clicks on the real preview page reach the link policy. WebKit refuses `file:`/`mailto:` navigations
+    /// from the `silkweb-preview:` page before the navigation delegate runs, so the page must report clicks itself.
+    func testRealPreviewLinkClicksOpenRevealNavigateAndBeep() async throws {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
+        if SnapshotHarness.isWebKitUnavailable(
+            environment: ProcessInfo.processInfo.environment, activationPolicy: NSApp.activationPolicy().rawValue)
+        {
+            throw XCTSkip(
+                "Preview link clicks need real WebKit in a registered offscreen host outside the agent sandbox; run this test on both pre-fix and fixed builds there."
+            )
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("media"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pdf = root.appendingPathComponent("media/file.pdf")
+        try Data("%PDF-1.4\n".utf8).write(to: pdf)
+        let script = root.appendingPathComponent("media/run.sh")
+        try Data("#!/bin/sh\n".utf8).write(to: script)
+        let other = root.appendingPathComponent("other.md")
+        try Data("# Other\n".utf8).write(to: other)
+        let document = root.appendingPathComponent("note.md")
+        let source =
+            "# Links\n\n[pdf](media/file.pdf) [script](media/run.sh) [missing](media/missing.pdf) [mail](mailto:user@example.com) [web](https://example.com/page) [jump](#end) [other](other.md)\n\n"
+            + String(repeating: "paragraph\n\n", count: 100) + "## End\n"
+        try Data(source.utf8).write(to: document)
+
+        let workspace = LibraryWorkspace(defaults: disposableDefaults("PreviewLinkClicks"))
+        workspace.canSaveWindowSession = false
+        workspace.root = root
+        workspace.install(try await LibraryScanner.scan(root: root))
+        workspace.editor.url = document
+        workspace.preview.mode = .preview
+        workspace.preview.schedule(text: source, document: document, root: root)
+        let host = NSHostingController(rootView: PreviewPane(workspace: workspace))
+        host.sizingOptions = []
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled, .resizable],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = host
+        defer { window.contentViewController = nil; window.close() }
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        var coordinator: PreviewView.Coordinator?
+        try await waitUntil("real preview didFinish", timeout: .seconds(10)) {
+            host.view.layoutSubtreeIfNeeded()
+            coordinator =
+                descendants(host.view).compactMap { $0 as? WKWebView }.first?.navigationDelegate
+                as? PreviewView.Coordinator
+            return coordinator?.completedPage != nil && coordinator?.restoring == false
+        }
+        let preview = try XCTUnwrap(coordinator)
+        let web = try XCTUnwrap(preview.web)
+        let page = try XCTUnwrap(preview.page)
+        var effects: [String] = []
+        preview.open = { effects.append("open " + ($0.isFileURL ? $0.lastPathComponent : $0.absoluteString)) }
+        preview.reveal = { effects.append("reveal " + $0.lastPathComponent) }
+        preview.beep = { effects.append("beep") }
+
+        /// Dispatches a click on the link whose href ends with `href`, then waits for one round trip to Swift.
+        func click(_ href: String, detail: Int = 1, meta: Bool = false, control: Bool = false) async throws {
+            let dispatched = try await web.callAsyncJavaScript(
+                """
+                const link = Array.from(document.querySelectorAll('a[href]')).find(a => a.getAttribute('href').endsWith(href));
+                if (!link) return false;
+                link.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window, detail, metaKey: meta, ctrlKey: control}));
+                return true;
+                """, arguments: ["href": href, "detail": detail, "meta": meta, "control": control], in: nil,
+                contentWorld: .page)
+            XCTAssertEqual(dispatched as? Bool, true, "no rendered link to \(href)")
+            // Messages are delivered in order, so a no-op round trip flushes any click report.
+            _ = try await web.callAsyncJavaScript("return 0", in: nil, contentWorld: .defaultClient)
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        func expect(_ expected: [String], _ message: String, line: UInt = #line) {
+            XCTAssertEqual(effects, expected, message, line: line)
+            effects = []
+        }
+
+        try await click("file.pdf")
+        expect(["open file.pdf"], "plain click opens a library attachment in its default app")
+        try await click("file.pdf", meta: true)
+        expect(["reveal file.pdf"], "⌘-click reveals an attachment in Finder")
+        try await click("run.sh")
+        expect(["reveal run.sh"], "a script is only ever revealed")
+        try await click("missing.pdf")
+        expect(["beep"], "a missing file beeps")
+        try await click("mailto:user@example.com")
+        expect(["open mailto:user@example.com"], "mailto: opens the mail client")
+        try await click("https://example.com/page")
+        expect(["open https://example.com/page"], "http(s) opens the browser")
+        try await click("file.pdf", detail: 2)
+        expect([], "the second click of a double-click does nothing more")
+        try await click("file.pdf", control: true)
+        expect([], "⌃-click is the context menu, never an open")
+
+        // Keyboard activation (Return on a focused link) arrives as a click with detail 0.
+        _ = try await web.callAsyncJavaScript(
+            "Array.from(document.querySelectorAll('a[href]')).find(a => a.getAttribute('href').endsWith('file.pdf')).click()",
+            in: nil, contentWorld: .page)
+        try await waitUntil("keyboard-style activation opens the attachment") { effects == ["open file.pdf"] }
+        effects = []
+
+        // A click during a debounced patch still belongs to this page and document.
+        preview.restoring = true
+        try await click("file.pdf")
+        expect(["open file.pdf"], "a click during a patch is not dropped")
+        preview.restoring = false
+        // A report from a page that has since been replaced is ignored, without a beep.
+        _ = try await web.callAsyncJavaScript(
+            "window.webkit.messageHandlers.position.postMessage({link: href, reveal: false, page: 'silkweb-preview://page/old'})",
+            arguments: ["href": pdf.absoluteString], in: nil, contentWorld: .defaultClient)
+        _ = try await web.callAsyncJavaScript("return 0", in: nil, contentWorld: .defaultClient)
+        try await Task.sleep(for: .milliseconds(100))
+        expect([], "a stale page's click does nothing")
+
+        try await click("#end")
+        var top = Double.infinity
+        for _ in 0..<50 where top > 400 {
+            top =
+                try await web.evaluateJavaScript("document.getElementById('end').getBoundingClientRect().top")
+                as? Double ?? .infinity
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertLessThan(top, 401, "a same-page anchor scrolls the preview")
+        XCTAssertEqual(web.url, page, "links never navigate the preview page")
+        XCTAssertEqual(effects, [])
+
+        try await click("other.md")
+        try await waitUntil("document link opens the note in Silkweb") { workspace.editor.url == other }
+        XCTAssertEqual(effects, [])
         XCTAssertFalse(window.isVisible)
     }
 }
