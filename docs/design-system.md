@@ -77,10 +77,10 @@ Before adding any shortcut, check it against this table. 1.25 audits the final m
 | File | Quick Open… | ⇧⌘O | 1.20 |
 | File | Open in New Tab | ⌘T | 1.26 |
 | File | Import Folder Copy… | ⇧⌘I | 1.10 |
-| File | Close Tab / Close Window | ⌘W / ⇧⌘W | 1.26 |
+| File | Close Tab / Close Window | ⌘W / ⇧⌘W († ⌘W closes a tab only while the library window is key; otherwise the front window) | 1.26 |
 | File | Save (flush autosave now) | ⌘S | 1.5 |
 | File | Rename… | ↩ † (sidebar/list focused; no menu key equivalent) | 1.6 |
-| File | Move To… | ⌃⌘M | 1.7 |
+| File | Move To… | ⌃⌘M † (sidebar/list focused) | 1.7 |
 | File | Reveal in Finder | ⌥⌘R | 1.6 |
 | File | Move to Trash | ⌘⌫ † (sidebar/list focused) | 1.8 |
 | File | Export ▸ HTML… / PDF… | ⇧⌘E / ⌥⌘P | 1.22 / 1.23 |
@@ -111,7 +111,7 @@ Before adding any shortcut, check it against this table. 1.25 audits the final m
 | Window | Show Next / Previous Tab | ⌃⇥ or ⇧⌘] / ⌃⇧⇥ or ⇧⌘[ | 1.26 |
 | Window | Close Other Tabs | ⌥⌘W | 1.26 |
 
-Deliberately unassigned: ⌘1–⌘9 tab selection (⌘4/⌘7/⌘8 are view commands) and ⌘U (Markdown has no underline). ⌃⌘Q is the system lock screen; never use it. Format commands are disabled unless the editor is first responder.
+Deliberately unassigned: ⌘1–⌘9 tab selection (⌘4/⌘7/⌘8 are view commands) and ⌘U (Markdown has no underline). ⌃⌘Q is the system lock screen; never use it. Format commands are disabled unless the library window is key and its editor is first responder; Save and the tab items in Window need the library window key (#104).
 
 ## 7. Accessibility baseline (every ticket, not just 1.25)
 - Every icon-only control has an `accessibilityLabel` and a `.help()` tooltip using the menu wording.

@@ -68,11 +68,15 @@ struct MenuCommandValues: Equatable {
 
 @MainActor @Observable final class MenuCommandState: NSObject {
     private(set) var value: MenuCommandValues
+    /// The library window is key: Close Tab, Save and the tab-scoped Window items (#104). Kept
+    /// apart from `value` so those groups invalidate only on key-window changes.
+    private(set) var libraryKey: Bool
     @ObservationIgnored private weak var workspace: LibraryWorkspace?
 
     init(workspace: LibraryWorkspace) {
         self.workspace = workspace
         value = MenuCommandValues(workspace: workspace)
+        libraryKey = workspace.libraryIsKey
         super.init()
         observe()
         // Responder/undo state is AppKit-owned. Sample it at menu open, and when undo or
@@ -96,6 +100,7 @@ struct MenuCommandValues: Equatable {
         guard let workspace else { return }
         let next = MenuCommandValues(workspace: workspace)
         if value != next { value = next }
+        if libraryKey != workspace.libraryIsKey { libraryKey.toggle() }
     }
 
     private func observe() {

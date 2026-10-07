@@ -91,8 +91,10 @@ extension LibraryWorkspace {
         }
     }
 
+    /// Without an item (the menu bar) the sidebar or list must have focus (#104).
     func beginRename(_ item: LibraryRename? = nil) {
-        guard canMutate, let item = item ?? selectedItem, !item.path.isEmpty else { return }
+        guard canMutate, item != nil || libraryHasFocus, let item = item ?? selectedItem, !item.path.isEmpty
+        else { return }
         Task {
             if item.isFolder, session.selectedFolder != item.path {
                 selectFolder(item.path)
