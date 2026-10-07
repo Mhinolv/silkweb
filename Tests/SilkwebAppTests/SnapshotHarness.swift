@@ -75,6 +75,8 @@ struct SnapshotScenario {
     var outlineArrows = 0
     /// Moves the editor caret to this heading after `outlineJump` (focus stays in the editor).
     var caretAfterJump: String? = nil
+    /// #150: opens this note first and lets its page land, then selects `document` in the list as a click does.
+    var switchFrom: String? = nil
 
     static let deepFolder =
         "Field Notes/Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
@@ -166,6 +168,9 @@ struct SnapshotScenario {
         .init(name: "preview-headings", document: "Snapshot Fixtures/Preview Headings.md", mode: .preview),
         .init(name: "preview-mode", document: pourOver, mode: .preview),
         .init(name: "split-mode", document: pourOver, mode: .split),
+        // #150: a list click from a text note to an image-bearing one: the new note's page, never a blank pane.
+        .init(name: "preview-switch", document: image, mode: .preview, switchFrom: pourOver),
+        .init(name: "split-switch", document: image, mode: .split, switchFrom: pourOver),
         .init(
             name: "split-scroll-update", document: "Snapshot Fixtures/Scroll Preview.md", mode: .split,
             previewScrollState: "update"),
@@ -635,7 +640,9 @@ final class SnapshotHarness {
                 workspace.unreadableRecoveryFile = directory.appendingPathComponent("Unreadable/draft.json")
             }
         }
-        let paths = scenario.tabs.isEmpty ? scenario.document.map({ [$0] }) ?? [] : scenario.tabs
+        let paths =
+            scenario.switchFrom.map { [$0] }
+            ?? (scenario.tabs.isEmpty ? scenario.document.map({ [$0] }) ?? [] : scenario.tabs)
         for path in paths {
             guard let document = snapshot.documents.first(where: { $0.relativePath == path }) else {
                 throw SnapshotFailure.error("Missing fixture document: \(path)")
@@ -943,6 +950,22 @@ final class SnapshotHarness {
                 try await bounded("search index") { await workspace.search.waitForIndex() }
                 try await bounded("search query") { await workspace.search.query(quick: scenario.quickQuery != nil) }
                 if let error = workspace.search.error { throw SnapshotFailure.error(error) }
+            }
+            if let previous = scenario.switchFrom, let path = scenario.document {
+                // The previous note's page is up before the list selects the next note.
+                let delegate = { workspace.preview.webView?.navigationDelegate as? PreviewView.Coordinator }
+                try await wait("previous preview") {
+                    workspace.preview.renderedURL?.path.hasSuffix("/" + previous) == true
+                        && !workspace.preview.html.isEmpty
+                        && (webKitUnavailable || delegate()?.completedPage != nil)
+                }
+                workspace.navigate(folder: (path as NSString).deletingLastPathComponent, documents: [path])
+                try await bounded("note switch") { await workspace.waitForNavigation() }
+                // The new page's navigation has started, so the didFinish wait below is for this note.
+                try await wait("switched preview") {
+                    workspace.preview.renderedURL?.path.hasSuffix("/" + path) == true
+                        && (webKitUnavailable || delegate()?.document == workspace.preview.renderedURL)
+                }
             }
             if scenario.document != nil, scenario.mode != .preview {
                 try await wait("editor content") {

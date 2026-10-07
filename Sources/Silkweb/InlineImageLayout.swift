@@ -29,6 +29,7 @@ import SilkwebCore
                 generation += 1
                 task?.cancel()
                 task = nil
+                loadPending = false
                 install([])
             }
         }
@@ -82,14 +83,20 @@ import SilkwebCore
         for view in imageViews { viewsByStart[view.sourceRange.location, default: []].append(view) }
     }
 
-    func schedule() {
+    /// A newly loaded note's first pass is due: the new view's first fit re-schedules it, still immediately.
+    private var loadPending = false
+
+    /// `immediate`: a newly loaded note skips the typing debounce, so its images arrive with the text (#150).
+    func schedule(immediate: Bool = false) {
         guard enabled else { return }
+        let immediate = immediate || loadPending
+        loadPending = immediate
         generation += 1
         let requested = generation
         task?.cancel()
         task = Task { [weak self] in
-            defer { if let self, requested == self.generation { self.task = nil } }
-            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            defer { if let self, requested == self.generation { self.task = nil; self.loadPending = false } }
+            if !immediate { do { try await Task.sleep(for: .milliseconds(150)) } catch { return } }
             guard let self, let editor = self.editor, !editor.hasMarkedText(),
                 let root = self.root, let document = self.document
             else { return }
