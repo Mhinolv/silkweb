@@ -241,8 +241,23 @@ extension LibraryWorkspace {
                     reportTrashFailures(result.failures, reveal: remaining.map(\.trashURL), restoring: true)
                     return
                 case .move(let plan):
-                    do { _ = try await commitMove(plan, using: engine) } catch {
-                        mutationFailure(error, title: "The move can’t be undone because items have changed since.")
+                    do {
+                        do { _ = try await commitMove(plan, using: engine) } catch MovePlanError.changed {
+                            // Something changed since the move: move back and rewrite links afresh.
+                            _ = try await commitMove(engine.planRestore(plan.changes), using: engine)
+                        }
+                    } catch {
+                        // Undo is all or nothing; drop the entry so older actions stay reachable.
+                        libraryUndo.removeLast()
+                        mutationFailure(error, title: "The move couldn’t be undone.")
+                        var lines = [error.localizedDescription]
+                        if let suggestion = (error as? LocalizedError)?.recoverySuggestion { lines.append(suggestion) }
+                        if let failure = error as? LibraryMutationError, case .rollbackFailed = failure {
+                            // The recovery suggestion identifies the preserved items.
+                        } else {
+                            lines.append("Nothing was changed.")
+                        }
+                        mutationError = lines.joined(separator: "\n")
                         return
                     }
                 case .newFolder(let path):

@@ -99,6 +99,102 @@ final class LibraryMoveTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("A/One.md").path))
         XCTAssertEqual(try two(), "[one](A/One.md)\nedited")
     }
+    /// #103: an edit saved anywhere after a move must not leave Undo Move stuck on the stack.
+    @MainActor
+    func testMoveUndoAfterUnrelatedEditRestoresPathsAndLinks() async throws {
+        let (root, workspace) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        func exists(_ path: String) -> Bool {
+            FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path)
+        }
+        func text(_ path: String) throws -> String {
+            try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+        }
+        _ = try await LibraryMutations(root: root).createDocument(named: "Three.md", in: "B", text: "three")
+        try await workspace.refresh(LibraryChangeSet(changes: []))
+        workspace.move(["A/One.md"], to: "B")
+        try await wait(workspace)
+        XCTAssertNil(workspace.mutationError)
+        XCTAssertEqual(try text("Two.md"), "[one](B/One.md)")
+        // A one-character edit in an unrelated open document is saved by the flush before undo.
+        _ = await workspace.editor.open(root.appendingPathComponent("B/Three.md"), readOnly: false)
+        workspace.editor.edit("three!")
+        workspace.undoLibrary()
+        try await wait(workspace)
+        XCTAssertNil(workspace.mutationError)
+        XCTAssertTrue(exists("A/One.md"))
+        XCTAssertFalse(exists("B/One.md"))
+        XCTAssertEqual(try text("Two.md"), "[one](A/One.md)")
+        XCTAssertEqual(try text("B/Three.md"), "three!")
+        XCTAssertTrue(workspace.libraryUndo.isEmpty)
+
+        // The linking document itself was edited, and Keep Both renamed the item: both come back.
+        _ = try await LibraryMutations(root: root).createDocument(named: "One.md", in: "B", text: "other")
+        let engine = try LibraryMutations(root: root)
+        let plan = try await engine.planMove(["A/One.md"], toFolder: "B", keepBoth: true)
+        _ = try await workspace.commitMove(plan, using: engine)
+        workspace.libraryUndo.append(.move(plan.reversed))
+        XCTAssertEqual(try text("Two.md"), "[one](B/One%202.md)")
+        try Data("[one](B/One%202.md)\nedited".utf8).write(to: root.appendingPathComponent("Two.md"), options: .atomic)
+        workspace.undoLibrary()
+        try await wait(workspace)
+        XCTAssertNil(workspace.mutationError)
+        XCTAssertEqual(try text("A/One.md"), "[two](../Two.md)")
+        XCTAssertEqual(try text("B/One.md"), "other")
+        XCTAssertFalse(exists("B/One 2.md"))
+        XCTAssertEqual(try text("Two.md"), "[one](A/One.md)\nedited")
+        XCTAssertTrue(workspace.libraryUndo.isEmpty)
+    }
+    /// #103: an impossible Undo Move changes nothing, reports once and exposes the older entry.
+    @MainActor
+    func testImpossibleMoveUndoDropsEntryAndReachesOlderUndo() async throws {
+        let (root, workspace) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        func exists(_ path: String) -> Bool {
+            FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path)
+        }
+        let item = LibraryRename(path: "A/Child", isFolder: true)
+        workspace.rename = item
+        workspace.finishRename(item, value: "Kid")
+        try await wait(workspace)
+        XCTAssertTrue(exists("A/Kid"))
+        workspace.move(["A/One.md", "Two.md"], to: "B")
+        try await wait(workspace)
+        XCTAssertNil(workspace.mutationError)
+        XCTAssertEqual(workspace.libraryUndo.map(\.title), ["Undo Rename", "Undo Move"])
+        // Something now occupies one original path: neither item may go back.
+        try Data("blocker".utf8).write(to: root.appendingPathComponent("Two.md"))
+        workspace.undoLibrary()
+        try await wait(workspace)
+        XCTAssertEqual(workspace.mutationErrorTitle, "The move couldn’t be undone.")
+        XCTAssertTrue(workspace.mutationError?.contains("Two") == true)
+        XCTAssertTrue(workspace.mutationError?.hasSuffix("Nothing was changed.") == true)
+        XCTAssertTrue(exists("B/One.md"))
+        XCTAssertTrue(exists("B/Two.md"))
+        XCTAssertFalse(exists("A/One.md"))
+        XCTAssertEqual(workspace.libraryUndo.map(\.title), ["Undo Rename"])
+        XCTAssertTrue(workspace.canUndoLibrary)
+        workspace.mutationError = nil
+        workspace.undoLibrary()
+        try await wait(workspace)
+        XCTAssertNil(workspace.mutationError)
+        XCTAssertTrue(exists("A/Child"))
+        XCTAssertTrue(workspace.libraryUndo.isEmpty)
+
+        // A moved item deleted outside Silkweb is reported the same way.
+        workspace.mutationError = nil
+        workspace.move(["B/One.md"], to: "A")
+        try await wait(workspace)
+        XCTAssertNil(workspace.mutationError)
+        XCTAssertEqual(workspace.libraryUndo.map(\.title), ["Undo Move"])
+        try FileManager.default.removeItem(at: root.appendingPathComponent("A/One.md"))
+        workspace.undoLibrary()
+        try await wait(workspace)
+        XCTAssertEqual(workspace.mutationErrorTitle, "The move couldn’t be undone.")
+        XCTAssertTrue(workspace.mutationError?.contains("no longer exists") == true)
+        XCTAssertTrue(workspace.libraryUndo.isEmpty)
+        XCTAssertFalse(workspace.canUndoLibrary)
+    }
     @MainActor
     func testFailedDirtySaveAbortsMove() async throws {
         let (root, workspace) = try await fixture()
