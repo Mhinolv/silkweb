@@ -8,9 +8,31 @@ import SwiftUI
     // keystroke/updateNSView) must not invalidate the menu bar (silkweb-1.58).
     @ObservationIgnored weak var editor: PlainMarkdownTextView?
     private(set) var enabled = false
+    @ObservationIgnored private var observers: [NSObjectProtocol] = []
+
+    init() {
+        // Another window (Settings) becoming key does not resign the editor; resample then (#104).
+        observers = [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            }
+        }
+    }
+
+    /// Same rule as the editor's own Format submenu: its key window's first responder (#104).
     func refresh() {
-        let next = editor?.isEditable == true && editor?.hasMarkedText() == false
+        let next =
+            editor.map {
+                $0.window?.isKeyWindow == true && $0.window?.firstResponder === $0 && $0.isEditable
+                    && !$0.hasMarkedText()
+            } == true
         if enabled != next { enabled = next }
+    }
+
+    /// Menu actions re-check live state: key equivalents can fire before a stale `enabled` publishes.
+    func perform(_ action: (PlainMarkdownTextView) -> Void) {
+        refresh()
+        if enabled, let editor { action(editor) }
     }
 }
 
@@ -63,19 +85,19 @@ struct FormatCommands: Commands {
                 if index > 0 { Divider() }
                 if index == 2 { Menu("Heading") { items(group) } } else { items(group) }
                 if index == 1 {
-                    Button("Image…") { target.editor?.assetHandler.chooseImages() }
+                    Button("Image…") { target.perform { $0.assetHandler.chooseImages() } }
                         .keyboardShortcut("i", modifiers: [.control, .command])
                         .disabled(!target.enabled)
                 }
             }
-            Button("Insert Table…") { target.editor?.showTableInsertSheet() }
+            Button("Insert Table…") { target.perform { $0.showTableInsertSheet() } }
                 .keyboardShortcut("t", modifiers: [.control, .command])
                 .disabled(!target.enabled)
         }
     }
     @ViewBuilder private func items(_ group: [FormatItem]) -> some View {
         ForEach(Array(group.enumerated()), id: \.offset) { _, item in
-            Button(item.title) { target.editor?.format(item.command) }
+            Button(item.title) { target.perform { $0.format(item.command) } }
                 .keyboardShortcut(KeyEquivalent(Character(item.key)), modifiers: item.swiftModifiers)
                 .disabled(!target.enabled)
         }

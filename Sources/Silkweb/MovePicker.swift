@@ -193,7 +193,8 @@ extension LibraryWorkspace {
         focusColumn == 0 ? selectedItem.map { [$0.path] } ?? [] : Array(session.selectedDocuments).sorted()
     }
     func requestMove(_ paths: [String]? = nil) {
-        guard canMutate else { return }
+        // The menu-bar path needs sidebar/list focus; row menus pass explicit paths (#104).
+        guard canMutate, paths != nil || libraryHasFocus else { return }
         let paths = MoveSelection.topLevel(paths ?? movePaths)
         guard !paths.isEmpty, !paths.contains("") else { return }
         moveRequest = MoveRequest(paths: paths)

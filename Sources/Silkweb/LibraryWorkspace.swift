@@ -104,6 +104,9 @@ final class LibraryWorkspace {
     var tagsExpanded = true
     var libraryColumnCollapsed = false
     @ObservationIgnored weak var librarySplitController: LibrarySplitViewController?
+    /// The two views whose focus enables Rename, Move To… and Move to Trash (#104).
+    @ObservationIgnored weak var sidebarOutline: SidebarOutlineView?
+    @ObservationIgnored weak var documentTable: DocumentTableView?
     var sidebarsTitle: String { sidebarsHidden || libraryColumnCollapsed ? "Show Sidebars" : "Hide Sidebars" }
     var focusRequest = 0
     var focusColumn = 0

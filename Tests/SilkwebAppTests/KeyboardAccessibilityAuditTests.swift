@@ -144,8 +144,9 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
         return Library(root: root, defaults: defaults, workspace: workspace)
     }
 
+    /// Key (#104: library commands follow the key window), but never ordered on screen.
     private func window(_ root: some View) -> (NSWindow, NSHostingController<AnyView>) {
-        let window = NSWindow(
+        let window = KeyedTestWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -190,6 +191,9 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
         workspace.selectDocuments([pour.relativePath])
         await workspace.waitForNavigation()
         try await settle(window)
+        // Real list focus, not only `focusColumn` (#104).
+        let list = try XCTUnwrap(Self.descendants(window.contentView!).compactMap { $0 as? DocumentTableView }.first)
+        XCTAssertTrue(window.makeFirstResponder(list))
         workspace.focusColumn = 1
         workspace.menuState.refresh()
         state = workspace.menuState.value
@@ -209,7 +213,6 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
         XCTAssertFalse(workspace.menuState.value.canMove)
         XCTAssertTrue(workspace.menuState.value.canFind)
         // Leaving the editor disables Format again.
-        let list = try XCTUnwrap(Self.descendants(window.contentView!).compactMap { $0 as? DocumentTableView }.first)
         XCTAssertTrue(window.makeFirstResponder(list))
         XCTAssertFalse(FormattingTarget.shared.enabled)
 
