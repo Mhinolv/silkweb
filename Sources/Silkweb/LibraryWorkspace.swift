@@ -72,6 +72,7 @@ final class LibraryWorkspace {
         itemPathsByID = Dictionary(uniqueKeysWithValues: snapshot.metadata.IDsByPath.map { ($0.value, $0.key) })
         documentCache = nil
         presentationRevision += 1
+        reportIndexRecovery(snapshot)
     }
     private var watcher: LibraryWatcher?
     private var reconciling = false
@@ -89,6 +90,10 @@ final class LibraryWorkspace {
     /// A recovery file set aside in `Recovery/Unreadable/` (1.70); shown once per launch.
     var unreadableRecoveryFile: URL?
     @ObservationIgnored static var unreadableRecoveryShown = false
+    /// The index couldn't be read and tags were reset (#107); `backup` is the set-aside copy, if one was saved.
+    var indexRecovery: (root: URL, backup: URL?)?
+    /// Backup URLs, or library roots for the no-copy case, already shown this launch.
+    @ObservationIgnored static var indexRecoveriesShown: Set<URL> = []
     var loadingCount: Int?
     var error: String?
     var errorTitle = "Can’t Open Library"
@@ -320,6 +325,7 @@ final class LibraryWorkspace {
             mediaFailures = []
             mediaBannerVisible = false
             unreadableRecoveryFile = nil
+            indexRecovery = nil
             loading = true
             loadingCount = nil
             do {
@@ -414,6 +420,20 @@ final class LibraryWorkspace {
             element: NSApplication.shared, notification: .announcementRequested,
             userInfo: [
                 .announcement: UnreadableRecoveryBanner.message,
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+            ])
+    }
+
+    /// Every reconcile of an unwritable library rereads the same bad index; it is reported once per launch.
+    func reportIndexRecovery(_ snapshot: LibrarySnapshot) {
+        guard snapshot.metadataWasReset else { return }
+        let key = snapshot.recoveredMetadataURL ?? snapshot.rootURL
+        guard Self.indexRecoveriesShown.insert(key).inserted else { return }
+        indexRecovery = (snapshot.rootURL, snapshot.recoveredMetadataURL)
+        NSAccessibility.post(
+            element: NSApplication.shared, notification: .announcementRequested,
+            userInfo: [
+                .announcement: IndexRecoveryBanner.message(backupSaved: snapshot.recoveredMetadataURL != nil),
                 .priority: NSAccessibilityPriorityLevel.medium.rawValue,
             ])
     }
@@ -528,6 +548,7 @@ final class LibraryWorkspace {
                 old.folders != scanned.folders || old.documents != scanned.documents
                     || old.metadata != scanned.metadata || old.isReadOnly != scanned.isReadOnly
                     || old.recoveredMetadataURL != scanned.recoveredMetadataURL
+                    || old.metadataWasReset != scanned.metadataWasReset
             else { return }
             // Finder batches are installed without row animations.
             var transaction = Transaction()

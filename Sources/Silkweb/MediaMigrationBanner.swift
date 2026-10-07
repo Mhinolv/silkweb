@@ -75,3 +75,46 @@ struct UnreadableRecoveryBanner: View {
         }
     }
 }
+
+/// Below the recovery strip: the library's index couldn't be read, so tags were reset (#107).
+struct IndexRecoveryBanner: View {
+    static let backupMessage =
+        "Silkweb couldn’t read this library’s index, so tags were reset. A copy of the old index was saved."
+    static let noCopyMessage =
+        "Silkweb couldn’t read this library’s index, so tags were reset. No copy could be saved because the library can’t be changed."
+    static func message(backupSaved: Bool) -> String { backupSaved ? backupMessage : noCopyMessage }
+    let workspace: LibraryWorkspace
+    /// The saved copy was gone when Reveal in Finder was clicked.
+    @State private var missingBackup: URL?
+
+    var body: some View {
+        if let recovery = workspace.indexRecovery {
+            let message = Self.message(backupSaved: recovery.backup != nil)
+            HStack(spacing: 8) {
+                Image(systemName: recovery.backup == nil ? "exclamationmark.triangle.fill" : "info.circle")
+                    .foregroundStyle(recovery.backup == nil ? Color(nsColor: .systemOrange) : Color.secondary)
+                Text(message).lineLimit(1).truncationMode(.tail).help(message).accessibilityLabel(message)
+                Spacer()
+                if let backup = recovery.backup, backup != missingBackup {
+                    Button("Reveal in Finder") {
+                        if FileManager.default.fileExists(atPath: backup.path) {
+                            NSWorkspace.shared.activateFileViewerSelecting([backup])
+                        } else {
+                            NSSound.beep()
+                            missingBackup = backup
+                        }
+                    }
+                    .help(backup.lastPathComponent)
+                }
+                Button {
+                    workspace.indexRecovery = nil
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .accessibilityLabel("Dismiss message").help("Dismiss message")
+            }
+            .font(.callout).controlSize(.small).padding(.horizontal, 12).padding(.vertical, 8)
+            .frame(minHeight: 36).paneStrip(hairline: .bottom)
+        }
+    }
+}
