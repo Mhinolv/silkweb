@@ -62,7 +62,7 @@ final class DocumentListRedesignTests: XCTestCase {
         }
         let workspace = LibraryWorkspace(defaults: defaults)
         workspace.root = root
-        workspace.install(try await LibraryScanner.scan(root: root))
+        workspace.install(try await withDeadline("the fixture scan") { try await LibraryScanner.scan(root: root) })
         workspace.session.selectedFolder = "Vanlife"
         workspace.session.selectedDocuments = []
         return Fixture(root: root, workspace: workspace)
@@ -94,6 +94,24 @@ final class DocumentListRedesignTests: XCTestCase {
             else { return false }
             return table.numberOfRows == workspace.documents.count && table.selectedRowIndexes == IndexSet(integer: row)
                 && table.visibleRect.height >= 96 && (!visible || table.visibleRect.intersects(table.rect(ofRow: row)))
+        }
+    }
+
+    /// #124: on a loaded machine `scrollRowToVisible` can land after `settle`'s fixed rounds, or a late SwiftUI pass
+    /// can put the list back at the top. Scrolls to `row` until the table has scrolled, and reports the geometry if
+    /// it never does.
+    @MainActor
+    private func scrollUntilScrolled(_ host: NSView, row: Int, _ step: String) async throws {
+        func geometry() -> String {
+            guard let table = try? table(in: host) else { return "no table, host \(host.frame)" }
+            return "visible \(table.visibleRect), row \(table.rect(ofRow: row)), host \(host.frame)"
+        }
+        try await waitUntil("\(step): fixture must scroll: \(geometry())", timeout: .seconds(10)) {
+            host.layoutSubtreeIfNeeded()
+            let table = try table(in: host)
+            if table.visibleRect.minY <= 0 { table.scrollRowToVisible(row) }
+            table.layoutSubtreeIfNeeded()
+            return table.visibleRect.minY > 0 && table.visibleRect.intersects(table.rect(ofRow: row))
         }
     }
 
@@ -345,7 +363,7 @@ final class DocumentListRedesignTests: XCTestCase {
         if workspace.listPreference.descending { workspace.setSortDescending(false) }
         let target = "Many/Note 45.md"
         workspace.selectDocuments([target])
-        await workspace.waitForNavigation()
+        try await withDeadline("navigation") { await workspace.waitForNavigation() }
         let host = NSHostingView(rootView: DocumentList(workspace: workspace))
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 1400), styleMask: [.titled, .resizable],
@@ -368,7 +386,7 @@ final class DocumentListRedesignTests: XCTestCase {
         table.scrollRowToVisible(0)
         try await settle(host)
         table.scrollRowToVisible(row)
-        try await settle(host)
+        try await scrollUntilScrolled(host, row: row, "row 45 at 1400")
         XCTAssertTrue(visible(), "fixture: row visible at 1400")
         XCTAssertGreaterThan(table.visibleRect.minY, 0, "fixture must scroll")
         XCTAssertGreaterThan(
@@ -414,15 +432,24 @@ final class DocumentListRedesignTests: XCTestCase {
         let fixture = try await fixture(extra: extra)
         let workspace = fixture.workspace
         let target = "Many/Note 45.md"
-        _ = try await TagStore.update(root: fixture.root) { metadata in
-            let ids = ["Many/Note 45.md", "Many/Note 10.md", "Many/Note 50.md"].compactMap { metadata.IDsByPath[$0] }
-            return TagEditor.edit(["draft"], documents: Set(ids), metadata: metadata)
+        try await withDeadline("the draft tag") {
+            _ = try await TagStore.update(root: fixture.root) { metadata in
+                let ids = ["Many/Note 45.md", "Many/Note 10.md", "Many/Note 50.md"].compactMap {
+                    metadata.IDsByPath[$0]
+                }
+                return TagEditor.edit(["draft"], documents: Set(ids), metadata: metadata)
+            }
         }
-        workspace.install(try await LibraryScanner.scan(root: fixture.root))
+        workspace.install(
+            try await withDeadline("the tagged rescan") { try await LibraryScanner.scan(root: fixture.root) })
         let draft = try XCTUnwrap(workspace.tags.first { $0.name == "draft" })
         workspace.session.selectedFolder = "Many"
+        // #124: the default Date Modified order follows write order, which puts the target at a random row (often on
+        // the first screen, where nothing scrolls). Name order puts it at row 45.
+        workspace.setSortKey(.name)
+        if workspace.listPreference.descending { workspace.setSortDescending(false) }
         workspace.selectDocuments([target])
-        await workspace.waitForNavigation()
+        try await withDeadline("navigation") { await workspace.waitForNavigation() }
         let host = NSHostingView(rootView: DocumentList(workspace: workspace))
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 560), styleMask: [.titled, .resizable],
@@ -457,9 +484,10 @@ final class DocumentListRedesignTests: XCTestCase {
         }
         // Bring the selection into view the way a click or navigation does, once the table has its rows.
         try await waitForList(host, workspace, selecting: target, "fixture")
-        try table(in: host).scrollRowToVisible(
-            try XCTUnwrap(workspace.documents.firstIndex { $0.relativePath == target }))
-        try await settle(host)
+        let row = try XCTUnwrap(workspace.documents.firstIndex { $0.relativePath == target })
+        XCTAssertEqual(row, 45, "#124: name order puts the target deep in the list, so the fixture must scroll")
+        try table(in: host).scrollRowToVisible(row)
+        try await scrollUntilScrolled(host, row: row, "initial")
         try await assertStable("initial")
         let origin = try table(in: host).visibleRect.minY
         XCTAssertGreaterThan(origin, 0, "fixture must scroll")
@@ -499,7 +527,7 @@ final class DocumentListRedesignTests: XCTestCase {
 
         // Search mode overlays results with the same row metrics, then restores the list.
         workspace.search.text = "fog"
-        await workspace.search.query(quick: false)
+        try await withDeadline("the search query") { await workspace.search.query(quick: false) }
         try await settle(host)
         XCTAssertFalse(workspace.filteredSearchResults.isEmpty)
         let resultRows = Self.descendants(host).compactMap { $0 as? NSTableView }.filter { !($0 is DocumentTableView) }
@@ -516,7 +544,7 @@ final class DocumentListRedesignTests: XCTestCase {
         XCTAssertEqual(try table(in: host).numberOfRows, 3)
         workspace.session.selectedFolder = "Many"
         workspace.selectDocuments([target])
-        await workspace.waitForNavigation()
+        try await withDeadline("navigation") { await workspace.waitForNavigation() }
         try await settle(host)
         // A folder switch starts the new list at the top; only the selection must survive.
         try await assertStable("folder switch", visible: false)
