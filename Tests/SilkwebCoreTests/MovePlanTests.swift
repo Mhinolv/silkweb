@@ -45,6 +45,57 @@ final class MovePlanTests: XCTestCase {
         XCTAssertEqual(restored.metadata, before.metadata)
     }
 
+    /// #103: a stale exact undo falls back to a fresh restore of original folders, names, links and IDs.
+    func testPlanRestoreAfterStaleUndoIsAllOrNothing() async throws {
+        let (root, engine) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let before = try await LibraryScanner.scan(root: root)
+        let one = try text(root, "A/Child/One.md")
+        _ = try await engine.createFolder(named: "A", in: "B")
+        let plan = try await engine.planMove(["A", "Two.md"], toFolder: "B", keepBoth: true)
+        _ = try await engine.executeMove(plan)
+        XCTAssertTrue(try text(root, "B/Two.md").contains("A%202/Child/One.md"))
+        try Data((try text(root, "B/Two.md") + "edited\n").utf8).write(
+            to: root.appendingPathComponent("B/Two.md"), options: .atomic)
+        do { _ = try await engine.executeMove(plan.reversed); XCTFail("Expected stale undo") } catch {
+            XCTAssertEqual(error as? MovePlanError, .changed)
+        }
+        // An occupied original path blocks every item, including the free one.
+        try Data("blocker".utf8).write(to: root.appendingPathComponent("Two.md"))
+        let blocked = try await engine.planRestore(plan.reversed.changes)
+        do { _ = try await engine.executeMove(blocked); XCTFail("Expected collision") } catch {
+            guard case .collision(let path, _, _)? = error as? LibraryMutationError else {
+                return XCTFail("\(error)")
+            }
+            XCTAssertEqual(path, "Two.md")
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("B/A 2").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("A").path))
+        try FileManager.default.removeItem(at: root.appendingPathComponent("Two.md"))
+        let restore = try await engine.planRestore(plan.reversed.changes)
+        XCTAssertEqual(restore.changes.changes.map(\.newPath), ["A", "Two.md"])
+        _ = try await engine.executeMove(restore)
+        XCTAssertEqual(try text(root, "A/Child/One.md"), one)
+        XCTAssertTrue(try text(root, "Two.md").hasPrefix("[one](A/Child/One.md)\n"))
+        XCTAssertTrue(try text(root, "Two.md").hasSuffix("edited\n"))
+        let restored = try await LibraryScanner.scan(root: root)
+        XCTAssertEqual(before.metadata.IDsByPath["A/Child/One.md"], restored.metadata.IDsByPath["A/Child/One.md"])
+        XCTAssertEqual(before.metadata.IDsByPath["Two.md"], restored.metadata.IDsByPath["Two.md"])
+        // A moved item deleted outside Silkweb, or a vanished original folder, can't be restored.
+        let again = try await engine.planMove(["A/Child/One.md"], toFolder: "B")
+        _ = try await engine.executeMove(again)
+        try FileManager.default.removeItem(at: root.appendingPathComponent("A/Child"))
+        do { _ = try await engine.planRestore(again.reversed.changes); XCTFail("Expected missing folder") } catch {
+            XCTAssertEqual(error as? LibraryMutationError, .sourceVanished("Child"))
+        }
+        try FileManager.default.removeItem(at: root.appendingPathComponent("B/One.md"))
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("A/Child"), withIntermediateDirectories: false)
+        do { _ = try await engine.planRestore(again.reversed.changes); XCTFail("Expected missing item") } catch {
+            XCTAssertEqual(error as? LibraryMutationError, .sourceVanished("One"))
+        }
+    }
+
     func testCollisionsKeepBothBatchAndChangedPreflight() async throws {
         let (root, engine) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }
