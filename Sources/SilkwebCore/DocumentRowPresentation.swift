@@ -32,7 +32,7 @@ public enum DocumentRowPresentation {
 
     public static func snippet(_ markdown: String, title: String) -> String {
         var isLeadingLine = true
-        for (line, kind) in snippetLines(MarkdownParser.parse(markdown).blocks) {
+        for (line, kind) in snippetLines(MarkdownParser.parse(withoutEnvelope(markdown)).blocks) {
             let text = summaryText(line).trimmingCharacters(in: .whitespaces)
             guard !text.isEmpty else { continue }
             if isLeadingLine && kind == .heading && text == title {
@@ -62,7 +62,7 @@ public enum DocumentRowPresentation {
         var result = ""
         var isLeadingLine = true
         var previousIsSegment = false
-        for (line, kind) in snippetLines(MarkdownParser.parse(markdown).blocks) {
+        for (line, kind) in snippetLines(MarkdownParser.parse(withoutEnvelope(markdown)).blocks) {
             let text = summaryText(line).split(whereSeparator: \.isWhitespace).joined(separator: " ")
             guard !text.isEmpty else { continue }
             if isLeadingLine && kind == .heading && headingRepeatsTitle(text, title: title) {
@@ -80,9 +80,21 @@ public enum DocumentRowPresentation {
         return excerpt.isEmpty ? "No additional text" : excerpt
     }
 
+    /// #132: a well-formed memory envelope isn't body text. Malformed or newer ones still show as text.
+    private static func withoutEnvelope(_ markdown: String) -> String {
+        MemoryEnvelope.bodyRange(in: markdown).map { String(markdown[$0]) } ?? markdown
+    }
+
     /// The heading equals the title ignoring case and whitespace, or begins with it at a word
-    /// boundary (a file named “Ten Days in Kyoto” for `# Ten Days in Kyoto（京都の十日間）`).
+    /// boundary (a file named “Ten Days in Kyoto” for `# Ten Days in Kyoto（京都の十日間）`). A progress
+    /// document's `YYYY-MM-DD HHmm — ` filename prefix isn't part of its heading (#132).
     static func headingRepeatsTitle(_ heading: String, title: String) -> Bool {
+        if let dash = title.range(of: " — "),
+            title[..<dash.lowerBound].map({ $0.isASCII && $0.isNumber ? "0" : $0 }) == Array("0000-00-00 0000"),
+            headingRepeatsTitle(heading, title: String(title[dash.upperBound...]))
+        {
+            return true
+        }
         func normalized(_ value: String) -> String {
             value.split(whereSeparator: \.isWhitespace).joined(separator: " ").lowercased()
         }

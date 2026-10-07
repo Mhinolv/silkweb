@@ -91,7 +91,101 @@ Folders are created in title case, exactly as shown:
   `review_after`. The helper assigns `memory_id` and `created_at`. `agent` and `session` are
   claims, not authentication. Tags stay in Silkweb’s index (`.silkweb`) and are not a YAML key.
   Review, pin and archive state belongs to the human and lives in app metadata. Unknown keys are
-  kept. Documents that are malformed or use a newer schema still open as plain text.
+  kept. Documents that are malformed or use a newer schema still open as plain text. See
+  [Envelope](#envelope).
+
+## Envelope
+
+Every document an agent creates starts with a portable front matter envelope, schema
+`silkweb-memory/v1` (#132, `MemoryEnvelope` in `SilkwebCore`). The rest of the file is ordinary
+Markdown, so the document still reads like any other Silkweb Document.
+
+On disk the envelope is a leading `---` line, one `key: value` per line, a closing `---` line, one blank
+line, then the body. The body starts with `# <Title>`, matching the generated filename.
+
+| Key | Required | Value | Set by |
+|---|---|---|---|
+| `schema` | Yes | `"silkweb-memory/v1"` | Helper |
+| `memory_id` | Yes | Quoted string, the portable identity | Helper |
+| `type` | Yes | `"memory"`, `"decision"`, `"progress"` or `"handoff"` | Agent |
+| `project` | Yes | Quoted project key from the grant | Helper |
+| `agent` | Yes | Quoted string, a claim, not authentication | Agent |
+| `session` | Yes | Quoted string, a claim, not authentication | Agent |
+| `created_at` | Yes | Quoted ISO 8601 UTC timestamp, `"2026-10-06T15:00:00Z"` | Helper |
+| `observed_at` | No | Quoted ISO 8601 UTC timestamp | Agent |
+| `status` | No | Quoted string | Agent |
+| `supersedes` | No | Flow list of `memory_id` strings, `[]` or `["a", "b"]` | Agent |
+| `review_after` | No | Quoted ISO 8601 UTC timestamp | Agent |
+
+An annotated v1 progress document, `Progress/2026-10-07 0930 — Helper spike.md`:
+
+```markdown
+---
+schema: "silkweb-memory/v1"
+memory_id: "mem_01JA2B3C4D5E6F7G8H9J0K1L2M"
+type: "progress"
+project: "Silkweb"
+agent: "claude-code"
+session: "2026-10-07-a"
+created_at: "2026-10-07T09:30:00Z"
+status: "in-progress"
+supersedes: []
+x-source-ticket: "#129"
+---
+
+# Helper spike
+
+Objective: prove the helper reads the Library with the app closed.
+
+Next action: wire `memory_create` (#133).
+```
+
+- The first twelve lines are the envelope. The v1 keys are written in the order of the table above, then
+  unknown keys (here `x-source-ticket`) in their original order, byte for byte.
+- The blank line after the closing `---` separates the envelope from the body. Creating the document
+  inserts the envelope and that blank line, and never changes the body bytes.
+- The Document list skips a well-formed envelope, so this row reads “Objective: prove the helper reads
+  the Library with the app closed. …”. The editor shows the envelope as plain, editable text.
+  Preview, Outline, word count and export render it as ordinary Markdown for now (#137).
+
+### Silkweb envelope subset
+
+The envelope is read with the **Silkweb envelope subset**, not a YAML parser:
+
+- Keys are `[A-Za-z_][A-Za-z0-9_-]*`, at the start of the line, with no repeats.
+- Values are double-quoted strings (escapes `\"`, `\\`, `\/`, `\n`, `\t`, `\r`, `\uXXXX`),
+  single-quoted strings, plain strings without `: ` or ` #`, flow lists (`[]`, `["a", "b"]`) or block
+  lists (`- item` lines) of strings. A key with no value is an empty string. Silkweb always writes
+  double-quoted strings and flow lists.
+- Blank lines inside the envelope are ignored. There are no comments, anchors or nested maps.
+- An unknown key whose value is outside the subset (for example a nested map) is kept byte for byte and
+  reported as unparsed. The same thing under a v1 key makes the envelope malformed.
+
+### Reading rules
+
+- **No envelope.** A document that doesn’t start with `---`, or whose front matter has no
+  `silkweb-memory` schema (front matter from other tools, a leading thematic break), is an ordinary
+  Library Document. Tools report `"envelope": null`, and that isn’t an error.
+- **Malformed or newer.** The document still opens as plain text and is never rewritten or truncated.
+  Tools report one of these errors, with no document text:
+
+  | `error.code` | Message |
+  |---|---|
+  | `envelope_malformed` | The front matter in “Name” couldn’t be read (line 4). The document is unchanged. |
+  | `envelope_schema_newer` | “Name” uses schema “silkweb-memory/v2”, which this version of Silkweb doesn’t support. The document is unchanged. |
+
+- **Creating.** The helper validates the envelope before writing it. A missing or invalid v1 field is
+  `envelope_invalid_field` (“The front matter field “type” is missing or invalid.”). Only the create
+  pipeline ever writes an envelope. Opening, editing and autosaving never reserialize it, and agents
+  can’t edit an existing envelope in MVP (#140).
+
+### Ownership
+
+- `memory_id` is the portable identity. It stays with the file, also when it’s copied outside Silkweb.
+- The app index (`.silkweb/index.json`) owns the native document UUID and Tags. Neither is an
+  envelope key. A `tags` or `id` key is just an unknown key that Silkweb keeps but never reads.
+- Review, pin and archive state belong to the human and live in versioned app metadata (`.silkweb/`),
+  never in the envelope.
 
 ## Grants
 
@@ -448,11 +542,12 @@ Silkweb otherwise allows no third-party dependencies.
   version in `Package.swift`, records it here, reviews and commits its transitive packages in
   `Package.resolved`, and keeps the SDK out of `SilkwebCore` and the app target. Nothing is
   downloaded at run time (no `npx`/`uvx`).
-- **YAML: no dependency.** Front matter uses a **restricted, documented subset** parsed in
-  `SilkwebCore` (#132). It supports one key per line, quoted strings, ISO 8601 timestamps as quoted
-  strings, and flow (`[]`) or block (`- item`) lists of strings. Anything else is kept as text and
-  reported as unparsed, not guessed at. It’s never described as general YAML support. If #132 needs a
-  real YAML parser, it adds a second exception here first.
+- **YAML: no dependency.** Front matter uses the **Silkweb envelope subset**, a restricted, documented
+  subset parsed in `SilkwebCore` (#132, see [Silkweb envelope subset](#silkweb-envelope-subset)). It
+  supports one key per line, quoted strings, ISO 8601 timestamps as quoted strings, and flow (`[]`) or
+  block (`- item`) lists of strings. Anything else is kept as text and reported as unparsed, not
+  guessed at. It’s never described as general YAML support. A real YAML parser would need a second
+  exception here first.
 
 ## Glossary
 
