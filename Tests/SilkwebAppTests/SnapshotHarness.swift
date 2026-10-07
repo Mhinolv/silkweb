@@ -77,6 +77,10 @@ struct SnapshotScenario {
     var caretAfterJump: String? = nil
     /// #150: opens this note first and lets its page land, then selects `document` in the list as a click does.
     var switchFrom: String? = nil
+    /// #153: opens an empty library folder (no Test_Library copy) so the list shows its first-run empty state.
+    var emptyLibrary = false
+    /// #153: the list column's width (240 pt minimum … 480 pt maximum) instead of the standard 300 pt.
+    var listWidth: CGFloat? = nil
 
     static let deepFolder =
         "Field Notes/Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
@@ -142,6 +146,9 @@ struct SnapshotScenario {
         .init(name: "redesign-list-a", folder: "Vanlife", document: "Vanlife/Settling In.md"),
         .init(name: "redesign-list-a-all", selectedDocuments: [pourOver]),
         .init(name: "empty-folder", folder: "Snapshot Fixtures/Empty Folder"),
+        // #153: New Document / New Folder stacked at the list's minimum width, side by side at its default.
+        .init(name: "empty-library-list-240", folder: "", emptyLibrary: true, listWidth: 240),
+        .init(name: "empty-library-list-300", folder: "", emptyLibrary: true, listWidth: 300),
         .init(name: "outline-empty", document: "Snapshot Fixtures/Empty Document.md", outline: true),
         .init(name: "search-empty", searchQuery: "silkweb-no-matches-fixture"),
         .init(
@@ -783,9 +790,13 @@ final class SnapshotHarness {
         }
         do {
             try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
-            try makeFixture(
-                at: root, deepPath: scenario.document == SnapshotScenario.deepDocument,
-                longOutline: scenario.document == SnapshotScenario.longOutline)
+            if scenario.emptyLibrary {
+                try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            } else {
+                try makeFixture(
+                    at: root, deepPath: scenario.document == SnapshotScenario.deepDocument,
+                    longOutline: scenario.document == SnapshotScenario.longOutline)
+            }
             workspace.root = root
             workspace.recoveryDirectory = root.appendingPathComponent("Snapshot Recovery")
             let metadataDirectory = root.appendingPathComponent(".silkweb")
@@ -895,7 +906,8 @@ final class SnapshotHarness {
                 ($0 as? NSSplitView)?.delegate as? LibrarySplitViewController
             }).first {
                 columns.splitView.setPosition(
-                    220 + columns.navigationController.splitView.dividerThickness + 300, ofDividerAt: 0)
+                    220 + columns.navigationController.splitView.dividerThickness + (scenario.listWidth ?? 300),
+                    ofDividerAt: 0)
                 controller.view.layoutSubtreeIfNeeded()
                 columns.navigationController.splitView.setPosition(220, ofDividerAt: 0)
                 if scenario.narrowDetail {

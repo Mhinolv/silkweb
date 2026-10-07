@@ -22,12 +22,42 @@ struct ColumnEmptyState<Content: View>: View {
     var body: some View {
         GeometryReader { geometry in
             content()
+                // #153: the same inset as the list capsules keeps text and buttons off the divider.
+                .padding(.horizontal, Spacing.capsuleInset)
                 .fixedSize(horizontal: false, vertical: true)
                 .columnLayoutAnchor("column-empty-body")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .offset(y: -min(24, geometry.size.height / 10))
         }
         .columnLayoutAnchor("column-empty-region")
+    }
+}
+
+/// #153: an empty state's buttons sit side by side when they fit, otherwise stacked, centred and as wide as the
+/// widest label (not the column). No fixed breakpoint; reading and focus order follow `actions`.
+struct ColumnEmptyActions: View {
+    struct Action {
+        let title: LocalizedStringKey
+        var isEnabled = true
+        let perform: () -> Void
+    }
+
+    let actions: [Action]
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack { buttons }.fixedSize()
+            VStack { buttons }.fixedSize()
+        }
+    }
+
+    private var buttons: some View {
+        ForEach(actions.indices, id: \.self) { index in
+            let action = actions[index]
+            // A flexible label lets the stacked buttons share the widest one's width.
+            Button(action: action.perform) { Text(action.title).frame(maxWidth: .infinity) }
+                .disabled(!action.isEnabled)
+        }
     }
 }
 
