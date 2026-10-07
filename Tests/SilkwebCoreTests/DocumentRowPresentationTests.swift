@@ -159,6 +159,43 @@ final class DocumentRowPresentationTests: XCTestCase {
         }
     }
 
+    /// #132: rows skip a well-formed memory envelope; malformed and newer ones still show as text.
+    func testRowsSkipAWellFormedMemoryEnvelope() {
+        let envelope = """
+            ---
+            schema: "silkweb-memory/v1"
+            memory_id: "mem_01"
+            type: "progress"
+            ---
+
+
+            """
+        let title = "2026-10-07 0930 — Helper spike"
+        let body = "# Helper spike\n\nObjective: prove the helper reads the Library.\n\n- Done"
+        XCTAssertEqual(
+            DocumentRowPresentation.excerpt(envelope + body, title: title),
+            "Objective: prove the helper reads the Library. · Done")
+        XCTAssertEqual(
+            DocumentRowPresentation.snippet(envelope + "# Title\n\nFirst line.", title: "Title"), "First line.")
+        XCTAssertEqual(
+            DocumentRowPresentation.excerpt(envelope + "Body only", title: "Title"), "Body only")
+        XCTAssertEqual(DocumentRowPresentation.excerpt(envelope, title: "Title"), "No additional text")
+        for (source, prefix) in [
+            ("---\nschema: \"silkweb-memory/v1\"\nagent: {x}\n---\n\nBody", "schema: \"silkweb-memory/v1\" agent: {x}"),
+            ("---\nschema: \"silkweb-memory/v2\"\n---\n\nBody", "schema: \"silkweb-memory/v2\""),
+            // Other front matter is untouched.
+            ("---\ntitle: \"Post\"\n---\n\nBody", "title: \"Post\""),
+        ] {
+            let excerpt = DocumentRowPresentation.excerpt(source, title: "Title")
+            XCTAssertTrue(excerpt.hasPrefix(prefix), excerpt)
+            XCTAssertTrue(excerpt.hasSuffix("Body"), excerpt)
+        }
+        // The progress filename prefix only matches a real date and time.
+        XCTAssertEqual(
+            DocumentRowPresentation.excerpt("# Helper spike\nBody", title: "Draft 0930 — Helper spike"),
+            "Helper spike · Body")
+    }
+
     func testExcerptLimitSweepPreservesGraphemes() {
         for character in ["a", "日", "👩🏽‍💻"] {
             for count in [0, 1, 239, 240, 241, 10_000] {
