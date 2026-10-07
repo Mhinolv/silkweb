@@ -338,8 +338,9 @@ struct PreviewView: NSViewRepresentable {
             case .anchor(let id): workspace.preview.scrollPreview(to: id)
             case .document(let url):
                 let path = String(url.path.dropFirst(root.path.count + 1))
-                if workspace.snapshot?.documents.contains(where: { $0.relativePath == path }) == true {
-                    workspace.showDocument(url)
+                // A case alias opens the note under its on-disk spelling (#151).
+                if let document = workspace.snapshot?.document(linkedAt: path) {
+                    workspace.navigate(folder: nil, documents: [document.relativePath])
                 } else {
                     beep()
                 }
