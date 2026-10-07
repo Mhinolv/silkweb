@@ -30,7 +30,8 @@ struct SnapshotScenario {
     /// Folders expanded in addition to the default set.
     var expanded: Set<String> = []
     var mediaMigration: String? = nil
-    /// silkweb-1.70 recovery states: "pending" (Keep/Discard), "orphan" (draft for a deleted note), "unreadable" (strip).
+    /// silkweb-1.70 recovery states: "pending" (Keep/Discard), "orphan" (draft for a deleted note), "unreadable" (strip);
+    /// #108 "two-orphans": a restored tab followed by two same-named deleted-note drafts.
     var recovery: String? = nil
     var tableInsert: String? = nil
     var exportWarning = false
@@ -110,6 +111,7 @@ struct SnapshotScenario {
         // silkweb-1.70: recovered text awaiting Keep/Discard; a draft whose note was deleted; a set-aside recovery file.
         .init(name: "recovery-pending", document: pourOver, recovery: "pending"),
         .init(name: "recovery-orphan-draft", folder: "Coffee", recovery: "orphan"),
+        .init(name: "recovery-two-orphans", recovery: "two-orphans"),
         .init(name: "recovery-unreadable", document: pourOver, recovery: "unreadable"),
         .init(name: "sidebar-resized", folder: "Coffee", resizeSidebar: true),
         // silkweb-1.63: thread guides at both sidebar width limits; no coral node since 1.65 (the capsule marks the scope).
@@ -579,7 +581,25 @@ final class SnapshotHarness {
         if let folder = scenario.folder, !snapshot.folders.contains(where: { $0.relativePath == folder }) {
             throw SnapshotFailure.error("Missing fixture folder: \(folder)")
         }
-        if let recovery = scenario.recovery {
+        if scenario.recovery == "two-orphans" {
+            // Mirrors launch: the restored tab first, then every orphan draft in library-path order.
+            guard let document = snapshot.documents.first(where: { $0.relativePath == SnapshotScenario.pourOver }),
+                await workspace.openTab(document, pinned: true)
+            else { throw SnapshotFailure.error("Cannot open \(SnapshotScenario.pourOver)") }
+            var urls: [URL] = []
+            for path in ["Coffee/Brewing Guides/Deleted Note.md", "Coffee/Deleted Note.md"] {
+                let url = snapshot.rootURL.appendingPathComponent(path)
+                try Data("# Deleted Note\n".utf8).write(to: url)
+                let coordinator = SaveCoordinator(
+                    store: DocumentStore(root: snapshot.rootURL), recoveryDirectory: workspace.recoveryDirectory)
+                let text = try await coordinator.open(url).text
+                try await coordinator.edit(text + "\nA recovered paragraph from \(path).\n", at: url)
+                try await coordinator.preserveUnsavedDrafts()
+                try FileManager.default.removeItem(at: url)
+                urls.append(url.standardizedFileURL)
+            }
+            await workspace.openOrphanDrafts(urls)
+        } else if let recovery = scenario.recovery {
             // Drafts are written exactly as a previous launch would have on quit.
             let path = recovery == "orphan" ? "Coffee/Deleted Note.md" : SnapshotScenario.pourOver
             let url = snapshot.rootURL.appendingPathComponent(path)

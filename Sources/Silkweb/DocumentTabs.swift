@@ -70,11 +70,30 @@ extension LibraryWorkspace {
     /// A recovery draft whose note was deleted outside Silkweb has no library row (1.70).
     /// It opens as a pinned tab; `reconcileFinderChanges` re-keys it once Save Again recreates the note.
     func openOrphanDraft(_ url: URL) async {
-        guard !tabs.contains(where: { $0.editor.url == url }), let editor = await openEditor(url) else { return }
-        let tab = DocumentTab(id: UUID(), editor: editor, isPreview: false)
+        guard let tab = await makeOrphanTab(url) else { return }
         let index = activeTabID.flatMap { active in tabs.firstIndex { $0.id == active } }.map { $0 + 1 } ?? tabs.count
         tabs.insert(tab, at: index)
         activateTab(tab.id, syncSelection: false)
+    }
+
+    /// Launch opens every orphan draft after the restored tabs, in the given order; the first is active (#108).
+    func openOrphanDrafts(_ urls: [URL]) async {
+        var first: UUID?
+        for url in urls {
+            guard let tab = await makeOrphanTab(url) else { continue }
+            tabs.append(tab)
+            first = first ?? tab.id
+        }
+        if let first { activateTab(first, syncSelection: false) }
+    }
+
+    private func makeOrphanTab(_ url: URL) async -> DocumentTab? {
+        guard !tabs.contains(where: { $0.editor.url == url }), let editor = await openEditor(url) else { return nil }
+        guard !tabs.contains(where: { $0.editor.url == url }) else {
+            await editor.didCloseWindow()
+            return nil
+        }
+        return DocumentTab(id: UUID(), editor: editor, isPreview: false)
     }
 
     /// Tabs whose note came back under a new library ID (Save Again) follow the new row.
