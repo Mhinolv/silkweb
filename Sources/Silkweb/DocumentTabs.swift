@@ -155,6 +155,19 @@ extension LibraryWorkspace {
         persistSession()
     }
 
+    /// File ▸ Close Tab/Close Window (⌘W): the active tab only while the library window is key;
+    /// otherwise the front window (Settings, panels) closes and library tabs stay open (#104).
+    /// `closeFrontWindow` replaces `performClose` in offscreen tests.
+    func performCloseCommand(closeFrontWindow: (() -> Void)? = nil) {
+        if libraryIsKey, let id = activeTabID {
+            Task { await closeTab(id) }
+        } else if let closeFrontWindow {
+            closeFrontWindow()
+        } else {
+            NSApp.keyWindow?.performClose(nil)
+        }
+    }
+
     func closeTab(_ id: UUID) async -> Bool {
         await waitForNavigation()
         guard !mutating, let tab = tabs.first(where: { $0.id == id }), closingTabIDs.insert(id).inserted else {

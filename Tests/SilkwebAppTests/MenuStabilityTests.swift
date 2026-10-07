@@ -49,12 +49,13 @@ final class MenuStabilityTests: XCTestCase {
         _ = await workspace.editor.open(file, readOnly: false)
         let scroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
         let editor = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
-        let window = NSWindow(
+        let window = KeyedTestWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
             styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = scroll // never ordered on screen
         editor.string = "# Heading\nBody"
         editor.isEditable = true
+        window.makeFirstResponder(editor)
         let target = FormattingTarget.shared
         target.editor = editor
         target.refresh()
@@ -78,7 +79,7 @@ final class MenuStabilityTests: XCTestCase {
                 "Window/Save",
                 {
                     _ = TabCommands(workspace: workspace).body
-                    _ = workspace.tabs; _ = workspace.activeTabID
+                    _ = workspace.tabs; _ = workspace.activeTabID; _ = workspace.menuState.libraryKey
                     _ = workspace.editor.url; _ = workspace.editor.readOnly
                 }
             ),
@@ -178,8 +179,21 @@ final class MenuStabilityTests: XCTestCase {
         let editor = try XCTUnwrap(scroll.documentView as? PlainMarkdownTextView)
         let otherScroll = MarkdownTextView.makeEditorScrollView(style: EditorStyle())
         let other = try XCTUnwrap(otherScroll.documentView as? PlainMarkdownTextView)
+        // Format needs the editor first responder in a key window (#104); never ordered on screen.
+        let windows = [scroll, otherScroll].map { content in
+            let window = KeyedTestWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled],
+                backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = content
+            window.makeFirstResponder(content.documentView)
+            return window
+        }
         let target = FormattingTarget.shared
-        defer { target.editor = nil; target.refresh() }
+        defer {
+            target.editor = nil; target.refresh()
+            for window in windows { window.contentView = nil; window.close() }
+        }
         let probe = CommandInvalidations()
         for editable in [false, true] {
             target.editor = editor

@@ -5,10 +5,23 @@ extension LibraryWorkspace {
     var canTrashSelection: Bool {
         canMutate && rename == nil && libraryHasFocus && !movePaths.isEmpty
     }
-    /// The sidebar or list, not the editor or a text field, has focus: Rename, Move To… and
-    /// Move to Trash act on the library selection only then (design-system §6 †).
+    /// The library window, once its columns are installed.
+    var libraryWindow: NSWindow? { librarySplitController?.view.window }
+    /// Window- and tab-scoped commands (Close Tab, Save, Format, tab items) act only then (#104).
+    var libraryIsKey: Bool { libraryWindow?.isKeyWindow == true }
+    /// This workspace's sidebar outline or document list is first responder in the key window:
+    /// Rename, Move To… and Move to Trash act on the library selection only then (design-system
+    /// §6 †, #104). The Inspector Outline, search results and other AppKit-backed lists never
+    /// qualify; neither do the editor, Preview or text fields.
     var libraryHasFocus: Bool {
-        focusColumn != 2 && !(NSApp.keyWindow?.firstResponder is NSTextView)
+        [sidebarOutline as NSView?, documentTable].contains { view in
+            guard let view, let window = view.window else { return false }
+            return window.isKeyWindow && window.firstResponder === view
+        }
+    }
+    /// The sidebar or list gained or lost first responder; resample menu state once AppKit settles.
+    func libraryFocusChanged() {
+        Task { @MainActor [weak self] in self?.menuState.refresh() }
     }
     var trashMenuTitle: String {
         guard canTrashSelection else { return "Move to Trash" }

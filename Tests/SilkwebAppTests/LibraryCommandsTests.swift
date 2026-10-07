@@ -186,7 +186,7 @@ final class LibraryCommandsTests: XCTestCase {
         let host = NSHostingView(
             rootView: DocumentList(workspace: workspace).frame(maxWidth: .infinity, maxHeight: .infinity))
         host.sizingOptions = []
-        let window = NSWindow(
+        let window = KeyedTestWindow(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 600),
             styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -212,6 +212,8 @@ final class LibraryCommandsTests: XCTestCase {
         // ⌥⌘2, select the visible note: Move to Trash is enabled.
         workspace.focus(1)
         workspace.session.selectedDocuments = ["Writing/Plan.markdown"]
+        let list = try XCTUnwrap(descendants(host).compactMap { $0 as? DocumentTableView }.first)
+        XCTAssertTrue(window.makeFirstResponder(list))
         XCTAssertTrue(workspace.canTrashSelection)
         XCTAssertEqual(workspace.movePaths, ["Writing/Plan.markdown"])
         for width: CGFloat in [1, 220, 320, 900] {

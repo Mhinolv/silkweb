@@ -14,6 +14,7 @@ struct DocumentTable: NSViewRepresentable {
     func makeNSView(context: Context) -> DocumentScrollView {
         let table = DocumentTableView()
         table.coordinator = context.coordinator
+        workspace.documentTable = table
         table.headerView = nil
         table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("document")))
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
@@ -324,6 +325,20 @@ final class DocumentTableView: NSTableView {
         return true
     }
 
+    override func becomeFirstResponder() -> Bool {
+        let result = super.becomeFirstResponder()
+        if result, let workspace = coordinator?.workspace {
+            workspace.focusColumn = 1
+            workspace.libraryFocusChanged()
+        }
+        return result
+    }
+    override func resignFirstResponder() -> Bool {
+        let result = super.resignFirstResponder()
+        if result { coordinator?.workspace.libraryFocusChanged() }
+        return result
+    }
+
     override func keyDown(with event: NSEvent) {
         guard let workspace = coordinator?.workspace, workspace.rename == nil else {
             super.keyDown(with: event)
@@ -332,7 +347,7 @@ final class DocumentTableView: NSTableView {
         switch event.keyCode {
         case 36:
             workspace.focusColumn = 1
-            workspace.beginRename()
+            if let selected = workspace.selectedItem { workspace.beginRename(selected) }
         case 48:
             workspace.focus(event.modifierFlags.contains(.shift) ? 0 : 2)
         default: super.keyDown(with: event)

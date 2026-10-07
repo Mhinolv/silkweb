@@ -39,7 +39,8 @@ final class LibraryTrashTests: XCTestCase {
         workspace.session.selectedFolder = "A"
         workspace.setSortKey(.name)
         workspace.session.selectedDocuments = ["A/Middle.md"]
-        workspace.focusColumn = 1
+        let pane = workspace.focusLibraryPaneForTesting(1)
+        defer { pane.contentView = nil; pane.close() }
         _ = await workspace.editor.open(root.appendingPathComponent("A/Middle.md"), readOnly: false)
         workspace.editor.edit("latest text")
         XCTAssertEqual(workspace.trashMenuTitle, "Move “Middle” to Trash")
@@ -146,7 +147,8 @@ final class LibraryTrashTests: XCTestCase {
     func testFolderConfirmationCancellationAndSidebarSuccessor() async throws {
         let (root, trash, workspace, service) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: trash) }
-        workspace.focusColumn = 0
+        let pane = workspace.focusLibraryPaneForTesting(0)
+        defer { pane.contentView = nil; pane.close() }
         workspace.session.selectedFolder = ""
         XCTAssertFalse(workspace.canTrashSelection)
         workspace.session.selectedFolder = nil
@@ -166,7 +168,7 @@ final class LibraryTrashTests: XCTestCase {
         await workspace.performTrash(plan, using: service)
         XCTAssertEqual(workspace.session.selectedFolder, "B")
         XCTAssertEqual(workspace.focusColumn, 0)
-        workspace.focusColumn = 2
+        pane.makeFirstResponder(nil) // The editor or another pane has focus.
         XCTAssertFalse(workspace.canTrashSelection)
     }
     @MainActor

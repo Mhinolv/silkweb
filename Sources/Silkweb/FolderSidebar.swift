@@ -34,11 +34,16 @@ struct FolderSidebar: NSViewRepresentable {
         scroll.drawsBackground = true
         scroll.backgroundColor = .silkwebPaneBackground
         let outline = SidebarOutlineView()
+        workspace.sidebarOutline = outline
         outline.renameSelected = { [weak coordinator] in coordinator?.renameSelection() }
         outline.toggleDisclosure = { [weak coordinator] row in coordinator?.toggleDisclosure(at: row) ?? false }
         outline.toggleGroup = { [weak coordinator] in coordinator?.toggleSelectedGroup() ?? false }
         outline.tagArrow = { [weak coordinator] key in coordinator?.navigateTags(key) ?? false }
-        outline.didFocus = { workspace.focusColumn = 0 }
+        outline.didFocus = {
+            workspace.focusColumn = 0
+            workspace.libraryFocusChanged()
+        }
+        outline.didResign = { workspace.libraryFocusChanged() }
         outline.contextMenu = { [weak coordinator = coordinator] event in coordinator?.menu(event) }
         outline.moveFocus = { backwards in workspace.focus(backwards ? 2 : 1) }
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("folders"))
@@ -490,8 +495,8 @@ struct FolderSidebar: NSViewRepresentable {
             if let tag = item.tag {
                 guard workspace.canMutate else { return }
                 workspace.tagRenameName = tag.name; workspace.tagRenameID = tag.id
-            } else if !item.isTagsGroup {
-                workspace.beginRename()
+            } else if !item.isTagsGroup, let selected = workspace.selectedItem {
+                workspace.beginRename(selected)
             }
         }
         private func setGroupExpanded(_ expanded: Bool) {
@@ -823,6 +828,7 @@ final class SidebarOutlineView: NSOutlineView {
     var moveFocus: ((Bool) -> Void)?
     var renameSelected: (() -> Void)?
     var didFocus: (() -> Void)?
+    var didResign: (() -> Void)?
     var contextMenu: ((NSEvent) -> NSMenu?)?
     var expandHovered: (() -> Bool)?
     var dragEnded: (() -> Void)?
@@ -831,6 +837,11 @@ final class SidebarOutlineView: NSOutlineView {
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
         if result { didFocus?() }
+        return result
+    }
+    override func resignFirstResponder() -> Bool {
+        let result = super.resignFirstResponder()
+        if result { didResign?() }
         return result
     }
     override func menu(for event: NSEvent) -> NSMenu? { contextMenu?(event) }

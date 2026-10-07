@@ -134,39 +134,37 @@ struct WorkspaceCommands: Commands {
 struct TabCommands: Commands {
     let workspace: LibraryWorkspace
     var body: some Commands {
+        // Tab-scoped items and Save act only while the library window is key (#104).
+        let key = workspace.menuState.libraryKey
         CommandGroup(after: .windowArrangement) {
             Button("Show Next Tab") { workspace.cycleTab(1) }
-                .keyboardShortcut("]", modifiers: [.command, .shift]).disabled(workspace.tabs.isEmpty)
+                .keyboardShortcut("]", modifiers: [.command, .shift]).disabled(!key || workspace.tabs.isEmpty)
             Button("Show Previous Tab") { workspace.cycleTab(-1) }
-                .keyboardShortcut("[", modifiers: [.command, .shift]).disabled(workspace.tabs.isEmpty)
+                .keyboardShortcut("[", modifiers: [.command, .shift]).disabled(!key || workspace.tabs.isEmpty)
             Button("Keep Open") {
                 if let id = workspace.activeTabID { workspace.keepTab(id) }
-            }.disabled(workspace.tabs.first { $0.id == workspace.activeTabID }?.isPreview != true)
+            }.disabled(!key || workspace.tabs.first { $0.id == workspace.activeTabID }?.isPreview != true)
             Button("Reveal in Library") {
                 if let id = workspace.activeTabID { workspace.search.text = ""; workspace.activateTab(id) }
-            }.disabled(workspace.tabs.isEmpty)
-            Button("Move Tab Left") { workspace.moveActiveTab(-1) }.disabled(workspace.tabs.count < 2)
-            Button("Move Tab Right") { workspace.moveActiveTab(1) }.disabled(workspace.tabs.count < 2)
+            }.disabled(!key || workspace.tabs.isEmpty)
+            Button("Move Tab Left") { workspace.moveActiveTab(-1) }.disabled(!key || workspace.tabs.count < 2)
+            Button("Move Tab Right") { workspace.moveActiveTab(1) }.disabled(!key || workspace.tabs.count < 2)
             Button("Close Other Tabs") {
                 if let id = workspace.activeTabID { Task { await workspace.closeTabs(otherThan: id) } }
-            }.keyboardShortcut("w", modifiers: [.command, .option]).disabled(workspace.tabs.count < 2)
+            }.keyboardShortcut("w", modifiers: [.command, .option]).disabled(!key || workspace.tabs.count < 2)
             Button("Close Tabs to the Right") {
                 if let id = workspace.activeTabID { Task { await workspace.closeTabs(otherThan: id, toRight: true) } }
-            }.disabled(workspace.tabs.last?.id == workspace.activeTabID)
+            }.disabled(!key || workspace.tabs.last?.id == workspace.activeTabID)
         }
         CommandGroup(replacing: .saveItem) {
-            Button(workspace.tabs.isEmpty ? "Close Window" : "Close Tab") {
-                if let id = workspace.activeTabID {
-                    Task { await workspace.closeTab(id) }
-                } else {
-                    NSApp.keyWindow?.performClose(nil)
-                }
+            Button(key && !workspace.tabs.isEmpty ? "Close Tab" : "Close Window") {
+                workspace.performCloseCommand()
             }.keyboardShortcut("w")
             Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
             Divider()
             Button("Save") { Task { await workspace.editor.save() } }
-                .keyboardShortcut("s").disabled(workspace.editor.url == nil || workspace.editor.readOnly)
+                .keyboardShortcut("s").disabled(!key || workspace.editor.url == nil || workspace.editor.readOnly)
         }
     }
 }
