@@ -389,7 +389,7 @@ struct FolderSidebar: NSViewRepresentable {
             if let rename = workspace.rename, rename.isFolder, rename.path == item.folder?.relativePath {
                 let field = RenameNameField(name: rename.name)
                 field.validate = { [weak workspace] in await workspace?.validateRename(rename, value: $0) }
-                field.finish = { [weak workspace] in workspace?.finishRename(rename, value: $0) }
+                field.finish = { [weak workspace] in workspace?.finishRename(rename, value: $0, clickedAway: $1) }
                 field.translatesAutoresizingMaskIntoConstraints = false
                 cell.addSubview(field)
                 if let text = cell.textField {
@@ -406,7 +406,7 @@ struct FolderSidebar: NSViewRepresentable {
             if let tag = item.tag, workspace.tagRenameID == tag.id {
                 let field = RenameNameField(name: workspace.tagRenameName)
                 field.validate = { TagEditor.normalize($0) == nil ? "Use 1–64 characters without commas." : nil }
-                field.finish = { [weak workspace] value in
+                field.finish = { [weak workspace] value, _ in
                     if let value { workspace?.renameTag(tag, to: value) }
                     workspace?.tagRenameID = nil
                 }

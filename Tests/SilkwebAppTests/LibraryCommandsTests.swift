@@ -158,7 +158,7 @@ final class LibraryCommandsTests: XCTestCase {
         cell.layoutSubtreeIfNeeded()
         field.viewDidMoveToWindow()
         var cancelled = false
-        field.finish = { cancelled = $0 == nil }
+        field.finish = { value, _ in cancelled = value == nil }
         XCTAssertTrue(
             field.control(field, textView: NSTextView(), doCommandBy: #selector(NSResponder.cancelOperation(_:))))
         XCTAssertTrue(cancelled)
