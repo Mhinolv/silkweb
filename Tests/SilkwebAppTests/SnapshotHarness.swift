@@ -18,6 +18,8 @@ struct SnapshotScenario {
     var caretHeading: String? = nil
     var caretImage: String? = nil
     var rename = false
+    /// #106: types this name into the rename field, then moves focus to the other library pane (a click-away).
+    var renameBlur: String? = nil
     var quickQuery: String? = nil
     var searchQuery: String? = nil
     var tabs: [String] = []
@@ -127,6 +129,8 @@ struct SnapshotScenario {
             name: "redesign-thread-sidebar", folder: "Vanlife", tagState: "expanded",
             expanded: ["Travel", "Travel/Japan"]),
         .init(name: "sidebar-folder-rename", folder: "Coffee", rename: true),
+        // #106: an invalid click-away keeps the old name; the message popover sits under the row (own window).
+        .init(name: "rename-folder-invalid-blur", folder: "Coffee", rename: true, renameBlur: "a/b"),
         .init(name: "folder-selected", folder: "Coffee/Brewing Guides"),
         // silkweb-1.62: one surface, hairlines, capsules, underline tab, status strip with “Saved” trailing.
         .init(
@@ -204,6 +208,8 @@ struct SnapshotScenario {
             name: "outline-accent-inactive", document: "Snapshot Fixtures/Outline Hierarchy.md", outline: true,
             caretHeading: "Grind size", accent: amberAccent),
         .init(name: "rename-active", document: pourOver, rename: true),
+        // #106: a valid click-away commits; the list and path bar show the new name and the sidebar keeps focus.
+        .init(name: "rename-document-blur-committed", document: pourOver, rename: true, renameBlur: "Pour Over Notes"),
         .init(name: "quick-open", quickQuery: "brew"),
         .init(name: "search-results", searchQuery: "coffee"),
         .init(name: "empty-document", document: "Snapshot Fixtures/Empty Document.md"),
@@ -907,6 +913,23 @@ final class SnapshotHarness {
                 workspace.beginRename(LibraryRename(path: path, isFolder: scenario.document == nil))
                 try await wait("inline rename") {
                     workspace.rename != nil && Self.descendants(controller.view).contains { $0 is RenameNameField }
+                }
+                if let draft = scenario.renameBlur {
+                    try await wait("rename editing") {
+                        Self.descendants(controller.view).contains { ($0 as? RenameNameField)?.currentEditor() != nil }
+                    }
+                    let field = Self.descendants(controller.view).compactMap { $0 as? RenameNameField }.first {
+                        $0.currentEditor() != nil
+                    }
+                    let editor = field?.currentEditor() as? NSTextView
+                    editor?.insertText(
+                        draft, replacementRange: NSRange(location: 0, length: editor?.string.utf16.count ?? 0))
+                    // Focus moves to the pane the item is not in, as a click there would.
+                    let target = Self.descendants(controller.view).compactMap { $0 as? NSTableView }.first {
+                        ($0 is SidebarOutlineView) == (scenario.document != nil)
+                    }
+                    window.makeFirstResponder(target)
+                    try await wait("rename ended by click-away") { workspace.rename == nil && !workspace.mutating }
                 }
             }
             if scenario.quickQuery != nil || scenario.searchQuery != nil {

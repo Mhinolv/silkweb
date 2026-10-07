@@ -254,6 +254,8 @@ private struct LibraryDocumentPane: View {
                 if workspace.rename == nil { focused = workspace.focusColumn == 1 }
             }
             .onKeyPress(keys: [.tab], phases: .down) { press in
+                // Tab in a rename field commits the name instead of changing panes (#106).
+                guard workspace.rename == nil else { return .ignored }
                 workspace.focus(press.modifiers.contains(.shift) ? 0 : 2)
                 return .handled
             }
