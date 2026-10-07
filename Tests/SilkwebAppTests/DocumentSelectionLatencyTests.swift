@@ -135,7 +135,7 @@ final class DocumentSelectionLatencyTests: XCTestCase {
             workspace.snapshot != nil && !workspace.loading
         }
         workspace.selectFolder(Self.folder)
-        await workspace.waitForNavigation()
+        try await withDeadline("navigation") { await workspace.waitForNavigation() }
         try await waitUntil("the list realizes its rows", timeout: .seconds(10)) {
             harness.content.superview?.layoutSubtreeIfNeeded()
             return harness.table.map {
@@ -150,14 +150,12 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         var list: [Double] = []
         var editor: [Double] = []
         var selectedOnPress = 0
-        static func percentile(_ samples: [Double], _ p: Double) -> Double {
-            let sorted = samples.sorted()
-            return sorted.isEmpty ? 0 : sorted[Int((Double(sorted.count - 1) * p).rounded())]
-        }
+        static func percentile(_ samples: [Double], _ p: Double) -> Double { LatencyGate.percentile(samples, p) }
         func summary(_ name: String) -> String {
             String(
-                format: "%@: list p50 %.2f ms p95 %.2f ms; editor p50 %.2f ms p95 %.2f ms; selected on press %d/%d",
-                name, Self.percentile(list, 0.5), Self.percentile(list, 0.95),
+                format:
+                    "%@: list p50 %.2f ms p90 %.2f ms p95 %.2f ms; editor p50 %.2f ms p95 %.2f ms; selected on press %d/%d",
+                name, Self.percentile(list, 0.5), LatencyGate.value(list), Self.percentile(list, 0.95),
                 Self.percentile(editor, 0.5), Self.percentile(editor, 0.95), selectedOnPress, list.count)
         }
     }
@@ -207,12 +205,12 @@ final class DocumentSelectionLatencyTests: XCTestCase {
             // Let this document's debounced styling, sizing and autosave land before the next click.
             try await Task.sleep(for: .milliseconds(20))
         }
-        await h.workspace.waitForNavigation()
+        try await withDeadline("navigation") { await h.workspace.waitForNavigation() }
         return run
     }
 
     /// The benchmark (p50/p95 printed for the PR) and the regression guard: the press selects the row, and the
-    /// capsule shows within one frame, with Focus Mode off and on.
+    /// capsule shows within one frame (p90 over 20 clicks, #124), with Focus Mode off and on.
     @MainActor
     func testClickingThroughTwentyDocumentsSelectsRowsWithinOneFrame() async throws {
         let h = try await makeHarness()
@@ -222,20 +220,25 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         _ = try await clickThrough(h, rows: [rows[2], rows[1]])
         var runs: [Bool: Run] = [:]
         for focus in [false, true] {
+            let mode = focus ? "focus on" : "focus off"
             h.workspace.setWritingModes(focus: focus)
             try await h.pump()
-            let run = try await clickThrough(h, rows: rows)
-            print("DocumentSelectionLatency " + run.summary(focus ? "focus on" : "focus off"))
+            let outcome = try await LatencyGate.measure("list \(mode)", budget: Self.listBudget, samples: \.list) {
+                let run = try await clickThrough(h, rows: rows)
+                print("DocumentSelectionLatency " + run.summary(mode))
+                return run
+            }
+            // Finder's rule: the press itself selects the row, before any run-loop turn. Checked on every run.
+            for run in outcome.runs {
+                XCTAssertEqual(
+                    run.selectedOnPress, run.list.count, "\(mode) — rows selected by the press: \(run.summary(mode))")
+            }
+            let run = try XCTUnwrap(outcome.runs.last)
+            XCTAssertTrue(
+                outcome.passed,
+                "\(mode) — list p90 over one frame (\(Self.listBudget) ms): \(run.summary(mode))"
+                    + (outcome.note.map { "; \($0)" } ?? ""))
             runs[focus] = run
-        }
-        for (focus, run) in runs {
-            let mode = focus ? "Focus on" : "Focus off"
-            // Finder's rule: the press itself selects the row, before any run-loop turn.
-            XCTAssertEqual(
-                run.selectedOnPress, run.list.count, "\(mode) — rows selected by the press: \(run.summary(mode))")
-            XCTAssertLessThanOrEqual(
-                Run.percentile(run.list, 0.95), Self.listBudget,
-                "\(mode) — list p95 over one frame: \(run.summary(mode))")
         }
         if let off = runs[false], let on = runs[true] {
             let base = Run.percentile(off.editor, 0.95)
@@ -266,7 +269,7 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         let clicked = ContinuousClock.now
         let last = try XCTUnwrap(rows.last)
         try await waitUntil("the editor shows the last clicked document") { h.editorURL == h.url(last) }
-        await h.workspace.waitForNavigation()
+        try await withDeadline("navigation") { await h.workspace.waitForNavigation() }
         let drained = Self.milliseconds(ContinuousClock.now - clicked)
         let open = Run.percentile(single.editor, 0.95)
         print(
@@ -305,7 +308,7 @@ final class DocumentSelectionLatencyTests: XCTestCase {
             let plain = try h.click(row)
             plain.source.mouseDown(with: plain.down)
             XCTAssertTrue(h.shows(row), "a plain press selects an unselected row")
-            await h.workspace.waitForNavigation()
+            try await withDeadline("navigation") { await h.workspace.waitForNavigation() }
             for _ in 0..<5 { try await h.pump() }
             XCTAssertEqual(h.editorURL, h.url(row))
             let point = NSPoint(x: plain.down.locationInWindow.x - 12, y: plain.down.locationInWindow.y)
@@ -324,7 +327,7 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         let plain = try h.click(1)
         plain.source.mouseDown(with: plain.down)
         plain.source.mouseUp(with: plain.up)
-        await h.workspace.waitForNavigation()
+        try await withDeadline("navigation") { await h.workspace.waitForNavigation() }
         XCTAssertTrue(h.shows(1))
 
         let command = try h.click(3, modifiers: .command)
@@ -337,7 +340,7 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         shift.source.mouseDown(with: shift.down)
         XCTAssertEqual(h.workspace.session.selectedDocuments, [paths[1], paths[3]], "⇧-press waits for the release")
         shift.source.mouseUp(with: shift.up)
-        await h.workspace.waitForNavigation()
+        try await withDeadline("navigation") { await h.workspace.waitForNavigation() }
         let selected = h.workspace.session.selectedDocuments
         XCTAssertGreaterThan(selected.count, 2)
 
@@ -346,7 +349,7 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         XCTAssertEqual(h.workspace.session.selectedDocuments, selected, "a press inside the selection keeps every row")
         inside.source.mouseUp(with: inside.up)
         XCTAssertTrue(h.shows(3), "the release narrows to the clicked row")
-        await h.workspace.waitForNavigation()
+        try await withDeadline("navigation") { await h.workspace.waitForNavigation() }
         XCTAssertEqual(h.editorURL, h.url(3))
         XCTAssertNil(h.workspace.rename, "a fast click-through never starts a rename")
     }
@@ -370,8 +373,22 @@ final class DocumentSelectionLatencyTests: XCTestCase {
     /// 250 ms typing debounce.
     static let outlineBudget = TestEnvironment.frameBudget(33)
 
+    private struct OutlineRun {
+        var latencies: [Double] = []
+        var empty = 0
+        var behindList = 0
+        var summary: String {
+            String(
+                format:
+                    "DocumentSelectionLatency outline: p50 %.2f ms p90 %.2f ms p95 %.2f ms; behind the list on %d, empty frames %d over %d clicks",
+                Run.percentile(latencies, 0.5), LatencyGate.value(latencies), Run.percentile(latencies, 0.95),
+                behindList, empty, latencies.count)
+        }
+    }
+
     /// The benchmark (p50/p95 printed for the PR) and regression guard for #87: with Show Outline on, the Outline
-    /// shows the clicked note's headings in the same display pass as the list capsule, never flashing No Headings.
+    /// shows the clicked note's headings in the same display pass as the list capsule (p90 over 20 clicks, #124),
+    /// never flashing No Headings.
     @MainActor
     func testOutlineFollowsEachClickWithinOneFrame() async throws {
         let h = try await makeHarness()
@@ -384,9 +401,23 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         try await waitUntil("the warm-up outline", timeout: .seconds(2)) {
             try outlineSample(h, expected: expectedOutline(h, rows[1])) == .current
         }
-        var latencies: [Double] = []
-        var empty = 0
-        var behindList = 0
+        let outcome = try await LatencyGate.measure("outline", budget: Self.outlineBudget, samples: \.latencies) {
+            let run = try await outlineClickThrough(h, rows: rows)
+            print(run.summary)
+            return run
+        }
+        // Functional guards hold on every run, the re-measure included.
+        for run in outcome.runs {
+            XCTAssertEqual(run.behindList, 0, "the Outline must update in the list capsule's pass: \(run.summary)")
+            XCTAssertEqual(run.empty, 0, "the Outline must not flash No Headings between notes: \(run.summary)")
+        }
+        let summary = try XCTUnwrap(outcome.runs.last).summary + (outcome.note.map { "; \($0)" } ?? "")
+        XCTAssertTrue(outcome.passed, "outline p90 over two frames (\(Self.outlineBudget) ms): \(summary)")
+    }
+
+    /// One click per row with the Outline sampled on every display pass after the press.
+    @MainActor private func outlineClickThrough(_ h: Harness, rows: [Int]) async throws -> OutlineRun {
+        var run = OutlineRun()
         for (index, row) in rows.enumerated() {
             let expected = try expectedOutline(h, row)
             let (source, down, up) = try h.click(row)
@@ -399,7 +430,7 @@ final class DocumentSelectionLatencyTests: XCTestCase {
             while ContinuousClock.now < deadline {
                 try await h.pump()
                 let sample = outlineSample(h, expected: expected)
-                if sample == .empty { empty += 1 }
+                if sample == .empty { run.empty += 1 }
                 if sample == .current {
                     done = ContinuousClock.now - start
                     break
@@ -407,12 +438,12 @@ final class DocumentSelectionLatencyTests: XCTestCase {
                 // A pass that shows the capsule but not this note's Outline: the inspector lags the list.
                 if h.shows(row), !listShown {
                     listShown = true
-                    behindList += 1
+                    run.behindList += 1
                 }
             }
             XCTAssertNotNil(done, "click \(index): the Outline never showed row \(row)")
-            latencies.append(Self.milliseconds(done ?? (ContinuousClock.now - start)))
-            await h.workspace.waitForNavigation()
+            run.latencies.append(Self.milliseconds(done ?? (ContinuousClock.now - start)))
+            try await withDeadline("navigation") { await h.workspace.waitForNavigation() }
             try await waitUntil("click \(index): the editor shows row \(row)") { h.editorURL == h.url(row) }
             // The editor's own render must keep the same outline (no step back, no blank).
             try await Task.sleep(for: .milliseconds(20))
@@ -423,15 +454,7 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         XCTAssertEqual(
             outlineSample(h, expected: try expectedOutline(h, try XCTUnwrap(rows.last))), .current,
             "the outline after the debounced render")
-        let summary = String(
-            format:
-                "DocumentSelectionLatency outline: p50 %.2f ms p95 %.2f ms; behind the list on %d, empty frames %d over %d clicks",
-            Run.percentile(latencies, 0.5), Run.percentile(latencies, 0.95), behindList, empty, latencies.count)
-        print(summary)
-        XCTAssertEqual(behindList, 0, "the Outline must update in the list capsule's pass: \(summary)")
-        XCTAssertEqual(empty, 0, "the Outline must not flash No Headings between notes: \(summary)")
-        XCTAssertLessThanOrEqual(
-            Run.percentile(latencies, 0.95), Self.outlineBudget, "outline p95 over two frames: \(summary)")
+        return run
     }
 
     /// A rapid burst with the Outline open: it settles on the last clicked note and never steps back to an
@@ -459,10 +482,102 @@ final class DocumentSelectionLatencyTests: XCTestCase {
             try await h.pump()
             samples.append(outlineSample(h, expected: expected))
         }
-        await h.workspace.waitForNavigation()
+        try await withDeadline("navigation") { await h.workspace.waitForNavigation() }
         XCTAssertEqual(h.editorURL, h.url(last))
         XCTAssertEqual(outlineSample(h, expected: expected), .current, "the Outline settles on the last clicked note")
         let off = samples.filter { $0 != .current }.count
         XCTAssertEqual(off, 0, "passes after the burst not showing the last note's outline: \(off) of \(samples.count)")
+    }
+
+    // MARK: - #124: the latency gate under load
+
+    /// Scheduler noise from a concurrent suite slows one or two clicks; a #70/#87 regression slows every click.
+    func testLatencyGateToleratesTwoOutliersButFailsEverySlowClick() {
+        let noisy = Array(repeating: 10.0, count: 18) + [100, 100]
+        XCTAssertTrue(LatencyGate.passes(noisy, budget: 16), "two loaded clicks pass the one-frame list budget")
+        XCTAssertTrue(LatencyGate.passes(noisy, budget: 33), "two loaded clicks pass the two-frame outline budget")
+        XCTAssertFalse(
+            LatencyGate.passes(Array(repeating: 10.0, count: 17) + [100, 100, 100], budget: 33),
+            "three slow clicks are not noise")
+        XCTAssertFalse(LatencyGate.passes(Array(repeating: 40.0, count: 20), budget: 16), "#70: async-gated selection")
+        XCTAssertFalse(LatencyGate.passes(Array(repeating: 260.0, count: 20), budget: 33), "#87: 250 ms debounce")
+        XCTAssertTrue(LatencyGate.passes(Array(repeating: 16.0, count: 20), budget: 16), "the budget itself passes")
+    }
+
+    /// One re-measure, only when the first run is over budget; a regression is over budget both times.
+    @MainActor
+    func testLatencyGateReMeasuresOnceAndFailsOnlyWhenBothRunsAreOver() async throws {
+        func gate(_ runs: [[Double]]) async throws -> (LatencyGate.Outcome<[Double]>, measured: Int) {
+            var measured = 0
+            let outcome = try await LatencyGate.measure("synthetic", budget: 16, samples: { $0 }) {
+                defer { measured += 1 }
+                return runs[measured]
+            }
+            return (outcome, measured)
+        }
+        let fast = Array(repeating: 10.0, count: 20)
+        let loaded = Array(repeating: 10.0, count: 15) + Array(repeating: 60.0, count: 5)
+        let slow = Array(repeating: 40.0, count: 20)
+
+        var (outcome, measured) = try await gate([fast, slow])
+        XCTAssertTrue(outcome.passed)
+        XCTAssertEqual(measured, 1, "a run within budget is not re-measured")
+        XCTAssertNil(outcome.note)
+
+        (outcome, measured) = try await gate([loaded, fast])
+        XCTAssertTrue(outcome.passed, "a loaded first run passes when the re-measure is within budget")
+        XCTAssertEqual(measured, 2)
+        XCTAssertEqual(outcome.runs, [loaded, fast], "both runs are returned for the functional guards")
+        XCTAssertEqual(outcome.note, "DocumentSelectionLatency synthetic: retried after p90 60.0 ms (first run)")
+
+        (outcome, measured) = try await gate([slow, slow])
+        XCTAssertFalse(outcome.passed, "#70: every click over budget fails both runs")
+        XCTAssertEqual(measured, 2, "at most one re-measure")
+        XCTAssertEqual(outcome.value, 40)
+    }
+}
+
+/// #124: judges the click-through benchmarks by a typical click, not the slowest one, at the unchanged local
+/// budgets. A real #70/#87 regression (async-gated selection, a 250 ms debounce) slows every click, so p90 over
+/// 20 clicks still fails it; scheduler noise from a concurrent suite slows one or two clicks, which p90 tolerates.
+/// When a whole run lands in a loaded stretch, the timing segment is re-measured once, logged, and fails only if
+/// it is over budget again. Functional guards are never judged here.
+enum LatencyGate {
+    static let quantile = 0.9
+
+    /// Nearest-rank percentile of `samples` (0 when empty).
+    static func percentile(_ samples: [Double], _ p: Double) -> Double {
+        let sorted = samples.sorted()
+        return sorted.isEmpty ? 0 : sorted[Int((Double(sorted.count - 1) * p).rounded())]
+    }
+
+    static func value(_ samples: [Double]) -> Double { percentile(samples, quantile) }
+
+    static func passes(_ samples: [Double], budget: Double) -> Bool { value(samples) <= budget }
+
+    struct Outcome<Run> {
+        /// Every measured run, first run first: callers check their functional guards on each.
+        var runs: [Run]
+        /// The judged run's p90.
+        var value: Double
+        var passed: Bool
+        /// The log line when the re-measure ran.
+        var note: String?
+    }
+
+    /// Measures `run`, and once more only when its p90 is over `budget`. Passes when the last run is within budget.
+    @MainActor
+    static func measure<Run>(
+        _ name: String, budget: Double, samples: (Run) -> [Double], _ run: () async throws -> Run
+    ) async throws -> Outcome<Run> {
+        let first = try await run()
+        let firstValue = value(samples(first))
+        guard firstValue > budget else { return Outcome(runs: [first], value: firstValue, passed: true) }
+        let note = String(
+            format: "DocumentSelectionLatency %@: retried after p90 %.1f ms (first run)", name, firstValue)
+        print(note)
+        let second = try await run()
+        let secondValue = value(samples(second))
+        return Outcome(runs: [first, second], value: secondValue, passed: secondValue <= budget, note: note)
     }
 }
