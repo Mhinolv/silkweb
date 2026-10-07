@@ -141,6 +141,14 @@ extension LibraryWorkspace {
             do {
                 let engine = try LibraryMutations(root: root)
                 let plan = try await engine.planRename(item.path, to: item.filename(value))
+                // The field is gone after a click-away (#106): attach to the library's window, not the key one.
+                let window = sidebarOutline?.window ?? documentTable?.window ?? NSApp.keyWindow
+                guard await confirmUnsupportedLinks(plan, action: "Rename Anyway", window: window) else {
+                    // Cancel works like Escape: the old name stays and nothing is added to undo.
+                    rename = nil
+                    if focusEditor { focus(2) }
+                    return
+                }
                 let changes = try await commitMove(plan, using: engine)
                 if let change = changes.changes.first {
                     libraryUndo.append(

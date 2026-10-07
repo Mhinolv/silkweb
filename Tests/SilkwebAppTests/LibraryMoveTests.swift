@@ -99,6 +99,76 @@ final class LibraryMoveTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("A/One.md").path))
         XCTAssertEqual(try two(), "[one](A/One.md)\nedited")
     }
+    /// #110: a rename whose incoming links can't be rewritten asks first, like Move To…; Cancel changes nothing.
+    @MainActor
+    func testRenameConfirmsUnsupportedLinksLikeMove() async throws {
+        let (root, workspace) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        func exists(_ path: String) -> Bool {
+            FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path)
+        }
+        func links() throws -> String {
+            try String(contentsOf: root.appendingPathComponent("Links.md"), encoding: .utf8)
+        }
+        let engine = try LibraryMutations(root: root)
+        _ = try await engine.createDocument(named: "a(b).md", in: "A", text: "target")
+        _ = try await engine.createDocument(named: "Links.md", text: "[bad](A/a(b).md)")
+        try await workspace.refresh(LibraryChangeSet(changes: []))
+        var alerts: [(buttons: [String], message: String, list: String)] = []
+        var answer = false
+        workspace.presentMoveAlert = { alert, _ in
+            let list = ((alert.accessoryView as? NSScrollView)?.documentView as? NSTextView)?.string ?? ""
+            alerts.append((alert.buttons.map(\.title), alert.messageText, list))
+            return answer
+        }
+        for (item, renamed) in [
+            (LibraryRename(path: "A/a(b).md", isFolder: false), "A/Renamed.md"),
+            (LibraryRename(path: "A", isFolder: true), "Renamed"),
+        ] {
+            workspace.session.selectedFolder = item.isFolder ? item.path : "A"
+            workspace.session.selectedDocuments = item.isFolder ? [] : [item.path]
+            let selection = (workspace.session.selectedFolder, workspace.session.selectedDocuments)
+            let count = alerts.count
+            answer = false
+            workspace.rename = item
+            workspace.finishRename(item, value: "Renamed")
+            try await wait(workspace)
+            XCTAssertEqual(alerts.count, count + 1, "\(item.path): rename committed without asking")
+            XCTAssertEqual(alerts.last?.buttons, ["Rename Anyway", "Cancel"])
+            XCTAssertEqual(alerts.last?.message, "Some links might stop working")
+            XCTAssertTrue(alerts.last?.list.hasPrefix("Links.md › ") == true, alerts.last?.list ?? "")
+            // Cancel works like Escape: old name, same selection, nothing on disk or on the undo stack.
+            XCTAssertNil(workspace.rename)
+            XCTAssertNil(workspace.mutationError)
+            XCTAssertTrue(exists(item.path), item.path)
+            XCTAssertFalse(exists(renamed), renamed)
+            XCTAssertTrue(workspace.libraryUndo.isEmpty)
+            XCTAssertEqual(workspace.session.selectedFolder, selection.0)
+            XCTAssertEqual(workspace.session.selectedDocuments, selection.1)
+
+            answer = true
+            workspace.rename = item
+            workspace.finishRename(item, value: "Renamed")
+            try await wait(workspace)
+            XCTAssertEqual(alerts.count, count + 2)
+            XCTAssertNil(workspace.mutationError)
+            XCTAssertTrue(exists(renamed), renamed)
+            XCTAssertEqual(try links(), "[bad](A/a(b).md)")
+            XCTAssertEqual(workspace.libraryUndo.map(\.title), ["Undo Rename"])
+            workspace.undoLibrary()
+            try await wait(workspace)
+            XCTAssertNil(workspace.mutationError)
+            XCTAssertTrue(exists(item.path), item.path)
+            XCTAssertTrue(workspace.libraryUndo.isEmpty)
+        }
+        // Move To… shares the sheet and keeps its own action name.
+        answer = false
+        workspace.move(["A/a(b).md"], to: "B")
+        try await wait(workspace)
+        XCTAssertEqual(alerts.last?.buttons, ["Move Anyway", "Cancel"])
+        XCTAssertTrue(exists("A/a(b).md"))
+        XCTAssertTrue(workspace.libraryUndo.isEmpty)
+    }
     /// #103: an edit saved anywhere after a move must not leave Undo Move stuck on the stack.
     @MainActor
     func testMoveUndoAfterUnrelatedEditRestoresPathsAndLinks() async throws {

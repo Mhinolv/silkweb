@@ -122,6 +122,11 @@ struct MovePicker: View {
             do {
                 let engine = try LibraryMutations(root: root)
                 let plan = try await engine.planRename(path, to: folderName)
+                guard await workspace.confirmUnsupportedLinks(plan, action: "Rename Anyway", window: NSApp.keyWindow)
+                else {
+                    renamingPath = nil
+                    return
+                }
                 let changes = try await workspace.commitMove(plan, using: engine)
                 destination = changes.changes.first?.newPath ?? path
                 if let newPath = changes.changes.first?.newPath {
@@ -256,18 +261,8 @@ extension LibraryWorkspace {
                         applyToAll = alert.suppressionButton?.state == .on
                     }
                 }
-                if !plan.unsupportedLinks.isEmpty {
-                    let alert = NSAlert()
-                    alert.messageText = "Some links might stop working"
-                    alert.informativeText = "Silkweb can’t update these links automatically. They’ll stay as written."
-                    let view = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 140))
-                    let text = NSTextView(frame: view.bounds)
-                    text.isEditable = false
-                    text.string = plan.unsupportedLinks.map { "\($0.document) › \($0.syntax)" }.joined(separator: "\n")
-                    view.documentView = text; view.hasVerticalScroller = true
-                    alert.accessoryView = view
-                    alert.addButton(withTitle: "Move Anyway"); alert.addButton(withTitle: "Cancel")
-                    guard await moveAlert(alert) else { return }
+                guard await confirmUnsupportedLinks(plan, action: "Move Anyway", window: NSApp.keyWindow) else {
+                    return
                 }
                 let changes = try await commitMove(plan, using: engine)
                 libraryUndo.append(.move(plan.reversed))
@@ -321,7 +316,36 @@ extension LibraryWorkspace {
     }
 
     private func moveAlert(_ alert: NSAlert) async -> Bool {
-        guard let window = NSApp.keyWindow else { return false }
+        await presentMoveAlert(alert, NSApp.keyWindow)
+    }
+
+    /// Move To… and every rename path confirm links Silkweb can’t rewrite (#110). True when there are none
+    /// or the user chose `action`; the plan is never committed otherwise.
+    func confirmUnsupportedLinks(_ plan: MovePlan, action: String, window: NSWindow?) async -> Bool {
+        guard !plan.unsupportedLinks.isEmpty else { return true }
+        return await presentMoveAlert(Self.unsupportedLinksAlert(plan.unsupportedLinks, action: action), window)
+    }
+
+    static func unsupportedLinksAlert(_ links: [UnsupportedMarkdownLink], action: String) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "Some links might stop working"
+        alert.informativeText = "Silkweb can’t update these links automatically. They’ll stay as written."
+        let view = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 140))
+        let text = NSTextView(frame: view.bounds)
+        text.isEditable = false
+        text.string = links.map { "\($0.document) › \($0.syntax)" }.joined(separator: "\n")
+        view.documentView = text; view.hasVerticalScroller = true
+        alert.accessoryView = view
+        alert.addButton(withTitle: action); alert.addButton(withTitle: "Cancel")
+        return alert
+    }
+
+    /// A document-modal sheet on `window`; without one, app-modal. XCTest never blocks on a modal alert.
+    static func presentAlert(_ alert: NSAlert, window: NSWindow?) async -> Bool {
+        guard let window else {
+            guard NSClassFromString("XCTestCase") == nil else { return false }
+            return alert.runModal() == .alertFirstButtonReturn
+        }
         return await withCheckedContinuation { continuation in
             alert.beginSheetModal(for: window) { continuation.resume(returning: $0 == .alertFirstButtonReturn) }
         }

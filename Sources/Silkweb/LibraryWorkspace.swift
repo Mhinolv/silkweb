@@ -47,6 +47,9 @@ final class LibraryWorkspace {
     var mutationRevealURLs: [URL] = []
     var mutationRevealTitle = "Reveal in Finder"
     var recentMoveFolders: [String] = []
+    /// Presents a move or rename confirmation and returns true for its first button. Tests replace it.
+    @ObservationIgnored var presentMoveAlert: @MainActor (NSAlert, NSWindow?) async -> Bool =
+        LibraryWorkspace.presentAlert(_:window:)
     var dragIdentity = UUID()
     var rename: LibraryRename?
     var exporting = false
