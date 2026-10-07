@@ -120,11 +120,13 @@ extension LibraryWorkspace {
         } catch { return error.localizedDescription }
     }
 
-    func finishRename(_ item: LibraryRename, value: String?) {
+    /// A click-away leaves focus with whatever the user clicked instead of moving it to the editor (#106).
+    func finishRename(_ item: LibraryRename, value: String?, clickedAway: Bool = false) {
         guard rename == item else { return }
+        let focusEditor = item.focusEditor && !clickedAway
         guard let value else {
             rename = nil
-            if item.focusEditor { focus(2) }
+            if focusEditor { focus(2) }
             return
         }
         guard canMutate, let root else { return }
@@ -147,7 +149,7 @@ extension LibraryWorkspace {
                             (item.path as NSString).lastPathComponent, plan.reversed))
                 }
                 rename = nil
-                if item.focusEditor { focus(2) }
+                if focusEditor { focus(2) }
             } catch {
                 rename = nil
                 mutationFailure(error, title: "“\(item.name)” couldn’t be renamed.")
