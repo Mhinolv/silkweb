@@ -21,6 +21,7 @@ Do **not** open or read the product owner's personal MWeb library/notes content 
 - Swift 6 toolchain (Swift 5 language mode), SwiftUI + AppKit where SwiftUI falls short
   (e.g. `NSTextView`-based editor, `NSOutlineView` if needed). macOS 15+.
 - SwiftPM package, no Xcode project. No third-party dependencies unless an issue explicitly allows it.
+  Exception: the Swift MCP SDK, pinned in #136 (see `docs/agent-memory.md` › Dependency exceptions).
 
 ## Build & Test
 - Build (also bundles `build/Silkweb.app`): `./scripts/build.sh`
@@ -62,6 +63,7 @@ Do **not** open or read the product owner's personal MWeb library/notes content 
 | Build / bundling scripts, Info.plist | `scripts/` |
 | Owner's manual-test library (sample blog). **Agents: do not modify**; unit tests use their own temp fixtures | `Test_Library/` |
 | Design system: naming, look, **keyboard shortcut map** (source of truth — check before adding any shortcut) | `docs/design-system.md` |
+| Agent memory contract (grants, layout, guarantees) and the headless `silkweb` helper (`build/helper/silkweb`) | `docs/agent-memory.md`, `Sources/SilkwebHelper/` |
 
 Put anything testable in `SilkwebCore` and cover it with XCTest. The app target stays thin.
 

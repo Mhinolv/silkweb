@@ -9,6 +9,8 @@ let package = Package(
         .target(name: "SilkwebCore"),
         // SwiftUI + AppKit app.
         .executableTarget(name: "Silkweb", dependencies: ["SilkwebCore"], resources: [.process("Resources")]),
+        // Headless `silkweb` agent-memory helper; bundled to build/helper/silkweb, outside the app.
+        .executableTarget(name: "SilkwebHelper", dependencies: ["SilkwebCore"]),
         .testTarget(name: "SilkwebCoreTests", dependencies: ["SilkwebCore"]),
         .testTarget(name: "SilkwebAppTests", dependencies: ["Silkweb"]),
     ],
