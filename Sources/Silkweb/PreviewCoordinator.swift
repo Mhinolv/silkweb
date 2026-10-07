@@ -151,12 +151,15 @@ final class PreviewCoordinator {
         guard next != input else { return }
         // A note switch or turning on the Outline skips the typing debounce for the outline (#87).
         let immediateOutline = next.outline && (input?.outline != true || document != input?.document)
+        // Only typing in the shown note waits for the debounce; a note switch, mode or setting renders at once (#150).
+        let typing = input.map { $0.document == document && $0.html == next.html && $0.text != text } ?? false
         input = next
         revision += 1
         let request = revision
         task?.cancel()
         if document != renderedURL {
-            html = ""; scrollAnchor = nil; scrollRatio = 0; pendingAnchor = nil
+            // The previous page stays up until the new one replaces it: no blank pane between notes (#150).
+            scrollAnchor = nil; scrollRatio = 0; pendingAnchor = nil
         }
         if outlineTarget == document { outlineTarget = nil }
         if !next.outline, document != outlineURL {
@@ -168,7 +171,7 @@ final class PreviewCoordinator {
         guard next.html || next.outline else { endLoading(); return }
         if next.html { beginLoading(document: document) } else { endLoading() }
         task = Task { [weak self] in
-            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            if typing { do { try await Task.sleep(for: .milliseconds(250)) } catch { return } }
             #if DEBUG
                 self?.renderCount += 1
             #endif
