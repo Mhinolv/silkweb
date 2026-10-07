@@ -151,6 +151,12 @@ struct SnapshotScenario {
         .init(
             name: "editor-link-accent", document: "Snapshot Fixtures/Editor Typography.md",
             tabs: ["Snapshot Fixtures/Editor Typography.md"], visibleCaret: "Body:", accent: amberAccent),
+        // #154: link text and image alt share the Accent (the `!` is a marker), a U+202F screenshot loads inline,
+        // and the selected Portrait image's outline is the Accent, not the system accent.
+        .init(
+            name: "editor-image-accent", document: "Snapshot Fixtures/Image Accent.md",
+            tabs: ["Snapshot Fixtures/Image Accent.md"], selectText: "![Portrait](portrait.png)",
+            accent: amberAccent),
         .init(name: "tabs-multi-selection", tabs: [pourOver], selectedDocuments: [pourOver, image]),
         .init(
             name: "editor-long-scrolled-end", document: "Snapshot Fixtures/Long Document.md",
@@ -518,6 +524,15 @@ final class SnapshotHarness {
         let typography =
             "# Heading one\n\n## Heading two\n\n### Heading three\n\n#### Heading four\n\n##### Heading five\n\n###### Heading six\n\nBody: café, 日本語, 👩🏽‍💻. **Strong**, *emphasis*, ~~strike~~ and `code`.\n\n> A quote\n\n- [ ] A task with [a link](https://example.invalid)\n\n```swift\nlet source = true\n```\n"
         try Data(typography.utf8).write(to: fixtures.appendingPathComponent("Editor Typography.md"), options: .atomic)
+        // #154: a macOS screenshot name (U+202F before AM) as pasted, next to a link and a selectable image.
+        try FileManager.default.copyItem(
+            at: fixtures.appendingPathComponent("fixture.png"),
+            to: fixtures.appendingPathComponent("Screenshot 2026-10-07 at 9.41.00\u{202F}AM.png"))
+        let imageAccent =
+            "# Image accent\n\nSee [the brewing guide](https://example.invalid/brew) for details.\n\n"
+            + "![Screenshot at 9.41 AM](Screenshot%202026-10-07%20at%209.41.00%E2%80%AFAM.png)\n\n"
+            + "![Portrait](portrait.png)\n"
+        try Data(imageAccent.utf8).write(to: fixtures.appendingPathComponent("Image Accent.md"), options: .atomic)
         let previewHeadings = """
             # Settling In
             ###### Jamestown, PA

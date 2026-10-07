@@ -54,4 +54,42 @@ final class InlineImagesTests: XCTestCase {
         }
         XCTAssertEqual(InlineImages.fittedSize(width: 0, height: 20, column: 720, viewport: 560).width, 0)
     }
+
+    /// #154: macOS screenshot names put U+202F (narrow no-break space) before AM/PM. A pasted screenshot,
+    /// and the same reference written by hand or by earlier builds, resolves to the file on disk.
+    func testScreenshotNameWithNarrowNoBreakSpaceResolves() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Notes"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let document = root.appendingPathComponent("Notes/Day.md")
+        try "".write(to: document, atomically: true, encoding: .utf8)
+        let name = "Screenshot 2026-10-07 at 9.41.00\u{202F}AM.png"
+        let id = UUID()
+        let batch = await AssetStore().add(
+            [AssetInput(name: name, isImage: true, data: Data([1]))], root: root, document: document, id: id)
+        let asset = try XCTUnwrap(batch.assets.first, "\(batch.failures)")
+        XCTAssertEqual(asset.url.lastPathComponent, name)
+        let folder = "../media/" + id.uuidString + "/"
+        let encoded = folder + "Screenshot%202026-10-07%20at%209.41.00%E2%80%AFAM.png"
+        XCTAssertEqual(asset.path, encoded, "the Markdown text stays percent-encoded")
+        for markdown in [
+            asset.markdown, "![s](" + encoded + ")", "![s](<" + folder + name + ">)",
+            "![s](" + folder + "Screenshot%202026-10-07%20at%209.41.00\u{202F}AM.png)",
+        ] {
+            let reference = try XCTUnwrap(InlineImages.paragraph(markdown).first, markdown)
+            guard case .local(let url) = InlineImages.resource(reference, document: document, root: root) else {
+                return XCTFail("not local: \(markdown)")
+            }
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "\(markdown) → \(url.path)")
+            // The preview serves the same file.
+            let html = HTMLRenderer.render(
+                markdown, options: .init(libraryRoot: root, documentURL: document, offlinePreview: true))
+            let src = try XCTUnwrap(
+                html.range(of: "src=\"silkweb-preview://asset/[^\"]*", options: .regularExpression), html)
+            let asset = try XCTUnwrap(URL(string: String(html[src].dropFirst("src=\"".count))))
+            let served = try XCTUnwrap(PreviewResource.fileURL(for: asset, root: root), asset.absoluteString)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: served.path), "\(markdown) → \(served.path)")
+        }
+    }
 }
