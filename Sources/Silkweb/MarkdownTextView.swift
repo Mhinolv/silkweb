@@ -495,6 +495,8 @@ final class PlainMarkdownTextView: NSTextView {
     /// Restyles attributes and layout only: the text storage, selection, scroll position and undo stack stay.
     func applySettings(_ preferences: WritingPreferences = LivePreferences.shared.current) {
         applyBehaviour(preferences)
+        // A layer border keeps its CGColor: re-resolve the selected image's Accent outline (#154).
+        inlineImages.refreshSelection()
         var next = EditorStyle(topInset: style.topInset, preferences: preferences)
         next.fontSize = CGFloat(
             WritingPreferences.clamp(

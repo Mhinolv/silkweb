@@ -300,6 +300,33 @@ final class SettingsTests: XCTestCase {
                 as? NSColor, .tertiaryLabelColor, "Brackets stay markers")
     }
 
+    /// #154: an image line looks like a link line plus a `!`: Accent alt text (live), and the `!`, brackets and
+    /// URL are markers. An escaped `\!` is literal text before an ordinary link.
+    @MainActor
+    func testEditorImageAltFollowsAccentLive() throws {
+        let settings = try makeSettings()
+        let line = "![Screenshot](media/Screenshot%202026-10-07%20at%209.41.00%E2%80%AFAM.png)"
+        let (window, text) = try makeEditor(line + "\nNot \\![an image](x.png)")
+        defer { window.close() }
+        let source = text.string as NSString
+        func color(_ index: Int) -> NSColor? {
+            text.textStorage?.attribute(.foregroundColor, at: index, effectiveRange: nil) as? NSColor
+        }
+        XCTAssertEqual(color(0), .tertiaryLabelColor, "The image `!` is a marker like the brackets")
+        XCTAssertEqual(color(1), .tertiaryLabelColor)
+        let alt = source.range(of: "Screenshot").location
+        let accent = try XCTUnwrap(color(alt))
+        XCTAssertEqual(accent, .silkwebAccent, "Image alt text uses the Accent token, like links")
+        XCTAssertEqual(color(source.range(of: "media/").location), .tertiaryLabelColor, "The URL is a marker")
+        settings.preferences.colors.light.accent = HexColor(0xD9822B)
+        settings.preferences.colors.dark.accent = HexColor(0xF0A050)
+        XCTAssertEqual(Self.srgb(accent, dark: false), 0xD9822B, "Changing Accent recolours image alt live")
+        XCTAssertEqual(Self.srgb(accent, dark: true), 0xF0A050)
+        let escaped = source.range(of: "\\!").location + 1
+        XCTAssertEqual(color(escaped), .silkwebText, "An escaped `!` stays body text")
+        XCTAssertEqual(color(source.range(of: "an image").location), .silkwebAccent)
+    }
+
     @MainActor
     func testAppearanceModeSetsNSAppAppearance() throws {
         let settings = try makeSettings()

@@ -10,7 +10,8 @@ public enum MarkdownTokens {
     private static let definitions: [(String, MarkdownToken.Kind)] = [
         ("(\\*\\*|__)(.+?)\\1", .bold), ("(?<![*_])(\\*|_)([^*_\\n]+)\\1(?![*_])", .italic),
         ("(~~)(.+?)\\1", .strike), ("(`+)(.+?)\\1", .code),
-        ("(\\[)([^\\]\\n]*)(\\]\\([^\\n)]*\\))", .link),
+        // An image's `!` is a marker like the brackets (#154); an escaped `\!` is literal text.
+        ("((?<!\\\\)!?\\[)([^\\]\\n]*)(\\]\\([^\\n)]*\\))", .link),
     ]
     private static let patterns = definitions.map { (try! NSRegularExpression(pattern: $0.0), $0.1) }
     private static let heading = try! NSRegularExpression(pattern: "^[ \\t]{0,3}(#{1,6})[ \\t]+")

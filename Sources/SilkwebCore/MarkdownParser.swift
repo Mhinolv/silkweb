@@ -462,7 +462,11 @@ public enum MarkdownParser {
                 if c == "\\", i + 1 < limit { url.append(chars[i + 1]); i += 2; continue }
                 if c == "(" { nesting += 1; if nesting > maximumNesting { return nil } }
                 if c == ")" { if nesting == 0 { break }; nesting -= 1 }
-                if c.isWhitespace && nesting == 0 { break }
+                // CommonMark ends a bare destination at ASCII space only: Unicode spaces such as the U+202F that
+                // macOS puts before AM/PM in screenshot names stay part of the path (#154).
+                // CommonMark ends a bare destination at ASCII space only: Unicode spaces such as the U+202F that
+                // macOS puts before AM/PM in screenshot names stay part of the path (#154).
+                if c.isASCII && c.isWhitespace && nesting == 0 { break }
                 url.append(c); i += 1
             }
             guard nesting == 0 else { return nil }

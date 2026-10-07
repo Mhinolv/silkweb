@@ -356,7 +356,10 @@ final class InlineImageView: NSView, @preconcurrency QLPreviewPanelDataSource, @
         let selected = editor.selectedRange() == selectionRange
         let width: CGFloat = selected ? 2 : 0
         if layer?.borderWidth != width { layer?.borderWidth = width }
-        layer?.borderColor = NSColor.controlAccentColor.cgColor
+        // Silkweb chrome: the Accent from Settings, resolved for this view's appearance (#154).
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.borderColor = NSColor.silkwebAccent.cgColor
+        }
     }
     private var selectionRange: NSRange {
         guard let editor, NSMaxRange(sourceRange) <= editor.string.utf16.count else {
@@ -379,6 +382,7 @@ final class InlineImageView: NSView, @preconcurrency QLPreviewPanelDataSource, @
     }
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        refreshSelection()
         needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {
