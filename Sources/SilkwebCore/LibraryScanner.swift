@@ -68,7 +68,7 @@ public enum LibraryScanner {
                 rootURL: snapshot.rootURL, folders: snapshot.folders, documents: documents,
                 presentation: LibraryPresentation(folders: snapshot.folders, documents: documents),
                 metadata: snapshot.metadata, recoveredMetadataURL: snapshot.recoveredMetadataURL,
-                isReadOnly: snapshot.isReadOnly)
+                isReadOnly: snapshot.isReadOnly, metadataWasReset: snapshot.metadataWasReset)
         }.value
     }
 
@@ -82,7 +82,8 @@ public enum LibraryScanner {
         guard try root.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else {
             throw LibraryError.invalidRoot
         }
-        let (previous, recoveredURL) = try LibraryMetadataStore.load(root: root)
+        let loaded = try LibraryMetadataStore.loadReportingReset(root: root)
+        let previous = loaded.metadata
         var metadata = previous
         metadata.formatVersion = LibraryMetadata.currentVersion
         metadata.IDsByPath = [:]
@@ -238,6 +239,7 @@ public enum LibraryScanner {
         return LibrarySnapshot(
             rootURL: root, folders: folders, documents: documents,
             presentation: LibraryPresentation(folders: folders, documents: documents),
-            metadata: metadata, recoveredMetadataURL: recoveredURL, isReadOnly: isReadOnly)
+            metadata: metadata, recoveredMetadataURL: loaded.recoveredURL, isReadOnly: isReadOnly,
+            metadataWasReset: loaded.wasReset)
     }
 }

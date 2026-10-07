@@ -57,16 +57,78 @@ final class LibraryScannerTests: XCTestCase {
     }
 
     func testMalformedMetadataIsPreservedAndRebuilt() async throws {
-        for malformed in ["not JSON", "{\"IDsByPath\":{\"Note.md\":\"invalid UUID\"}}"] {
+        // #107: only wholly undecodable files (or a field of the wrong shape) are set aside.
+        for malformed in [
+            "not JSON", "[]", "{\"IDsByPath\":[\"Note.md\"]}", "{\"tags\":{}}", "{\"formatVersion\":\"3\"}",
+        ] {
             try write("Note.md")
             try write(".silkweb/index.json", text: malformed)
             let snapshot = try await LibraryScanner.scan(root: root)
-            let recovered = try XCTUnwrap(snapshot.recoveredMetadataURL)
+            let recovered = try XCTUnwrap(snapshot.recoveredMetadataURL, malformed)
+            XCTAssertTrue(snapshot.metadataWasReset)
+            XCTAssertTrue(recovered.lastPathComponent.hasPrefix("index.corrupt-"))
             XCTAssertEqual(try String(contentsOf: recovered, encoding: .utf8), malformed)
             XCTAssertEqual(snapshot.documents.count, 1)
             let saved = try JSONDecoder().decode(
                 LibraryMetadata.self, from: Data(contentsOf: root.appendingPathComponent(".silkweb/index.json")))
             XCTAssertEqual(saved, snapshot.metadata)
+            // The rebuilt index is healthy: the next scan reports nothing.
+            let again = try await LibraryScanner.scan(root: root)
+            XCTAssertNil(again.recoveredMetadataURL)
+            XCTAssertFalse(again.metadataWasReset)
+        }
+    }
+
+    /// #107: one bad tag, tag set or ID drops only that entry; nothing is set aside and nothing is reported.
+    func testPartiallyInvalidMetadataKeepsValidEntries() async throws {
+        try write("Keep.md")
+        try write("Other.md")
+        let keep = UUID()
+        let other = UUID()
+        let tag = UUID()
+        let second = UUID()
+        let json = """
+            {"formatVersion":3,
+             "tags":[{"id":"\(tag.uuidString)","name":"Travel"},{"id":"bad","name":"Broken"},{"name":"No ID"},
+                     {"id":"\(second.uuidString)","name":"Coffee"}],
+             "tagRecency":["\(second.uuidString)","bad"],
+             "tagsByDocument":{"\(keep.uuidString)":["\(tag.uuidString)","bad","\(second.uuidString)"],
+                               "\(other.uuidString)":"bad"},
+             "IDsByPath":{"Keep.md":"\(keep.uuidString)","Other.md":"invalid UUID","":42}}
+            """
+        try write(".silkweb/index.json", text: json)
+        let snapshot = try await LibraryScanner.scan(root: root)
+        XCTAssertNil(snapshot.recoveredMetadataURL)
+        XCTAssertFalse(snapshot.metadataWasReset)
+        let files = try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent(".silkweb").path)
+        XCTAssertEqual(files, ["index.json"])
+        XCTAssertEqual(snapshot.metadata.tags.map(\.name), ["Travel", "Coffee"])
+        XCTAssertEqual(snapshot.metadata.tagRecency, [second])
+        XCTAssertEqual(snapshot.metadata.tagsByDocument, [keep.uuidString: [tag, second]])
+        XCTAssertEqual(snapshot.documents.first { $0.relativePath == "Keep.md" }?.id, keep)
+        // The bad ID is replaced by a fresh one; the folder root's bad ID too.
+        XCTAssertNotNil(snapshot.metadata.IDsByPath["Other.md"])
+        XCTAssertNotEqual(snapshot.metadata.IDsByPath["Other.md"], other)
+        let again = try await LibraryScanner.scan(root: root)
+        XCTAssertEqual(again.metadata, snapshot.metadata)
+    }
+
+    /// #107: an unwritable `.silkweb` can't hold a copy; the reset is still reported and the file is left alone.
+    func testUnreadableIndexInUnwritableFolderReportsResetWithoutCopy() async throws {
+        try write("Note.md")
+        try write(".silkweb/index.json", text: "not JSON")
+        let directory = root.appendingPathComponent(".silkweb")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
+        for _ in 0..<2 {
+            let snapshot = try await LibraryScanner.scan(root: root)
+            XCTAssertTrue(snapshot.metadataWasReset)
+            XCTAssertNil(snapshot.recoveredMetadataURL)
+            XCTAssertTrue(snapshot.isReadOnly)
+            XCTAssertEqual(snapshot.documents.count, 1)
+            XCTAssertEqual(
+                try String(contentsOf: directory.appendingPathComponent("index.json"), encoding: .utf8), "not JSON")
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["index.json"])
         }
     }
 
