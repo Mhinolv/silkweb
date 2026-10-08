@@ -233,7 +233,7 @@ final class AgentMemoryTests: XCTestCase {
         XCTAssertEqual(json["library"] as? String, library.standardizedFileURL.path)
         XCTAssertEqual(json["filesystem"] as? String, "qualified")
         XCTAssertEqual(json["access"] as? String, "read-create")
-        XCTAssertEqual(json["operations"] as? [String], ["capabilities", "list"])
+        XCTAssertEqual(json["operations"] as? [String], ["capabilities", "list", "create", "create-folder"])
         XCTAssertEqual(json["read_roots"] as? [String], ["Memory/Projects/Silkweb", "Notes/Private"])
         XCTAssertEqual((json["create_roots"] as? [String])?.count, 3)
         XCTAssertEqual(json["project_folder_exists"] as? Bool, true)
@@ -244,6 +244,7 @@ final class AgentMemoryTests: XCTestCase {
         try FileManager.default.removeItem(at: library.appendingPathComponent("Memory"))
         let readOnly = try object(run(["memory", "capabilities", "--project", "Silkweb"]))
         XCTAssertEqual(readOnly["create_roots"] as? [String], [])
+        XCTAssertEqual(readOnly["operations"] as? [String], ["capabilities", "list"])
         XCTAssertEqual(readOnly["project_folder_exists"] as? Bool, false)
         XCTAssertFalse(FileManager.default.fileExists(atPath: library.appendingPathComponent("Memory").path))
     }

@@ -487,7 +487,7 @@ final class AgentAccessTests: XCTestCase {
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any])
         XCTAssertEqual(
             json["limits"] as? [String: Int],
-            ["max_read_bytes": 4096, "max_results": 200, "requests_per_minute": 120])
+            ["max_read_bytes": 4096, "max_results": 200, "requests_per_minute": 120, "max_create_bytes": 262_144])
 
         file.setEnabled(false, project: "Silkweb")
         try file.write(to: grantsURL)

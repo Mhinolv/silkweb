@@ -2,7 +2,7 @@ import Foundation
 
 /// The v2 agent-memory contract (`docs/agent-memory.md`): the grants file, scope rules, filesystem
 /// qualification and read-only helper commands. Enforcement per operation lives in `AgentAccess.swift`
-/// (#130); creates arrive with #133/#135/#136.
+/// (#130); creates and receipts in `AgentCreate.swift` (#133).
 public enum AgentMemoryContract {
     public static let version = 1
     public static let projectsFolder = "Memory/Projects"
@@ -335,8 +335,9 @@ public enum AgentFilesystem: String, Codable, Sendable {
     }
 }
 
-/// The spike's `silkweb memory …` commands: resolve a grant with Silkweb closed and report scope
-/// or list documents. Read-only: it never writes to the Library or the grants file.
+/// The `silkweb memory …` commands: resolve a grant with Silkweb closed, report scope, list
+/// documents, and create documents and Folders (#133). Only creates write to the Library; nothing
+/// writes the grants file.
 public enum AgentHelper {
     public struct Output: Equatable, Sendable {
         public var status: Int32
@@ -347,25 +348,55 @@ public enum AgentHelper {
     public static let usage = """
         Usage: silkweb memory capabilities --project <Project> [--grants <file>]
                silkweb memory list --project <Project> [--grants <file>]
+               silkweb memory create --project <Project> --key <key> --type <type> --title <title>
+                   --agent <agent> --session <session> --body-file <file|-> [--folder <path>]
+                   [--status <status>] [--observed-at <time>] [--review-after <time>]
+                   [--supersedes <memory_id>]... [--client <name>] [--grants <file>]
+               silkweb memory create-folder --project <Project> --path <path> [--grants <file>]
                silkweb version
 
         """
 
-    public static func run(_ arguments: [String], home: URL = FileManager.default.homeDirectoryForCurrentUser)
-        -> Output
-    {
+    /// Options each command accepts. `--supersedes` may repeat; every other option appears once.
+    private static let commandOptions: [String: (required: Set<String>, optional: Set<String>)] = [
+        "capabilities": (["--project"], ["--grants"]),
+        "list": (["--project"], ["--grants"]),
+        "create": (
+            ["--project", "--key", "--type", "--title", "--agent", "--session", "--body-file"],
+            [
+                "--grants", "--folder", "--status", "--observed-at", "--review-after", "--supersedes", "--client",
+            ]
+        ),
+        "create-folder": (["--project", "--path"], ["--grants"]),
+    ]
+
+    public static func run(
+        _ arguments: [String], home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        standardInput: FileHandle = .standardInput
+    ) -> Output {
         if arguments == ["version"] {
             return emit(["contract_version": AgentMemoryContract.version, "helper_version": SilkwebCore.version])
         }
-        guard arguments.count >= 2, arguments[0] == "memory", ["capabilities", "list"].contains(arguments[1]),
-            let options = options(Array(arguments.dropFirst(2))), let project = options["--project"]
+        guard arguments.count >= 2, arguments[0] == "memory", let allowed = commandOptions[arguments[1]],
+            let options = options(Array(arguments.dropFirst(2)), allowed: allowed),
+            let project = options["--project"]?.first
         else { return Output(status: 64, stdout: "", stderr: usage) }
-        let grantsURL = options["--grants"].map { URL(fileURLWithPath: $0) } ?? AgentGrantFile.defaultURL(home: home)
+        let grantsURL =
+            options["--grants"]?.first.map { URL(fileURLWithPath: $0) } ?? AgentGrantFile.defaultURL(home: home)
         let session = AgentSession(project: project, store: AgentGrantStore(url: grantsURL))
         do {
-            let operation: AgentOperation = arguments[1] == "list" ? .list : .capabilities
-            let authorization = try session.authorize(operation)
-            return operation == .list ? try list(authorization) : capabilities(authorization)
+            switch arguments[1] {
+            case "create":
+                return try create(session.authorize(.create), options: options, standardInput: standardInput)
+            case "create-folder":
+                let authorization = try session.authorize(.createFolder, path: options["--path"]?.first)
+                let folder = try AgentCreateService(authorization: authorization).createFolder(authorization.path ?? "")
+                return emit(["path": folder.path, "created": folder.created])
+            case "list":
+                return try list(session.authorize(.list))
+            default:
+                return capabilities(try session.authorize(.capabilities))
+            }
         } catch let failure as AgentAccessError {
             return refusal(failure)
         } catch let gate as LibraryGateError {
@@ -393,15 +424,54 @@ public enum AgentHelper {
             "library": context.library.path,
             "filesystem": context.filesystem.rawValue,
             "access": context.grant.access.rawValue,
-            "operations": ["capabilities", "list"],
+            "operations": ["capabilities", "list"]
+                + (context.scope.createRoots.isEmpty ? [] : ["create", "create-folder"]),
             "read_roots": context.scope.readRoots,
             "create_roots": context.scope.createRoots,
             "project_folder_exists": descriptor != nil,
             "limits": [
                 "max_read_bytes": limits.maxReadBytes, "max_results": limits.maxResults,
-                "requests_per_minute": limits.requestsPerMinute,
+                "requests_per_minute": limits.requestsPerMinute, "max_create_bytes": limits.maxCreateBytes,
             ],
         ])
+    }
+
+    /// One create (#133). The body comes from `--body-file`, or stdin for `-`, read only up to the
+    /// grant's limit. A replay of the same key and payload succeeds with `"replayed": true`.
+    static func create(_ context: AgentAuthorization, options: [String: [String]], standardInput: FileHandle) throws
+        -> Output
+    {
+        let value = { (option: String) in options[option]?.first }
+        let limit = context.grant.limits.maxCreateBytes
+        let source = value("--body-file") ?? "-"
+        let handle = source == "-" ? standardInput : FileHandle(forReadingAtPath: source)
+        guard let handle, let data = try? handle.read(upToCount: limit + 1) ?? Data() else {
+            throw AgentAccessError.invalidRequest("The document text couldn’t be read.")
+        }
+        guard data.count <= limit else { throw AgentAccessError.createTooLarge(limit: limit) }
+        guard let body = String(data: data, encoding: .utf8) else {
+            throw AgentAccessError.invalidRequest("The document text must be UTF-8.")
+        }
+        let request = AgentCreateRequest(
+            idempotencyKey: value("--key") ?? "", type: value("--type") ?? "", title: value("--title") ?? "",
+            body: body, agent: value("--agent") ?? "", session: value("--session") ?? "",
+            client: value("--client") ?? "cli", folder: value("--folder"), status: value("--status"),
+            observedAt: value("--observed-at"), reviewAfter: value("--review-after"),
+            supersedes: options["--supersedes"])
+        let service = AgentCreateService(authorization: context)
+        // Interrupted creates from earlier sessions are settled first. Details go to stderr only.
+        let settled = (try? service.reconcile()) ?? []
+        let result = try service.create(request)
+        let receipt = try JSONSerialization.jsonObject(with: AgentReceipt.encoded(result.receipt))
+        var output = emit([
+            "outcome": result.outcome.rawValue, "replayed": result.replayed, "path": result.path ?? NSNull(),
+            "receipt": receipt,
+        ])
+        if !settled.isEmpty {
+            let counts = Dictionary(grouping: settled, by: \.outcome.rawValue).map { "\($0.value.count) \($0.key)" }
+            output.stderr = "Recovered interrupted creates: " + counts.sorted().joined(separator: ", ") + ".\n"
+        }
+        return output
     }
 
     /// Paths, sizes and dates only — no document bodies. Hidden items, links and special files are
@@ -422,16 +492,19 @@ public enum AgentHelper {
         return emit(["project": context.scope.project, "documents": rows])
     }
 
-    private static func options(_ arguments: [String]) -> [String: String]? {
+    private static func options(_ arguments: [String], allowed: (required: Set<String>, optional: Set<String>))
+        -> [String: [String]]?
+    {
         guard arguments.count.isMultiple(of: 2) else { return nil }
-        var result: [String: String] = [:]
+        var result: [String: [String]] = [:]
         for index in stride(from: 0, to: arguments.count, by: 2) {
-            guard ["--project", "--grants"].contains(arguments[index]), result[arguments[index]] == nil else {
-                return nil
-            }
-            result[arguments[index]] = arguments[index + 1]
+            let option = arguments[index]
+            guard allowed.required.contains(option) || allowed.optional.contains(option),
+                result[option] == nil || option == "--supersedes"
+            else { return nil }
+            result[option, default: []].append(arguments[index + 1])
         }
-        return result
+        return allowed.required.isSubset(of: result.keys) ? result : nil
     }
 
     private static func emit(_ object: [String: Any]) -> Output {

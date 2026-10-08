@@ -25,8 +25,9 @@ redefining names, layout or guarantees. Changing a rule here means bumping `cont
   agent may send it to its model provider.
 
 The #129 spike ships the helper with two read-only commands, `memory capabilities` and
-`memory list` (see [Helper distribution](#helper-distribution)). All other operations below are
-contracted here and built in the tickets listed.
+`memory list` (see [Helper distribution](#helper-distribution)). #133 adds `memory create` and
+`memory create-folder` (see [Create and receipts](#create-and-receipts-133)). All other operations
+below are contracted here and built in the tickets listed.
 
 ## Supported operations
 
@@ -240,7 +241,7 @@ still load unchanged:
   "extra_read_folders" : [],
   "label" : "Silkweb project",
   "library" : { "path" : "/Users/me/Writing", "version" : 1 },
-  "limits" : { "max_read_bytes" : 1048576, "max_results" : 200, "requests_per_minute" : 120 },
+  "limits" : { "max_create_bytes" : 262144, "max_read_bytes" : 1048576, "max_results" : 200, "requests_per_minute" : 120 },
   "project" : "Silkweb",
   "revoked_at" : "2026-10-08T17:00:00Z"
 }
@@ -254,7 +255,8 @@ still load unchanged:
 - `label` is the owner-facing name used in messages. When it’s empty, it’s “<Project> project”.
 - `limits` bound one document read (`max_read_bytes`), the rows one search, list or activity page
   returns (`max_results`) and the operations per rolling minute in one helper session
-  (`requests_per_minute`). A missing or non-positive value uses the default shown.
+  (`requests_per_minute`). `max_create_bytes` (#133) bounds one created document, front matter included.
+  A missing or non-positive value uses the default shown.
 - `revoked_at` turns the grant off. Any non-null value counts, even one that can’t be parsed. Removing
   the date (or the `null` value) turns it back on. Silkweb writes this file atomically with sorted keys.
 - **Revocation fails closed on the next operation.** Before every operation the helper checks the
@@ -286,7 +288,7 @@ document text or the requested target.
 | `excluded_name` | Agents can create only Markdown documents, never instruction files or reserved Folders. |
 | `grant_revoked` | Agent access “Silkweb project” was turned off. Ask the owner to turn it back on. |
 | `rate_limited` | Too many requests. Try again in N seconds. |
-| `too_large` | That document is larger than this grant’s read limit (1 MB). |
+| `too_large` | That document is larger than this grant’s read limit (1 MB). For creates: This document is larger than the grant allows (256 KB). Nothing was created. |
 | `not_found` | There’s no document at that location. (Only for targets inside the scope.) |
 
 The Settings ▸ Library ▸ Agent Access section and the commands that set grants up come later
@@ -377,6 +379,102 @@ Helper errors for coordination (stable `error.code`):
 | `library_busy` | Library Busy | Silkweb is updating this library. Try again in a moment. The JSON error includes `retry_after` (seconds). |
 | `stale_snapshot` | Library Changed | The library changed while this request ran. Try again. (Retried internally first, then reported only if the retries run out.) |
 
+## Create and receipts (#133)
+
+A create publishes exactly one new Document and never replaces anything (`AgentCreateService` in
+`SilkwebCore`):
+
+```sh
+silkweb memory create --project Silkweb --key 7f3c-checkpoint-1 --type progress \
+  --title "Helper spike" --agent claude-code --session 2026-10-07-a --body-file - < body.md
+silkweb memory create-folder --project Silkweb --path "Memory/Projects/Silkweb/Progress/Sprint 1"
+```
+
+- **Where it goes:** `--type` picks the entry folder (`memory` and `decision` → `Memories`,
+  `progress` → `Progress`, `handoff` → `Handoffs`), or `--folder` names a Folder inside a create
+  folder. Missing Folders are made on demand in the case given (the defaults are title case) and get
+  identities in the app index like any new Folder. `create-folder` is idempotent: an existing Folder
+  returns `"created": false`.
+- **Name:** the [generated filename](#library-layout). A taken name gets the next “ 2”, “ 3” suffix,
+  re-checked atomically at publish (`RENAME_EXCL`), so a create never replaces a file and never fails
+  because the name is taken.
+- **Text:** the helper writes the v1 envelope (`memory_id`, `created_at` and `project` are its own),
+  one blank line, then the body. A body that doesn’t start with `# <Title>` gets that heading. A body
+  that brings its own Silkweb envelope is refused (`envelope_malformed` or `envelope_invalid_field`).
+- **What appears:** one new Document, through the app’s normal watcher refresh. Selection, scroll,
+  caret and the open editor don’t change, and nothing opens.
+
+**Commit order.** Everything below holds the [Library gate](#coordination-131):
+
+1. Interrupted creates are recovered (below).
+2. The key’s receipt is checked: same payload → replay, different payload → `idempotency_conflict`.
+3. The complete file is written to `.silkweb/agent-staging/<attempt>.md` and flushed.
+4. The intent `<attempt>.json` is written next to it (operation, key, digests, destination Folder,
+   `memory_id`, document UUID).
+5. The staged file is renamed into place without replacing (exclusive create) and the Folder is flushed.
+6. The document UUID is added to `.silkweb/index.json` (skipped if the index is unreadable or
+   newer, which the app recovers).
+7. The receipt is written to `.silkweb/agent-events/<operationId>.json`, then the intent is removed.
+
+Nothing in `.silkweb/` appears in the tree, list or search, and the watcher ignores it.
+
+**Idempotency.** `operationId` is derived from the grant and the key, so a retry finds its receipt by
+name. The payload is everything the agent chose (type, title, body, folder, agent, session and the
+optional envelope fields), but not `--client`.
+
+- Same key, same payload: no new file and no change to the existing one. The original receipt comes
+  back with `"replayed": true` and `"outcome": "duplicate"`, and `path` is the document’s **current**
+  path, found through its index UUID (so renames and moves are followed). `path` is `null` when the
+  owner trashed or deleted it, or moved it outside the read folders. It’s never recreated.
+- Same key, different payload: `idempotency_conflict`, and nothing on disk changes.
+- A key whose earlier create was `abandoned` or `refused` can be retried, with any payload.
+
+**Recovery** runs silently before every create, under the gate. It never deletes, renames or
+rewrites a published Document, and never uses the recovery strip or an alert. The helper notes what it
+recovered on stderr only.
+
+| Found in `agent-staging/` | Meaning | Recovery |
+|---|---|---|
+| Intent and its staged file | Never published | Receipt `abandoned`, then the staged file and intent are removed. The agent retries. |
+| Intent without its staged file | Published | The document is found by index UUID, then by `memory_id` in its Folder. Receipt `reconciled` (with the path, or `null` if it’s gone), then the intent is removed. |
+| Intent whose key already has a published receipt | Only the cleanup was lost | The intent is removed. |
+| Staged file or temporary file without an intent | Never published | Removed. |
+| Intent that can’t be read | Unknown | Left alone. |
+
+A receipt that can’t be written leaves the published document and its intent in place, and the
+create reports `write_failed`. The next create (or a retry with the same key) records it.
+
+**Receipt** (`version: 1`, sorted keys, every key present, decoded tolerantly; never body text):
+
+| Key | Value |
+|---|---|
+| `operationId` | `op_` + 32 hex characters |
+| `idempotencyKey`, `grantId`, `client`, `agent`, `session` | As given; `grantId` is the project key |
+| `createdAt` | The envelope’s `created_at`, or when the receipt was recorded |
+| `destination` | Library-relative POSIX path at publish, or `null` |
+| `documentId` | The app index UUID, or `null` |
+| `memoryId` | The envelope’s `memory_id`, or `null` |
+| `contentDigest` | `sha256:` + hex of the published bytes, or `null` |
+| `requestDigest` | `sha256:` + hex of the payload |
+| `byteCount` | Bytes published |
+| `outcome` | `created`, `duplicate`, `reconciled`, `abandoned` or `refused` |
+| `refusal` | The `error.code` of a `refused` create, otherwise `null` |
+
+An unknown `outcome` from a newer build counts as published, so a retry can never duplicate a
+document. `duplicate` is the outcome a replay reports; the stored receipt keeps its original outcome.
+
+**Output.** `{"outcome": …, "replayed": …, "path": …, "receipt": {…}}` on stdout, exit 0.
+
+**Create codes** (reusing `create_not_allowed`, `out_of_scope`, `invalid_path`, `excluded_name`,
+`library_busy` and the envelope codes):
+
+| Code | Message |
+|---|---|
+| `idempotency_conflict` | This request key was already used with different content. Nothing was changed. Use a new key. |
+| `too_large` | This document is larger than the grant allows (256 KB). Nothing was created. |
+| `write_failed` | Silkweb couldn’t finish writing to the Library. Nothing was replaced. Try again with the same key. |
+| `invalid_request` | The request key must be 1 to 200 characters, without control characters. (Also: unreadable or non-UTF-8 text.) |
+
 ## Safety exclusions
 
 - **Instruction and configuration files can never be created by an agent:** `AGENTS.md`, `AGENT.md`,
@@ -402,7 +500,8 @@ grant’s scope, never the requested target (see [Refusals](#refusals)).
 
 Error codes: `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `no_grant`,
 `invalid_grant`, `library_not_found`, `library_unreadable`, `library_busy`, `stale_snapshot`
-([Coordination](#coordination-131)), plus the per-operation [refusals](#refusals).
+([Coordination](#coordination-131)), plus the per-operation [refusals](#refusals) and the
+[create codes](#create-and-receipts-133).
 
 ## Helper distribution
 
@@ -481,13 +580,16 @@ Run these once from the repository root. Each step shows its expected output.
      "helper_version" : "0.1.0",
      "library" : "/Users/me/Writing",
      "limits" : {
+       "max_create_bytes" : 262144,
        "max_read_bytes" : 1048576,
        "max_results" : 200,
        "requests_per_minute" : 120
      },
      "operations" : [
        "capabilities",
-       "list"
+       "list",
+       "create",
+       "create-folder"
      ],
      "project" : "Silkweb",
      "project_folder_exists" : true,
