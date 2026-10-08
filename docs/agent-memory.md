@@ -2,8 +2,11 @@
 
 ```text
 contract_version: 1
-Last reviewed: 2026-10-08 (#138)
+Last reviewed: 2026-10-08 (#139)
 ```
+
+The MVP release gate (P1) and its evidence live in
+[`agent-memory-qualification.md`](agent-memory-qualification.md).
 
 This is the source of truth for how coding agents (Claude Code, Codex, Gemini and other local MCP
 clients) read and create memory in a Silkweb Library. Later tickets (#130–#139) link here instead of
@@ -597,6 +600,14 @@ document. `duplicate` is the outcome a replay reports; the stored receipt keeps 
 | `too_large` | This document is larger than the grant allows (256 KB). Nothing was created. |
 | `write_failed` | Silkweb couldn’t finish writing to the Library. Nothing was replaced. Try again with the same key. |
 | `invalid_argument` | The request key must be 1 to 200 characters, without control characters. (Also: unreadable or non-UTF-8 text.) Builds of #133 sent `invalid_request`; #135 replaced it everywhere, with no alias. |
+| `disk_full` | There isn’t enough space on the disk. Nothing was created. (#139; `ENOSPC` or `EDQUOT` before publish. Builds before #139 sent `write_failed`.) |
+| `permission_denied` | Silkweb doesn’t have permission to write to this Library. Nothing was created. (#139; `EACCES`, `EPERM` or `EROFS` on the Library, `.silkweb/` or the destination Folder.) |
+
+`write_failed` stays for every other I/O failure, and for a receipt that can’t be written after the
+document was published (the document exists, so “Nothing was created” would be wrong).
+**Cancellation has no code:** an MCP call cancelled with `notifications/cancelled` gets no response
+([Cancellation and shutdown](#cancellation-and-shutdown)), and a CLI process that is killed is a crash,
+settled by the next create’s recovery. Either way a retry with the same key replays or creates once.
 
 ## Command line (#135)
 
@@ -674,7 +685,7 @@ and `--supersedes` (create).
 | 65 | Bad input data | `envelope_malformed`, `envelope_schema_newer`, `envelope_invalid_field`, `too_large`, `idempotency_conflict`, `not_found` |
 | 69 | Busy; try again | `library_busy`, `stale_snapshot`, `rate_limited` |
 | 70 | Unexpected helper failure | `internal_error` |
-| 74 | Library I/O | `library_not_found`, `library_unreadable`, `unreadable`, `write_failed` |
+| 74 | Library I/O | `library_not_found`, `library_unreadable`, `unreadable`, `write_failed`, `disk_full`, `permission_denied` |
 | 77 | Access | `grant_required`, `grant_not_found`, `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `no_grant`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `invalid_path`, `excluded_name` |
 
 - **One bad-input code.** `invalid_argument` covers usage mistakes (unknown command or option, a
@@ -742,7 +753,8 @@ args = ["mcp", "--grant", "Silkweb"]
 ```
 
 Minimum client versions aren't pinned. The exact Claude Code, Codex and Gemini CLI versions qualified
-when this shipped are recorded in the #139 matrix.
+when this shipped are recorded in the #139 matrix,
+[`agent-memory-qualification.md`](agent-memory-qualification.md).
 
 ### Agent packages (#138)
 

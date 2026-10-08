@@ -264,8 +264,9 @@ struct AgentCreateIntent: Codable, Equatable {
 /// Recovery never deletes, renames or rewrites a published document: an interrupted create is either
 /// still staged (recorded `abandoned`, then discarded) or published (kept and recorded `reconciled`).
 public struct AgentCreateService: Sendable {
-    /// The points a test can interrupt, as if the process died right after that step.
-    enum Step: Sendable { case intent, published, indexed, receipt }
+    /// The points a test can interrupt, as if the process died right after that step. `stage` comes before
+    /// anything is written, so an error thrown there acts like a staging write that failed (a full disk).
+    enum Step: Sendable { case stage, intent, published, indexed, receipt }
 
     static let stagingFolder = "agent-staging"
     static let eventsFolder = "agent-events"
@@ -409,6 +410,7 @@ public struct AgentCreateService: Sendable {
         let staging = try AgentCreateFiles.metadataFolder(root, Self.stagingFolder, create: true)!
         defer { close(staging) }
         let attempt = UUID().uuidString
+        try fault?(.stage)
         try AgentCreateFiles.writeExclusive(staging, attempt + ".md", plan.data)
         let intent = AgentCreateIntent(
             operationId: operationId, idempotencyKey: request.idempotencyKey, requestDigest: digest, grantId: grantId,
@@ -682,8 +684,12 @@ public struct AgentCreateService: Sendable {
         } catch let error as LibraryGateError {
             throw AgentAccessError(error)
         } catch let error as NSError where error.domain == NSPOSIXErrorDomain {
-            if [ELOOP, ENOTDIR].contains(Int32(error.code)) { throw AgentAccessError.invalidPath }
-            throw AgentAccessError.writeFailed
+            switch Int32(error.code) {
+            case ELOOP, ENOTDIR: throw AgentAccessError.invalidPath
+            case ENOSPC, EDQUOT: throw AgentAccessError.diskFull
+            case EACCES, EPERM, EROFS: throw AgentAccessError.permissionDenied
+            default: throw AgentAccessError.writeFailed
+            }
         } catch {
             throw AgentAccessError.writeFailed
         }

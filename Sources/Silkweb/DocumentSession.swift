@@ -6,6 +6,11 @@ import SwiftUI
 @MainActor @Observable
 final class DocumentSession {
     @ObservationIgnored var didEdit: (() -> Void)?
+    /// Sees every banner announcement this session posts (tests count them, #139).
+    @ObservationIgnored var didAnnounce: ((String) -> Void)?
+    /// The banner and state last announced. Watcher ticks (an agent create, for one) re-publish an unchanged
+    /// conflict or failure; it's announced once, until the document saves cleanly or another one opens (#139).
+    @ObservationIgnored private var announced: (banner: String, state: DocumentSaveState)?
     var text = ""
     var url: URL?
     var state: DocumentSaveState = .clean
@@ -76,6 +81,7 @@ final class DocumentSession {
         url = nil
         text = ""
         state = .clean
+        announced = nil
     }
 
     func open(_ destination: URL?, readOnly: Bool) async -> Bool {
@@ -96,6 +102,7 @@ final class DocumentSession {
         conflictCopy = nil
         text = ""
         state = .clean
+        announced = nil
         error = nil
         self.readOnly = readOnly
         recovered = false
@@ -142,7 +149,8 @@ final class DocumentSession {
                 guard !Task.isCancelled, let self, self.url == destination else { return }
                 if self.pendingEdits == 0 {
                     self.state = value
-                    if self.banner != nil { self.announce() }
+                    if value == .clean { self.announced = nil }
+                    if self.banner != nil { self.announce(once: true) }
                 }
             }
         }
@@ -173,7 +181,7 @@ final class DocumentSession {
                 try target.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
             }.value
             observe(target)
-            if externalConflict || externalDeleted { announce() }
+            if externalConflict || externalDeleted { announce(once: true) }
         } catch {
             self.error = error.localizedDescription
             if let url { observe(url) }
@@ -283,7 +291,8 @@ final class DocumentSession {
         let result = await coordinator.save(url) ?? .clean
         // Typing may continue while IO runs. Never mark newer text clean.
         if value == text, pendingEdits == 0 { state = result }
-        if result.isDirty { announce() }
+        if state == .clean { announced = nil }
+        if result.isDirty { announce(once: true) }
         return !result.isDirty && value == text && pendingEdits == 0
     }
 
@@ -374,13 +383,19 @@ final class DocumentSession {
         url = nil
         text = ""
         state = .clean
+        announced = nil
         recovered = false
         orphanDraft = false
         error = nil
     }
 
-    func announce() {
+    /// `once`: a re-published state (the save observer, a watcher tick) is skipped if it was already announced.
+    /// Explicit paths (a refused switch, a failed action) always announce.
+    func announce(once: Bool = false) {
         guard let banner else { return }
+        if once, let announced, announced.banner == banner, announced.state == state { return }
+        announced = (banner, state)
+        didAnnounce?(banner)
         // `NSApplication.shared`, not `NSApp`: the global is nil until something creates the application (#63).
         NSAccessibility.post(
             element: NSApplication.shared.mainWindow ?? NSApplication.shared, notification: .announcementRequested,

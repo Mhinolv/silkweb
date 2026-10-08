@@ -108,6 +108,8 @@ Replace `<code>` with the `error.code` from the result, for example `create_not_
   retry them. Pass the message on; it already says what the owner can do.
 - `library_busy`, `rate_limited`: wait `retryAfter` seconds, then retry once with the same
   `idempotencyKey`. `stale_snapshot`, `write_failed`: retry once with the same `idempotencyKey`.
+- `disk_full`, `permission_denied`: nothing was created. Don't retry; pass the message on so the owner
+  can free space or fix the Library's permissions.
 - `idempotency_conflict`: that key was already used for other content. Check `memory_activity`
   before you create again with a new key.
 - `too_large`: shorten the document. Don't split one checkpoint into many.
