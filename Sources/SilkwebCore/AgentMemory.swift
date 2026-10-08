@@ -141,6 +141,23 @@ public struct AgentGrantFile: Codable, Equatable, Sendable {
 
     public func grant(for project: String) -> AgentGrant? { grants.first { $0.project == project } }
 
+    /// The grant a caller asked for (#135), by exact project key, then by its label. Without a
+    /// request, the only grant is used; with several, the caller has to choose. Revoked grants are
+    /// still selected, so the operation reports `grant_revoked` rather than a missing grant.
+    public func select(_ requested: String?) throws -> AgentGrant {
+        guard let requested else {
+            guard grants.count == 1 else {
+                throw grants.isEmpty ? AgentAccessError.noGrants : .grantRequired(grants.map(\.displayLabel))
+            }
+            return grants[0]
+        }
+        if let grant = grant(for: requested) { return grant }
+        let labelled = grants.filter { $0.displayLabel == requested }
+        guard labelled.count <= 1 else { throw AgentAccessError.grantRequired(grants.map(\.displayLabel)) }
+        guard let grant = labelled.first else { throw AgentAccessError.grantNotFound(requested) }
+        return grant
+    }
+
     /// Turns a grant off (keeping the first revocation date) or back on. False if there's no grant.
     @discardableResult
     public mutating func setEnabled(_ enabled: Bool, project: String, at date: Date = Date()) -> Bool {
@@ -332,239 +349,5 @@ public enum AgentFilesystem: String, Codable, Sendable {
         return classify(
             path: url.resolvingSymlinksInPath().path, isLocal: values?.volumeIsLocal,
             typeName: values?.volumeTypeName, isUbiquitous: values?.isUbiquitousItem)
-    }
-}
-
-/// The `silkweb memory …` commands: resolve a grant with Silkweb closed, report scope, list,
-/// search and read documents (#134), and create documents and Folders (#133). Only creates write
-/// to the Library; nothing writes the grants file. Search keeps its own index cache outside the
-/// Library (`AgentMemoryService`).
-public enum AgentHelper {
-    public struct Output: Equatable, Sendable {
-        public var status: Int32
-        public var stdout: String
-        public var stderr: String
-    }
-
-    public static let usage = """
-        Usage: silkweb memory capabilities --project <Project> [--grants <file>]
-               silkweb memory list --project <Project> [--grants <file>]
-               silkweb memory search --project <Project> [--query <text>] [--type <t,…>] [--status <s,…>]
-                   [--created-after <date>] [--created-before <date>] [--filter-project <Project>]
-                   [--limit <n>] [--grants <file>]
-               silkweb memory read --project <Project> --path <path> [--cursor <cursor>]
-                   [--expected-revision <sha256:…>] [--grants <file>]
-               silkweb memory create --project <Project> --key <key> --type <type> --title <title>
-                   --agent <agent> --session <session> --body-file <file|-> [--folder <path>]
-                   [--status <status>] [--observed-at <time>] [--review-after <time>]
-                   [--supersedes <memory_id>]... [--client <name>] [--grants <file>]
-               silkweb memory create-folder --project <Project> --path <path> [--grants <file>]
-               silkweb version
-
-        """
-
-    /// Options each command accepts. `--supersedes` may repeat; every other option appears once.
-    private static let commandOptions: [String: (required: Set<String>, optional: Set<String>)] = [
-        "capabilities": (["--project"], ["--grants"]),
-        "list": (["--project"], ["--grants"]),
-        "search": (
-            ["--project"],
-            [
-                "--grants", "--query", "--type", "--status", "--created-after", "--created-before",
-                "--filter-project", "--limit",
-            ]
-        ),
-        "read": (["--project", "--path"], ["--grants", "--cursor", "--expected-revision"]),
-        "create": (
-            ["--project", "--key", "--type", "--title", "--agent", "--session", "--body-file"],
-            [
-                "--grants", "--folder", "--status", "--observed-at", "--review-after", "--supersedes", "--client",
-            ]
-        ),
-        "create-folder": (["--project", "--path"], ["--grants"]),
-    ]
-
-    public static func run(
-        _ arguments: [String], home: URL = FileManager.default.homeDirectoryForCurrentUser,
-        standardInput: FileHandle = .standardInput
-    ) -> Output {
-        if arguments == ["version"] {
-            return emit(["contract_version": AgentMemoryContract.version, "helper_version": SilkwebCore.version])
-        }
-        guard arguments.count >= 2, arguments[0] == "memory", let allowed = commandOptions[arguments[1]],
-            let options = options(Array(arguments.dropFirst(2)), allowed: allowed),
-            let project = options["--project"]?.first
-        else { return Output(status: 64, stdout: "", stderr: usage) }
-        let grantsURL =
-            options["--grants"]?.first.map { URL(fileURLWithPath: $0) } ?? AgentGrantFile.defaultURL(home: home)
-        let session = AgentSession(project: project, store: AgentGrantStore(url: grantsURL))
-        do {
-            switch arguments[1] {
-            case "search", "read":
-                let service = AgentMemoryService(
-                    session: session, cacheDirectory: AgentMemoryService.defaultCacheDirectory(home: home))
-                let json =
-                    arguments[1] == "search"
-                    ? try service.search(searchRequest(options)).json
-                    : try service.read(
-                        AgentMemoryReadRequest(
-                            path: options["--path"]?.first ?? "", cursor: options["--cursor"]?.first,
-                            expectedRevision: options["--expected-revision"]?.first)
-                    ).json
-                return Output(status: 0, stdout: json.rendered, stderr: "")
-            case "create":
-                return try create(session.authorize(.create), options: options, standardInput: standardInput)
-            case "create-folder":
-                let authorization = try session.authorize(.createFolder, path: options["--path"]?.first)
-                let folder = try AgentCreateService(authorization: authorization).createFolder(authorization.path ?? "")
-                return emit(["path": folder.path, "created": folder.created])
-            case "list":
-                return try list(session.authorize(.list))
-            default:
-                return capabilities(try session.authorize(.capabilities))
-            }
-        } catch let failure as AgentAccessError {
-            return refusal(failure)
-        } catch let gate as LibraryGateError {
-            return refusal(AgentAccessError(gate))
-        } catch {
-            return Output(status: 1, stdout: "", stderr: "\(error)\n")
-        }
-    }
-
-    static func refusal(_ failure: AgentAccessError) -> Output {
-        var error: [String: Any] = ["code": failure.code, "title": failure.title]
-        if let seconds = failure.retryAfter { error["retry_after"] = seconds }
-        return Output(status: 1, stdout: json(["error": error]), stderr: failure.title + ": " + failure.message + "\n")
-    }
-
-    static func capabilities(_ context: AgentAuthorization) -> Output {
-        let root = AgentMemoryContract.projectRoot(context.scope.project)
-        let descriptor = try? AgentSecureFiles.openFolder(library: context.library, path: root)
-        if let descriptor { close(descriptor) }
-        let limits = context.grant.limits
-        return emit([
-            "contract_version": AgentMemoryContract.version,
-            "helper_version": SilkwebCore.version,
-            "project": context.scope.project,
-            "library": context.library.path,
-            "filesystem": context.filesystem.rawValue,
-            "access": context.grant.access.rawValue,
-            "operations": ["capabilities", "list", "search", "read"]
-                + (context.scope.createRoots.isEmpty ? [] : ["create", "create-folder"]),
-            "read_roots": context.scope.readRoots,
-            "create_roots": context.scope.createRoots,
-            "project_folder_exists": descriptor != nil,
-            "limits": [
-                "max_read_bytes": limits.maxReadBytes, "max_results": limits.maxResults,
-                "requests_per_minute": limits.requestsPerMinute, "max_create_bytes": limits.maxCreateBytes,
-            ],
-        ])
-    }
-
-    /// One create (#133). The body comes from `--body-file`, or stdin for `-`, read only up to the
-    /// grant's limit. A replay of the same key and payload succeeds with `"replayed": true`.
-    static func create(_ context: AgentAuthorization, options: [String: [String]], standardInput: FileHandle) throws
-        -> Output
-    {
-        let value = { (option: String) in options[option]?.first }
-        let limit = context.grant.limits.maxCreateBytes
-        let source = value("--body-file") ?? "-"
-        let handle = source == "-" ? standardInput : FileHandle(forReadingAtPath: source)
-        guard let handle, let data = try? handle.read(upToCount: limit + 1) ?? Data() else {
-            throw AgentAccessError.invalidRequest("The document text couldn’t be read.")
-        }
-        guard data.count <= limit else { throw AgentAccessError.createTooLarge(limit: limit) }
-        guard let body = String(data: data, encoding: .utf8) else {
-            throw AgentAccessError.invalidRequest("The document text must be UTF-8.")
-        }
-        let request = AgentCreateRequest(
-            idempotencyKey: value("--key") ?? "", type: value("--type") ?? "", title: value("--title") ?? "",
-            body: body, agent: value("--agent") ?? "", session: value("--session") ?? "",
-            client: value("--client") ?? "cli", folder: value("--folder"), status: value("--status"),
-            observedAt: value("--observed-at"), reviewAfter: value("--review-after"),
-            supersedes: options["--supersedes"])
-        let service = AgentCreateService(authorization: context)
-        // Interrupted creates from earlier sessions are settled first. Details go to stderr only.
-        let settled = (try? service.reconcile()) ?? []
-        let result = try service.create(request)
-        let receipt = try JSONSerialization.jsonObject(with: AgentReceipt.encoded(result.receipt))
-        var output = emit([
-            "outcome": result.outcome.rawValue, "replayed": result.replayed, "path": result.path ?? NSNull(),
-            "receipt": receipt,
-        ])
-        if !settled.isEmpty {
-            let counts = Dictionary(grouping: settled, by: \.outcome.rawValue).map { "\($0.value.count) \($0.key)" }
-            output.stderr = "Recovered interrupted creates: " + counts.sorted().joined(separator: ", ") + ".\n"
-        }
-        return output
-    }
-
-    /// Paths, sizes and dates only — no document bodies. Hidden items, links and special files are
-    /// skipped, and a read folder reached through a link is skipped entirely.
-    static func list(_ context: AgentAuthorization) throws -> Output {
-        let dates = ISO8601DateFormatter()
-        var documents: [AgentSecureFiles.Document] = []
-        for root in context.scope.readRoots {
-            do {
-                documents += try AgentSecureFiles.documents(library: context.library, under: root)
-            } catch let error as AgentAccessError where error == .invalidPath {
-                continue
-            }
-        }
-        let rows = context.scope.readable(documents, path: \.path).sorted { $0.path < $1.path }.map {
-            ["path": $0.path, "size": $0.size, "modified": dates.string(from: $0.modified)] as [String: Any]
-        }
-        return emit(["project": context.scope.project, "documents": rows])
-    }
-
-    /// `--type`/`--status` take comma-separated lists; dates are `2026-10-07` or ISO 8601 timestamps.
-    static func searchRequest(_ options: [String: [String]]) throws -> AgentMemorySearchRequest {
-        let value = { (option: String) in options[option]?.first }
-        let list = { (key: String) -> [String] in
-            (value(key) ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-        }
-        let date = { (key: String) throws -> Date? in
-            guard let text = value(key) else { return nil }
-            guard let date = AgentMemorySearchRequest.date(text) else {
-                throw AgentAccessError.invalidArgument(String(key.dropFirst(2)))
-            }
-            return date
-        }
-        var limit = AgentMemorySearchRequest.defaultLimit
-        if let text = value("--limit") {
-            guard let parsed = Int(text) else { throw AgentAccessError.invalidArgument("limit") }
-            limit = parsed
-        }
-        return AgentMemorySearchRequest(
-            query: value("--query") ?? "", project: value("--filter-project"), types: list("--type"),
-            statuses: list("--status"), createdAfter: try date("--created-after"),
-            createdBefore: try date("--created-before"), limit: limit)
-    }
-
-    private static func options(_ arguments: [String], allowed: (required: Set<String>, optional: Set<String>))
-        -> [String: [String]]?
-    {
-        guard arguments.count.isMultiple(of: 2) else { return nil }
-        var result: [String: [String]] = [:]
-        for index in stride(from: 0, to: arguments.count, by: 2) {
-            let option = arguments[index]
-            guard allowed.required.contains(option) || allowed.optional.contains(option),
-                result[option] == nil || option == "--supersedes"
-            else { return nil }
-            result[option, default: []].append(arguments[index + 1])
-        }
-        return allowed.required.isSubset(of: result.keys) ? result : nil
-    }
-
-    private static func emit(_ object: [String: Any]) -> Output {
-        Output(status: 0, stdout: json(object), stderr: "")
-    }
-
-    private static func json(_ object: [String: Any]) -> String {
-        let data = try? JSONSerialization.data(
-            withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        return (data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}") + "\n"
     }
 }

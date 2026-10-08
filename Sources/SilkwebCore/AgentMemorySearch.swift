@@ -156,11 +156,14 @@ public struct AgentMemorySearchResponse: Equatable, Sendable {
 
 public struct AgentMemoryReadRequest: Equatable, Sendable {
     public var path: String
+    /// The app index's native UUID (#135, `--id`). When set, it names the document instead of `path`.
+    public var documentID: UUID?
     public var cursor: String?
     public var expectedRevision: String?
 
-    public init(path: String, cursor: String? = nil, expectedRevision: String? = nil) {
+    public init(path: String, documentID: UUID? = nil, cursor: String? = nil, expectedRevision: String? = nil) {
         self.path = path
+        self.documentID = documentID
         self.cursor = cursor
         self.expectedRevision = expectedRevision
     }
@@ -267,8 +270,20 @@ public final class AgentMemoryService: @unchecked Sendable {
     public func read(_ request: AgentMemoryReadRequest) throws -> AgentMemoryReadResponse {
         lock.lock()
         defer { lock.unlock() }
-        let context = try authorize(.read, path: request.path)
-        return try loadedIndex(for: context).read(request, context: context, reviews: reviews)
+        guard let documentID = request.documentID else {
+            let context = try authorize(.read, path: request.path)
+            return try loadedIndex(for: context).read(request, context: context, reviews: reviews)
+        }
+        // An ID the index doesn't know and one outside the read folders look the same, so an ID
+        // never reveals whether a document exists elsewhere in the Library.
+        let context = try authorize(.read)
+        let index = loadedIndex(for: context)
+        guard let path = index.path(forDocumentID: documentID, library: context.library),
+            let normalized = try? context.scope.checkRead(path)
+        else { throw AgentAccessError.notFound }
+        var resolved = request
+        resolved.path = normalized
+        return try index.read(resolved, context: context, reviews: reviews)
     }
 
     /// Call right after this session publishes a document (#133) with that create's authorization, so
@@ -772,6 +787,11 @@ final class AgentMemoryIndex {
     }
 
     // MARK: Read
+
+    /// The Library-relative path the app index records for a native document ID.
+    func path(forDocumentID id: UUID, library: URL) -> String? {
+        documentIDs(library).first { $0.value == id }?.key
+    }
 
     func read(
         _ request: AgentMemoryReadRequest, context: AgentAuthorization, reviews: AgentMemoryReviewLookup

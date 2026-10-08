@@ -361,8 +361,8 @@ final class AgentCreateTests: XCTestCase {
     func testRefusalsUseStableCodesAndCreateNothing() throws {
         let before = try tree()
         let cases: [(AgentCreateRequest, String)] = [
-            (request(key: ""), "invalid_request"),
-            (request(key: "a\nb"), "invalid_request"),
+            (request(key: ""), "invalid_argument"),
+            (request(key: "a\nb"), "invalid_argument"),
             (request(type: "note"), "envelope_invalid_field"),
             (request(title: "Bad: name"), "invalid_path"),
             (request(title: "  "), "invalid_path"),
@@ -480,6 +480,11 @@ final class AgentCreateTests: XCTestCase {
 
     // MARK: Helper
 
+    private func result(_ output: AgentHelper.Output) throws -> [String: Any] {
+        let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any])
+        return try XCTUnwrap(envelope["result"] as? [String: Any], output.stdout)
+    }
+
     func testHelperCreateReplayConflictAndCreateFolder() throws {
         try Data(
             """
@@ -489,13 +494,14 @@ final class AgentCreateTests: XCTestCase {
         let bodyURL = root.appendingPathComponent("body.md")
         try Data("Checkpoint.".utf8).write(to: bodyURL)
         let arguments = [
-            "memory", "create", "--project", "Silkweb", "--key", "cli-1", "--type", "memory", "--title", "Note",
+            "memory", "create", "--grant", "Silkweb", "--idempotency-key", "cli-1", "--type", "memory", "--title",
+            "Note",
             "--agent", "codex", "--session", "s", "--body-file", bodyURL.path, "--client", "codex-cli", "--grants",
             grantsURL.path,
         ]
         let first = AgentHelper.run(arguments, home: root)
         XCTAssertEqual(first.status, 0, first.stderr)
-        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(first.stdout.utf8)) as? [String: Any])
+        let json = try result(first)
         XCTAssertEqual(json["outcome"] as? String, "created")
         XCTAssertEqual(json["replayed"] as? Bool, false)
         XCTAssertEqual(json["path"] as? String, project + "/Memories/Note.md")
@@ -509,26 +515,26 @@ final class AgentCreateTests: XCTestCase {
         stdinArguments[stdinArguments.firstIndex(of: bodyURL.path)!] = "-"
         let replay = AgentHelper.run(stdinArguments, home: root, standardInput: pipe.fileHandleForReading)
         XCTAssertEqual(replay.status, 0, replay.stderr)
-        let replayJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(replay.stdout.utf8)) as? [String: Any])
+        let replayJSON = try result(replay)
         XCTAssertEqual(replayJSON["replayed"] as? Bool, true)
         XCTAssertEqual(replayJSON["outcome"] as? String, "duplicate")
 
         try Data("Other text.".utf8).write(to: bodyURL)
         let conflict = AgentHelper.run(arguments, home: root)
-        XCTAssertEqual(conflict.status, 1)
+        XCTAssertEqual(conflict.status, 65)
         XCTAssertTrue(conflict.stdout.contains("\"idempotency_conflict\""))
         XCTAssertFalse(conflict.stderr.contains("Other text"))
 
         let folder = AgentHelper.run(
             [
-                "memory", "create-folder", "--project", "Silkweb", "--path", project + "/Handoffs/Next",
+                "memory", "create-folder", "--grant", "Silkweb", project + "/Handoffs/Next",
                 "--grants", grantsURL.path,
             ], home: root)
         XCTAssertEqual(folder.status, 0, folder.stderr)
-        XCTAssertTrue(folder.stdout.contains("\"created\" : true"))
+        XCTAssertTrue(folder.stdout.contains("\"created\":true"))
 
-        let missingKey = arguments.filter { $0 != "--key" && $0 != "cli-1" }
-        XCTAssertEqual(AgentHelper.run(missingKey, home: root).status, 64, "required options are checked")
+        let missingTitle = arguments.filter { $0 != "--title" && $0 != "Note" }
+        XCTAssertEqual(AgentHelper.run(missingTitle, home: root).status, 64, "required options are checked")
         XCTAssertEqual(AgentHelper.run(arguments + ["--title", "Twice"], home: root).status, 64)
     }
 }

@@ -438,12 +438,12 @@ final class AgentAccessTests: XCTestCase {
         try writeGrants([grant()])
 
         let output = AgentHelper.run(
-            ["memory", "list", "--project", "Silkweb", "--grants", grantsURL.path], home: root)
+            ["memory", "list", "--grant", "Silkweb", "--grants", grantsURL.path], home: root)
         XCTAssertEqual(output.status, 0, output.stderr)
         XCTAssertFalse(output.stdout.contains("Escaped"), output.stdout)
         let capabilities = AgentHelper.run(
-            ["memory", "capabilities", "--project", "Silkweb", "--grants", grantsURL.path], home: root)
-        XCTAssertTrue(capabilities.stdout.contains(#""project_folder_exists" : false"#), capabilities.stdout)
+            ["memory", "capabilities", "--grant", "Silkweb", "--grants", grantsURL.path], home: root)
+        XCTAssertTrue(capabilities.stdout.contains(#""project_folder_exists":false"#), capabilities.stdout)
         assertRefused(
             try AgentSecureFiles.readDocument(
                 library: library, path: "Memory/Projects/Silkweb/Progress/Escaped.md", maxBytes: 100),
@@ -481,10 +481,11 @@ final class AgentAccessTests: XCTestCase {
     func testHelperReportsRevocationAndLimits() throws {
         var file = AgentGrantFile(grants: [grant(limits: AgentGrantLimits(maxReadBytes: 4096))])
         try file.write(to: grantsURL)
-        let arguments = ["memory", "capabilities", "--project", "Silkweb", "--grants", grantsURL.path]
+        let arguments = ["memory", "capabilities", "--grant", "Silkweb", "--grants", grantsURL.path]
         let output = AgentHelper.run(arguments, home: root)
         XCTAssertEqual(output.status, 0, output.stderr)
-        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any])
+        let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any])
+        let json = try XCTUnwrap(envelope["result"] as? [String: Any])
         XCTAssertEqual(
             json["limits"] as? [String: Int],
             ["max_read_bytes": 4096, "max_results": 200, "requests_per_minute": 120, "max_create_bytes": 262_144])
@@ -492,12 +493,13 @@ final class AgentAccessTests: XCTestCase {
         file.setEnabled(false, project: "Silkweb")
         try file.write(to: grantsURL)
         let revoked = AgentHelper.run(arguments, home: root)
-        XCTAssertEqual(revoked.status, 1)
+        XCTAssertEqual(revoked.status, 77)
         XCTAssertEqual(
             revoked.stdout,
-            "{\n  \"error\" : {\n    \"code\" : \"grant_revoked\",\n    \"title\" : \"No Agent Access\"\n  }\n}\n")
+            #"{"error":{"code":"grant_revoked","message":"Agent access “Silkweb project” was turned off. "#
+                + #"Ask the owner to turn it back on.","title":"No Agent Access"},"ok":false,"version":1}"# + "\n")
         XCTAssertEqual(
             revoked.stderr,
-            "No Agent Access: Agent access “Silkweb project” was turned off. Ask the owner to turn it back on.\n")
+            "silkweb: Agent access “Silkweb project” was turned off. Ask the owner to turn it back on.\n")
     }
 }

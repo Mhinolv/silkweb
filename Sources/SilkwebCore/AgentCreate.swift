@@ -563,6 +563,42 @@ public struct AgentCreateService: Sendable {
         return nil
     }
 
+    // MARK: Activity
+
+    public struct ActivityPage: Equatable, Sendable {
+        /// Newest first, at most the requested limit.
+        public let receipts: [AgentReceipt]
+        /// Matching receipts before the limit.
+        public let total: Int
+    }
+
+    /// This grant's receipts, newest first (`memory activity`). Receipts that name a destination
+    /// outside the read folders are left out before counting. A read: it never takes the gate and
+    /// never writes; a Library without receipts is an empty page.
+    public func activity(since: Date? = nil, limit: Int) -> ActivityPage {
+        guard let root = try? AgentCreateFiles.openRoot(library) else { return ActivityPage(receipts: [], total: 0) }
+        defer { close(root) }
+        guard let events = try? AgentCreateFiles.metadataFolder(root, Self.eventsFolder, create: false) else {
+            return ActivityPage(receipts: [], total: 0)
+        }
+        defer { close(events) }
+        var receipts: [AgentReceipt] = []
+        for name in AgentCreateFiles.names(events) where name.hasPrefix("op_") && name.hasSuffix(".json") {
+            guard let data = AgentCreateFiles.read(events, name, maxBytes: 65_536),
+                let receipt = try? JSONDecoder().decode(AgentReceipt.self, from: data), receipt.grantId == grantId,
+                receipt.destination.map({ readable($0) != nil }) ?? true
+            else { continue }
+            if let since {
+                guard let date = AgentMemorySearchRequest.date(receipt.createdAt), date >= since else { continue }
+            }
+            receipts.append(receipt)
+        }
+        receipts.sort {
+            $0.createdAt != $1.createdAt ? $0.createdAt > $1.createdAt : $0.operationId < $1.operationId
+        }
+        return ActivityPage(receipts: Array(receipts.prefix(max(0, limit))), total: receipts.count)
+    }
+
     // MARK: Receipts and identities
 
     /// The operation ID for a key: a retry finds its receipt by file name, and keys never collide across grants.
