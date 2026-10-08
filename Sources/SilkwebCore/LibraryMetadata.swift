@@ -78,7 +78,9 @@ enum LibraryMetadataStore {
         return (loaded.metadata, loaded.recoveredURL)
     }
 
-    static func loadReportingReset(root: URL) throws -> LoadedLibraryMetadata {
+    /// `repair: false` is the headless read path (#131): an undecodable index reads as empty metadata
+    /// with `wasReset` set, and stays exactly where it is. Recovery belongs to the app.
+    static func loadReportingReset(root: URL, repair: Bool = true) throws -> LoadedLibraryMetadata {
         let (_, file) = try locations(root: root)
         let data: Data
         do {
@@ -95,7 +97,7 @@ enum LibraryMetadataStore {
         } catch {
             let backup = file.deletingLastPathComponent()
                 .appendingPathComponent("index.corrupt-\(UUID().uuidString).json")
-            guard FileManager.default.isWritableFile(atPath: file.deletingLastPathComponent().path) else {
+            guard repair, FileManager.default.isWritableFile(atPath: file.deletingLastPathComponent().path) else {
                 return LoadedLibraryMetadata(metadata: LibraryMetadata(), wasReset: true)
             }
             try FileManager.default.moveItem(at: file, to: backup)

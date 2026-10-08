@@ -241,6 +241,48 @@ How the write path keeps it (built in #130–#133):
 The app keeps its dirty-buffer protection. An external change never replaces unsaved editor text,
 and conflicts keep both versions.
 
+### Coordination (#131)
+
+Cooperating writers (the app and the helper) serialize every **commit** through one gate per
+Library. Scans and reads never wait for it.
+
+- **The gate** is an exclusive `flock` on `<Library>/.silkweb/library.lock` (`LibraryGate`). The
+  lock file holds the holder’s pid while it’s held and is emptied on release. It lives under
+  `.silkweb/`, so nothing appears in the Library tree, and the app’s watcher ignores it.
+- **Held for:** a document replacement from its revision check to its rename, and every
+  read-modify-write of `.silkweb/index.json`: tag edits, new Folder or document, rename, move,
+  Move to Trash and Put Back, and the scan’s index commit. Staging a file happens before the gate.
+- **Scans** enumerate outside the gate. Before writing identities, the app re-reads the index inside
+  the gate. If it changed since the scan started (a **stale snapshot**), the scan runs again from the
+  new index. The third attempt enumerates inside the gate, so a busy Library still converges. Only the
+  app sets an undecodable index aside, and it does that inside the gate too.
+- **Headless reads** (`LibraryScanner.scan(…, writesMetadata: false)`) never rename, repair or write
+  anything, never create `.silkweb/` or the lock file, and never wait for the gate. Identities for
+  documents the index doesn’t know yet are temporary. Index recovery and the recovery strip stay
+  app-only and show on the next app open.
+- **Waiting:** a writer waits up to **5 seconds**. In the app the wait happens on `SaveCoordinator`,
+  never on the main thread. The document stays **Edited** while it waits, and edits typed meanwhile go
+  into the same commit. After the wait the app uses its existing save-failure banner with the detail
+  “Another Silkweb process is updating this library. Silkweb will try again.”, keeps the text, writes
+  the recovery draft and retries autosave on its own. Library operations use their usual failure
+  alert with the same detail. Contention is never a conflict, so a “(Conflict …)” copy is made only
+  when the revision really changed.
+- **Crashes and stale locks:** the kernel releases a `flock` when its process exits or crashes, so
+  a lock can’t outlive its holder, and no lease timeout or lock breaking is needed. A pid left in
+  the lock file means the last holder died while holding the gate. The next holder takes over
+  silently and gets that pid as `staleHolder`, for the helper’s diagnostics only (never in a
+  document). Commits are atomic renames, so a crash leaves the old file or the new one, never a mix.
+- **Where it doesn’t lock:** if `.silkweb/` can’t be created or the volume has no `flock` (a
+  read-only Library, some network volumes), the lease is non-exclusive and the write itself decides.
+  Unqualified filesystems aren’t covered by the guarantee anyway (see [Filesystems](#filesystems)).
+
+Helper errors for coordination (stable `error.code`):
+
+| Code | Title | Message |
+|---|---|---|
+| `library_busy` | Library Busy | Silkweb is updating this library. Try again in a moment. The JSON error includes `retry_after` (seconds). |
+| `stale_snapshot` | Library Changed | The library changed while this request ran. Try again. (Retried internally first, then reported only if the retries run out.) |
+
 ## Safety exclusions
 
 - **Instruction and configuration files can never be created by an agent:** `AGENTS.md`, `AGENT.md`,
@@ -265,8 +307,8 @@ grant’s scope, never the requested target (see [Refusals](#refusals)).
 | 64 | Usage error | Nothing; usage text on stderr |
 
 Error codes: `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `no_grant`,
-`invalid_grant`, `library_not_found`, `library_unreadable`, plus the per-operation
-[refusals](#refusals).
+`invalid_grant`, `library_not_found`, `library_unreadable`, `library_busy`, `stale_snapshot`
+([Coordination](#coordination-131)), plus the per-operation [refusals](#refusals).
 
 ## Helper distribution
 

@@ -49,6 +49,8 @@ struct SnapshotScenario {
     var editImageHeading = false
     /// Marks the active tab's document unsaved just before capture (no text change, so nothing autosaves).
     var dirtyActive = false
+    /// Puts the active document in this save failure just before capture, as a failed commit would (#131 busy gate).
+    var saveFailure: DocumentSaveFailure.Reason? = nil
     /// Hosts the production Settings window content on this tab (1.24) instead of the library window.
     var settingsTab: SettingsTab? = nil
     /// Turns on Focus and/or Typewriter (1.27) with the caret right after `visibleCaret`.
@@ -240,6 +242,8 @@ struct SnapshotScenario {
             name: "new-document-in-folder", folder: "Snapshot Fixtures/Empty Folder",
             document: "Snapshot Fixtures/Empty Document.md", createDocument: true),
         .init(name: "read-only-banner", document: "Snapshot Fixtures/Read Only.md"),
+        // #131: another Silkweb process held the library's gate past the wait; the existing save-failure banner.
+        .init(name: "save-gate-busy", document: pourOver, saveFailure: .libraryBusy),
         .init(name: "tabs-open", document: image, tabs: [pourOver, image, "Snapshot Fixtures/Empty Document.md"]),
         // silkweb-1.65: compact bar, folder tabs with a coral unsaved dot; #91: the path, folded at `…`, in the status bar.
         .init(
@@ -1217,6 +1221,12 @@ final class SnapshotHarness {
                 }
                 if scenario.dirtyActive {
                     workspace.editor.state = .dirty
+                    for _ in 0..<3 { view.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(100)) }
+                }
+                if let reason = scenario.saveFailure, let url = workspace.editor.url {
+                    let failure = DocumentSaveFailure(
+                        reason: reason, folderName: url.deletingLastPathComponent().lastPathComponent)
+                    workspace.editor.state = .failed(error: failure, attempt: 1)
                     for _ in 0..<3 { view.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(100)) }
                 }
                 if scenario.concealedTitlebar {

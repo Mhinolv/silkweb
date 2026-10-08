@@ -367,12 +367,18 @@ public enum AgentHelper {
             let authorization = try session.authorize(operation)
             return operation == .list ? try list(authorization) : capabilities(authorization)
         } catch let failure as AgentAccessError {
-            return Output(
-                status: 1, stdout: json(["error": ["code": failure.code, "title": failure.title]]),
-                stderr: failure.title + ": " + failure.message + "\n")
+            return refusal(failure)
+        } catch let gate as LibraryGateError {
+            return refusal(AgentAccessError(gate))
         } catch {
             return Output(status: 1, stdout: "", stderr: "\(error)\n")
         }
+    }
+
+    static func refusal(_ failure: AgentAccessError) -> Output {
+        var error: [String: Any] = ["code": failure.code, "title": failure.title]
+        if let seconds = failure.retryAfter { error["retry_after"] = seconds }
+        return Output(status: 1, stdout: json(["error": error]), stderr: failure.title + ": " + failure.message + "\n")
     }
 
     static func capabilities(_ context: AgentAuthorization) -> Output {

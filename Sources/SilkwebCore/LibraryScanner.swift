@@ -13,12 +13,34 @@ public enum LibraryScanner {
                 && ["md", "markdown"].contains(url.pathExtension.lowercased()))
     }
 
+    /// Attempts before a scan gives up validating its snapshot and enumerates inside the gate.
+    static let commitAttempts = 3
+
     /// All enumeration, metadata IO and encoding run away from the caller's actor.
+    ///
+    /// `writesMetadata: false` is the headless read path (#131): no index recovery rename, no index
+    /// repair or identity write, no lock file, nothing created. Identities for documents the index
+    /// doesn't know yet are temporary in that snapshot. The app scan enumerates outside the gate and
+    /// commits the index inside it only if the index is still the one it started from (otherwise
+    /// it scans again).
     public static func scan(
-        root: URL, previousSnapshot: LibrarySnapshot? = nil, progress: (@Sendable (Int) -> Void)? = nil
+        root: URL, previousSnapshot: LibrarySnapshot? = nil, writesMetadata: Bool = true,
+        progress: (@Sendable (Int) -> Void)? = nil
+    ) async throws -> LibrarySnapshot {
+        try await scan(
+            root: root, previousSnapshot: previousSnapshot, writesMetadata: writesMetadata, progress: progress,
+            gateTimeout: LibraryGate.defaultTimeout, afterEnumeration: nil)
+    }
+
+    /// `afterEnumeration` is a test seam, called with the attempt number before the index commit.
+    static func scan(
+        root: URL, previousSnapshot: LibrarySnapshot?, writesMetadata: Bool, progress: (@Sendable (Int) -> Void)?,
+        gateTimeout: Duration, afterEnumeration: (@Sendable (Int) -> Void)?
     ) async throws -> LibrarySnapshot {
         let worker = Task.detached(priority: .userInitiated) {
-            try scanOnWorker(root: root, previousSnapshot: previousSnapshot, progress: progress)
+            try scanOnWorker(
+                root: root, previousSnapshot: previousSnapshot, writesMetadata: writesMetadata, progress: progress,
+                gateTimeout: gateTimeout, afterEnumeration: afterEnumeration)
         }
         return try await withTaskCancellationHandler {
             try await worker.value
@@ -73,7 +95,8 @@ public enum LibraryScanner {
     }
 
     private static func scanOnWorker(
-        root: URL, previousSnapshot: LibrarySnapshot?, progress: (@Sendable (Int) -> Void)?
+        root: URL, previousSnapshot: LibrarySnapshot?, writesMetadata: Bool, progress: (@Sendable (Int) -> Void)?,
+        gateTimeout: Duration, afterEnumeration: (@Sendable (Int) -> Void)?
     ) throws -> LibrarySnapshot {
         precondition(!Thread.isMainThread, "Library enumeration must run off the main thread")
         try LibraryMetadataStore.rejectLink(root.standardizedFileURL)
@@ -82,8 +105,79 @@ public enum LibraryScanner {
         guard try root.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else {
             throw LibraryError.invalidRoot
         }
-        let loaded = try LibraryMetadataStore.loadReportingReset(root: root)
-        let previous = loaded.metadata
+        let gate = LibraryGate(root: root)
+        var recoveredURL: URL?
+        var wasReset = false
+        /// A pure read. Only the app sets an undecodable index aside, and only inside the gate.
+        func readIndex(holdingGate: Bool) throws -> LoadedLibraryMetadata {
+            var loaded = try LibraryMetadataStore.loadReportingReset(root: root, repair: false)
+            if loaded.wasReset && writesMetadata {
+                let repair = { try LibraryMetadataStore.loadReportingReset(root: root) }
+                do {
+                    loaded = try holdingGate ? repair() : gate.withLease(timeout: gateTimeout, repair)
+                } catch is LibraryGateError {}
+            }
+            recoveredURL = recoveredURL ?? loaded.recoveredURL
+            wasReset = wasReset || loaded.wasReset
+            return loaded
+        }
+        for attempt in 1...commitAttempts {
+            // The last attempt enumerates inside the gate, so a library under steady change still converges.
+            var lease: LibraryGate.Lease?
+            var gateBusy = false
+            if writesMetadata && attempt == commitAttempts {
+                do { lease = try gate.acquire(timeout: gateTimeout) } catch is LibraryGateError { gateBusy = true }
+            }
+            defer { lease?.release() }
+            let read = try readIndex(holdingGate: lease != nil)
+            let previous = read.metadata
+            try Task.checkCancellation()
+            let (folders, documents, metadata) = try enumerate(
+                root: root, previous: previous, previousSnapshot: previousSnapshot, progress: progress)
+            afterEnumeration?(attempt)
+            let locations = try LibraryMetadataStore.locations(root: root)
+            let metadataTarget =
+                FileManager.default.fileExists(atPath: locations.file.path)
+                ? locations.file
+                : (FileManager.default.fileExists(atPath: locations.directory.path) ? locations.directory : root)
+            var isReadOnly =
+                !FileManager.default.isWritableFile(atPath: root.path)
+                || !FileManager.default.isWritableFile(atPath: metadataTarget.path)
+            if writesMetadata && metadata != previous && !isReadOnly && !gateBusy {
+                do {
+                    let held = try lease ?? gate.acquire(timeout: gateTimeout)
+                    defer { if lease == nil { held.release() } }
+                    // Snapshot validation: another writer committed since this scan read the index, so
+                    // committing now would drop its tags or IDs. Scan again from the current index.
+                    // A writer that doesn't take the gate (an older build) can still change it on the
+                    // last attempt; then this scan is shown and left for the next refresh to commit.
+                    let current = try LibraryMetadataStore.loadReportingReset(root: root, repair: false)
+                    // An index that still can't be decoded (and couldn't be set aside) is unchanged,
+                    // not stale: the write below fails as before and marks the library read-only.
+                    let stale = current.wasReset != read.wasReset || current.metadata != previous
+                    if stale && attempt < commitAttempts { continue }
+                    if !stale { try LibraryMetadataStore.save(metadata, root: root) }
+                } catch let error as NSError
+                    where error.domain == NSCocoaErrorDomain
+                    && [NSFileWriteNoPermissionError, NSFileWriteVolumeReadOnlyError].contains(error.code)
+                {
+                    isReadOnly = true
+                } catch is LibraryGateError {
+                    // Busy for the whole wait: show this scan; the next refresh commits its identities.
+                }
+            }
+            return LibrarySnapshot(
+                rootURL: root, folders: folders, documents: documents,
+                presentation: LibraryPresentation(folders: folders, documents: documents),
+                metadata: metadata, recoveredMetadataURL: recoveredURL, isReadOnly: isReadOnly,
+                metadataWasReset: wasReset)
+        }
+        preconditionFailure("Unreachable: the last scan attempt always returns")
+    }
+
+    private static func enumerate(
+        root: URL, previous: LibraryMetadata, previousSnapshot: LibrarySnapshot?, progress: (@Sendable (Int) -> Void)?
+    ) throws -> (folders: [LibraryFolder], documents: [LibraryDocument], metadata: LibraryMetadata) {
         var metadata = previous
         metadata.formatVersion = LibraryMetadata.currentVersion
         metadata.IDsByPath = [:]
@@ -217,29 +311,6 @@ public enum LibraryScanner {
             return updated
         }
         try Task.checkCancellation()
-        metadata = TagEditor.pruning(metadata)
-        let locations = try LibraryMetadataStore.locations(root: root)
-        let metadataTarget =
-            FileManager.default.fileExists(atPath: locations.file.path)
-            ? locations.file
-            : (FileManager.default.fileExists(atPath: locations.directory.path) ? locations.directory : root)
-        var isReadOnly =
-            !FileManager.default.isWritableFile(atPath: root.path)
-            || !FileManager.default.isWritableFile(atPath: metadataTarget.path)
-        if metadata != previous && !isReadOnly {
-            do {
-                try LibraryMetadataStore.save(metadata, root: root)
-            } catch let error as NSError
-                where error.domain == NSCocoaErrorDomain
-                && [NSFileWriteNoPermissionError, NSFileWriteVolumeReadOnlyError].contains(error.code)
-            {
-                isReadOnly = true
-            }
-        }
-        return LibrarySnapshot(
-            rootURL: root, folders: folders, documents: documents,
-            presentation: LibraryPresentation(folders: folders, documents: documents),
-            metadata: metadata, recoveredMetadataURL: loaded.recoveredURL, isReadOnly: isReadOnly,
-            metadataWasReset: loaded.wasReset)
+        return (folders, documents, TagEditor.pruning(metadata))
     }
 }

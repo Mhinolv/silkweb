@@ -199,6 +199,9 @@ final class LibraryWatcherTests: XCTestCase {
         XCTAssertFalse(
             LibraryWatcher.isLibraryChange(
                 ["/Volumes/Notes/Library/.silkweb", "/Volumes/Notes/Library/.silkweb/.dat.nosync1.x"], root: root))
+        // #131: the cross-process gate's lock file is rewritten on every commit and must never rescan.
+        XCTAssertEqual(LibraryGate(root: URL(fileURLWithPath: root)).lockURL.path, root + "/.silkweb/library.lock")
+        XCTAssertFalse(LibraryWatcher.isLibraryChange([root + "/.silkweb/library.lock"], root: root))
         XCTAssertTrue(
             LibraryWatcher.isLibraryChange(
                 ["/Volumes/Notes/Library/.silkweb/x", "/Volumes/Notes/Library/a.md"], root: root))

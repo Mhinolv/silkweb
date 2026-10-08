@@ -96,8 +96,12 @@ public struct LibraryChangeSet: Equatable, Sendable {
 /// Batch moves also stage supported link rewrites. Use one instance per library.
 public actor LibraryMutations {
     private let root: URL
+    /// Every commit that reads and then writes the index (or checks then changes the tree) holds
+    /// the Library's cross-process gate (#131). Planning and previews never wait for it.
+    private let gate: LibraryGate
+    private let gateTimeout: Duration
 
-    public init(root: URL) throws {
+    public init(root: URL, gateTimeout: Duration = LibraryGate.defaultTimeout) throws {
         guard root.isFileURL else { throw LibraryError.invalidRoot }
         try LibraryMetadataStore.rejectLink(root.standardizedFileURL)
         let canonical = root.standardizedFileURL.resolvingSymlinksInPath()
@@ -105,6 +109,13 @@ public actor LibraryMutations {
             throw LibraryError.invalidRoot
         }
         self.root = canonical
+        gate = LibraryGate(root: canonical)
+        self.gateTimeout = gateTimeout
+    }
+
+    /// A busy gate surfaces through `perform` as the operation's failure, with the busy detail line.
+    private func gated<T>(_ body: () throws -> T) throws -> T {
+        try gate.withLease(timeout: gateTimeout, body)
     }
 
     public func createFolder(named name: String, in parentPath: String = "") throws -> LibraryChangeSet {
@@ -113,30 +124,34 @@ public actor LibraryMutations {
             let parent = try directory(parentPath)
             let path = joined(parentPath, name)
             let destination = parent.appendingPathComponent(name)
-            let (metadata, _) = try LibraryMetadataStore.load(root: root)
-            // mkdir is exclusive, including when the existing item is a file or symlink.
-            guard mkdir(destination.path, 0o755) == 0 else { throw operationError(path, isFolder: true) }
-            let changes = LibraryChangeSet(changes: [
-                LibraryPathChange(id: UUID(), oldPath: nil, newPath: path, isFolder: true)
-            ])
-            try persist(changes, metadata: metadata, original: nil, current: destination)
-            return changes
+            return try gated {
+                let (metadata, _) = try LibraryMetadataStore.load(root: root)
+                // mkdir is exclusive, including when the existing item is a file or symlink.
+                guard mkdir(destination.path, 0o755) == 0 else { throw operationError(path, isFolder: true) }
+                let changes = LibraryChangeSet(changes: [
+                    LibraryPathChange(id: UUID(), oldPath: nil, newPath: path, isFolder: true)
+                ])
+                try persist(changes, metadata: metadata, original: nil, current: destination)
+                return changes
+            }
         }
     }
 
     /// Used only by Undo New Folder. rmdir atomically refuses nonempty folders.
     public func removeEmptyFolder(_ path: String) throws {
         let source = try item(path)
-        let (metadata, _) = try LibraryMetadataStore.load(root: root)
-        guard rmdir(source.path) == 0 else { throw operationError(path, isFolder: true) }
-        var updated = metadata
-        updated.IDsByPath.removeValue(forKey: path)
-        do { try LibraryMetadataStore.save(updated, root: root) } catch {
-            // Restore the empty folder if its index could not be committed.
-            guard mkdir(source.path, 0o755) == 0 else {
-                throw LibraryMutationError.rollbackFailed(original: path, current: path)
+        try gated {
+            let (metadata, _) = try LibraryMetadataStore.load(root: root)
+            guard rmdir(source.path) == 0 else { throw operationError(path, isFolder: true) }
+            var updated = metadata
+            updated.IDsByPath.removeValue(forKey: path)
+            do { try LibraryMetadataStore.save(updated, root: root) } catch {
+                // Restore the empty folder if its index could not be committed.
+                guard mkdir(source.path, 0o755) == 0 else {
+                    throw LibraryMutationError.rollbackFailed(original: path, current: path)
+                }
+                throw error
             }
-            throw error
         }
     }
 
@@ -151,17 +166,19 @@ public actor LibraryMutations {
             let parent = try directory(parentPath)
             let path = joined(parentPath, name)
             let destination = parent.appendingPathComponent(name)
-            let (metadata, _) = try LibraryMetadataStore.load(root: root)
             // Publish the complete UTF-8 file atomically, without replacing a competing file.
             let staging = parent.appendingPathComponent(".silkweb-create-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: staging) }
             try Data(text.utf8).write(to: staging, options: .withoutOverwriting)
-            try exclusiveRename(staging, destination, path: path)
-            let changes = LibraryChangeSet(changes: [
-                LibraryPathChange(id: UUID(), oldPath: nil, newPath: path, isFolder: false)
-            ])
-            try persist(changes, metadata: metadata, original: nil, current: destination)
-            return changes
+            return try gated {
+                let (metadata, _) = try LibraryMetadataStore.load(root: root)
+                try exclusiveRename(staging, destination, path: path)
+                let changes = LibraryChangeSet(changes: [
+                    LibraryPathChange(id: UUID(), oldPath: nil, newPath: path, isFolder: false)
+                ])
+                try persist(changes, metadata: metadata, original: nil, current: destination)
+                return changes
+            }
         }
     }
 
@@ -398,14 +415,16 @@ public actor LibraryMutations {
         let newPath = joined(parentPath, name)
         if path == newPath { return LibraryChangeSet(changes: []) }
         let destination = parent.appendingPathComponent(name)
-        let (metadata, _) = try LibraryMetadataStore.load(root: root)
-        try relocateOnDisk(source, destination, oldPath: path, newPath: newPath)
-        let changes = LibraryChangeSet(changes: [
-            LibraryPathChange(
-                id: metadata.IDsByPath[path] ?? UUID(), oldPath: path, newPath: newPath, isFolder: isFolder)
-        ])
-        try persist(changes, metadata: metadata, original: source, current: destination)
-        return changes
+        return try gated {
+            let (metadata, _) = try LibraryMetadataStore.load(root: root)
+            try relocateOnDisk(source, destination, oldPath: path, newPath: newPath)
+            let changes = LibraryChangeSet(changes: [
+                LibraryPathChange(
+                    id: metadata.IDsByPath[path] ?? UUID(), oldPath: path, newPath: newPath, isFolder: isFolder)
+            ])
+            try persist(changes, metadata: metadata, original: source, current: destination)
+            return changes
+        }
     }
 
     private func relocateOnDisk(_ source: URL, _ destination: URL, oldPath: String, newPath: String) throws {
@@ -672,7 +691,12 @@ extension LibraryMutations {
 
     /// One commit point for the index; on any error restore rewritten bodies and
     /// reverse all completed renames. An immutable plan also supplies guarded undo.
+    /// The plan's staleness checks run inside the gate, so they validate the index it commits over.
     public func executeMove(_ plan: MovePlan) throws -> LibraryChangeSet {
+        try gated { try executeMoveHoldingGate(plan) }
+    }
+
+    private func executeMoveHoldingGate(_ plan: MovePlan) throws -> LibraryChangeSet {
         guard plan.root == root, try moveInventory().managed == plan.inventory,
             try LibraryMetadataStore.load(root: root).0 == plan.metadata
         else { throw MovePlanError.changed }
