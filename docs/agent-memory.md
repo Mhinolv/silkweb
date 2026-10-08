@@ -2,7 +2,7 @@
 
 ```text
 contract_version: 1
-Last reviewed: 2026-10-08 (#136)
+Last reviewed: 2026-10-08 (#138)
 ```
 
 This is the source of truth for how coding agents (Claude Code, Codex, Gemini and other local MCP
@@ -743,6 +743,14 @@ args = ["mcp", "--grant", "Silkweb"]
 
 Minimum client versions aren't pinned. The exact Claude Code, Codex and Gemini CLI versions qualified
 when this shipped are recorded in the #139 matrix.
+
+### Agent packages (#138)
+
+The skill, instruction-file blocks and per-client install, update and uninstall steps live in
+[`agent-packages/`](../agent-packages/README.md). One workflow, `agent-packages/shared/silkweb-memory.md`,
+is copied byte for byte into the Claude Code, Codex and Gemini CLI skills by `scripts/agent_packages.sh`,
+and `AgentPackagesTests` fails when a copy drifts. Silkweb ships no command that creates grants, because
+an agent could run it to widen its own access; the owner edits `agent-grants.json` from the template there.
 
 ### Protocol
 
