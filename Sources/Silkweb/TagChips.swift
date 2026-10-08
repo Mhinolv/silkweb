@@ -4,6 +4,8 @@ import SwiftUI
 
 struct DocumentInfo: View {
     let workspace: LibraryWorkspace
+    /// #137: the selected Document's agent provenance, loaded off the main thread.
+    @State private var provenance: LoadedAgentProvenance?
     var body: some View {
         if workspace.tagDocumentIDs.isEmpty {
             ContentUnavailableView("No Document Selected", systemImage: "doc.text")
@@ -50,8 +52,17 @@ struct DocumentInfo: View {
                         if let date = document.modified {
                             Text("Modified").font(.headline); Text(date.formatted()).font(.caption)
                         }
+                        // #137: only Documents with a receipt or an envelope agent claim show anything here.
+                        if let provenance, provenance.path == document.relativePath,
+                            let value = provenance.provenance
+                        {
+                            AgentProvenanceSection(provenance: value, modified: document.modified)
+                        }
                     }
                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .modifier(
+                        AgentProvenanceLoader(
+                            workspace: workspace, document: workspace.selectedDocument, loaded: $provenance))
             }
         }
     }

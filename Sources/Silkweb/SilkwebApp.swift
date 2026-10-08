@@ -127,6 +127,9 @@ struct WorkspaceCommands: Commands {
             Button("Folders") { workspace.focus(0) }.keyboardShortcut("1", modifiers: [.command, .option])
             Button("Documents") { workspace.focus(1) }.keyboardShortcut("2", modifiers: [.command, .option])
             Button("Editor") { workspace.focus(2) }.keyboardShortcut("3", modifiers: [.command, .option])
+            Divider()
+            // #137: no shortcut; selects the sidebar row as a click does, and is disabled while it's hidden.
+            Button("Agent Activity") { workspace.selectAgentActivity() }.disabled(!state.hasAgentActivity)
         }
     }
 }
