@@ -593,6 +593,36 @@ document. `duplicate` is the outcome a replay reports; the stored receipt keeps 
 | `write_failed` | Silkweb couldn’t finish writing to the Library. Nothing was replaced. Try again with the same key. |
 | `invalid_request` | The request key must be 1 to 200 characters, without control characters. (Also: unreadable or non-UTF-8 text.) |
 
+## In the app (#137)
+
+The app shows agent work quietly. A background create never moves focus, selection, the caret, scroll
+or tabs. It never opens anything, and it never posts an announcement, sound, badge or banner.
+
+- **Agent Activity** is a sidebar row under **All Documents**, with the symbol `clock.arrow.circlepath` and
+  a `(n)` count of agent-created Documents that still exist. The row appears only after a receipt with
+  outcome `created` or `reconciled` exists, so a Library that agents never used looks the same as before.
+  You can't rename it, drop onto it, or open a context menu on it. **Go ▸ Agent Activity** (no shortcut)
+  selects it, and the menu item is disabled while the row is hidden.
+- The list in this scope shows the usual Document rows, newest receipt `createdAt` first, whatever Sort
+  By says. The second line reads `date · agent · location`, and the location truncates first. Filter by
+  Tag still applies. A pinned strip reads “Agent activity · N documents” and has an **All Agents ▾**
+  pull-down that lists each claimed `agent` with its count. The choice lasts for the window session
+  only. A receipt finds its Document by `documentId`, so renames and moves are followed. It falls back
+  to `destination` only when the index never learned that identity.
+- **Document Info ▸ Agent** appears for a Document that has a receipt or an envelope `agent` claim:
+  - Agent: “Agent-created · claude-code”, or “claude-code (claimed)” when there's no receipt.
+  - Session (claimed by the agent).
+  - Client.
+  - Operation: monospaced and selectable, or “No Silkweb receipt”.
+  - Created.
+  - **Since creation**: “Unchanged” or “Edited after creation”. It compares the current bytes with the
+    receipt's `contentDigest`, so a rename or move isn't an edit. It never says who edited.
+  - Review: “Not reviewed”, display only until #140.
+- **Refresh:** the watcher ignores `.silkweb/`, except that changes under `.silkweb/agent-events/` reload
+  the receipts on their own debounce. That reload never rescans the Library and never writes anything,
+  so it can't feed back into the index, search or autosave. The new Document itself arrives through the
+  normal external-change refresh. The two can land in either order.
+
 ## Safety exclusions
 
 - **Instruction and configuration files can never be created by an agent:** `AGENTS.md`, `AGENT.md`,

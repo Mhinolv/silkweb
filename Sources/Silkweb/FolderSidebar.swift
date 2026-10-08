@@ -12,6 +12,8 @@ struct FolderSidebar: NSViewRepresentable {
         let title: String
         var tag: LibraryTag?
         var isTagsGroup = false
+        /// #137: the virtual Agent Activity row under All Documents.
+        var isAgentActivity = false
         var children: [Item] = [] { didSet { for child in children { child.parent = self } } }
         /// Thread guides walk up through parents (silkweb-1.63).
         weak var parent: Item?
@@ -83,7 +85,10 @@ struct FolderSidebar: NSViewRepresentable {
 
     static func update(_ view: NSScrollView, coordinator: Coordinator, snapshot: LibrarySnapshot) {
         let workspace = coordinator.workspace
-        if coordinator.rootURL != snapshot.rootURL || coordinator.revision != workspace.revision {
+        if coordinator.rootURL != snapshot.rootURL || coordinator.revision != workspace.revision
+            || coordinator.agentVisible != workspace.hasAgentActivity
+            || coordinator.agentCount != workspace.agentEntries.count
+        {
             coordinator.revision = workspace.revision
             if coordinator.configure(snapshot) { coordinator.restore() } else { coordinator.updateVisibleCounts() }
         }
@@ -101,7 +106,9 @@ struct FolderSidebar: NSViewRepresentable {
             coordinator.restore()
         }
         // Scope changes made outside the sidebar (the toolbar breadcrumb, 1.65) move the selected row too.
-        if coordinator.selectedFolder != .some(workspace.session.selectedFolder) {
+        if coordinator.selectedFolder != .some(workspace.session.selectedFolder)
+            || coordinator.agentScope != workspace.agentScope
+        {
             coordinator.selectScope()
         }
         coordinator.updateCurrentScope()
@@ -119,6 +126,12 @@ struct FolderSidebar: NSViewRepresentable {
         var itemsByPath: [String: Item] = [:]
         var rootURL: URL?
         var tagsGroup: Item?
+        var agentItem: Item?
+        /// The Agent Activity row is shown, and its `(n)`.
+        private(set) var agentVisible = false
+        private(set) var agentCount = 0
+        /// Whether the selected row last followed the Agent Activity scope.
+        var agentScope = false
         var itemsByTag: [UUID: Item] = [:]
         var tagsExpanded = true
         var selectedTagID: UUID?
@@ -162,15 +175,29 @@ struct FolderSidebar: NSViewRepresentable {
             counts = snapshot.presentation.counts
             totalCount = snapshot.documents.count
             tagCounts = workspace.tagCounts
-            guard rootURL != snapshot.rootURL || folders != snapshot.folders || tags != workspace.tags else {
+            agentCount = workspace.agentEntries.count
+            let agentVisible = workspace.hasAgentActivity
+            guard
+                rootURL != snapshot.rootURL || folders != snapshot.folders || tags != workspace.tags
+                    || self.agentVisible != agentVisible
+            else {
                 return false
             }
+            self.agentVisible = agentVisible
             tags = workspace.tags
             rootURL = snapshot.rootURL
             folders = snapshot.folders
             itemsByPath = [:]
             let all = Item(folder: nil, title: "All Documents")
             roots = [all]
+            agentItem = nil
+            // Hidden until a receipt published a Document: a Library without agents looks as it always did.
+            if agentVisible {
+                let item = Item(folder: nil, title: "Agent Activity")
+                item.isAgentActivity = true
+                agentItem = item
+                roots.append(item)
+            }
             var byID: [UUID: Item] = [:]
             for folder in snapshot.folders {
                 let item = Item(folder: folder, title: folder.name)
@@ -210,6 +237,13 @@ struct FolderSidebar: NSViewRepresentable {
             }
         }
         private func applyCount(to cell: SidebarFolderCell, item: Item) {
+            if item.isAgentActivity {
+                cell.countBadge.stringValue =
+                    FolderDocumentCount(direct: agentCount, recursive: agentCount).inlineSuffix
+                cell.setAccessibilityValue(CountPresentation.label(agentCount, unit: .document) + currentSuffix(item))
+                cell.toolTip = nil
+                return
+            }
             if item.isTagsGroup || item.tag != nil {
                 let count = item.tag.map { tagCounts[$0.id] ?? 0 } ?? tags.count
                 cell.countBadge.stringValue = FolderDocumentCount(direct: count, recursive: count).inlineSuffix
@@ -230,7 +264,8 @@ struct FolderSidebar: NSViewRepresentable {
 
         /// The list's scope: a selected tag, else the selected folder, else All Documents.
         func scopeItem() -> Item? {
-            workspace.session.selectedTagID.flatMap { itemsByTag[$0] }
+            if workspace.agentScope, let agentItem { return agentItem }
+            return workspace.session.selectedTagID.flatMap { itemsByTag[$0] }
                 ?? (workspace.session.selectedFolder.flatMap { itemsByPath[$0] } ?? roots.first)
         }
 
@@ -280,6 +315,7 @@ struct FolderSidebar: NSViewRepresentable {
             if let item { select(item) }
             if item == nil { outline.deselectAll(nil) }
             selectedFolder = .some(workspace.session.selectedFolder)
+            agentScope = workspace.agentScope
             restoring = false
             updateCurrentScope()
         }
@@ -287,6 +323,7 @@ struct FolderSidebar: NSViewRepresentable {
         /// Selects the scope's row without reloading; a no-op when it is already selected.
         func selectScope() {
             selectedFolder = .some(workspace.session.selectedFolder)
+            agentScope = workspace.agentScope
             guard let outline, let item = scopeItem(), outline.item(atRow: outline.selectedRow) as? Item !== item else {
                 return
             }
@@ -426,8 +463,10 @@ struct FolderSidebar: NSViewRepresentable {
             }
             cell.textField?.stringValue = item.title
             let symbol =
-                item.tag != nil || item.isTagsGroup
-                ? "tag" : item.folder.map { $0.parentID == nil ? "books.vertical" : "folder" } ?? "doc.on.doc"
+                item.isAgentActivity
+                ? "clock.arrow.circlepath"
+                : item.tag != nil || item.isTagsGroup
+                    ? "tag" : item.folder.map { $0.parentID == nil ? "books.vertical" : "folder" } ?? "doc.on.doc"
             cell.imageView?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
             cell.configureCluster(unreadable: item.folder?.isUnreadable == true, renaming: cell.renameField != nil)
             let label = item.folder.map { "\(item.title), \($0.parentID == nil ? "library" : "folder")" } ?? item.title
@@ -655,7 +694,9 @@ struct FolderSidebar: NSViewRepresentable {
             guard !restoring, let outline, let item = outline.item(atRow: outline.selectedRow) as? Item else { return }
             if item.isTagsGroup { return }
             let generation = workspace.navigationGeneration
-            if let tag = item.tag {
+            if item.isAgentActivity {
+                workspace.selectAgentActivity()
+            } else if let tag = item.tag {
                 workspace.selectTag(tag.id)
             } else {
                 workspace.selectFolder(item.folder?.relativePath)
