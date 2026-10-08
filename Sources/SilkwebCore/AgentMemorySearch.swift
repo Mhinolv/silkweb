@@ -197,7 +197,7 @@ extension AgentAccessError {
         code: "unreadable", title: "Can’t Open Document", message: "That document isn’t UTF-8 text.")
 
     /// #132 reading rules: a malformed or newer envelope is reported with no document text.
-    static func envelope(_ error: MemoryEnvelopeError, name: String) -> Self {
+    static func unreadableEnvelope(_ error: MemoryEnvelopeError, name: String) -> Self {
         Self(code: error.code, title: "Can’t Read Front Matter", message: error.message(name: name))
     }
 }
@@ -790,7 +790,7 @@ final class AgentMemoryIndex {
         case .envelope(let envelope, let range):
             parsed = envelope
             body = String(text[range])
-        case .failure(let error): throw AgentAccessError.envelope(error, name: title)
+        case .failure(let error): throw AgentAccessError.unreadableEnvelope(error, name: title)
         }
         var offset = 0
         if let cursor = request.cursor {

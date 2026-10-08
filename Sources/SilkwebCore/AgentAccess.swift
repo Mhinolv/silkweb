@@ -15,6 +15,7 @@ public struct AgentGrantLimits: Codable, Equatable, Sendable {
     public static let defaultMaxReadBytes = 1_048_576
     public static let defaultMaxResults = 200
     public static let defaultRequestsPerMinute = 120
+    public static let defaultMaxCreateBytes = 262_144
 
     /// Largest document a read returns.
     public var maxReadBytes: Int
@@ -22,20 +23,24 @@ public struct AgentGrantLimits: Codable, Equatable, Sendable {
     public var maxResults: Int
     /// Operations per rolling minute for one helper session.
     public var requestsPerMinute: Int
+    /// Largest document a create may publish, envelope included (#133).
+    public var maxCreateBytes: Int
 
     public init(
         maxReadBytes: Int = defaultMaxReadBytes, maxResults: Int = defaultMaxResults,
-        requestsPerMinute: Int = defaultRequestsPerMinute
+        requestsPerMinute: Int = defaultRequestsPerMinute, maxCreateBytes: Int = defaultMaxCreateBytes
     ) {
         self.maxReadBytes = maxReadBytes
         self.maxResults = maxResults
         self.requestsPerMinute = requestsPerMinute
+        self.maxCreateBytes = maxCreateBytes
     }
 
     private enum CodingKeys: String, CodingKey {
         case maxReadBytes = "max_read_bytes"
         case maxResults = "max_results"
         case requestsPerMinute = "requests_per_minute"
+        case maxCreateBytes = "max_create_bytes"
     }
 
     public init(from decoder: Decoder) throws {
@@ -47,6 +52,7 @@ public struct AgentGrantLimits: Codable, Equatable, Sendable {
         maxReadBytes = positive(.maxReadBytes, Self.defaultMaxReadBytes)
         maxResults = positive(.maxResults, Self.defaultMaxResults)
         requestsPerMinute = positive(.requestsPerMinute, Self.defaultRequestsPerMinute)
+        maxCreateBytes = positive(.maxCreateBytes, Self.defaultMaxCreateBytes)
     }
 }
 
@@ -113,6 +119,33 @@ public struct AgentAccessError: Error, Equatable, Sendable {
             code: "too_large", title: "Document Too Large",
             message: "That document is larger than this grant’s read limit ("
                 + ByteCountFormatter.string(fromByteCount: Int64(limit), countStyle: .file) + ").")
+    }
+
+    /// A create larger than the grant's `max_create_bytes`. Nothing was created.
+    public static func createTooLarge(limit: Int) -> Self {
+        Self(
+            code: "too_large", title: "Document Too Large",
+            message: "This document is larger than the grant allows (\(max(1, limit / 1024)) KB). Nothing was created.")
+    }
+
+    /// The idempotency key already created a document from a different payload (#133). Nothing was changed.
+    public static let idempotencyConflict = Self(
+        code: "idempotency_conflict", title: "Request Key Already Used",
+        message: "This request key was already used with different content. Nothing was changed. Use a new key.")
+
+    /// A create the helper couldn't finish writing. Nothing was replaced; a retry with the same key
+    /// either creates the document or returns the one already published.
+    public static let writeFailed = Self(
+        code: "write_failed", title: "Can’t Create Document",
+        message: "Silkweb couldn’t finish writing to the Library. Nothing was replaced. Try again with the same key.")
+
+    public static func invalidRequest(_ message: String) -> Self {
+        Self(code: "invalid_request", title: "Invalid Request", message: message)
+    }
+
+    /// The envelope codes from #132, named after the document's title, never its text.
+    public static func envelope(_ error: MemoryEnvelopeError, name: String) -> Self {
+        Self(code: error.code, title: "Invalid Front Matter", message: error.message(name: name))
     }
 
     /// Only reachable for in-scope targets: out-of-scope paths are refused before the disk is touched.

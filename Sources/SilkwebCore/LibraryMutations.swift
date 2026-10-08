@@ -321,11 +321,16 @@ public actor LibraryMutations {
             var candidate = base
             var number = 2
             while try entryExists(parent.appendingPathComponent(candidate)) {
-                candidate = try Self.validateName(stem + " \(number)" + (ext.isEmpty ? "" : "." + ext))
+                candidate = try Self.validateName(Self.numbered(stem, number, ext))
                 number += 1
             }
             return candidate
         }
+    }
+
+    /// “Name 2.md”: the collision suffix shared by every create path, including agent creates (#133).
+    static func numbered(_ stem: String, _ number: Int, _ ext: String) -> String {
+        stem + " \(number)" + (ext.isEmpty ? "" : "." + ext)
     }
 
     private func entryExists(_ url: URL) throws -> Bool {
