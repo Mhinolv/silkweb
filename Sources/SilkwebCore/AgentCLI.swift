@@ -21,6 +21,8 @@ public enum AgentHelper {
     public static let help = """
         USAGE
           silkweb memory <command> [arguments] [options]
+          silkweb mcp [--grant G] [--agent A] [--session S] [--client C]
+                                        Stdio MCP server for agents (stdout is MCP only)
 
         COMMANDS
           capabilities                  This grant’s scope, limits and commands
@@ -246,7 +248,7 @@ public enum AgentHelper {
     }
 
     /// Library-relative paths and titles are compared and stored in NFC.
-    private static func nfc(_ text: String) -> String { text.precomposedStringWithCanonicalMapping }
+    static func nfc(_ text: String) -> String { text.precomposedStringWithCanonicalMapping }
 
     // MARK: Commands
 
@@ -338,10 +340,28 @@ public enum AgentHelper {
     static func create(_ context: AgentAuthorization, invocation: Invocation, standardInput: FileHandle) throws
         -> (AgentJSON, String?)
     {
-        let value = invocation.value
-        var type = value("type")
+        let (type, folder) = try destination(invocation)
+        let limit = context.grant.limits.maxCreateBytes
+        let source = invocation.value("body-file") ?? "-"
+        let handle = source == "-" ? standardInput : FileHandle(forReadingAtPath: source)
+        guard let handle, let data = try? handle.read(upToCount: limit + 1) ?? Data() else {
+            throw AgentAccessError.invalidRequest("The document text couldn’t be read.")
+        }
+        guard data.count <= limit else { throw AgentAccessError.createTooLarge(limit: limit) }
+        guard let body = String(data: data, encoding: .utf8) else {
+            throw AgentAccessError.invalidRequest("The document text must be UTF-8.")
+        }
+        let created = try publish(
+            context, invocation: invocation, type: type, folder: folder, body: body, keyPrefix: "cli-")
+        return (created.json, created.note)
+    }
+
+    /// The envelope type and the Library-relative Folder (`nil` for the type's entry folder) from
+    /// `--folder` and `--type`.
+    static func destination(_ invocation: Invocation) throws -> (type: String, folder: String?) {
+        var type = invocation.value("type")
         var folder: String?
-        if let given = value("folder").map(nfc) {
+        if let given = invocation.value("folder").map(nfc) {
             if let keywordType = folderKeywords[given.lowercased()] {
                 if let type, let entry = AgentCreateService.entryFolder(for: type),
                     entry.lowercased() != given.lowercased()
@@ -354,20 +374,19 @@ public enum AgentHelper {
             }
         }
         guard let type else { throw usage("“memory create” needs --folder or --type.") }
+        return (type, folder)
+    }
 
-        let limit = context.grant.limits.maxCreateBytes
-        let source = value("body-file") ?? "-"
-        let handle = source == "-" ? standardInput : FileHandle(forReadingAtPath: source)
-        guard let handle, let data = try? handle.read(upToCount: limit + 1) ?? Data() else {
-            throw AgentAccessError.invalidRequest("The document text couldn’t be read.")
-        }
-        guard data.count <= limit else { throw AgentAccessError.createTooLarge(limit: limit) }
-        guard let body = String(data: data, encoding: .utf8) else {
-            throw AgentAccessError.invalidRequest("The document text must be UTF-8.")
-        }
+    /// The create itself, shared with `memory_create` (#136): the same request, recovery and result.
+    /// `note` is the stderr line about recovered creates, if any.
+    static func publish(
+        _ context: AgentAuthorization, invocation: Invocation, type: String, folder: String?, body: String,
+        keyPrefix: String
+    ) throws -> (json: AgentJSON, note: String?, result: AgentCreateResult) {
+        let value = invocation.value
         let request = AgentCreateRequest(
             // Without a key a retry can't be recognized, so each run creates a new document.
-            idempotencyKey: value("idempotency-key") ?? "cli-" + UUID().uuidString, type: type,
+            idempotencyKey: value("idempotency-key") ?? keyPrefix + UUID().uuidString, type: type,
             title: nfc(value("title") ?? ""), body: body, agent: value("agent") ?? "", session: value("session") ?? "",
             client: value("client") ?? "cli", folder: folder, status: value("status"),
             observedAt: value("observed-at"), reviewAfter: value("review-after"),
@@ -382,9 +401,9 @@ public enum AgentHelper {
             "receipt": receipt,
         ]
         let json = AgentJSON(sortingKeysOf: fields)
-        guard !settled.isEmpty else { return (json, nil) }
+        guard !settled.isEmpty else { return (json, nil, result) }
         let counts = Dictionary(grouping: settled, by: \.outcome.rawValue).map { "\($0.value.count) \($0.key)" }
-        return (json, "Recovered interrupted creates: " + counts.sorted().joined(separator: ", ") + ".")
+        return (json, "Recovered interrupted creates: " + counts.sorted().joined(separator: ", ") + ".", result)
     }
 
     /// This grant's receipts within its read folders, newest first. Never document text.

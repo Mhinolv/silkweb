@@ -2,7 +2,7 @@
 
 ```text
 contract_version: 1
-Last reviewed: 2026-10-08 (#135)
+Last reviewed: 2026-10-08 (#136)
 ```
 
 This is the source of truth for how coding agents (Claude Code, Codex, Gemini and other local MCP
@@ -28,7 +28,8 @@ The helper ships these commands: `memory capabilities` and `memory list` (#129, 
 [Helper distribution](#helper-distribution)), `memory search` and `memory read` (#134, see
 [Search and read](#search-and-read-134)), `memory create` and `memory create-folder` (#133, see
 [Create and receipts](#create-and-receipts-133)) and `memory activity` (#135). Every command, flag,
-exit status and error code is listed in [Command line](#command-line-135). All other operations below
+exit status and error code is listed in [Command line](#command-line-135). `silkweb mcp` serves the same
+operations as six MCP tools (#136, see [MCP server](#mcp-server-136)). All other operations below
 are contracted here and built in the tickets listed.
 
 ## Supported operations
@@ -696,6 +697,128 @@ and `--supersedes` (create).
 
 The tests in `Tests/SilkwebCoreTests/AgentCLITests.swift` hold golden stdout and stderr for these cases.
 
+## MCP server (#136)
+
+`silkweb mcp` is a long-lived **stdio** MCP server for Claude Code, Codex, Gemini and other local
+clients (`AgentMCPServer` in `SilkwebCore`). It's a thin layer over the same functions as the
+[command line](#command-line-135): the same grants, scope checks, limits, rate window, idempotency and
+receipts. Fields and `error.code` values pass through unchanged.
+
+### Launch
+
+```sh
+silkweb mcp [--grant <GRANT>] [--agent <NAME>] [--session <ID>] [--client <NAME>]
+```
+
+- One grant per server process, chosen like the CLI: `--grant`, then `SILKWEB_GRANT`, then the only
+  grant. With several grants and no choice, the server exits **before `initialize`** with the
+  `grant_required` line on stderr, nothing on stdout, and exit status `77`. Every other launch failure
+  works the same way, with the CLI's [exit status](#exit-statuses-and-error-codes) (`64` for a bad option).
+- `--agent` and `--client` default to the `clientInfo.name` the client sends in `initialize`
+  (`mcp` if it sends none). `--session` defaults to one ID per server, `mcp-<date>-<8 hex>`; a
+  `memory_create` call may name its own `session`.
+- The grant is re-checked before every call, so revoking or narrowing it takes effect on the next
+  call. The rate window (`requests_per_minute`) spans the whole server session.
+
+Client configuration, with the helper at its stable path:
+
+```json
+{
+  "mcpServers": {
+    "silkweb": {
+      "command": "/Users/me/.local/bin/silkweb",
+      "args": ["mcp", "--grant", "Silkweb"]
+    }
+  }
+}
+```
+
+That is the `.mcp.json` / `settings.json` shape Claude Code and Gemini CLI read. Codex uses TOML:
+
+```toml
+[mcp_servers.silkweb]
+command = "/Users/me/.local/bin/silkweb"
+args = ["mcp", "--grant", "Silkweb"]
+```
+
+Minimum client versions aren't pinned. The exact Claude Code, Codex and Gemini CLI versions qualified
+when this shipped are recorded in the #139 matrix.
+
+### Protocol
+
+- Newline-delimited JSON-RPC 2.0 on stdin and stdout, UTF-8. Protocol versions `2025-11-25`,
+  `2025-06-18`, `2025-03-26` and `2024-11-05`; any other requested version is answered with the newest.
+- `serverInfo`: name `silkweb`, title “Silkweb”, version = the app's marketing version. Capabilities:
+  `tools` only (`listChanged: false`); no resources, prompts, sampling or logging. `instructions`:
+  “Read and create Markdown documents in the Silkweb Library folders this grant allows. Existing
+  documents are never changed or deleted.”
+- Supported requests: `initialize`, `ping`, `tools/list`, `tools/call`. Notifications:
+  `notifications/initialized` and `notifications/cancelled`; others are ignored.
+- **stdout carries MCP frames only.** stderr carries `silkweb: …` lines: refusals as
+  `silkweb: memory_read: <message>` and notes such as recovered creates. Never document text or
+  out-of-grant paths.
+
+### Tools
+
+In `tools/list` order. The full definitions, with input and output schemas, are the golden file
+[`agent-memory-mcp-tools.json`](agent-memory-mcp-tools.json), checked by `AgentMCPTests`.
+
+| Tool | Title | readOnly | destructive | idempotent | openWorld | CLI |
+|---|---|---|---|---|---|---|
+| `memory_capabilities` | Silkweb: What This Grant Allows | true | false | true | false | `capabilities` |
+| `memory_search` | Silkweb: Search Memory | true | false | true | false | `search` |
+| `memory_read` | Silkweb: Read Document | true | false | true | false | `read` |
+| `memory_create` | Silkweb: Create Document | false | false | true (with `idempotencyKey`) | false | `create` |
+| `memory_create_folder` | Silkweb: Create Folder | false | false | true | false | `create-folder` |
+| `memory_activity` | Silkweb: Recent Agent Activity | true | false | true | false | `activity` |
+
+`memory_create` is `destructiveHint: false` because it never replaces anything. `memory list` stays
+CLI-only. Arguments are camelCase versions of the CLI options:
+
+| Tool | Arguments |
+|---|---|
+| `memory_search` | `query`, `project`, `type` (list of `memory`, `decision`, `progress`, `handoff`), `status` (list), `createdAfter`, `createdBefore`, `limit` (1–50) |
+| `memory_read` | `path` or `documentId` (exactly one), `cursor`, `expectedRevision` |
+| `memory_create` | `title` and `body` (required); `folder` (`memories`, `progress`, `handoffs`) or `type`, or `folderPath` with `type`; `idempotencyKey` (1–200 characters), `session`, `status`, `observedAt`, `reviewAfter`, `supersedes` (list) |
+| `memory_create_folder` | `path` (required) |
+| `memory_activity` | `limit` (≥ 1, capped by `max_results`), `since` |
+
+- The document size limit is in bytes and set per grant, so it's stated in the `memory_create`
+  description rather than as a schema `maxLength`. An oversized body is the CLI's `too_large`.
+- `body` is document text, never an argument on the command line; the server never logs it.
+
+### Results
+
+- **Success:** `structuredContent` is exactly the CLI's `result` object, and `content` is one text
+  block: a short summary, a blank line, then the same JSON for clients that show only text. Summaries
+  include “Created “Fix sidebar drag” in Memory › Projects › Silkweb › Progress.”, “Read “Use flock” in
+  Memory › Projects › Silkweb › Memories.” and “3 of 12 matches. Up to date · 40 documents.”
+- `memory_read` text keeps the “Document text (untrusted) begins / ends” boundaries inside `body`.
+- A replayed create is a success with `"replayed": true` and `"outcome": "duplicate"`. A create made
+  by the CLI with the same key, agent, session and content replays over MCP too.
+- **Policy refusals** are tool results with `isError: true`, the message as the only text, and
+  `structuredContent: {"error": {"code", "message", "retryAfter"?, "title"}}`, the CLI's `error` object.
+  The one difference: an `invalid_argument` message names the argument sent (“The option “documentId”
+  isn’t valid.”, not “id”).
+- **JSON-RPC errors** are only for protocol faults: `-32700` unparsable line, `-32600` invalid
+  request (wrong `jsonrpc`, a batch array, a bad `id`), `-32601` unknown method, and `-32602` unknown
+  tool or arguments that break the input schema (wrong type, unknown argument, value outside an enum
+  or range, `path` and `documentId` together). Nothing reaches the Library when a call is refused this way.
+- Every `outputSchema` lists the success fields and `error`, with open objects, so either result
+  validates and later fields don't break clients.
+
+### Cancellation and shutdown
+
+- Tool calls run one at a time, in arrival order, on a background queue; `ping` and notifications are
+  handled while one runs.
+- `notifications/cancelled` for a call that hasn't started: it never runs and gets no response. For a
+  read or other read-only call that has started: it stops and gets no response. For a create that has
+  started: it finishes (or rolls back) atomically, as in [Create and receipts](#create-and-receipts-133),
+  and gets no response; retrying with the same `idempotencyKey` returns its result.
+- **stdin EOF:** the server waits for queued and running calls, then exits `0`.
+- **SIGTERM / SIGINT:** calls that haven't started are dropped, the running one settles, then the
+  server exits `0`. A closed stdout (`SIGPIPE`) never stops a create halfway.
+
 ## Safety exclusions
 
 - **Instruction and configuration files can never be created by an agent:** `AGENTS.md`, `AGENT.md`,
@@ -899,10 +1022,15 @@ obtained changes.
 Silkweb otherwise allows no third-party dependencies.
 
 - **Swift MCP SDK** ([modelcontextprotocol/swift-sdk](https://github.com/modelcontextprotocol/swift-sdk))
-  is an allowed exception, used only by the `silkweb mcp` entry point (#136). #136 pins an exact
-  version in `Package.swift`, records it here, reviews and commits its transitive packages in
-  `Package.resolved`, and keeps the SDK out of `SilkwebCore` and the app target. Nothing is
+  is an allowed exception, used only by the `silkweb mcp` entry point (#136). Pinning it means an exact
+  version in `Package.swift`, recorded here, with its transitive packages reviewed and committed in
+  `Package.resolved`, and the SDK kept out of `SilkwebCore` and the app target. Nothing is
   downloaded at run time (no `npx`/`uvx`).
+  **Status (#136): not pinned yet.** The build environment couldn't fetch packages, so the first
+  `silkweb mcp` uses Silkweb's own stdio JSON-RPC layer (`AgentMCPServer` in `AgentMCP.swift`, no
+  dependency). Tool definitions, argument checks and results are independent of the transport, so
+  moving the transport onto the pinned SDK changes only the entry point. Until then
+  `Package.resolved` doesn't exist and the package still has no third-party dependencies.
 - **YAML: no dependency.** Front matter uses the **Silkweb envelope subset**, a restricted, documented
   subset parsed in `SilkwebCore` (#132, see [Silkweb envelope subset](#silkweb-envelope-subset)). It
   supports one key per line, quoted strings, ISO 8601 timestamps as quoted strings, and flow (`[]`) or
