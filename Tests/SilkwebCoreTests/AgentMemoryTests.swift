@@ -60,8 +60,17 @@ final class AgentMemoryTests: XCTestCase {
         AgentHelper.run(arguments + ["--grants", grantsURL.path], home: root)
     }
 
+    /// The `result` of a successful command's envelope.
     private func object(_ output: AgentHelper.Output) throws -> [String: Any] {
-        try XCTUnwrap(JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any])
+        let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any])
+        return try XCTUnwrap(envelope["result"] as? [String: Any], output.stdout)
+    }
+
+    /// The `error` of a failed command's envelope.
+    private func failure(_ output: AgentHelper.Output) throws -> [String: Any] {
+        let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any])
+        XCTAssertEqual(envelope["ok"] as? Bool, false)
+        return try XCTUnwrap(envelope["error"] as? [String: Any], output.stdout)
     }
 
     // MARK: Grants file
@@ -224,7 +233,7 @@ final class AgentMemoryTests: XCTestCase {
     func testCapabilitiesReportsScopeWithoutTouchingTheLibrary() throws {
         try writeGrants(grantJSON(extra: ["Notes/Private"]))
         let before = try snapshot()
-        let output = run(["memory", "capabilities", "--project", "Silkweb"])
+        let output = run(["memory", "capabilities", "--grant", "Silkweb"])
         XCTAssertEqual(output.status, 0, output.stderr)
         XCTAssertEqual(output.stderr, "")
         let json = try object(output)
@@ -233,8 +242,12 @@ final class AgentMemoryTests: XCTestCase {
         XCTAssertEqual(json["library"] as? String, library.standardizedFileURL.path)
         XCTAssertEqual(json["filesystem"] as? String, "qualified")
         XCTAssertEqual(json["access"] as? String, "read-create")
+        XCTAssertEqual(json["profile"] as? String, "Read and Create")
+        XCTAssertEqual(json["label"] as? String, "Silkweb project")
+        XCTAssertEqual(json["schema"] as? String, "silkweb-memory/v1")
         XCTAssertEqual(
-            json["operations"] as? [String], ["capabilities", "list", "search", "read", "create", "create-folder"])
+            json["operations"] as? [String],
+            ["capabilities", "list", "search", "read", "activity", "create", "create-folder"])
         XCTAssertEqual(json["read_roots"] as? [String], ["Memory/Projects/Silkweb", "Notes/Private"])
         XCTAssertEqual((json["create_roots"] as? [String])?.count, 3)
         XCTAssertEqual(json["project_folder_exists"] as? Bool, true)
@@ -243,16 +256,17 @@ final class AgentMemoryTests: XCTestCase {
 
         try writeGrants(grantJSON(access: "read"))
         try FileManager.default.removeItem(at: library.appendingPathComponent("Memory"))
-        let readOnly = try object(run(["memory", "capabilities", "--project", "Silkweb"]))
+        let readOnly = try object(run(["memory", "capabilities", "--grant", "Silkweb"]))
         XCTAssertEqual(readOnly["create_roots"] as? [String], [])
-        XCTAssertEqual(readOnly["operations"] as? [String], ["capabilities", "list", "search", "read"])
+        XCTAssertEqual(readOnly["operations"] as? [String], ["capabilities", "list", "search", "read", "activity"])
+        XCTAssertEqual(readOnly["profile"] as? String, "Read Only")
         XCTAssertEqual(readOnly["project_folder_exists"] as? Bool, false)
         XCTAssertFalse(FileManager.default.fileExists(atPath: library.appendingPathComponent("Memory").path))
     }
 
     func testListReturnsGrantedMarkdownPathsOnly() throws {
         try writeGrants(grantJSON())
-        let output = run(["memory", "list", "--project", "Silkweb"])
+        let output = run(["memory", "list", "--grant", "Silkweb"])
         XCTAssertEqual(output.status, 0, output.stderr)
         let documents = try XCTUnwrap(try object(output)["documents"] as? [[String: Any]])
         XCTAssertEqual(
@@ -268,74 +282,78 @@ final class AgentMemoryTests: XCTestCase {
 
         try writeGrants(grantJSON(extra: ["Notes/Private"]))
         let extra = try XCTUnwrap(
-            try object(run(["memory", "list", "--project", "Silkweb"]))["documents"] as? [[String: Any]])
+            try object(run(["memory", "list", "--grant", "Silkweb"]))["documents"] as? [[String: Any]])
         XCTAssertEqual(extra.compactMap { $0["path"] as? String }.last, "Notes/Private/Diary.md")
     }
 
     func testHelperFailuresUseSharedTitlesAndJSONCodes() throws {
-        let missing = run(["memory", "list", "--project", "Silkweb"])
-        XCTAssertEqual(missing.status, 1)
-        XCTAssertEqual(
-            try object(missing)["error"] as? [String: String], ["code": "no_grants_file", "title": "No Agent Access"])
+        let missing = run(["memory", "list", "--grant", "Silkweb"])
+        XCTAssertEqual(missing.status, 77)
+        XCTAssertEqual(try failure(missing)["code"] as? String, "no_grants_file")
+        XCTAssertEqual(try failure(missing)["title"] as? String, "No Agent Access")
 
         try writeGrants("not json")
         XCTAssertEqual(
-            (try object(run(["memory", "list", "--project", "Silkweb"]))["error"] as? [String: String])?["code"],
-            "invalid_grants_file")
+            try failure(run(["memory", "list", "--grant", "Silkweb"]))["code"] as? String, "invalid_grants_file")
 
         try writeGrants(#"{"version":2,"grants":[]}"#)
         XCTAssertEqual(
-            (try object(run(["memory", "list", "--project", "Silkweb"]))["error"] as? [String: String])?["code"],
-            "unsupported_grants_version")
+            try failure(run(["memory", "list", "--grant", "Silkweb"]))["code"] as? String, "unsupported_grants_version")
 
         try writeGrants(grantJSON())
-        let noGrant = run(["memory", "capabilities", "--project", "Other"])
-        XCTAssertEqual(noGrant.status, 1)
-        XCTAssertEqual(noGrant.stderr, "No Agent Access: There’s no grant for the project “Other”.\n")
+        let noGrant = run(["memory", "capabilities", "--grant", "Other"])
+        XCTAssertEqual(noGrant.status, 77)
+        XCTAssertEqual(
+            noGrant.stderr, "silkweb: No agent access named “Other” exists. Ask the owner to create one in Silkweb.\n")
 
         try writeGrants(grantJSON(extra: [".silkweb"]))
-        XCTAssertEqual(
-            (try object(run(["memory", "list", "--project", "Silkweb"]))["error"] as? [String: String])?["code"],
-            "invalid_grant")
+        XCTAssertEqual(try failure(run(["memory", "list", "--grant", "Silkweb"]))["code"] as? String, "invalid_grant")
 
         try writeGrants(grantJSON())
         try FileManager.default.removeItem(at: library)
-        let gone = run(["memory", "capabilities", "--project", "Silkweb"])
-        XCTAssertEqual(gone.status, 1)
-        XCTAssertEqual(
-            try object(gone)["error"] as? [String: String], ["code": "library_not_found", "title": "Library Not Found"])
-        XCTAssertEqual(gone.stderr, "Library Not Found: The Library “My Library 日本語” can’t be found.\n")
+        let gone = run(["memory", "capabilities", "--grant", "Silkweb"])
+        XCTAssertEqual(gone.status, 74)
+        XCTAssertEqual(try failure(gone)["code"] as? String, "library_not_found")
+        XCTAssertEqual(try failure(gone)["title"] as? String, "Library Not Found")
+        XCTAssertEqual(gone.stderr, "silkweb: The Library “My Library 日本語” can’t be found.\n")
 
         try writeGrants(#"{"version":1,"grants":[{"project":"Silkweb"}]}"#)
         XCTAssertEqual(
-            (try object(run(["memory", "list", "--project", "Silkweb"]))["error"] as? [String: String])?["title"],
-            "Library Not Found")
+            try failure(run(["memory", "list", "--grant", "Silkweb"]))["title"] as? String, "Library Not Found")
     }
 
     func testDefaultGrantsLocationAndUsage() throws {
         try writeGrants(grantJSON())
         let output = AgentHelper.run(
-            ["memory", "capabilities", "--project", "Silkweb"], home: root.appendingPathComponent("elsewhere"))
-        XCTAssertEqual(output.status, 1, "the default path is under the given home, not --grants")
+            ["memory", "capabilities", "--grant", "Silkweb"], home: root.appendingPathComponent("elsewhere"))
+        XCTAssertEqual(output.status, 77, "the default path is under the given home, not --grants")
         let home = root.appendingPathComponent("home")
         let target = AgentGrantFile.defaultURL(home: home)
         try FileManager.default.createDirectory(
             at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: grantsURL, to: target)
-        XCTAssertEqual(AgentHelper.run(["memory", "capabilities", "--project", "Silkweb"], home: home).status, 0)
+        XCTAssertEqual(AgentHelper.run(["memory", "capabilities", "--grant", "Silkweb"], home: home).status, 0)
 
         for arguments in [
-            [], ["memory"], ["memory", "capabilities"], ["memory", "delete", "--project", "Silkweb"],
-            ["memory", "list", "--project"], ["memory", "list", "--project", "A", "--project", "B"],
-            ["memory", "list", "--path", "x"], ["write_file"],
+            [], ["memory"], ["memory", "delete", "--grant", "Silkweb"], ["memory", "list", "--grant"],
+            ["memory", "list", "--grant", "A", "--grant", "B"], ["memory", "list", "--path", "x"], ["write_file"],
+            ["memory", "capabilities", "extra"], ["memory", "create-folder"],
         ] {
             let usage = AgentHelper.run(arguments, home: home)
             XCTAssertEqual(usage.status, 64, "\(arguments)")
-            XCTAssertEqual(usage.stdout, "")
-            XCTAssertEqual(usage.stderr, AgentHelper.usage)
+            XCTAssertEqual(try failure(usage)["code"] as? String, "invalid_argument", "\(arguments)")
+            XCTAssertTrue(usage.stderr.hasPrefix("silkweb: "), usage.stderr)
+            XCTAssertTrue(usage.stderr.hasSuffix(" Run “silkweb --help” for usage.\n"), usage.stderr)
         }
-        let version = try object(AgentHelper.run(["version"], home: home))
-        XCTAssertEqual(version["contract_version"] as? Int, AgentMemoryContract.version)
+        for arguments in [["--help"], ["memory", "--help"], ["memory", "search", "-h"]] {
+            let help = AgentHelper.run(arguments, home: home)
+            XCTAssertEqual(help.status, 0)
+            XCTAssertEqual(help.stdout, AgentHelper.help)
+        }
+        for arguments in [["version"], ["--version"]] {
+            let version = try object(AgentHelper.run(arguments, home: home))
+            XCTAssertEqual(version["contract_version"] as? Int, AgentMemoryContract.version)
+        }
     }
 
     /// A document published by `create` (#133) is found by `search` and returned by `read` (#134),
@@ -345,28 +363,28 @@ final class AgentMemoryTests: XCTestCase {
         let bodyURL = root.appendingPathComponent("body.md")
         try Data("Checkpoint about the quartz gate.".utf8).write(to: bodyURL)
         let created = run([
-            "memory", "create", "--project", "Silkweb", "--key", "k1", "--type", "decision", "--title", "Quartz",
-            "--agent", "codex", "--session", "s1", "--body-file", bodyURL.path,
+            "memory", "create", "--grant", "Silkweb", "--idempotency-key", "k1", "--type", "decision", "--title",
+            "Quartz", "--agent", "codex", "--session", "s1", "--body-file", bodyURL.path,
         ])
         XCTAssertEqual(created.status, 0, created.stderr)
         let path = try XCTUnwrap(try object(created)["path"] as? String)
 
-        let search = run(["memory", "search", "--project", "Silkweb", "--query", "quartz"])
+        let search = run(["memory", "search", "--grant", "Silkweb", "quartz"])
         XCTAssertEqual(search.status, 0, search.stderr)
         let results = try XCTUnwrap(try object(search)["results"] as? [[String: Any]])
         XCTAssertEqual(results.compactMap { $0["path"] as? String }, [path])
         XCTAssertEqual(results.first?["type"] as? String, "decision")
         XCTAssertEqual(results.first?["agent"] as? String, "codex")
 
-        let read = run(["memory", "read", "--project", "Silkweb", "--path", path])
+        let read = run(["memory", "read", "--grant", "Silkweb", path])
         XCTAssertEqual(read.status, 0, read.stderr)
         XCTAssertTrue((try object(read)["body"] as? String)?.contains("Checkpoint about the quartz gate.") == true)
 
-        let staged = run(["memory", "search", "--project", "Silkweb", "--query", "agent-staging"])
+        let staged = run(["memory", "search", "--grant", "Silkweb", "agent-staging"])
         XCTAssertEqual((try object(staged)["results"] as? [[String: Any]])?.count, 0)
         XCTAssertEqual(
-            run(["memory", "search", "--project", "Silkweb", "--query", "a", "--query", "b"]).status, 64,
-            "only --supersedes may repeat")
+            run(["memory", "search", "--grant", "Silkweb", "--limit", "1", "--limit", "2"]).status, 64,
+            "only --type, --status and --supersedes may repeat")
     }
 
     /// The real signed helper binary, launched as its own process like an agent would.
@@ -379,7 +397,7 @@ final class AgentMemoryTests: XCTestCase {
         try writeGrants(grantJSON())
         let process = Process()
         process.executableURL = binary
-        process.arguments = ["memory", "list", "--project", "Silkweb", "--grants", grantsURL.path]
+        process.arguments = ["memory", "list", "--grants", grantsURL.path]
         let stdout = Pipe()
         process.standardOutput = stdout
         process.standardError = Pipe()
@@ -388,7 +406,8 @@ final class AgentMemoryTests: XCTestCase {
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        XCTAssertEqual((json["documents"] as? [[String: Any]])?.count, 3)
+        XCTAssertEqual(json["ok"] as? Bool, true)
+        XCTAssertEqual(((json["result"] as? [String: Any])?["documents"] as? [[String: Any]])?.count, 3)
     }
 
     private func snapshot() throws -> [String: Date] {
