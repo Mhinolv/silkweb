@@ -1,0 +1,1225 @@
+{
+  "library": "library.json",
+  "queries": [
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-01",
+      "query": "Write gate uses flock"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-03",
+      "query": "notarytool"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-05",
+      "query": "hb_cache_v2"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-06",
+      "query": "hb_gate"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Preview rendering debounce.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-08",
+      "query": "150 ms preview"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Backups with Time Machine.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-10",
+      "query": "Time Machine"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Encryption is out of scope.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-11",
+      "query": "FileVault"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Quick Open ranking.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-13",
+      "query": "Quick Open ranking"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-15",
+      "query": "PDFKit"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Image assets folder.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-16",
+      "query": "media folder"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Progress/2026-09-18 1100 — Spellcheck language detection.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-18",
+      "query": "NLLanguageRecognizer"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Large library performance budget.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-20",
+      "query": "10,000 documents"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Undo coalescing.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-21",
+      "query": "undo step per word"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Notarize with altool.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-23",
+      "query": "xcrun altool"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Progress/2026-10-01 0900 — Shard migration.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-25",
+      "query": "Shard migration"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Handoffs/Resume export work.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-26",
+      "query": "Resume export work"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Notes/Glossary.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-28",
+      "query": "Glossary"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Opt-in crash upload.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-30",
+      "query": "Opt-in crash upload"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-01",
+      "query": "stop two processes writing the library at the same time"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Preview rendering debounce.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-03",
+      "query": "delay before the rendered view refreshes while typing"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Conflict copies keep both texts.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-05",
+      "query": "same document edited in two places"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-06",
+      "query": "turning documents into printable files"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/No analytics in Harbor.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-08",
+      "query": "do we collect usage statistics"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Shortcut map lives in the design system.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-10",
+      "query": "where are hotkeys documented"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Tags stay out of front matter.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-11",
+      "query": "labels kept outside the yaml header"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Large library performance budget.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-13",
+      "query": "keeping the list fast with huge collections"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Image assets folder.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-15",
+      "query": "where do pasted pictures go"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/English only for v1.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-16",
+      "query": "translating the app into other languages"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Encryption is out of scope.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-18",
+      "query": "password protecting documents"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Quick Open ranking.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-20",
+      "query": "fuzzy file finder ordering"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md",
+        "Memory/Projects/Harbor/Progress/2026-09-30 1700 — Gate timeout tuning.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-21",
+      "query": "how long does a writer wait for the lock"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Handoffs/Resume shard migration.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-23",
+      "query": "picking up the unfinished sharding work"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-25",
+      "query": "why not a database for metadata"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/No analytics in Harbor.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-26",
+      "query": "crash logs leaving the machine"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-28",
+      "query": "saving fails because another process holds the lock"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Semantic colors.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-30",
+      "query": "theme colors in light and dark"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Encryption is out of scope.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-31",
+      "query": "is there per file encryption"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Progress/2026-08-02 1000 — Cache size investigation.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-33",
+      "query": "how big did the metadata file get"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Progress/2026-09-30 1700 — Gate timeout tuning.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-35",
+      "query": "who agreed to the shorter gate wait"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-01",
+      "query": "index cache format"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-03",
+      "query": "should the index move to SQLite"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Index cache format v1.md",
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-05",
+      "query": "Index cache format v1"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Move the index cache to SQLite.md",
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-06",
+      "query": "Move the index cache to SQLite"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Last writer wins for conflicts.md",
+        "Memory/Projects/Harbor/Memories/Conflict copies keep both texts.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-08",
+      "query": "last writer wins"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-10",
+      "query": "PDF export approach"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/PDF export uses WebKit printing.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-11",
+      "query": "how did PDF export work before PDFKit"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-13",
+      "query": "PDF page breaks"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Notarize with altool.md",
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-15",
+      "query": "altool"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-16",
+      "query": "how to notarize a release"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/No analytics in Harbor.md",
+        "Memory/Projects/Harbor/Memories/Opt-in crash upload.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-18",
+      "query": "crash report upload"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-20",
+      "query": "what replaced the WebKit print panel"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Notarize with altool.md",
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-21",
+      "query": "which notarization tool is deprecated"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-23",
+      "query": "is SQLite approved for the index"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/No analytics in Harbor.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-25",
+      "query": "telemetry decision"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Memory/Projects/Harbor2/Memories/Harbor2 signing keys.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-01",
+      "query": "signing identity passphrase"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Memory/Projects/Harbor2/Memories/Harbor2 signing keys.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-03",
+      "query": "Harbor2"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Memory/Projects/Lighthouse/Memories/Lighthouse database choice.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-05",
+      "query": "SQLite WAL mode"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Memory/Projects/Lighthouse/Memories/Lighthouse database choice.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-06",
+      "query": "WAL"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md"
+      ],
+      "forbidden": [
+        "Memory/Projects/Lighthouse/Progress/Lighthouse migration progress.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-08",
+      "query": "flock"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Journal/Private/Salary negotiation.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-10",
+      "query": "ask for a raise"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Journal/Private/Health appointments.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-11",
+      "query": "health appointments"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Journal/Private/Salary negotiation.md",
+        "Journal/Private/Health appointments.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-13",
+      "query": "private journal"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [
+        "Reference/Harbor/Apple notarization guide.md"
+      ],
+      "forbidden": [
+        "Memory/Projects/Harbor2/Memories/Harbor2 signing keys.md",
+        "Reference/Other/Competitor pricing.md"
+      ],
+      "grant": "harbor-reference",
+      "id": "scope-leak-15",
+      "query": "stapling ticket Gatekeeper offline"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Reference/Harbor/WebKit printing quirks.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-16",
+      "query": "WebKit printing quirks"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Reference/Other/Competitor pricing.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-18",
+      "query": "competitor pricing"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Memory/Projects/Harbor/.drafts/Secret draft.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-20",
+      "query": "secret draft"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Memory/Projects/HarborArchive/Archived roadmap 2025.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-21",
+      "query": "archived roadmap"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Memory/Projects/Harbor2/Memories/Harbor2 signing keys.md",
+        "Memory/Projects/HarborArchive/Archived roadmap 2025.md",
+        "Memory/Projects/Lighthouse/Memories/Lighthouse database choice.md",
+        "Memory/Projects/Lighthouse/Progress/Lighthouse migration progress.md",
+        "Journal/Private/Salary negotiation.md",
+        "Journal/Private/Health appointments.md",
+        "Reference/Harbor/Apple notarization guide.md",
+        "Reference/Harbor/WebKit printing quirks.md",
+        "Reference/Other/Competitor pricing.md",
+        "Memory/Projects/Harbor/.drafts/Secret draft.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-23",
+      "query": "canary"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Memory/Projects/Lighthouse/Memories/Lighthouse database choice.md"
+      ],
+      "grant": "harbor-reference",
+      "id": "scope-leak-25",
+      "query": "nightly vacuum"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Autosave interval.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-01",
+      "query": "Autosave interval"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Window restoration.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-03",
+      "query": "Window restoration"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Notes/Find bar behaviour.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-05",
+      "query": "Find bar behaviour"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Notes/Find bar behaviour.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-06",
+      "query": "Escape closes the search field"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Sidebar width.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-08",
+      "query": "sidebar 240 points"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Print margins.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-10",
+      "query": "margins 18 millimetres"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Typewriter scrolling.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-11",
+      "query": "Typewriter scrolling"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Status bar layout.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-13",
+      "query": "Status bar layout"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Table editing.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-15",
+      "query": "Table editing"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Table editing.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-16",
+      "query": "tab moves to the next cell"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Heading folding.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-18",
+      "query": "collapse sections under headings"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Focus mode.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-20",
+      "query": "dims other paragraphs"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-01",
+      "query": "flock write gate commits"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md",
+        "Memory/Projects/Harbor/Progress/2026-09-30 1700 — Gate timeout tuning.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-03",
+      "query": "gate timeout seconds"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-05",
+      "query": "running headers page numbers"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-06",
+      "query": "notarytool staple"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/No analytics in Harbor.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-08",
+      "query": "analytics crash reports"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Conflict copies keep both texts.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-10",
+      "query": "conflict copies"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Conflict copies keep both texts.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-11",
+      "query": "save conflicts unsaved text"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Image assets folder.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-13",
+      "query": "pasted images media folder"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-15",
+      "query": "write gate"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-16",
+      "query": "PDF export"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/No analytics in Harbor.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-18",
+      "query": "crash reports"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Image assets folder.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-20",
+      "query": "media folders"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-01",
+      "query": "kubernetes deployment"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-03",
+      "query": "Windows installer"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-05",
+      "query": "payment processing provider"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-06",
+      "query": "customer support SLA"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-08",
+      "query": "users table database index"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-10",
+      "query": "push notification certificates"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-11",
+      "query": "iPad keyboard shortcuts"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-13",
+      "query": "font licensing"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-15",
+      "query": "real-time collaboration cursors"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-16",
+      "query": "encryption key rotation"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-18",
+      "query": "Harbor 3 roadmap"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-20",
+      "query": "voice dictation"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Handoffs/Resume shard migration.md",
+        "Memory/Projects/Harbor/Progress/2026-10-01 0900 — Shard migration.md",
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-01",
+      "query": "resume shard migration background and decision"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Handoffs/Resume export work.md",
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-03",
+      "query": "export handoff and the pagination decision"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Progress/2026-09-18 1100 — Spellcheck language detection.md",
+        "Memory/Projects/Harbor/Memories/Spelling per document.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-05",
+      "query": "spellcheck language detection and the spelling decision"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Handoffs/Resume undo work.md",
+        "Memory/Projects/Harbor/Memories/Undo coalescing.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-06",
+      "query": "undo handoff and the coalescing rule"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Notes/Release checklist.md",
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-08",
+      "query": "release checklist and the current notarization command"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Progress/2026-08-02 1000 — Cache size investigation.md",
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-10",
+      "query": "cache size investigation and the format that followed"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Notes/Glossary.md",
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-11",
+      "query": "glossary definition of the write gate"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Progress/2026-09-26 1000 — Color audit.md",
+        "Memory/Projects/Harbor/Memories/Semantic colors.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-13",
+      "query": "color audit and the color decision"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Handoffs/Resume notarization automation.md",
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-15",
+      "query": "notarization automation handoff and tool choice"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Handoffs/Resume conflict UI.md",
+        "Memory/Projects/Harbor/Memories/Conflict copies keep both texts.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-16",
+      "query": "conflict UI handoff and the conflict rule"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md",
+        "Memory/Projects/Harbor/Progress/2026-10-01 0900 — Shard migration.md",
+        "Memory/Projects/Harbor/Handoffs/Resume shard migration.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-18",
+      "query": "documents linking to Index cache format v2"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Handoffs/Resume shard migration.md",
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-20",
+      "query": "shard handoff and why SQLite was rejected"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Notes/Meeting notes 2026-09-14.md",
+        "Memory/Projects/Harbor/Memories/Large library performance budget.md",
+        "Memory/Projects/Harbor/Memories/Image assets folder.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-21",
+      "query": "meeting notes performance budget and image rule"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Notes/Glossary.md",
+        "Memory/Projects/Harbor/Memories/Atomic document saves.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-23",
+      "query": "glossary terms linked to atomic saves"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Handoffs/Resume notarization automation.md",
+        "Memory/Projects/Harbor/Notes/Release checklist.md",
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-25",
+      "query": "notarization automation steps two hops from the tool decision"
+    }
+  ],
+  "split": "dev",
+  "version": 1
+}
