@@ -31,6 +31,8 @@ struct MenuCommandValues: Equatable {
     var listPreference: LibraryListPreference
     var includesSubfolders: Bool
     var hasSelectedFolder: Bool
+    /// Go ▸ Agent Activity is enabled while its sidebar row is shown (#137).
+    var hasAgentActivity: Bool
 
     @MainActor init(workspace: LibraryWorkspace) {
         canMutate = workspace.canMutate
@@ -63,6 +65,7 @@ struct MenuCommandValues: Equatable {
         listPreference = workspace.listPreference
         includesSubfolders = workspace.includesSubfolders
         hasSelectedFolder = workspace.session.selectedFolder != nil
+        hasAgentActivity = hasLibrary && workspace.hasAgentActivity
     }
 }
 

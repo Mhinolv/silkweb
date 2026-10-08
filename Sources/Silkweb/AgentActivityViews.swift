@@ -1,0 +1,164 @@
+import AppKit
+import SilkwebCore
+import SwiftUI
+
+/// #137: quiet agent provenance. Receipts reload off the main thread and only update what changed; nothing here
+/// moves focus, selection, scroll or tabs, and nothing is announced.
+extension LibraryWorkspace {
+    /// The Agent Activity row (and Go ▸ Agent Activity) exists once a receipt published a Document.
+    var hasAgentActivity: Bool { agentActivity.hasPublished }
+
+    nonisolated static func loadAgentActivity(root: URL) async -> AgentActivity {
+        await Task.detached(priority: .utility) { AgentActivity.load(root: root) }.value
+    }
+
+    /// `.silkweb/agent-events/` changed: reread the receipts only. No rescan, and nothing is written back.
+    func reloadAgentActivity() async {
+        guard let root, snapshot != nil else { return }
+        let previous = agentReloadTask
+        let task = Task {
+            await previous?.value
+            let loaded = await Self.loadAgentActivity(root: root)
+            guard !Task.isCancelled, self.root == root else { return }
+            agentActivity = loaded
+        }
+        agentReloadTask = task
+        await task.value
+    }
+
+    func selectAgentActivity() {
+        guard hasAgentActivity else { return }
+        navigate(folder: nil, documents: [], tag: nil, changesScope: true, agents: true)
+    }
+
+    /// The receipt the Info pane describes for one Document, in any scope.
+    func agentEntry(for document: LibraryDocument) -> AgentActivityEntry? {
+        agentEntriesByPath[document.relativePath].flatMap { $0.document.id == document.id ? $0 : nil }
+    }
+}
+
+/// The pinned strip in Agent Activity scope: “Agent activity · 14 documents” and the All Agents ▾ pull-down.
+struct AgentActivityStrip: View {
+    let workspace: LibraryWorkspace
+
+    var body: some View {
+        let agents = AgentActivity.agents(in: workspace.agentEntries)
+        HStack {
+            Text("Agent activity · \(CountPresentation.label(workspace.documents.count, unit: .document))")
+                .lineLimit(1)
+            Spacer(minLength: Spacing.small)
+            Menu {
+                Button("All Agents") { workspace.agentFilter = nil }
+                Divider()
+                ForEach(agents, id: \.name) { agent in
+                    Button("\(agent.name) (\(agent.count))") { workspace.agentFilter = agent.name }
+                }
+            } label: {
+                Text(workspace.agentFilter ?? "All Agents")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .accessibilityLabel("Filter by agent")
+            .accessibilityValue(workspace.agentFilter ?? "All Agents")
+        }
+        .font(.caption).monospacedDigit().padding(.horizontal, Spacing.small).frame(height: 28)
+        .paneStrip(hairline: .bottom)
+        .accessibilityElement(children: .contain).accessibilityLabel("Agent activity")
+    }
+}
+
+/// Document Info's text-only Agent block (#137): no box and no colour, the same label/value pairs as above it.
+struct AgentProvenanceSection: View {
+    let provenance: AgentProvenance
+    let modified: Date?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            pair("Agent", provenance.agentLabel)
+            if let session = provenance.session {
+                pair("Session", "\(session)  (claimed by the agent)")
+            }
+            if let client = provenance.client { pair("Client", client) }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Operation").font(.headline)
+                Text(provenance.operationLabel)
+                    .font(provenance.hasReceipt ? .caption.monospaced() : .caption)
+                    .textSelection(.enabled)
+                    .contextMenu {
+                        if let operation = provenance.operationId {
+                            Button("Copy") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(operation, forType: .string)
+                            }
+                        }
+                    }
+            }
+            .accessibilityElement(children: .combine)
+            if let created = provenance.created {
+                pair("Created", created.formatted(date: .abbreviated, time: .shortened))
+            }
+            if let since = provenance.sinceCreation {
+                pair(
+                    "Since creation",
+                    since == .unchanged
+                        ? "Unchanged"
+                        : "Edited after creation"
+                            + (modified.map {
+                                " · " + $0.formatted(.dateTime.month().day().hour().minute())
+                            }
+                                ?? ""))
+            }
+            // Display only; the review workflow and its controls come with #140.
+            pair("Review", "Not reviewed")
+            Text("Agent and session are reported by the agent, not verified.")
+                .font(.caption).foregroundStyle(.tertiary)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Agent provenance")
+    }
+
+    private func pair(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.headline)
+            Text(value).font(.caption).textSelection(.enabled)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The provenance one Document Info shows, with the Document it describes, so another selection never shows
+/// the previous one's values.
+struct LoadedAgentProvenance: Equatable {
+    let path: String
+    let provenance: AgentProvenance?
+}
+
+/// Loads the selected Document's provenance off the main thread. Attached to the always-present Info column
+/// (a `.task` on an empty view never runs); the result updates in place, so Info keeps its scroll position.
+struct AgentProvenanceLoader: ViewModifier {
+    let workspace: LibraryWorkspace
+    let document: LibraryDocument?
+    @Binding var loaded: LoadedAgentProvenance?
+
+    private struct Identity: Hashable {
+        let path: String?
+        let modified: Date?
+        let receipt: String?
+    }
+
+    func body(content: Content) -> some View {
+        let receipt = document.flatMap { workspace.agentEntry(for: $0)?.receipt }
+        content.task(
+            id: Identity(path: document?.relativePath, modified: document?.modified, receipt: receipt?.operationId)
+        ) {
+            guard let document, let root = workspace.snapshot?.rootURL else { return }
+            let path = document.relativePath
+            let provenance = await Task.detached(priority: .utility) {
+                AgentProvenance.load(relativePath: path, root: root, receipt: receipt)
+            }.value
+            guard !Task.isCancelled else { return }
+            let next = LoadedAgentProvenance(path: path, provenance: provenance)
+            if loaded != next { loaded = next }
+        }
+    }
+}

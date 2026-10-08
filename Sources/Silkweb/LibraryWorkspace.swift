@@ -74,8 +74,32 @@ final class LibraryWorkspace {
         search.install(snapshot)
         itemPathsByID = Dictionary(uniqueKeysWithValues: snapshot.metadata.IDsByPath.map { ($0.value, $0.key) })
         documentCache = nil
+        updateAgentEntries()
         presentationRevision += 1
         reportIndexRecovery(snapshot)
+    }
+    /// #137: receipts under `.silkweb/agent-events/`, read for display only.
+    var agentActivity = AgentActivity() {
+        didSet { if agentActivity != oldValue { updateAgentEntries() } }
+    }
+    /// Published receipts matched to existing Documents, newest first. Assigned only when it changes.
+    private(set) var agentEntries: [AgentActivityEntry] = []
+    @ObservationIgnored private(set) var agentEntriesByPath: [String: AgentActivityEntry] = [:]
+    /// The Agent Activity sidebar row is selected. Never saved; it implies no folder and no tag scope.
+    var agentScope = false { didSet { documentCache = nil } }
+    /// The All Agents ▾ choice, kept for this window session only.
+    var agentFilter: String? { didSet { documentCache = nil } }
+    @ObservationIgnored var agentReloadTask: Task<Void, Never>?
+
+    private func updateAgentEntries() {
+        let entries = snapshot.map { agentActivity.entries(in: $0) } ?? []
+        guard entries != agentEntries else { return }
+        agentEntries = entries
+        agentEntriesByPath = Dictionary(
+            entries.map { ($0.document.relativePath, $0) }, uniquingKeysWith: { first, _ in first })
+        documentCache = nil
+        // Receipts were removed: the hidden row can't stay the list's scope.
+        if agentScope && !agentActivity.hasPublished { agentScope = false }
     }
     private var watcher: LibraryWatcher?
     private var reconciling = false
@@ -83,7 +107,12 @@ final class LibraryWorkspace {
     /// Bumped by every accepted `navigate`; a refused one leaves it unchanged.
     @ObservationIgnored private(set) var navigationGeneration = 0
     var snapshot: LibrarySnapshot?
-    var session = LibrarySession()
+    var session = LibrarySession() {
+        // Any folder or tag scope, however it was set, leaves Agent Activity.
+        didSet {
+            if agentScope && (session.selectedFolder != nil || session.selectedTagID != nil) { agentScope = false }
+        }
+    }
     var loading = false
     var mediaProgress: (name: String, done: Int, total: Int)?
     var mediaFailures: [AssetFailure] = []
@@ -121,12 +150,17 @@ final class LibraryWorkspace {
     @ObservationIgnored var itemPathsByID: [UUID: String] = [:]
     @ObservationIgnored private var presentationRevision = 0
     @ObservationIgnored private var documentCache:
-        (folder: String?, preference: LibraryListPreference, tag: UUID?, documents: [LibraryDocument])?
+        (
+            folder: String?, preference: LibraryListPreference, tag: UUID?, agents: String??,
+            documents: [LibraryDocument]
+        )?
 
     var selectedFolder: LibraryFolder? {
         session.selectedTagID == nil ? snapshot?.folders.first { $0.relativePath == session.selectedFolder } : nil
     }
+    /// Agent Activity keeps its own (unsaved) preference, so Sort By there never changes All Documents.
     private var preferenceID: String {
+        if agentScope { return "agents" }
         if let id = session.selectedTagID { return "tag:" + id.uuidString };
         return selectedFolder.map { "folder:" + $0.id.uuidString } ?? "all"
     }
@@ -152,17 +186,23 @@ final class LibraryWorkspace {
     var documents: [LibraryDocument] {
         guard let snapshot else { return [] }
         let preference = listPreference
+        let agents: String?? = agentScope ? .some(agentFilter) : nil
         if let cached = documentCache, cached.folder == session.selectedFolder, cached.preference == preference,
-            cached.tag == session.selectedTagID
+            cached.tag == session.selectedTagID, cached.agents == agents
         {
             return cached.documents
         }
         guard session.selectedTagID != nil || session.selectedFolder == nil || selectedFolder != nil else { return [] }
-        let documents = snapshot.presentation.documents(in: selectedFolder, preference: preference).filter {
+        // Agent Activity is newest receipt first whatever Sort By says, as search results are.
+        let scoped =
+            agentScope
+            ? agentEntries.filter { agentFilter == nil || $0.agent == agentFilter }.map(\.document)
+            : snapshot.presentation.documents(in: selectedFolder, preference: preference)
+        let documents = scoped.filter {
             TagEditor.matches(
                 $0, folder: nil, includeSubfolders: false, tags: effectiveTagFilters, metadata: snapshot.metadata)
         }
-        documentCache = (session.selectedFolder, preference, session.selectedTagID, documents)
+        documentCache = (session.selectedFolder, preference, session.selectedTagID, agents, documents)
         return documents
     }
     func refreshSavedDocumentDates() async {
@@ -182,7 +222,8 @@ final class LibraryWorkspace {
         return documents.first { session.selectedDocuments.contains($0.relativePath) }
     }
     var folderName: String {
-        tags.first { $0.id == session.selectedTagID }?.name ?? snapshot?.folders.first {
+        if agentScope { return "Agent Activity" }
+        return tags.first { $0.id == session.selectedTagID }?.name ?? snapshot?.folders.first {
             $0.relativePath == session.selectedFolder
         }?.name ?? "All Documents"
     }
@@ -319,6 +360,10 @@ final class LibraryWorkspace {
             search.reset()
             watcher?.stop()
             watcher = nil
+            agentReloadTask?.cancel()
+            agentScope = false
+            agentFilter = nil
+            agentActivity = AgentActivity()
             await editor.configure(root: url)
             // Let any previous scan finish cancellation before releasing its access.
             scope?.stopAccessingSecurityScopedResource()
@@ -348,6 +393,7 @@ final class LibraryWorkspace {
                 { canSaveSession = false } catch
                 { /* A rebuildable navigation session can fall back to its defaults. */  }
                 guard !Task.isCancelled else { return }
+                agentActivity = await Self.loadAgentActivity(root: url)
                 install(scanned)
                 session = restored.pruningPreferences(
                     folderIDs: Set(scanned.folders.map(\.id)), tagIDs: Set(scanned.metadata.tags.map(\.id)))
@@ -390,7 +436,13 @@ final class LibraryWorkspace {
                 if let id = activeTabID, let document = scanned.documents.first(where: { $0.id == id }) {
                     session.selectedDocuments = [document.relativePath]
                 }
-                watcher = LibraryWatcher(root: url) { [weak self] in await self?.reconcileFinderChanges() }
+                watcher = LibraryWatcher(root: url) { [weak self] in
+                    await self?.reconcileFinderChanges()
+                } receiptsChanged: { [weak self] in
+                    await self?.reloadAgentActivity()
+                }
+                // A receipt written between the first read and the watcher's start is picked up here.
+                await reloadAgentActivity()
                 let location = await Task.detached(priority: .utility) { LibraryLocation.saving(url) }.value
                 guard !Task.isCancelled else { return }
                 persistLocation(location)
@@ -618,18 +670,25 @@ final class LibraryWorkspace {
     }
 
     func navigate(
-        folder: String?, documents: Set<String>, pinned: Bool = false, tag: UUID? = nil, changesScope: Bool = false
+        folder: String?, documents: Set<String>, pinned: Bool = false, tag: UUID? = nil, changesScope: Bool = false,
+        agents: Bool = false
     ) {
         guard !loading, !mutating else { return }
         // The list follows the click at once (#70); the editor swaps in when the buffer has loaded.
         let shown = (
             folder: session.selectedFolder, documents: session.selectedDocuments, tag: session.selectedTagID,
-            filters: tagFilters
+            filters: tagFilters, agents: agentScope
         )
         var next = session
         next.selectedFolder = folder
         next.selectedDocuments = documents
         if changesScope { next.selectedTagID = tag }
+        // Revealing a Document Agent Activity doesn't list (a link, a search result) shows All Documents.
+        if changesScope {
+            agentScope = agents
+        } else if agentScope, !documents.allSatisfy({ agentEntriesByPath[$0] != nil }) {
+            agentScope = false
+        }
         session = next
         // Install the new tag scope before clearing toolbar filters: never expose the full library.
         if changesScope && tag != nil { tagFilters = [] }
@@ -660,6 +719,7 @@ final class LibraryWorkspace {
                 session.selectedFolder = shown.folder
                 session.selectedDocuments = shown.documents
                 session.selectedTagID = shown.tag
+                agentScope = shown.agents
                 tagFilters = shown.filters
                 return
             }

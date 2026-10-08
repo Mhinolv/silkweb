@@ -83,6 +83,9 @@ struct SnapshotScenario {
     var emptyLibrary = false
     /// #153: the list column's width (240 pt minimum … 480 pt maximum) instead of the standard 300 pt.
     var listWidth: CGFloat? = nil
+    /// #137 agent states, on three receipts from two agents plus one envelope-only claim: "list" (Agent Activity
+    /// selected), "filtered-empty", "info" (an edited agent Document in Info), "claimed-only" and "arrives".
+    var agentActivity: String? = nil
 
     static let deepFolder =
         "Field Notes/Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
@@ -92,6 +95,8 @@ struct SnapshotScenario {
     /// #132: agent progress documents with front matter envelopes; written only for their scenario.
     static let memoryFolder = "Memory/Projects/Silkweb/Progress"
     static let memoryDocument = memoryFolder + "/2026-10-07 0930 — Helper spike.md"
+    /// #137: an envelope-only agent claim with no Silkweb receipt.
+    static let agentClaimed = "Memory/Projects/Silkweb/Memories/Prefer local disks.md"
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
     /// #90: the owner's non-default amber Accent.
@@ -242,6 +247,14 @@ struct SnapshotScenario {
         .init(name: "empty-document", document: "Snapshot Fixtures/Empty Document.md"),
         // #132: the list skips a well-formed envelope; the malformed row and the editor show the raw text.
         .init(name: "memory-envelope-list", folder: memoryFolder, document: memoryDocument),
+        // #137: Agent Activity (newest receipt first, `date · agent · location`), the All Agents ▾ filter with no
+        // match, the Agent block in Info (edited after creation; envelope claim only), and a receipt arriving while
+        // another agent Document stays selected and open.
+        .init(name: "agent-activity-list", agentActivity: "list"),
+        .init(name: "agent-activity-filtered-empty", agentActivity: "filtered-empty"),
+        .init(name: "agent-provenance-info", agentActivity: "info"),
+        .init(name: "agent-provenance-claimed-only", agentActivity: "claimed-only"),
+        .init(name: "agent-receipt-arrives", agentActivity: "arrives"),
         .init(name: "new-document", folder: "", document: "Snapshot Fixtures/Empty Document.md", createDocument: true),
         .init(
             name: "new-document-in-folder", folder: "Snapshot Fixtures/Empty Folder",
@@ -795,6 +808,97 @@ final class SnapshotHarness {
         }
         if let query = scenario.quickQuery { workspace.search.toggleQuickOpen(); workspace.search.quickText = query }
         if let query = scenario.searchQuery { workspace.search.text = query }
+        if let state = scenario.agentActivity {
+            await workspace.reloadAgentActivity()
+            guard workspace.hasAgentActivity, workspace.agentEntries.count == 3 else {
+                throw SnapshotFailure.error("Agent receipts did not load")
+            }
+            func path(_ title: String) throws -> String {
+                guard let path = agentPaths[title] else {
+                    throw SnapshotFailure.error("Missing agent fixture \(title)")
+                }
+                return path
+            }
+            switch state {
+            case "claimed-only":
+                let claimed = SnapshotScenario.agentClaimed
+                workspace.navigate(
+                    folder: (claimed as NSString).deletingLastPathComponent, documents: [claimed], pinned: true,
+                    changesScope: true)
+            case "filtered-empty":
+                workspace.navigate(folder: nil, documents: [], changesScope: true, agents: true)
+                workspace.agentFilter = "gemini-cli"
+            case "info":
+                workspace.navigate(
+                    folder: nil, documents: [try path("Helper spike")], pinned: true, changesScope: true, agents: true)
+            default:
+                workspace.navigate(
+                    folder: nil, documents: [try path("Next session")], pinned: true, changesScope: true, agents: true)
+            }
+            await workspace.waitForNavigation()
+            if ["info", "claimed-only"].contains(state) {
+                workspace.inspectorInfo = true
+                workspace.preview.showsOutline = true
+            }
+        }
+    }
+
+    /// #137 fixture paths by title, from the real create pipeline.
+    private var agentPaths: [String: String] = [:]
+
+    /// Publishes one agent Document through `AgentCreateService` at a fixed UTC time and pins its file dates.
+    @discardableResult
+    private func agentCreate(
+        _ root: URL, title: String, type: String, agent: String, client: String, at seconds: TimeInterval
+    ) throws -> String {
+        let library = root.resolvingSymlinksInPath()
+        let date = Date(timeIntervalSince1970: seconds)
+        let grant = AgentGrant(project: "Silkweb", library: LibraryLocation(path: library.path))
+        var service = AgentCreateService(
+            library: library, grantId: "Silkweb", scope: try AgentScope(grant: grant),
+            maxBytes: AgentGrantLimits.defaultMaxCreateBytes)
+        service.now = { date }
+        service.timeZone = TimeZone(identifier: "UTC")!
+        let result = try service.create(
+            AgentCreateRequest(
+                idempotencyKey: title, type: type, title: title,
+                body: "Objective: \(title.lowercased()).\n\nNext action: keep the owner’s Library quiet.\n",
+                agent: agent, session: "7f3a2c19", client: client))
+        guard let path = result.path else { throw SnapshotFailure.error("Agent create returned no path") }
+        try FileManager.default.setAttributes(
+            [.creationDate: date, .modificationDate: date], ofItemAtPath: library.appendingPathComponent(path).path)
+        agentPaths[title] = path
+        return path
+    }
+
+    /// Three receipts from two agents (Oct 6 14:32 and 15:05, Oct 7 09:30 UTC); the first one edited afterwards;
+    /// one envelope-only claim with no receipt.
+    func makeAgentFixture(at root: URL) throws {
+        agentPaths = [:]
+        let spike = try agentCreate(
+            root, title: "Helper spike", type: "progress", agent: "claude-code", client: "Claude Code",
+            at: 1_791_297_120)
+        try agentCreate(
+            root, title: "Use flock for the gate", type: "decision", agent: "codex", client: "Codex CLI",
+            at: 1_791_299_100)
+        try agentCreate(
+            root, title: "Next session", type: "handoff", agent: "claude-code", client: "Claude Code",
+            at: 1_791_365_400)
+        // Edited after creation (Oct 6 15:10 UTC): only the bytes say so, never who edited.
+        let url = root.appendingPathComponent(spike)
+        try Data((try String(contentsOf: url, encoding: .utf8) + "\nChecked by hand.\n").utf8).write(to: url)
+        let edited = Date(timeIntervalSince1970: 1_791_299_400)
+        try FileManager.default.setAttributes([.modificationDate: edited], ofItemAtPath: url.path)
+        let claimed = root.appendingPathComponent(SnapshotScenario.agentClaimed)
+        try Data(
+            ("---\nschema: \"silkweb-memory/v1\"\nmemory_id: \"mem_01JA2B3C4D5E6F7G8H9J0K1L2N\"\ntype: \"memory\"\n"
+                + "project: \"Silkweb\"\nagent: \"gemini-cli\"\nsession: \"2026-10-05-b\"\n"
+                + "created_at: \"2026-10-05T11:00:00Z\"\n---\n\n# Prefer local disks\n\n"
+                + "Agents create only on a local disk Library.\n").utf8
+        ).write(to: claimed)
+        let date = Date(timeIntervalSince1970: 1_791_198_000)
+        try FileManager.default.setAttributes(
+            [.creationDate: date, .modificationDate: date], ofItemAtPath: claimed.path)
     }
 
     private func render(_ scenario: SnapshotScenario, dark: Bool, output: URL) async -> SnapshotManifest.Capture {
@@ -850,6 +954,7 @@ final class SnapshotHarness {
                     at: root, deepPath: scenario.document == SnapshotScenario.deepDocument,
                     longOutline: scenario.document == SnapshotScenario.longOutline,
                     memoryEnvelopes: scenario.folder == SnapshotScenario.memoryFolder)
+                if scenario.agentActivity != nil { try makeAgentFixture(at: root) }
             }
             workspace.root = root
             workspace.recoveryDirectory = root.appendingPathComponent("Snapshot Recovery")
@@ -985,6 +1090,27 @@ final class SnapshotHarness {
                 try await wait("sidebars collapse") {
                     workspace.librarySplitController?.navigationItem.isCollapsed == true
                 }
+            }
+            if scenario.agentActivity == "arrives", let root = workspace.root {
+                // A receipt lands while “Next session” stays selected and open. Its Oct 6 16:00 receipt sorts it
+                // below the selection, which neither moves nor changes the editor, focus or tabs.
+                let responder = window.firstResponder
+                let tabs = workspace.tabs.map(\.id)
+                try agentCreate(
+                    root, title: "Recovered checkpoint", type: "progress", agent: "codex", client: "Codex CLI",
+                    at: 1_791_302_400)
+                await workspace.reloadAgentActivity()
+                await workspace.reconcileFinderChanges()
+                controller.view.layoutSubtreeIfNeeded()
+                guard workspace.agentEntries.count == 4, workspace.tabs.map(\.id) == tabs,
+                    window.firstResponder === responder,
+                    let selected = agentPaths["Next session"], workspace.session.selectedDocuments == [selected]
+                else { throw SnapshotFailure.error("The arriving receipt moved the selection, tabs or focus") }
+            }
+            if ["info", "claimed-only"].contains(scenario.agentActivity) {
+                // The Agent block reads the Document off the main thread.
+                try await Task.sleep(for: .milliseconds(400))
+                controller.view.layoutSubtreeIfNeeded()
             }
             if scenario.rename {
                 guard let path = scenario.document ?? scenario.folder else {

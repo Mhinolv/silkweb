@@ -10,6 +10,7 @@ struct DocumentList: View {
         SearchView(workspace: workspace, search: workspace.search) {
             PinnedColumn {
                 TagFilterBar(workspace: workspace)
+                if workspace.agentScope { AgentActivityStrip(workspace: workspace) }
                 if workspace.includesSubfolders {
                     HStack {
                         Text(
@@ -32,6 +33,24 @@ struct DocumentList: View {
                         ContentUnavailableView(
                             "Folder Unavailable", systemImage: "lock",
                             description: Text("You don't have permission to view this folder."))
+                    }
+                } else if workspace.agentScope && workspace.documents.isEmpty && workspace.agentFilter != nil {
+                    ColumnEmptyState {
+                        ContentUnavailableView {
+                            Label("No Agent Documents", systemImage: "clock.arrow.circlepath")
+                        } description: {
+                            Text("No documents from this agent.")
+                        } actions: {
+                            ColumnEmptyActions(actions: [
+                                .init(title: "Show All Agents") { workspace.agentFilter = nil }
+                            ])
+                        }
+                    }
+                } else if workspace.agentScope && workspace.documents.isEmpty && workspace.effectiveTagFilters.isEmpty {
+                    ColumnEmptyState {
+                        ContentUnavailableView(
+                            "No Agent Documents", systemImage: "clock.arrow.circlepath",
+                            description: Text("Documents agents create appear here."))
                     }
                 } else if workspace.documents.isEmpty && !workspace.effectiveTagFilters.isEmpty {
                     ColumnEmptyState {
@@ -109,11 +128,15 @@ struct DocumentRow: View {
     let pointerState: DocumentRowPointerState
     /// Shown only when the list spans folders; a single-folder scope already names its folder.
     var location: String? = nil
+    /// #137: in Agent Activity scope only, the receipt that created this Document; the row shows its date and agent.
+    var agentEntry: AgentActivityEntry? = nil
     @Environment(\.locale) private var locale
     @State private var summary: DocumentSummary?
     private var title: String { URL(fileURLWithPath: document.name).deletingPathExtension().lastPathComponent }
-    private var sortsByCreated: Bool { workspace.listPreference.key == .created }
-    private var date: Date? { sortsByCreated ? document.created : document.modified }
+    private var sortsByCreated: Bool { agentEntry == nil && workspace.listPreference.key == .created }
+    private var date: Date? {
+        agentEntry.map { $0.created ?? document.created } ?? (sortsByCreated ? document.created : document.modified)
+    }
     private var dateText: String? {
         date.map {
             (sortsByCreated ? "Created " : "")
@@ -133,8 +156,15 @@ struct DocumentRow: View {
             }
             HStack(spacing: 0) {
                 if let dateText { Text(dateText).fixedSize().layoutPriority(1) }
-                if let location {
+                // The date and agent never truncate; the location gives way first.
+                if let agent = agentEntry?.agent {
                     if dateText != nil { Text(" · ").foregroundStyle(.tertiary).fixedSize().layoutPriority(1) }
+                    Text(agent).fixedSize().layoutPriority(1)
+                }
+                if let location {
+                    if dateText != nil || agentEntry != nil {
+                        Text(" · ").foregroundStyle(.tertiary).fixedSize().layoutPriority(1)
+                    }
                     Text(location).truncationMode(.head)
                 }
             }
@@ -176,6 +206,7 @@ struct DocumentRow: View {
             let sentence = summary.excerpt.prefix { !".!?。".contains($0) }
             value += (value.isEmpty ? "" : ". ") + sentence
         }
+        if let agent = agentEntry?.agent { value += (value.isEmpty ? "" : ", ") + "agent-created by " + agent }
         return value
     }
 }

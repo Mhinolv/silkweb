@@ -145,10 +145,11 @@ struct DocumentTable: NSViewRepresentable {
                 dateReference: dateReference, pointerState: pointerState,
                 location: locationScope.map {
                     DocumentRowPresentation.location(for: document.relativePath, scope: $0.path, scopeName: $0.name)
-                })
+                }, agentEntry: workspace.agentScope ? workspace.agentEntry(for: document) : nil)
         }
 
-        /// Rows show where they live only when the list spans folders: All Documents, a tag, or Include Subfolders.
+        /// Rows show where they live only when the list spans folders: All Documents, a tag, Agent Activity, or
+        /// Include Subfolders.
         static func locationScope(_ workspace: LibraryWorkspace) -> (path: String?, name: String)? {
             guard let snapshot = workspace.snapshot else { return nil }
             if let folder = workspace.selectedFolder {
