@@ -1,0 +1,12 @@
+{
+  "name": "silkweb-memory",
+  "version": "1.0.0",
+  "description": "Recall and save this project's memory in Silkweb through the silkweb MCP server.",
+  "contextFileName": "GEMINI.md",
+  "mcpServers": {
+    "silkweb": {
+      "command": "<SILKWEB_HELPER>",
+      "args": ["mcp", "--grant", "<GRANT_ID>"]
+    }
+  }
+}

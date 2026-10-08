@@ -1,0 +1,14 @@
+description = "Save a Silkweb checkpoint: What changed, Evidence, Still uncertain, Next step."
+prompt = """
+Follow the "Writing a checkpoint" and "Creating safely" sections of the silkweb-memory skill. Extra context from the user: {{args}}
+
+Create one progress document with memory_create (folder "progress", or folder "handoffs" for a handoff) whose body uses these headings:
+
+## What changed
+## Evidence
+## Still uncertain
+## Next step
+
+Never claim tests you didn't run. Pass your session ID as session and an idempotencyKey of <session>-<n>.
+If the create fails, say exactly "Checkpoint not saved (<code>). Keeping the handoff here instead:" with the error.code, then put the checkpoint in the chat.
+"""
