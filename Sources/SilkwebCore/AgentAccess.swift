@@ -160,6 +160,16 @@ public struct AgentAccessError: Error, Equatable, Sendable {
         code: "write_failed", title: "Can’t Create Document",
         message: "Silkweb couldn’t finish writing to the Library. Nothing was replaced. Try again with the same key.")
 
+    /// The volume ran out of space before the document was published (#139). Nothing was created.
+    public static let diskFull = Self(
+        code: "disk_full", title: "Can’t Create Document",
+        message: "There isn’t enough space on the disk. Nothing was created.")
+
+    /// The Library (or a Folder in it) can't be written by this user (#139). Nothing was created.
+    public static let permissionDenied = Self(
+        code: "permission_denied", title: "Can’t Create Document",
+        message: "Silkweb doesn’t have permission to write to this Library. Nothing was created.")
+
     /// Bad input from the caller. One code for every command (#135): `invalid_request` from #133 builds
     /// is no longer sent. See also `invalidArgument(_:)`.
     public static func invalidRequest(_ message: String) -> Self {

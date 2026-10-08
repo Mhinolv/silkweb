@@ -85,6 +85,7 @@ struct SnapshotScenario {
     var listWidth: CGFloat? = nil
     /// #137 agent states, on three receipts from two agents plus one envelope-only claim: "list" (Agent Activity
     /// selected), "filtered-empty", "info" (an edited agent Document in Info), "claimed-only" and "arrives".
+    /// #139 "dirty-open": the owner's unsaved Document in Progress stays open while an agent row arrives there.
     var agentActivity: String? = nil
 
     static let deepFolder =
@@ -97,6 +98,8 @@ struct SnapshotScenario {
     static let memoryDocument = memoryFolder + "/2026-10-07 0930 — Helper spike.md"
     /// #137: an envelope-only agent claim with no Silkweb receipt.
     static let agentClaimed = "Memory/Projects/Silkweb/Memories/Prefer local disks.md"
+    /// #139: the owner's own Document in an agent create folder; written only for "dirty-open".
+    static let ownerNotes = memoryFolder + "/Owner notes.md"
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
     /// #90: the owner's non-default amber Accent.
@@ -255,6 +258,8 @@ struct SnapshotScenario {
         .init(name: "agent-provenance-info", agentActivity: "info"),
         .init(name: "agent-provenance-claimed-only", agentActivity: "claimed-only"),
         .init(name: "agent-receipt-arrives", agentActivity: "arrives"),
+        // #139: an edited Document stays open and selected while a new agent row appears in its Folder.
+        .init(name: "agent-qual-dirty-open", dirtyActive: true, agentActivity: "dirty-open"),
         .init(name: "new-document", folder: "", document: "Snapshot Fixtures/Empty Document.md", createDocument: true),
         .init(
             name: "new-document-in-folder", folder: "Snapshot Fixtures/Empty Folder",
@@ -262,6 +267,9 @@ struct SnapshotScenario {
         .init(name: "read-only-banner", document: "Snapshot Fixtures/Read Only.md"),
         // #131: another Silkweb process held the library's gate past the wait; the existing save-failure banner.
         .init(name: "save-gate-busy", document: pourOver, saveFailure: .libraryBusy),
+        // #139: the same banner when the disk is full or the Folder can't be written.
+        .init(name: "save-disk-full", document: pourOver, saveFailure: .diskFull),
+        .init(name: "save-permission-denied", document: pourOver, saveFailure: .permission),
         .init(name: "tabs-open", document: image, tabs: [pourOver, image, "Snapshot Fixtures/Empty Document.md"]),
         // silkweb-1.65: compact bar, folder tabs with a coral unsaved dot; #91: the path, folded at `…`, in the status bar.
         .init(
@@ -831,6 +839,10 @@ final class SnapshotHarness {
             case "info":
                 workspace.navigate(
                     folder: nil, documents: [try path("Helper spike")], pinned: true, changesScope: true, agents: true)
+            case "dirty-open":
+                workspace.navigate(
+                    folder: SnapshotScenario.memoryFolder, documents: [SnapshotScenario.ownerNotes], pinned: true,
+                    changesScope: true)
             default:
                 workspace.navigate(
                     folder: nil, documents: [try path("Next session")], pinned: true, changesScope: true, agents: true)
@@ -955,6 +967,13 @@ final class SnapshotHarness {
                     longOutline: scenario.document == SnapshotScenario.longOutline,
                     memoryEnvelopes: scenario.folder == SnapshotScenario.memoryFolder)
                 if scenario.agentActivity != nil { try makeAgentFixture(at: root) }
+                if scenario.agentActivity == "dirty-open" {
+                    let notes = root.appendingPathComponent(SnapshotScenario.ownerNotes)
+                    try Data("# Owner notes\n\nWhat I still need to check before the release.\n".utf8).write(to: notes)
+                    let date = Date(timeIntervalSince1970: 1_791_302_000)
+                    try FileManager.default.setAttributes(
+                        [.creationDate: date, .modificationDate: date], ofItemAtPath: notes.path)
+                }
             }
             workspace.root = root
             workspace.recoveryDirectory = root.appendingPathComponent("Snapshot Recovery")
@@ -1106,6 +1125,25 @@ final class SnapshotHarness {
                     window.firstResponder === responder,
                     let selected = agentPaths["Next session"], workspace.session.selectedDocuments == [selected]
                 else { throw SnapshotFailure.error("The arriving receipt moved the selection, tabs or focus") }
+            }
+            if scenario.agentActivity == "dirty-open", let root = workspace.root {
+                // The owner's Document has unsaved changes when an agent publishes into the same Folder. Its new row
+                // sorts in by date; the selection, editor, focus, tabs and Edited state don't move.
+                workspace.editor.state = .dirty
+                let responder = window.firstResponder
+                let tabs = workspace.tabs.map(\.id)
+                let text = workspace.editor.text
+                let arrived = try agentCreate(
+                    root, title: "Release checklist", type: "progress", agent: "codex", client: "Codex CLI",
+                    at: 1_791_366_000)
+                await workspace.reloadAgentActivity()
+                await workspace.reconcileFinderChanges()
+                controller.view.layoutSubtreeIfNeeded()
+                guard workspace.documents.contains(where: { $0.relativePath == arrived }),
+                    workspace.session.selectedDocuments == [SnapshotScenario.ownerNotes],
+                    workspace.tabs.map(\.id) == tabs, window.firstResponder === responder,
+                    workspace.editor.text == text, workspace.editor.state == .dirty
+                else { throw SnapshotFailure.error("The agent row moved the edited Document's selection or state") }
             }
             if ["info", "claimed-only"].contains(scenario.agentActivity) {
                 // The Agent block reads the Document off the main thread.

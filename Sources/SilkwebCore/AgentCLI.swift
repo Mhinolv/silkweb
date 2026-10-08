@@ -154,7 +154,7 @@ public enum AgentHelper {
             return 65
         case "library_busy", "stale_snapshot", "rate_limited":
             return 69
-        case "library_not_found", "library_unreadable", "unreadable", "write_failed":
+        case "library_not_found", "library_unreadable", "unreadable", "write_failed", "disk_full", "permission_denied":
             return 74
         case "grant_required", "grant_not_found", "grant_revoked", "no_grant", "no_grants_file",
             "invalid_grants_file", "unsupported_grants_version", "invalid_grant", "out_of_scope",
