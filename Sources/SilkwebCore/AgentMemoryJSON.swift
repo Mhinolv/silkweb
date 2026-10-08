@@ -12,33 +12,55 @@ public indirect enum AgentJSON: Sendable {
 
     static func optional(_ value: String?) -> Self { value.map(Self.string) ?? .null }
 
-    public var rendered: String {
+    /// A `JSONSerialization`-style value (dictionaries, arrays, strings, numbers, `NSNull`), with
+    /// object keys sorted. Anything else becomes `null`.
+    public init(sortingKeysOf value: Any) {
+        switch value {
+        case let object as [String: Any]:
+            self = .object(object.keys.sorted().map { ($0, AgentJSON(sortingKeysOf: object[$0]!)) })
+        case let array as [Any]: self = .array(array.map(AgentJSON.init(sortingKeysOf:)))
+        case let string as String: self = .string(string)
+        case let number as NSNumber:
+            self = CFGetTypeID(number) == CFBooleanGetTypeID() ? .bool(number.boolValue) : .int(number.intValue)
+        case let bool as Bool: self = .bool(bool)
+        case let int as Int: self = .int(int)
+        default: self = .null
+        }
+    }
+
+    /// Indented like `JSONSerialization`'s pretty printing, with a final line break.
+    public var rendered: String { rendered(pretty: true) }
+
+    /// One line (`{"a":1}`) unless `pretty`, always followed by a line break.
+    public func rendered(pretty: Bool) -> String {
         var output = ""
-        render(into: &output, indent: "")
+        render(into: &output, indent: pretty ? "" : nil)
         return output + "\n"
     }
 
-    private func render(into output: inout String, indent: String) {
-        let inner = indent + "  "
+    /// `indent` is `nil` for compact output.
+    private func render(into output: inout String, indent: String?) {
+        let inner = indent.map { $0 + "  " }
+        let open = inner == nil ? "" : "\n"
         switch self {
         case .object(let pairs) where pairs.isEmpty: output += "{}"
         case .array(let items) where items.isEmpty: output += "[]"
         case .object(let pairs):
-            output += "{\n"
+            output += "{" + open
             for (offset, pair) in pairs.enumerated() {
-                output += inner + Self.quoted(pair.0) + " : "
+                output += (inner ?? "") + Self.quoted(pair.0) + (inner == nil ? ":" : " : ")
                 pair.1.render(into: &output, indent: inner)
-                output += offset == pairs.count - 1 ? "\n" : ",\n"
+                output += (offset == pairs.count - 1 ? "" : ",") + open
             }
-            output += indent + "}"
+            output += (indent ?? "") + "}"
         case .array(let items):
-            output += "[\n"
+            output += "[" + open
             for (offset, item) in items.enumerated() {
-                output += inner
+                output += inner ?? ""
                 item.render(into: &output, indent: inner)
-                output += offset == items.count - 1 ? "\n" : ",\n"
+                output += (offset == items.count - 1 ? "" : ",") + open
             }
-            output += indent + "]"
+            output += (indent ?? "") + "]"
         case .string(let string): output += Self.quoted(string)
         case .int(let value): output += String(value)
         case .bool(let value): output += value ? "true" : "false"

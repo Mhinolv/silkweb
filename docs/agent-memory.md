@@ -2,7 +2,7 @@
 
 ```text
 contract_version: 1
-Last reviewed: 2026-10-07 (#129)
+Last reviewed: 2026-10-08 (#135)
 ```
 
 This is the source of truth for how coding agents (Claude Code, Codex, Gemini and other local MCP
@@ -24,11 +24,12 @@ redefining names, layout or guarantees. Changing a rule here means bumping `cont
 - **Local storage doesn’t mean local processing.** Text the helper returns goes to the agent, and the
   agent may send it to its model provider.
 
-The helper ships four read-only commands: `memory capabilities` and `memory list` (#129, see
-[Helper distribution](#helper-distribution)), and `memory search` and `memory read` (#134, see
-[Search and read](#search-and-read-134)). #133 adds `memory create` and `memory create-folder` (see
-[Create and receipts](#create-and-receipts-133)). All other operations below are contracted here and
-built in the tickets listed.
+The helper ships these commands: `memory capabilities` and `memory list` (#129, see
+[Helper distribution](#helper-distribution)), `memory search` and `memory read` (#134, see
+[Search and read](#search-and-read-134)), `memory create` and `memory create-folder` (#133, see
+[Create and receipts](#create-and-receipts-133)) and `memory activity` (#135). Every command, flag,
+exit status and error code is listed in [Command line](#command-line-135). All other operations below
+are contracted here and built in the tickets listed.
 
 ## Supported operations
 
@@ -40,7 +41,7 @@ built in the tickets listed.
 | `memory_read` | `silkweb memory read` | One saved revision with provenance | #134 |
 | `memory_create` | `silkweb memory create` | Create one complete document; never replaces | #133 |
 | `memory_create_folder` | `silkweb memory create-folder` | Create a Folder inside a create folder | #133 |
-| `memory_activity` | `silkweb memory activity` | Operation receipts within the caller’s read scope | #137 |
+| `memory_activity` | `silkweb memory activity` | Operation receipts within the caller’s read scope | #135 (list), #137 |
 
 Rules for every operation:
 
@@ -292,8 +293,9 @@ document text or the requested target.
 | `too_large` | That document is larger than this grant’s read limit (1 MB). For creates: This document is larger than the grant allows (256 KB). Nothing was created. |
 | `not_found` | There’s no document at that location. (Only for targets inside the scope.) |
 
-The Settings ▸ Library ▸ Agent Access section and the commands that set grants up come later
-(#135); they only edit this file.
+The Settings ▸ Library ▸ Agent Access section comes later and only edits this file. Until then the
+owner writes it by hand (see [Spike](#spike-app-closed-access-in-terminal-macos-15) step 3); the CLI
+(#135) never writes it.
 
 ## Filesystems
 
@@ -377,7 +379,7 @@ Helper errors for coordination (stable `error.code`):
 
 | Code | Title | Message |
 |---|---|---|
-| `library_busy` | Library Busy | Silkweb is updating this library. Try again in a moment. The JSON error includes `retry_after` (seconds). |
+| `library_busy` | Library Busy | Silkweb is updating this library. Try again in a moment. The JSON error includes `retryAfter` (seconds). |
 | `stale_snapshot` | Library Changed | The library changed while this request ran. Try again. (Retried internally first, then reported only if the retries run out.) |
 
 ## Search and read (#134)
@@ -387,10 +389,11 @@ the Library gate, never write to the Library and never wait for the app. The CLI
 (#136) and skills (#138) present the fields below as they are and don't rename them.
 
 ```sh
-silkweb memory search --project Silkweb [--query <text>] [--type decision,memory] [--status <s,…>] \
-  [--created-after 2026-10-01] [--created-before 2026-10-08] [--filter-project Silkweb] [--limit 10]
-silkweb memory read --project Silkweb --path "Memory/Projects/Silkweb/Memories/Use flock.md" \
+silkweb memory search [<text>] [--type decision --type memory] [--status <s>]… \
+  [--created-after 2026-10-01] [--created-before 2026-10-08] [--project Silkweb] [--limit 10]
+silkweb memory read "Memory/Projects/Silkweb/Memories/Use flock.md" \
   [--cursor <nextCursor>] [--expected-revision sha256:…]
+silkweb memory read --id 5E0C…-documentId
 ```
 
 ### Search request
@@ -492,7 +495,7 @@ Errors for search and read, in addition to the [refusals](#refusals):
 
 | Code | Title | Message |
 |---|---|---|
-| `invalid_argument` | Invalid Request | The option “type” isn’t valid. (Also `limit`, `cursor` and the dates.) |
+| `invalid_argument` | Invalid Request | The option “type” isn’t valid. (Also `limit`, `cursor`, `id` and the dates.) |
 | `unreadable` | Can’t Open Document | That document isn’t UTF-8 text. |
 | `envelope_malformed`, `envelope_schema_newer` | Can’t Read Front Matter | See [Reading rules](#reading-rules). |
 | `stale_snapshot` | Library Changed | The library changed while this request ran. Try again. |
@@ -503,14 +506,15 @@ A create publishes exactly one new Document and never replaces anything (`AgentC
 `SilkwebCore`):
 
 ```sh
-silkweb memory create --project Silkweb --key 7f3c-checkpoint-1 --type progress \
-  --title "Helper spike" --agent claude-code --session 2026-10-07-a --body-file - < body.md
-silkweb memory create-folder --project Silkweb --path "Memory/Projects/Silkweb/Progress/Sprint 1"
+silkweb memory create --folder progress --title "Helper spike" --idempotency-key 7f3c-checkpoint-1 \
+  --agent claude-code --session 2026-10-07-a --body-file - < body.md
+silkweb memory create-folder "Memory/Projects/Silkweb/Progress/Sprint 1"
 ```
 
-- **Where it goes:** `--type` picks the entry folder (`memory` and `decision` → `Memories`,
-  `progress` → `Progress`, `handoff` → `Handoffs`), or `--folder` names a Folder inside a create
-  folder. Missing Folders are made on demand in the case given (the defaults are title case) and get
+- **Where it goes:** `--folder memories|progress|handoffs` picks an entry folder, and `--type` picks the
+  envelope type (`memory` and `decision` → `Memories`, `progress` → `Progress`, `handoff` → `Handoffs`);
+  either one alone is enough. Or `--folder` names a Folder inside a create folder, and then `--type` is
+  required. Missing Folders are made on demand in the case given (the defaults are title case) and get
   identities in the app index like any new Folder. `create-folder` is idempotent: an existing Folder
   returns `"created": false`.
 - **Name:** the [generated filename](#library-layout). A taken name gets the next “ 2”, “ 3” suffix,
@@ -591,7 +595,106 @@ document. `duplicate` is the outcome a replay reports; the stored receipt keeps 
 | `idempotency_conflict` | This request key was already used with different content. Nothing was changed. Use a new key. |
 | `too_large` | This document is larger than the grant allows (256 KB). Nothing was created. |
 | `write_failed` | Silkweb couldn’t finish writing to the Library. Nothing was replaced. Try again with the same key. |
-| `invalid_request` | The request key must be 1 to 200 characters, without control characters. (Also: unreadable or non-UTF-8 text.) |
+| `invalid_argument` | The request key must be 1 to 200 characters, without control characters. (Also: unreadable or non-UTF-8 text.) Builds of #133 sent `invalid_request`; #135 replaced it everywhere, with no alias. |
+
+## Command line (#135)
+
+`silkweb memory …` is the shell-facing face of the same services the MCP server uses (#136): the same
+grants, scope checks, limits, idempotency and receipts. Every command works with Silkweb closed.
+The binary is the helper from [Helper distribution](#helper-distribution) (`build/helper/silkweb`,
+linked to `~/.local/bin/silkweb`); nothing installs itself. `silkweb --help` prints the summary below
+in a `USAGE` / `COMMANDS` / `OPTIONS` layout.
+
+### Commands
+
+```text
+silkweb memory capabilities
+silkweb memory search  [QUERY…] [--project P] [--type T]… [--status S]… [--created-after D] [--created-before D] [--limit N]
+silkweb memory read    <PATH> | --id DOCUMENT_ID  [--cursor C] [--expected-revision R]
+silkweb memory create  --folder memories|progress|handoffs|<PATH> --title T --body-file <FILE|->
+                       --agent A --session S [--type T] [--idempotency-key K] [--status S]
+                       [--observed-at D] [--review-after D] [--supersedes MEMORY_ID]…
+silkweb memory create-folder <PATH>
+silkweb memory activity [--limit N] [--since D]
+silkweb memory list
+silkweb --version | --help
+```
+
+| Command | Result (`result` in the envelope) |
+|---|---|
+| `capabilities` | `access`, `profile` (Read Only / Read and Create), `label`, `project`, `library`, `filesystem`, `read_roots`, `create_roots`, `project_folder_exists`, `limits`, `operations`, `schema` (`silkweb-memory/v1`), `contract_version`, `helper_version`. Never document counts. |
+| `search` | The [search response](#search-response), fields in the documented order. The query is the command’s remaining words joined by spaces; put `--` before a query that starts with “-”. `--type` and `--status` repeat or take comma-separated lists. `--project` is the search filter, not grant selection. |
+| `read` | The [read response](#read). `--id` takes the app index’s `documentId`; an ID the index doesn’t know and one outside the read folders are both `not_found`. |
+| `create` | `{"outcome", "path", "receipt", "replayed"}` ([Create and receipts](#create-and-receipts-133)). `--folder memories`, `progress` or `handoffs` (any case) picks the entry folder and the default type (`memory`, `progress`, `handoff`); `--type decision` with `memories` makes a decision. A Library-relative `--folder` needs `--type`. Without `--idempotency-key`, the helper uses a fresh `cli-<UUID>` key, so a retry creates another document. A replay exits 0. |
+| `create-folder` | `{"created", "path"}`. Idempotent. |
+| `activity` | `{"receipts": […], "total": N}`: this grant’s [receipts](#create-and-receipts-133) (sorted keys, never body text), newest first. Receipts whose destination is outside the read folders are dropped before counting. `--limit` defaults to 20 and is capped by the grant’s `max_results`; `--since` is a date or ISO 8601 timestamp. Reads `.silkweb/agent-events/` only and never takes the gate. |
+| `list` | `{"documents": [{"modified", "path", "size"}], "project"}` (#129). |
+
+### Global options
+
+| Option | Meaning |
+|---|---|
+| `--grant <GRANT>` | The grant’s project key or its label. Falls back to `SILKWEB_GRANT`; the flag wins, and an empty variable counts as unset. Without either, the only grant is used; with several, `grant_required`. A revoked grant is still selected, so the answer is `grant_revoked`. |
+| `--agent`, `--session` | Claims written into created documents (required by `create`). |
+| `--client` | Recorded in receipts; default `cli`. Not part of the idempotency payload. |
+| `--grants <FILE>` | Another grants file, for testing. |
+| `--pretty` | Indent the JSON. Compact otherwise. |
+| `--help`, `-h`, `--version` | Help text on stdout (exit 0); versions in the JSON envelope. |
+
+Options take `--name value` or `--name=value`. Each may appear once, except `--type`, `--status` (search)
+and `--supersedes` (create).
+
+### Input
+
+- **Document text comes only from `--body-file <FILE>` or stdin (`--body-file -`), never from an
+  argument.** The bytes are kept exactly (multiline, Unicode, CRLF); they must be UTF-8. At most the
+  grant’s `max_create_bytes` + 1 bytes are read, so an oversized input fails with `too_large` without
+  reading the rest. The limit covers the finished document, front matter included.
+- Paths and titles are Library-relative POSIX, may contain spaces and any Unicode, and are normalized
+  to NFC (APFS ignores the difference, so a decomposed spelling reads the same file).
+
+### Output
+
+- stdout carries **exactly one JSON object** with sorted top-level keys, for success and failure alike:
+  `{"ok":true,"result":…,"version":1}` or `{"error":{"code","message","retryAfter"?,"title"},"ok":false,"version":1}`.
+  `version` is the envelope’s version. Search and read results keep their documented field order;
+  every other object has sorted keys.
+- stderr carries only human lines, `silkweb: <message>`: the refusal message, or a note such as
+  “Recovered interrupted creates: 1 abandoned.” It never contains document text, excerpts or
+  out-of-grant paths, and has no colour or progress output.
+- `retryAfter` (seconds) comes with `library_busy` and `rate_limited`.
+
+### Exit statuses and error codes
+
+| Exit | Meaning | `error.code` |
+|---|---|---|
+| 0 | Success, including a replayed create | — |
+| 64 | Usage or bad argument | `invalid_argument` |
+| 65 | Bad input data | `envelope_malformed`, `envelope_schema_newer`, `envelope_invalid_field`, `too_large`, `idempotency_conflict`, `not_found` |
+| 69 | Busy; try again | `library_busy`, `stale_snapshot`, `rate_limited` |
+| 70 | Unexpected helper failure | `internal_error` |
+| 74 | Library I/O | `library_not_found`, `library_unreadable`, `unreadable`, `write_failed` |
+| 77 | Access | `grant_required`, `grant_not_found`, `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `no_grant`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `invalid_path`, `excluded_name` |
+
+- **One bad-input code.** `invalid_argument` covers usage mistakes (unknown command or option, a
+  repeated or missing option, `--body` text), bad values (`--limit`, `--type`, dates, `--id`, `--cursor`)
+  and bad create input (the request key, unreadable or non-UTF-8 text). #133 builds sent
+  `invalid_request` for the last group; it isn’t sent any more and has no alias. Usage messages end
+  with “Run “silkweb --help” for usage.”
+- New copy for grant selection (title **No Agent Access**):
+
+  | Code | Message |
+  |---|---|
+  | `grant_required` | Choose a grant with --grant. Available: “Silkweb project”, “Notes”. (Labels only.) |
+  | `grant_not_found` | No agent access named “x” exists. Ask the owner to create one in Silkweb. (With no grants at all: No agent access exists yet. Ask the owner to create one in Silkweb.) |
+  | `internal_error` | Silkweb’s helper ran into an unexpected problem. Try again. |
+
+- No message ever suggests turning off an agent’s sandbox, macOS privacy protections, SIP or any
+  safety flag. Missing, revoked and out-of-scope access is answered by asking the owner.
+- A removed grant (`grant_not_found`, or a deleted grants file) also deletes that grant’s search cache
+  when it was named with `--grant` or `SILKWEB_GRANT`.
+
+The tests in `Tests/SilkwebCoreTests/AgentCLITests.swift` hold golden stdout and stderr for these cases.
 
 ## Safety exclusions
 
@@ -608,18 +711,8 @@ document. `duplicate` is the outcome a replay reports; the stored receipt keeps 
 **Message copy.** Machine output is JSON on stdout. Human messages go to stderr in sentence case,
 with curly quotes around names. Library failures reuse the app’s titles, **“Library Not Found”** and
 **“Can’t Open Library”**. Grant failures use **“No Agent Access”**. Out-of-scope messages name the
-grant’s scope, never the requested target (see [Refusals](#refusals)).
-
-| Exit | Meaning | stdout |
-|---|---|---|
-| 0 | Success | Result JSON |
-| 1 | Failure | `{"error": {"code": "…", "title": "…"}}` |
-| 64 | Usage error | Nothing; usage text on stderr |
-
-Error codes: `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `no_grant`,
-`invalid_grant`, `library_not_found`, `library_unreadable`, `library_busy`, `stale_snapshot`
-([Coordination](#coordination-131)), `invalid_argument` ([Search and read](#search-and-read-134)), plus
-the per-operation [refusals](#refusals) and the [create codes](#create-and-receipts-133).
+grant’s scope, never the requested target (see [Refusals](#refusals)). Exit statuses and the full code
+list are in [Command line](#command-line-135).
 
 ## Helper distribution
 
@@ -661,13 +754,10 @@ Run these once from the repository root. Each step shows its expected output.
 
    ```sh
    mkdir -p ~/.local/bin && ln -sf "$PWD/build/helper/silkweb" ~/.local/bin/silkweb
-   ~/.local/bin/silkweb version
+   ~/.local/bin/silkweb --version
    ```
    ```json
-   {
-     "contract_version" : 1,
-     "helper_version" : "0.1.0"
-   }
+   {"ok":true,"result":{"contract_version":1,"helper_version":"0.1.0"},"version":1}
    ```
 
 3. Write the grant, using the Library you want agents to use.
@@ -680,42 +770,50 @@ Run these once from the repository root. Each step shows its expected output.
    ```
    (No output.)
 
-4. Quit Silkweb (⌘Q), then ask the helper for its scope.
+4. Quit Silkweb (⌘Q), then ask the helper for its scope. With one grant, `--grant` isn’t needed.
 
    ```sh
-   ~/.local/bin/silkweb memory capabilities --project Silkweb
+   ~/.local/bin/silkweb memory capabilities --pretty
    ```
    ```json
    {
-     "access" : "read-create",
-     "contract_version" : 1,
-     "create_roots" : [
-       "Memory/Projects/Silkweb/Memories",
-       "Memory/Projects/Silkweb/Progress",
-       "Memory/Projects/Silkweb/Handoffs"
-     ],
-     "filesystem" : "qualified",
-     "helper_version" : "0.1.0",
-     "library" : "/Users/me/Writing",
-     "limits" : {
-       "max_create_bytes" : 262144,
-       "max_read_bytes" : 1048576,
-       "max_results" : 200,
-       "requests_per_minute" : 120
+     "ok" : true,
+     "result" : {
+       "access" : "read-create",
+       "contract_version" : 1,
+       "create_roots" : [
+         "Memory/Projects/Silkweb/Memories",
+         "Memory/Projects/Silkweb/Progress",
+         "Memory/Projects/Silkweb/Handoffs"
+       ],
+       "filesystem" : "qualified",
+       "helper_version" : "0.1.0",
+       "label" : "Silkweb project",
+       "library" : "/Users/me/Writing",
+       "limits" : {
+         "max_create_bytes" : 262144,
+         "max_read_bytes" : 1048576,
+         "max_results" : 200,
+         "requests_per_minute" : 120
+       },
+       "operations" : [
+         "capabilities",
+         "list",
+         "search",
+         "read",
+         "activity",
+         "create",
+         "create-folder"
+       ],
+       "profile" : "Read and Create",
+       "project" : "Silkweb",
+       "project_folder_exists" : true,
+       "read_roots" : [
+         "Memory/Projects/Silkweb"
+       ],
+       "schema" : "silkweb-memory/v1"
      },
-     "operations" : [
-       "capabilities",
-       "list",
-       "search",
-       "read",
-       "create",
-       "create-folder"
-     ],
-     "project" : "Silkweb",
-     "project_folder_exists" : true,
-     "read_roots" : [
-       "Memory/Projects/Silkweb"
-     ]
+     "version" : 1
    }
    ```
    If `Memory/Projects/Silkweb` doesn’t exist yet, `project_folder_exists` is `false`. The spike never
@@ -724,35 +822,34 @@ Run these once from the repository root. Each step shows its expected output.
 5. List the granted documents, still with Silkweb closed.
 
    ```sh
-   ~/.local/bin/silkweb memory list --project Silkweb
+   ~/.local/bin/silkweb memory list --pretty
    ```
    ```json
    {
-     "documents" : [
-       {
-         "modified" : "2026-10-07T09:30:00Z",
-         "path" : "Memory/Projects/Silkweb/Progress/2026-10-07 0930 — Helper spike.md",
-         "size" : 412
-       }
-     ],
-     "project" : "Silkweb"
+     "ok" : true,
+     "result" : {
+       "documents" : [
+         {
+           "modified" : "2026-10-07T09:30:00Z",
+           "path" : "Memory/Projects/Silkweb/Progress/2026-10-07 0930 — Helper spike.md",
+           "size" : 412
+         }
+       ],
+       "project" : "Silkweb"
+     },
+     "version" : 1
    }
    ```
 
-6. Check that out-of-scope requests are refused.
+6. Check that a grant that doesn’t exist is refused.
 
    ```sh
-   ~/.local/bin/silkweb memory list --project Other; echo "exit $?"
+   ~/.local/bin/silkweb memory list --grant Other; echo "exit $?"
    ```
    ```text
-   {
-     "error" : {
-       "code" : "no_grant",
-       "title" : "No Agent Access"
-     }
-   }
-   No Agent Access: There’s no grant for the project “Other”.
-   exit 1
+   {"error":{"code":"grant_not_found","message":"No agent access named “Other” exists. Ask the owner to create one in Silkweb.","title":"No Agent Access"},"ok":false,"version":1}
+   silkweb: No agent access named “Other” exists. Ask the owner to create one in Silkweb.
+   exit 77
    ```
 
 `--grants <file>` points the helper at another grants file, which is useful for testing. The

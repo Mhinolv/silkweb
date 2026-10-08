@@ -484,13 +484,14 @@ final class LibraryGateTests: XCTestCase {
         XCTAssertEqual(busy.code, "library_busy")
         XCTAssertEqual(busy.message, "Silkweb is updating this library. Try again in a moment.")
         let output = AgentHelper.refusal(busy)
-        XCTAssertEqual(output.status, 1)
-        let json = try? JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: [String: Any]]
-        XCTAssertEqual(json?["error"]?["code"] as? String, "library_busy")
-        XCTAssertEqual(json?["error"]?["retry_after"] as? Int, 1)
-        XCTAssertEqual(output.stderr, "Library Busy: Silkweb is updating this library. Try again in a moment.\n")
+        XCTAssertEqual(output.status, 69)
+        let json = try? JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any]
+        let error = json?["error"] as? [String: Any]
+        XCTAssertEqual(error?["code"] as? String, "library_busy")
+        XCTAssertEqual(error?["retryAfter"] as? Int, 1)
+        XCTAssertEqual(output.stderr, "silkweb: Silkweb is updating this library. Try again in a moment.\n")
         XCTAssertEqual(AgentAccessError.staleSnapshot.code, "stale_snapshot")
         XCTAssertEqual(AgentAccessError.staleSnapshot.message, "The library changed while this request ran. Try again.")
-        XCTAssertNil(AgentHelper.refusal(.staleSnapshot).stdout.range(of: "retry_after"))
+        XCTAssertNil(AgentHelper.refusal(.staleSnapshot).stdout.range(of: "retryAfter"))
     }
 }

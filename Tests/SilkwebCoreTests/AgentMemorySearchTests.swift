@@ -81,8 +81,13 @@ final class AgentMemorySearchTests: XCTestCase {
         }
     }
 
+    private func result(_ output: AgentHelper.Output) throws -> [String: Any] {
+        let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any])
+        return try XCTUnwrap(envelope["result"] as? [String: Any], output.stdout)
+    }
+
     private func run(_ arguments: [String]) -> AgentHelper.Output {
-        AgentHelper.run(arguments + ["--project", "Silkweb", "--grants", grantsURL.path], home: root)
+        AgentHelper.run(arguments + ["--grant", "Silkweb", "--grants", grantsURL.path, "--pretty"], home: root)
     }
 
     /// The common fixture: one of each type, a plain document, and secrets outside the grant.
@@ -233,7 +238,7 @@ final class AgentMemorySearchTests: XCTestCase {
 
     func testCLIPrintsFieldsInTheDocumentedOrder() throws {
         try writeFixture()
-        let output = run(["memory", "search", "--query", "gate", "--type", "decision,handoff", "--limit", "5"])
+        let output = run(["memory", "search", "gate", "--type", "decision", "--type", "handoff", "--limit", "5"])
         XCTAssertEqual(output.status, 0, output.stderr)
         XCTAssertEqual(output.stderr, "")
         let keys = [
@@ -243,7 +248,7 @@ final class AgentMemorySearchTests: XCTestCase {
         let positions = keys.map { output.stdout.range(of: "\"\($0)\" : ")?.lowerBound }
         XCTAssertFalse(positions.contains(nil), output.stdout)
         XCTAssertEqual(positions.compactMap { $0 }, positions.compactMap { $0 }.sorted(), output.stdout)
-        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any])
+        let json = try result(output)
         let results = try XCTUnwrap(json["results"] as? [[String: Any]])
         XCTAssertEqual(results.compactMap { $0["type"] as? String }, ["decision", "handoff"])
         XCTAssertTrue(results[0]["documentId"] is NSNull)
@@ -258,20 +263,18 @@ final class AgentMemorySearchTests: XCTestCase {
         XCTAssertEqual(index["message"] as? String, "Up to date · 5 documents")
         XCTAssertNil(json["message"])
 
-        let empty = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: Data(run(["memory", "search", "--query", "nothing"]).stdout.utf8))
-                as? [String: Any])
+        let empty = try result(run(["memory", "search", "nothing"]))
         XCTAssertEqual(empty["message"] as? String, "No matches in Memory › Projects › Silkweb.")
 
-        let refused = run(["memory", "search", "--filter-project", "Other"])
-        XCTAssertEqual(refused.status, 1)
+        let refused = run(["memory", "search", "--project", "Other"])
+        XCTAssertEqual(refused.status, 77)
         XCTAssertEqual(
             refused.stderr,
-            "No Agent Access: That location is outside this grant’s read folders (Memory › Projects › Silkweb).\n")
-        XCTAssertEqual(run(["memory", "search", "--created-after", "yesterday"]).status, 1)
-        XCTAssertEqual(run(["memory", "search", "--limit", "ten"]).status, 1)
+            "silkweb: That location is outside this grant’s read folders (Memory › Projects › Silkweb).\n")
+        XCTAssertEqual(run(["memory", "search", "--created-after", "yesterday"]).status, 64)
+        XCTAssertEqual(run(["memory", "search", "--limit", "ten"]).status, 64)
         XCTAssertEqual(run(["memory", "search", "--path", "x"]).status, 64)
-        XCTAssertEqual(run(["memory", "read"]).status, 64, "read needs --path")
+        XCTAssertEqual(run(["memory", "read"]).status, 64, "read needs a path")
     }
 
     // MARK: Ranking
@@ -498,7 +501,7 @@ final class AgentMemorySearchTests: XCTestCase {
         _ = try session.search(AgentMemorySearchRequest())
         XCTAssertTrue(FileManager.default.fileExists(atPath: session.cacheURL.path))
         try AgentGrantFile(grants: []).write(to: grantsURL)
-        XCTAssertEqual(run(["memory", "search"]).status, 1)
+        XCTAssertEqual(run(["memory", "search"]).status, 77)
         XCTAssertFalse(FileManager.default.fileExists(atPath: session.cacheURL.path))
         XCTAssertNotEqual(
             AgentMemoryService.grantID(project: "Silkweb"), AgentMemoryService.grantID(project: "silkweb"))
@@ -600,16 +603,16 @@ final class AgentMemorySearchTests: XCTestCase {
         try writeGrants(limits: AgentGrantLimits(maxReadBytes: 10))
         assertRefused(try session.read(AgentMemoryReadRequest(path: "\(projectPath)/Notes.md")), code: "too_large")
 
-        let output = run(["memory", "read", "--path", "\(projectPath)/Memories/Broken.md"])
-        XCTAssertEqual(output.status, 1)
+        let output = run(["memory", "read", "\(projectPath)/Memories/Broken.md"])
+        XCTAssertEqual(output.status, 65)
         XCTAssertFalse(output.stdout.contains("secret") || output.stderr.contains("secret"))
     }
 
     func testCLIReadPrintsStructuredEnvelopeThenTheBoundedBody() throws {
         try writeFixture()
-        let output = run(["memory", "read", "--path", "\(projectPath)/Memories/Gate decision.md"])
+        let output = run(["memory", "read", "\(projectPath)/Memories/Gate decision.md"])
         XCTAssertEqual(output.status, 0, output.stderr)
-        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any])
+        let json = try result(output)
         XCTAssertEqual((json["envelope"] as? [String: Any])?["type"] as? String, "decision")
         XCTAssertEqual(json["revisionChanged"] as? Bool, false)
         XCTAssertTrue(json["nextCursor"] is NSNull)

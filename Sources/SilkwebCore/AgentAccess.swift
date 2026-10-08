@@ -63,7 +63,7 @@ public struct AgentAccessError: Error, Equatable, Sendable {
     public let code: String
     public let title: String
     public let message: String
-    /// Seconds before retrying a `library_busy` refusal; JSON `retry_after`.
+    /// Seconds before retrying a `library_busy` or `rate_limited` refusal; CLI JSON `retryAfter`.
     public let retryAfter: Int?
 
     public init(code: String, title: String, message: String, retryAfter: Int? = nil) {
@@ -111,8 +111,29 @@ public struct AgentAccessError: Error, Equatable, Sendable {
     public static func rateLimited(retryAfter seconds: Int) -> Self {
         Self(
             code: "rate_limited", title: "Too Many Requests",
-            message: "Too many requests. Try again in \(seconds) \(seconds == 1 ? "second" : "seconds").")
+            message: "Too many requests. Try again in \(seconds) \(seconds == 1 ? "second" : "seconds").",
+            retryAfter: seconds)
     }
+
+    /// Several grants exist and the caller didn't choose one (#135). Lists owner-facing labels only.
+    public static func grantRequired(_ labels: [String]) -> Self {
+        Self(
+            code: "grant_required", title: noAccess,
+            message: "Choose a grant with --grant. Available: " + labels.map { "“\($0)”" }.joined(separator: ", ")
+                + ".")
+    }
+
+    /// The requested grant (by project key or label) isn't in the grants file (#135).
+    public static func grantNotFound(_ name: String) -> Self {
+        Self(
+            code: "grant_not_found", title: noAccess,
+            message: "No agent access named “\(name)” exists. Ask the owner to create one in Silkweb.")
+    }
+
+    /// The grants file has no grants at all, so there's nothing to choose (#135).
+    public static let noGrants = Self(
+        code: "grant_not_found", title: noAccess,
+        message: "No agent access exists yet. Ask the owner to create one in Silkweb.")
 
     public static func tooLarge(limit: Int) -> Self {
         Self(
@@ -139,8 +160,10 @@ public struct AgentAccessError: Error, Equatable, Sendable {
         code: "write_failed", title: "Can’t Create Document",
         message: "Silkweb couldn’t finish writing to the Library. Nothing was replaced. Try again with the same key.")
 
+    /// Bad input from the caller. One code for every command (#135): `invalid_request` from #133 builds
+    /// is no longer sent. See also `invalidArgument(_:)`.
     public static func invalidRequest(_ message: String) -> Self {
-        Self(code: "invalid_request", title: "Invalid Request", message: message)
+        Self(code: "invalid_argument", title: "Invalid Request", message: message)
     }
 
     /// The envelope codes from #132, named after the document's title, never its text.
