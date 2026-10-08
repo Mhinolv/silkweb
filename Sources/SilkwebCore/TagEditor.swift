@@ -135,15 +135,20 @@ public enum TagEditor {
 }
 
 public enum TagStore {
-    /// Read-modify-write against the current identity index, never a stale scan snapshot.
-    public static func update(root: URL, transform: @escaping @Sendable (LibraryMetadata) -> LibraryMetadata)
-        async throws -> LibraryMetadata
-    {
+    /// Read-modify-write against the current identity index, never a stale scan snapshot. The read
+    /// and the write happen inside the Library's gate, so a tag or ID another Silkweb process commits
+    /// meanwhile is never lost (#131).
+    public static func update(
+        root: URL, gateTimeout: Duration = LibraryGate.defaultTimeout,
+        transform: @escaping @Sendable (LibraryMetadata) -> LibraryMetadata
+    ) async throws -> LibraryMetadata {
         try await Task.detached(priority: .userInitiated) {
-            let current = try LibraryMetadataStore.load(root: root).0
-            let updated = TagEditor.pruning(transform(current))
-            if updated != current { try LibraryMetadataStore.save(updated, root: root) }
-            return updated
+            try LibraryGate(root: root).withLease(timeout: gateTimeout) {
+                let current = try LibraryMetadataStore.load(root: root).0
+                let updated = TagEditor.pruning(transform(current))
+                if updated != current { try LibraryMetadataStore.save(updated, root: root) }
+                return updated
+            }
         }.value
     }
 }

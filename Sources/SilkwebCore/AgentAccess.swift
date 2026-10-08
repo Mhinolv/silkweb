@@ -57,11 +57,14 @@ public struct AgentAccessError: Error, Equatable, Sendable {
     public let code: String
     public let title: String
     public let message: String
+    /// Seconds before retrying a `library_busy` refusal; JSON `retry_after`.
+    public let retryAfter: Int?
 
-    public init(code: String, title: String, message: String) {
+    public init(code: String, title: String, message: String, retryAfter: Int? = nil) {
         self.code = code
         self.title = title
         self.message = message
+        self.retryAfter = retryAfter
     }
 
     static let noAccess = "No Agent Access"
@@ -115,6 +118,25 @@ public struct AgentAccessError: Error, Equatable, Sendable {
     /// Only reachable for in-scope targets: out-of-scope paths are refused before the disk is touched.
     public static let notFound = Self(
         code: "not_found", title: "Document Not Found", message: "There’s no document at that location.")
+
+    /// The app (or another helper) held the Library's gate for the whole wait (#131). Nothing was written.
+    public static func libraryBusy(retryAfter seconds: Int) -> Self {
+        Self(
+            code: "library_busy", title: "Library Busy",
+            message: "Silkweb is updating this library. Try again in a moment.", retryAfter: seconds)
+    }
+
+    /// Reported only after the helper's own retries against a changing Library run out (#131).
+    public static let staleSnapshot = Self(
+        code: "stale_snapshot", title: "Library Changed",
+        message: "The library changed while this request ran. Try again.")
+
+    /// The helper's refusal for a gate failure, so callers never surface a raw lock error.
+    public init(_ gate: LibraryGateError) {
+        switch gate {
+        case .busy(let seconds): self = .libraryBusy(retryAfter: seconds)
+        }
+    }
 
     public static let unreadable = Self(
         code: "unreadable", title: LibraryLocationError.unreadable.title,

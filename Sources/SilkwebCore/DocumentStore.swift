@@ -47,10 +47,18 @@ public struct DiskDocumentFileSystem: DocumentFileSystem {
 public struct DocumentStore: Sendable {
     private let fileSystem: any DocumentFileSystem
     private let root: URL?
+    /// The Library's cross-process gate; nil for standalone documents outside a library.
+    public let gate: LibraryGate?
+    let gateTimeout: Duration
 
-    public init(fileSystem: any DocumentFileSystem = DiskDocumentFileSystem(), root: URL? = nil) {
+    public init(
+        fileSystem: any DocumentFileSystem = DiskDocumentFileSystem(), root: URL? = nil,
+        gateTimeout: Duration = LibraryGate.defaultTimeout
+    ) {
         self.root = root?.standardizedFileURL.resolvingSymlinksInPath()
         self.fileSystem = fileSystem
+        gate = self.root.map(LibraryGate.init(root:))
+        self.gateTimeout = gateTimeout
     }
 
     public func load(_ url: URL) throws -> LoadedDocument {
@@ -63,7 +71,17 @@ public struct DocumentStore: Sendable {
     }
 
     /// Only existing Markdown documents are saved here; creation belongs to LibraryMutations.
+    /// The revision check and the replacement are one commit inside the Library's gate, so a
+    /// cooperating writer can't publish between them (#131).
     public func save(_ text: String, to url: URL, expectedRevision: DocumentRevision) throws -> DocumentRevision {
+        try validate(url)
+        let lease = try gate?.acquire(timeout: gateTimeout)
+        defer { lease?.release() }
+        return try saveHoldingGate(text, to: url, expectedRevision: expectedRevision)
+    }
+
+    /// For callers that already hold this store's gate (or whose store has none).
+    func saveHoldingGate(_ text: String, to url: URL, expectedRevision: DocumentRevision) throws -> DocumentRevision {
         try validate(url)
         let staging = url.deletingLastPathComponent().appendingPathComponent(".silkweb-save-\(UUID().uuidString)")
         defer { try? fileSystem.remove(staging) }

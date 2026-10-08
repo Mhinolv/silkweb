@@ -131,7 +131,11 @@ public actor TrashService {
             throw LibraryError.invalidRoot
         }
         self.trash = trash
+        gate = LibraryGate(root: self.root)
     }
+
+    /// Trashing and putting back are commits like any other mutation (#131).
+    private let gate: LibraryGate
 
     private func item(_ path: String) throws -> URL {
         guard !path.isEmpty else { throw LibraryMutationError.libraryRoot }
@@ -191,6 +195,8 @@ public actor TrashService {
     }
 
     public func execute(_ plan: DeletionPlan) throws -> TrashResult {
+        let lease = try gate.acquire()
+        defer { lease.release() }
         guard plan.root == root, try self.plan(plan.paths).inventory == plan.inventory else { throw TrashError.changed }
         let (metadata, _) = try LibraryMetadataStore.load(root: root)
         var result = TrashResult()
@@ -213,6 +219,8 @@ public actor TrashService {
         var result = TrashResult()
         for record in items {
             do {
+                let lease = try gate.acquire()
+                defer { lease.release() }
                 let destination = try item(record.originalPath)
                 guard !FileManager.default.fileExists(atPath: destination.path) else {
                     throw TrashError.occupied(record.originalPath)

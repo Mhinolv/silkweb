@@ -2,7 +2,8 @@ import Darwin
 import Foundation
 
 public struct DocumentSaveFailure: Error, LocalizedError, Equatable, Sendable {
-    public enum Reason: Equatable, Sendable { case diskFull, permission, volumeUnavailable, other(String) }
+    /// `libraryBusy`: another Silkweb process held the library's gate for the whole wait (#131).
+    public enum Reason: Equatable, Sendable { case diskFull, permission, volumeUnavailable, libraryBusy, other(String) }
     public let reason: Reason
     public let folderName: String
 
@@ -12,15 +13,25 @@ public struct DocumentSaveFailure: Error, LocalizedError, Equatable, Sendable {
         case .diskFull: message = "There isn’t enough space on the disk."
         case .permission: message = "You don’t have permission to write to “\(folderName)”."
         case .volumeUnavailable: message = "The disk containing this library is no longer available."
+        // The banner already says the text is safe; this detail says what happens next.
+        case .libraryBusy: return LibraryGateError.busy(retryAfter: 1).errorDescription
         case .other(let description): message = description
         }
         return message + " Your text is safe in this window."
     }
 
+    public init(reason: Reason, folderName: String) {
+        self.reason = reason
+        self.folderName = folderName
+    }
+
     init(error: Error, url: URL) {
+        let isBusy = error is LibraryGateError
         let error = error as NSError
         let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError ?? error
-        if (error.domain == NSCocoaErrorDomain && error.code == NSFileWriteOutOfSpaceError)
+        if isBusy {
+            reason = .libraryBusy
+        } else if (error.domain == NSCocoaErrorDomain && error.code == NSFileWriteOutOfSpaceError)
             || (underlying.domain == NSPOSIXErrorDomain && underlying.code == Int(ENOSPC))
         {
             reason = .diskFull
@@ -90,14 +101,19 @@ public actor SaveCoordinator {
     }
     private let store: DocumentStore
     private let recoveryDirectory: URL
+    /// After a busy-gate failure, autosave tries again on its own after this delay.
+    private let busyRetryDelay: Duration
     private var entries: [URL: Entry] = [:]
     private var scheduled: [URL: Task<Void, Never>] = [:]
     private var recoveryFailures: [URL: DocumentSaveFailure] = [:]
     private var unreadableRecovery: [URL] = []
     private var observers: [URL: [UUID: AsyncStream<DocumentSaveState>.Continuation]] = [:]
 
-    public init(store: DocumentStore = DocumentStore(), recoveryDirectory: URL? = nil) {
+    public init(
+        store: DocumentStore = DocumentStore(), recoveryDirectory: URL? = nil, busyRetryDelay: Duration = .seconds(2)
+    ) {
         self.store = store
+        self.busyRetryDelay = busyRetryDelay
         self.recoveryDirectory =
             recoveryDirectory
             ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -146,9 +162,9 @@ public actor SaveCoordinator {
 
     /// Failed closes retain the entry so the UI can refuse navigation.
     @discardableResult
-    public func close(_ url: URL) -> Bool {
+    public func close(_ url: URL) async -> Bool {
         let url = url.standardizedFileURL
-        guard commit(url, explicit: false)?.isDirty != true else { return false }
+        guard await commit(url, explicit: false)?.isDirty != true else { return false }
         entries[url] = nil
         recoveryFailures[url] = nil
         return true
@@ -185,9 +201,9 @@ public actor SaveCoordinator {
     /// An explicit save (Keep Recovered Text, Save) also accepts a pending recovery draft.
     /// Failure is represented in state; the in-memory text always remains available.
     @discardableResult
-    public func save(_ url: URL) -> DocumentSaveState? { commit(url, explicit: true) }
+    public func save(_ url: URL) async -> DocumentSaveState? { await commit(url, explicit: true) }
 
-    private func commit(_ url: URL, explicit: Bool) -> DocumentSaveState? {
+    private func commit(_ url: URL, explicit: Bool) async -> DocumentSaveState? {
         let url = url.standardizedFileURL
         scheduled.removeValue(forKey: url)?.cancel()
         guard var entry = entries[url], entry.state.isDirty else { return entries[url]?.state }
@@ -205,9 +221,27 @@ public actor SaveCoordinator {
         entry.attempts += 1
         entries[url] = entry
         publish(url)
+        // Another Silkweb process may hold the gate. Wait quietly (the state stays `.saving`, shown as
+        // Edited); edits typed meanwhile land in `entries` and are saved by this same commit.
+        let lease: LibraryGate.Lease?
+        do {
+            lease = try await gateLease()
+        } catch {
+            return fail(url, error: error)
+        }
+        defer { lease?.release() }
+        // The wait may have let another commit, a conflict or a close happen first.
+        guard var latest = entries[url], latest.state.isDirty else { return entries[url]?.state }
+        if case .conflict = latest.state { return latest.state }
+        if latest.state != .saving {
+            latest.state = .saving
+            entries[url] = latest
+            publish(url)
+        }
+        entry = latest
         do {
             guard let revision = entry.revision else { throw CocoaError(.fileReadNoSuchFile) }
-            entry.revision = try store.save(entry.text, to: url, expectedRevision: revision)
+            entry.revision = try store.saveHoldingGate(entry.text, to: url, expectedRevision: revision)
             entry.state = .clean
             entry.attempts = 0
             // A leftover draft must never silently overwrite the successfully saved file.
@@ -233,6 +267,31 @@ public actor SaveCoordinator {
             }
         }
         publish(url)
+        return entry.state
+    }
+
+    /// The uncontended case takes the gate without suspending. The wait runs in a task of its own:
+    /// a scheduled autosave cancels its own task as it commits, and that must not cut the wait short.
+    private func gateLease() async throws -> LibraryGate.Lease? {
+        guard let gate = store.gate else { return nil }
+        if let lease = try gate.tryAcquire() { return lease }
+        let timeout = store.gateTimeout
+        return try await Task.detached(priority: .userInitiated) { try await gate.acquire(timeout: timeout) }.value
+    }
+
+    /// The gate couldn't be had. Never a conflict: the buffer (including edits typed during the wait)
+    /// stays dirty with a save-failure reason, and a busy library is retried on its own.
+    private func fail(_ url: URL, error: Error) -> DocumentSaveState? {
+        guard var entry = entries[url], entry.state.isDirty else { return entries[url]?.state }
+        if case .conflict = entry.state { return entry.state }
+        let failure = DocumentSaveFailure(error: error, url: url)
+        entry.state = .failed(error: failure, attempt: entry.attempts)
+        entries[url] = entry
+        do { try persistRecovery(url, entry: entry) } catch {
+            recoveryFailures[url] = DocumentSaveFailure(error: error, url: recoveryDirectory)
+        }
+        publish(url)
+        if failure.reason == .libraryBusy { scheduleSave(url, delay: busyRetryDelay) }
         return entry.state
     }
 

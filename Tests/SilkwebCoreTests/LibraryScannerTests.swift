@@ -101,7 +101,8 @@ final class LibraryScannerTests: XCTestCase {
         XCTAssertNil(snapshot.recoveredMetadataURL)
         XCTAssertFalse(snapshot.metadataWasReset)
         let files = try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent(".silkweb").path)
-        XCTAssertEqual(files, ["index.json"])
+        // No recovery copy; the only other file is the cross-process gate's lock (#131).
+        XCTAssertEqual(Set(files), ["index.json", "library.lock"])
         XCTAssertEqual(snapshot.metadata.tags.map(\.name), ["Travel", "Coffee"])
         XCTAssertEqual(snapshot.metadata.tagRecency, [second])
         XCTAssertEqual(snapshot.metadata.tagsByDocument, [keep.uuidString: [tag, second]])
