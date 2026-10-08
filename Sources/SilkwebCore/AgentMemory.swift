@@ -335,9 +335,10 @@ public enum AgentFilesystem: String, Codable, Sendable {
     }
 }
 
-/// The `silkweb memory …` commands: resolve a grant with Silkweb closed, report scope, list
-/// documents, and create documents and Folders (#133). Only creates write to the Library; nothing
-/// writes the grants file.
+/// The `silkweb memory …` commands: resolve a grant with Silkweb closed, report scope, list,
+/// search and read documents (#134), and create documents and Folders (#133). Only creates write
+/// to the Library; nothing writes the grants file. Search keeps its own index cache outside the
+/// Library (`AgentMemoryService`).
 public enum AgentHelper {
     public struct Output: Equatable, Sendable {
         public var status: Int32
@@ -348,6 +349,11 @@ public enum AgentHelper {
     public static let usage = """
         Usage: silkweb memory capabilities --project <Project> [--grants <file>]
                silkweb memory list --project <Project> [--grants <file>]
+               silkweb memory search --project <Project> [--query <text>] [--type <t,…>] [--status <s,…>]
+                   [--created-after <date>] [--created-before <date>] [--filter-project <Project>]
+                   [--limit <n>] [--grants <file>]
+               silkweb memory read --project <Project> --path <path> [--cursor <cursor>]
+                   [--expected-revision <sha256:…>] [--grants <file>]
                silkweb memory create --project <Project> --key <key> --type <type> --title <title>
                    --agent <agent> --session <session> --body-file <file|-> [--folder <path>]
                    [--status <status>] [--observed-at <time>] [--review-after <time>]
@@ -361,6 +367,14 @@ public enum AgentHelper {
     private static let commandOptions: [String: (required: Set<String>, optional: Set<String>)] = [
         "capabilities": (["--project"], ["--grants"]),
         "list": (["--project"], ["--grants"]),
+        "search": (
+            ["--project"],
+            [
+                "--grants", "--query", "--type", "--status", "--created-after", "--created-before",
+                "--filter-project", "--limit",
+            ]
+        ),
+        "read": (["--project", "--path"], ["--grants", "--cursor", "--expected-revision"]),
         "create": (
             ["--project", "--key", "--type", "--title", "--agent", "--session", "--body-file"],
             [
@@ -386,6 +400,18 @@ public enum AgentHelper {
         let session = AgentSession(project: project, store: AgentGrantStore(url: grantsURL))
         do {
             switch arguments[1] {
+            case "search", "read":
+                let service = AgentMemoryService(
+                    session: session, cacheDirectory: AgentMemoryService.defaultCacheDirectory(home: home))
+                let json =
+                    arguments[1] == "search"
+                    ? try service.search(searchRequest(options)).json
+                    : try service.read(
+                        AgentMemoryReadRequest(
+                            path: options["--path"]?.first ?? "", cursor: options["--cursor"]?.first,
+                            expectedRevision: options["--expected-revision"]?.first)
+                    ).json
+                return Output(status: 0, stdout: json.rendered, stderr: "")
             case "create":
                 return try create(session.authorize(.create), options: options, standardInput: standardInput)
             case "create-folder":
@@ -424,7 +450,7 @@ public enum AgentHelper {
             "library": context.library.path,
             "filesystem": context.filesystem.rawValue,
             "access": context.grant.access.rawValue,
-            "operations": ["capabilities", "list"]
+            "operations": ["capabilities", "list", "search", "read"]
                 + (context.scope.createRoots.isEmpty ? [] : ["create", "create-folder"]),
             "read_roots": context.scope.readRoots,
             "create_roots": context.scope.createRoots,
@@ -490,6 +516,31 @@ public enum AgentHelper {
             ["path": $0.path, "size": $0.size, "modified": dates.string(from: $0.modified)] as [String: Any]
         }
         return emit(["project": context.scope.project, "documents": rows])
+    }
+
+    /// `--type`/`--status` take comma-separated lists; dates are `2026-10-07` or ISO 8601 timestamps.
+    static func searchRequest(_ options: [String: [String]]) throws -> AgentMemorySearchRequest {
+        let value = { (option: String) in options[option]?.first }
+        let list = { (key: String) -> [String] in
+            (value(key) ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        }
+        let date = { (key: String) throws -> Date? in
+            guard let text = value(key) else { return nil }
+            guard let date = AgentMemorySearchRequest.date(text) else {
+                throw AgentAccessError.invalidArgument(String(key.dropFirst(2)))
+            }
+            return date
+        }
+        var limit = AgentMemorySearchRequest.defaultLimit
+        if let text = value("--limit") {
+            guard let parsed = Int(text) else { throw AgentAccessError.invalidArgument("limit") }
+            limit = parsed
+        }
+        return AgentMemorySearchRequest(
+            query: value("--query") ?? "", project: value("--filter-project"), types: list("--type"),
+            statuses: list("--status"), createdAfter: try date("--created-after"),
+            createdBefore: try date("--created-before"), limit: limit)
     }
 
     private static func options(_ arguments: [String], allowed: (required: Set<String>, optional: Set<String>))

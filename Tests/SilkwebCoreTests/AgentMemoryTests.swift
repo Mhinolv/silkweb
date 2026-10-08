@@ -233,7 +233,8 @@ final class AgentMemoryTests: XCTestCase {
         XCTAssertEqual(json["library"] as? String, library.standardizedFileURL.path)
         XCTAssertEqual(json["filesystem"] as? String, "qualified")
         XCTAssertEqual(json["access"] as? String, "read-create")
-        XCTAssertEqual(json["operations"] as? [String], ["capabilities", "list", "create", "create-folder"])
+        XCTAssertEqual(
+            json["operations"] as? [String], ["capabilities", "list", "search", "read", "create", "create-folder"])
         XCTAssertEqual(json["read_roots"] as? [String], ["Memory/Projects/Silkweb", "Notes/Private"])
         XCTAssertEqual((json["create_roots"] as? [String])?.count, 3)
         XCTAssertEqual(json["project_folder_exists"] as? Bool, true)
@@ -244,7 +245,7 @@ final class AgentMemoryTests: XCTestCase {
         try FileManager.default.removeItem(at: library.appendingPathComponent("Memory"))
         let readOnly = try object(run(["memory", "capabilities", "--project", "Silkweb"]))
         XCTAssertEqual(readOnly["create_roots"] as? [String], [])
-        XCTAssertEqual(readOnly["operations"] as? [String], ["capabilities", "list"])
+        XCTAssertEqual(readOnly["operations"] as? [String], ["capabilities", "list", "search", "read"])
         XCTAssertEqual(readOnly["project_folder_exists"] as? Bool, false)
         XCTAssertFalse(FileManager.default.fileExists(atPath: library.appendingPathComponent("Memory").path))
     }
@@ -335,6 +336,37 @@ final class AgentMemoryTests: XCTestCase {
         }
         let version = try object(AgentHelper.run(["version"], home: home))
         XCTAssertEqual(version["contract_version"] as? Int, AgentMemoryContract.version)
+    }
+
+    /// A document published by `create` (#133) is found by `search` and returned by `read` (#134),
+    /// and the staging and receipt files under `.silkweb/` never show up in results.
+    func testCreatedMemoryIsSearchableAndReadable() throws {
+        try writeGrants(grantJSON())
+        let bodyURL = root.appendingPathComponent("body.md")
+        try Data("Checkpoint about the quartz gate.".utf8).write(to: bodyURL)
+        let created = run([
+            "memory", "create", "--project", "Silkweb", "--key", "k1", "--type", "decision", "--title", "Quartz",
+            "--agent", "codex", "--session", "s1", "--body-file", bodyURL.path,
+        ])
+        XCTAssertEqual(created.status, 0, created.stderr)
+        let path = try XCTUnwrap(try object(created)["path"] as? String)
+
+        let search = run(["memory", "search", "--project", "Silkweb", "--query", "quartz"])
+        XCTAssertEqual(search.status, 0, search.stderr)
+        let results = try XCTUnwrap(try object(search)["results"] as? [[String: Any]])
+        XCTAssertEqual(results.compactMap { $0["path"] as? String }, [path])
+        XCTAssertEqual(results.first?["type"] as? String, "decision")
+        XCTAssertEqual(results.first?["agent"] as? String, "codex")
+
+        let read = run(["memory", "read", "--project", "Silkweb", "--path", path])
+        XCTAssertEqual(read.status, 0, read.stderr)
+        XCTAssertTrue((try object(read)["body"] as? String)?.contains("Checkpoint about the quartz gate.") == true)
+
+        let staged = run(["memory", "search", "--project", "Silkweb", "--query", "agent-staging"])
+        XCTAssertEqual((try object(staged)["results"] as? [[String: Any]])?.count, 0)
+        XCTAssertEqual(
+            run(["memory", "search", "--project", "Silkweb", "--query", "a", "--query", "b"]).status, 64,
+            "only --supersedes may repeat")
     }
 
     /// The real signed helper binary, launched as its own process like an agent would.
