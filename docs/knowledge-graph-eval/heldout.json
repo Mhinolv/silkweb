@@ -1,0 +1,813 @@
+{
+  "library": "library.json",
+  "queries": [
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-02",
+      "query": "library.lock"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-04",
+      "query": "Index cache format v2"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Atomic document saves.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-07",
+      "query": "rename(2)"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Spelling per document.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-09",
+      "query": "NSSpellChecker"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Owner prefers curly quotes.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-12",
+      "query": "curly quotes"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Conflict copies keep both texts.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-14",
+      "query": "Conflict copies keep both texts"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Semantic colors.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-17",
+      "query": "asset catalog color"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/English only for v1.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-19",
+      "query": "English only"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Tags stay out of front matter.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-22",
+      "query": "Tags stay out of front matter"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/PDF export uses WebKit printing.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-24",
+      "query": "hb_pdf_v1"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Harbor index.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-27",
+      "query": "Harbor index"
+    },
+    {
+      "category": "exact",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Backups with Time Machine.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "exact-29",
+      "query": "hard links"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Atomic document saves.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-02",
+      "query": "avoid half written files after a crash"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-04",
+      "query": "where does app metadata get stored on disk"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-07",
+      "query": "apple signing service command"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Owner prefers curly quotes.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-09",
+      "query": "typographic apostrophes in interface text"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Spelling per document.md",
+        "Memory/Projects/Harbor/Progress/2026-09-18 1100 — Spellcheck language detection.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-12",
+      "query": "language detection for misspelled words"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Undo coalescing.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-14",
+      "query": "how many edits does command z revert"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Backups with Time Machine.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-17",
+      "query": "can the notes be backed up with standard tools"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Semantic colors.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-19",
+      "query": "dark appearance palette"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Progress/2026-10-01 0900 — Shard migration.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-22",
+      "query": "migrating old metadata to the new layout"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-24",
+      "query": "page numbering in exported documents"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-27",
+      "query": "uploading builds to apple for approval"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Spelling per document.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-29",
+      "query": "spelling dictionary choice"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Image assets folder.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-32",
+      "query": "relative image references beside markdown files"
+    },
+    {
+      "category": "paraphrase",
+      "expected": [
+        "Memory/Projects/Harbor/Handoffs/Resume undo work.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "paraphrase-34",
+      "query": "next steps for undo grouping"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-02",
+      "query": "current metadata storage format"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Index cache format v1.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-04",
+      "query": "original index.json format"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Conflict copies keep both texts.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-07",
+      "query": "conflict resolution policy"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Conflict copies keep both texts.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-09",
+      "query": "do conflict copies still exist"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/PDF export uses WebKit printing.md",
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-12",
+      "query": "WebKit printing for PDF"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-14",
+      "query": "notarization command"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/No analytics in Harbor.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-17",
+      "query": "analytics policy"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Opt-in crash upload.md",
+        "Memory/Projects/Harbor/Memories/No analytics in Harbor.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-19",
+      "query": "Opt-in crash upload status"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-22",
+      "query": "latest decision on index shards"
+    },
+    {
+      "category": "supersession",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Conflict copies keep both texts.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "supersession-24",
+      "query": "conflict copies or overwrite"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Memory/Projects/Harbor2/Memories/Harbor2 signing keys.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-02",
+      "query": "harbor2-release keychain"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Memory/Projects/Lighthouse/Memories/Lighthouse database choice.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-04",
+      "query": "Lighthouse database choice"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Memory/Projects/Lighthouse/Progress/Lighthouse migration progress.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-07",
+      "query": "Lighthouse migration progress"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Journal/Private/Salary negotiation.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-09",
+      "query": "salary negotiation"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Journal/Private/Health appointments.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-12",
+      "query": "doctor appointment"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Reference/Harbor/Apple notarization guide.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-14",
+      "query": "stapling ticket Gatekeeper offline"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [
+        "Reference/Harbor/WebKit printing quirks.md"
+      ],
+      "forbidden": [
+        "Reference/Other/Competitor pricing.md"
+      ],
+      "grant": "harbor-reference",
+      "id": "scope-leak-17",
+      "query": "orphans and widows"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [],
+      "forbidden": [
+        "Reference/Other/Competitor pricing.md"
+      ],
+      "grant": "harbor-reference",
+      "id": "scope-leak-19",
+      "query": "competitor pricing tiers"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [
+        "Memory/Projects/Harbor/Notes/Release checklist.md"
+      ],
+      "forbidden": [
+        "Reference/Harbor/Apple notarization guide.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-22",
+      "query": "release checklist notarization guide"
+    },
+    {
+      "category": "scope-leak",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "forbidden": [
+        "Memory/Projects/Harbor2/Memories/Harbor2 signing keys.md"
+      ],
+      "grant": "harbor",
+      "id": "scope-leak-24",
+      "query": "keychain profile"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Autosave interval.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-02",
+      "query": "autosave two seconds after typing stops"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Window restoration.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-04",
+      "query": "reopen windows at launch"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Sidebar width.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-07",
+      "query": "Sidebar width"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Print margins.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-09",
+      "query": "Print margins"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Typewriter scrolling.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-12",
+      "query": "caret stays vertically centered"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Status bar layout.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-14",
+      "query": "word count in the status bar"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Heading folding.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-17",
+      "query": "Heading folding"
+    },
+    {
+      "category": "malformed-metadata",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Focus mode.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "malformed-metadata-19",
+      "query": "Focus mode"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-02",
+      "query": "library.lock"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-04",
+      "query": "PDF export PDFKit pagination"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-07",
+      "query": "notarization tips"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/No analytics in Harbor.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-09",
+      "query": "telemetry FAQ"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Tags stay out of front matter.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-12",
+      "query": "tags front matter"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Backups with Time Machine.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-14",
+      "query": "Time Machine rsync"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-17",
+      "query": "notarize release"
+    },
+    {
+      "category": "injection-neighbor",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Conflict copies keep both texts.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "injection-neighbor-19",
+      "query": "last writer wins approved"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-02",
+      "query": "GraphQL schema"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-04",
+      "query": "Android app release"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-07",
+      "query": "team holiday schedule"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-09",
+      "query": "OAuth login flow"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-12",
+      "query": "Linux build"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-14",
+      "query": "accessibility audit results"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-17",
+      "query": "server costs"
+    },
+    {
+      "category": "unanswerable",
+      "expected": [],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "unanswerable-19",
+      "query": "table formulas"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Progress/2026-10-01 0900 — Shard migration.md",
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-02",
+      "query": "which decision does the shard migration implement"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Progress/2026-09-30 1700 — Gate timeout tuning.md",
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-04",
+      "query": "decision behind the gate timeout tuning"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Atomic document saves.md",
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-07",
+      "query": "atomic saves and the gate they rely on"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Progress/2026-09-05 1400 — PDF page break experiments.md",
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-09",
+      "query": "PDF experiments and the decision they led to"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Progress/2026-09-22 1500 — Asset folder cleanup.md",
+        "Memory/Projects/Harbor/Memories/Image assets folder.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-12",
+      "query": "asset cleanup and where images belong"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Progress/2026-09-28 1300 — Quick Open tuning.md",
+        "Memory/Projects/Harbor/Memories/Quick Open ranking.md",
+        "Memory/Projects/Harbor/Memories/Shortcut map lives in the design system.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-14",
+      "query": "Quick Open tuning and the shortcut map"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md",
+        "Memory/Projects/Harbor/Memories/Atomic document saves.md",
+        "Memory/Projects/Harbor/Progress/2026-09-30 1700 — Gate timeout tuning.md",
+        "Memory/Projects/Harbor/Notes/Glossary.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-17",
+      "query": "documents linking to the write gate decision"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md",
+        "Memory/Projects/Harbor/Handoffs/Resume export work.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-19",
+      "query": "what links to the PDFKit pagination decision"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Notes/Release checklist.md",
+        "Memory/Projects/Harbor/Handoffs/Resume notarization automation.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-22",
+      "query": "release checklist and notarization automation handoff"
+    },
+    {
+      "category": "multi-hop",
+      "expected": [
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md",
+        "Memory/Projects/Harbor/Progress/2026-10-01 0900 — Shard migration.md"
+      ],
+      "forbidden": [],
+      "grant": "harbor",
+      "id": "multi-hop-24",
+      "query": "what replaced index cache v1 and who is migrating it"
+    }
+  ],
+  "split": "heldout",
+  "version": 1
+}

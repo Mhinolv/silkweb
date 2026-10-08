@@ -1,0 +1,1827 @@
+{
+  "envelopes" : {
+    "Journal/Private/Health appointments.md" : "missing",
+    "Journal/Private/Salary negotiation.md" : "missing",
+    "Memory/Projects/Harbor/.drafts/Secret draft.md" : "missing",
+    "Memory/Projects/Harbor/Handoffs/Resume conflict UI.md" : "envelope",
+    "Memory/Projects/Harbor/Handoffs/Resume export work.md" : "envelope",
+    "Memory/Projects/Harbor/Handoffs/Resume notarization automation.md" : "envelope",
+    "Memory/Projects/Harbor/Handoffs/Resume shard migration.md" : "envelope",
+    "Memory/Projects/Harbor/Handoffs/Resume undo work.md" : "envelope",
+    "Memory/Projects/Harbor/Harbor index.md" : "missing",
+    "Memory/Projects/Harbor/Memories/Atomic document saves.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Autosave interval.md" : "envelope_malformed",
+    "Memory/Projects/Harbor/Memories/Backups with Time Machine.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Conflict copies keep both texts.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Encryption is out of scope.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/English only for v1.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Focus mode.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Heading folding.md" : "missing",
+    "Memory/Projects/Harbor/Memories/Image assets folder.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Index cache format v1.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Index cache format v2.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Large library performance budget.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Last writer wins for conflicts.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Move the index cache to SQLite.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/No analytics in Harbor.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Notarization tips.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Notarize with altool.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Notarize with notarytool.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Opt-in crash upload.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Owner prefers curly quotes.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/PDF export uses WebKit printing.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Preview rendering debounce.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Print margins.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Quick Open ranking.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Semantic colors.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Shortcut map lives in the design system.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Sidebar width.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Spelling per document.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Status bar layout.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Table editing.md" : "envelope_malformed",
+    "Memory/Projects/Harbor/Memories/Tags stay out of front matter.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Typewriter scrolling.md" : "envelope_malformed",
+    "Memory/Projects/Harbor/Memories/Undo coalescing.md" : "envelope",
+    "Memory/Projects/Harbor/Memories/Window restoration.md" : "envelope_schema_newer",
+    "Memory/Projects/Harbor/Memories/Write gate uses flock.md" : "envelope",
+    "Memory/Projects/Harbor/Notes/Backup notes.md" : "missing",
+    "Memory/Projects/Harbor/Notes/Conflict handling scratch.md" : "missing",
+    "Memory/Projects/Harbor/Notes/Export checklist (pasted).md" : "missing",
+    "Memory/Projects/Harbor/Notes/Find bar behaviour.md" : "missing",
+    "Memory/Projects/Harbor/Notes/Glossary.md" : "missing",
+    "Memory/Projects/Harbor/Notes/Meeting notes 2026-09-14.md" : "missing",
+    "Memory/Projects/Harbor/Notes/Pasted images scratch.md" : "missing",
+    "Memory/Projects/Harbor/Notes/Release checklist.md" : "missing",
+    "Memory/Projects/Harbor/Notes/Tag storage scratch.md" : "missing",
+    "Memory/Projects/Harbor/Notes/Telemetry FAQ.md" : "missing",
+    "Memory/Projects/Harbor/Progress/2026-08-02 1000 — Cache size investigation.md" : "envelope",
+    "Memory/Projects/Harbor/Progress/2026-09-05 1400 — PDF page break experiments.md" : "envelope",
+    "Memory/Projects/Harbor/Progress/2026-09-18 1100 — Spellcheck language detection.md" : "envelope",
+    "Memory/Projects/Harbor/Progress/2026-09-22 1500 — Asset folder cleanup.md" : "envelope",
+    "Memory/Projects/Harbor/Progress/2026-09-26 1000 — Color audit.md" : "envelope",
+    "Memory/Projects/Harbor/Progress/2026-09-28 1300 — Quick Open tuning.md" : "envelope",
+    "Memory/Projects/Harbor/Progress/2026-09-30 1700 — Gate timeout tuning.md" : "envelope",
+    "Memory/Projects/Harbor/Progress/2026-10-01 0900 — Shard migration.md" : "envelope",
+    "Memory/Projects/Harbor/Progress/2026-10-02 0800 — Gate notes from contributor.md" : "envelope",
+    "Memory/Projects/Harbor2/Memories/Harbor2 signing keys.md" : "missing",
+    "Memory/Projects/HarborArchive/Archived roadmap 2025.md" : "missing",
+    "Memory/Projects/Lighthouse/Memories/Lighthouse database choice.md" : "missing",
+    "Memory/Projects/Lighthouse/Progress/Lighthouse migration progress.md" : "missing",
+    "Reference/Harbor/Apple notarization guide.md" : "missing",
+    "Reference/Harbor/WebKit printing quirks.md" : "missing",
+    "Reference/Other/Competitor pricing.md" : "missing"
+  },
+  "golden_set_version" : 1,
+  "queries" : {
+    "exact-01" : {
+      "latency_ms" : 2.851,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md",
+        "Memory/Projects/Harbor/Memories/Atomic document saves.md",
+        "Memory/Projects/Harbor/Harbor index.md",
+        "Memory/Projects/Harbor/Notes/Glossary.md",
+        "Memory/Projects/Harbor/Progress/2026-09-30 1700 — Gate timeout tuning.md"
+      ],
+      "total" : 5
+    },
+    "exact-02" : {
+      "latency_ms" : 2.349,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md",
+        "Memory/Projects/Harbor/Progress/2026-10-02 0800 — Gate notes from contributor.md"
+      ],
+      "total" : 2
+    },
+    "exact-03" : {
+      "latency_ms" : 2.782,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md",
+        "Memory/Projects/Harbor/Harbor index.md",
+        "Memory/Projects/Harbor/Memories/Notarization tips.md",
+        "Memory/Projects/Harbor/Notes/Release checklist.md",
+        "Memory/Projects/Harbor/Handoffs/Resume notarization automation.md"
+      ],
+      "total" : 5
+    },
+    "exact-04" : {
+      "latency_ms" : 2.69,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md",
+        "Memory/Projects/Harbor/Harbor index.md",
+        "Memory/Projects/Harbor/Handoffs/Resume shard migration.md",
+        "Memory/Projects/Harbor/Progress/2026-10-01 0900 — Shard migration.md"
+      ],
+      "total" : 4
+    },
+    "exact-05" : {
+      "latency_ms" : 2.223,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "exact-06" : {
+      "latency_ms" : 2.243,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "exact-07" : {
+      "latency_ms" : 2.272,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Atomic document saves.md"
+      ],
+      "total" : 1
+    },
+    "exact-08" : {
+      "latency_ms" : 2.27,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Preview rendering debounce.md"
+      ],
+      "total" : 1
+    },
+    "exact-09" : {
+      "latency_ms" : 2.277,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Spelling per document.md"
+      ],
+      "total" : 1
+    },
+    "exact-10" : {
+      "latency_ms" : 2.554,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Backups with Time Machine.md",
+        "Memory/Projects/Harbor/Harbor index.md",
+        "Memory/Projects/Harbor/Notes/Backup notes.md"
+      ],
+      "total" : 3
+    },
+    "exact-11" : {
+      "latency_ms" : 2.218,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Encryption is out of scope.md"
+      ],
+      "total" : 1
+    },
+    "exact-12" : {
+      "latency_ms" : 2.452,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Owner prefers curly quotes.md",
+        "Memory/Projects/Harbor/Harbor index.md"
+      ],
+      "total" : 2
+    },
+    "exact-13" : {
+      "latency_ms" : 2.612,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Quick Open ranking.md",
+        "Memory/Projects/Harbor/Harbor index.md",
+        "Memory/Projects/Harbor/Progress/2026-09-28 1300 — Quick Open tuning.md"
+      ],
+      "total" : 3
+    },
+    "exact-14" : {
+      "latency_ms" : 2.58,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Conflict copies keep both texts.md",
+        "Memory/Projects/Harbor/Harbor index.md",
+        "Memory/Projects/Harbor/Handoffs/Resume conflict UI.md"
+      ],
+      "total" : 3
+    },
+    "exact-15" : {
+      "latency_ms" : 2.549,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md",
+        "Memory/Projects/Harbor/Harbor index.md",
+        "Memory/Projects/Harbor/Notes/Export checklist (pasted).md",
+        "Memory/Projects/Harbor/Handoffs/Resume export work.md"
+      ],
+      "total" : 4
+    },
+    "exact-16" : {
+      "latency_ms" : 2.317,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Image assets folder.md",
+        "Memory/Projects/Harbor/Notes/Pasted images scratch.md",
+        "Memory/Projects/Harbor/Progress/2026-09-22 1500 — Asset folder cleanup.md"
+      ],
+      "total" : 3
+    },
+    "exact-17" : {
+      "latency_ms" : 2.196,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Semantic colors.md"
+      ],
+      "total" : 1
+    },
+    "exact-18" : {
+      "latency_ms" : 2.391,
+      "results" : [
+        "Memory/Projects/Harbor/Progress/2026-09-18 1100 — Spellcheck language detection.md"
+      ],
+      "total" : 1
+    },
+    "exact-19" : {
+      "latency_ms" : 2.583,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/English only for v1.md",
+        "Memory/Projects/Harbor/Harbor index.md"
+      ],
+      "total" : 2
+    },
+    "exact-20" : {
+      "latency_ms" : 2.397,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Large library performance budget.md",
+        "Memory/Projects/Harbor/Progress/2026-08-02 1000 — Cache size investigation.md"
+      ],
+      "total" : 2
+    },
+    "exact-21" : {
+      "latency_ms" : 2.41,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Undo coalescing.md"
+      ],
+      "total" : 1
+    },
+    "exact-22" : {
+      "latency_ms" : 2.815,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Tags stay out of front matter.md",
+        "Memory/Projects/Harbor/Harbor index.md"
+      ],
+      "total" : 2
+    },
+    "exact-23" : {
+      "latency_ms" : 2.345,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md",
+        "Memory/Projects/Harbor/Memories/Notarize with altool.md"
+      ],
+      "total" : 2
+    },
+    "exact-24" : {
+      "latency_ms" : 2.233,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "exact-25" : {
+      "latency_ms" : 2.425,
+      "results" : [
+        "Memory/Projects/Harbor/Handoffs/Resume shard migration.md",
+        "Memory/Projects/Harbor/Progress/2026-10-01 0900 — Shard migration.md"
+      ],
+      "total" : 2
+    },
+    "exact-26" : {
+      "latency_ms" : 2.311,
+      "results" : [
+        "Memory/Projects/Harbor/Handoffs/Resume export work.md"
+      ],
+      "total" : 1
+    },
+    "exact-27" : {
+      "latency_ms" : 2.567,
+      "results" : [
+        "Memory/Projects/Harbor/Harbor index.md"
+      ],
+      "total" : 1
+    },
+    "exact-28" : {
+      "latency_ms" : 2.255,
+      "results" : [
+        "Memory/Projects/Harbor/Notes/Glossary.md"
+      ],
+      "total" : 1
+    },
+    "exact-29" : {
+      "latency_ms" : 2.196,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Backups with Time Machine.md"
+      ],
+      "total" : 1
+    },
+    "exact-30" : {
+      "latency_ms" : 2.308,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Opt-in crash upload.md"
+      ],
+      "total" : 1
+    },
+    "injection-neighbor-01" : {
+      "latency_ms" : 2.308,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md",
+        "Memory/Projects/Harbor/Progress/2026-10-02 0800 — Gate notes from contributor.md"
+      ],
+      "total" : 2
+    },
+    "injection-neighbor-02" : {
+      "latency_ms" : 2.312,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md",
+        "Memory/Projects/Harbor/Progress/2026-10-02 0800 — Gate notes from contributor.md"
+      ],
+      "total" : 2
+    },
+    "injection-neighbor-03" : {
+      "latency_ms" : 2.314,
+      "results" : [
+        "Memory/Projects/Harbor/Progress/2026-10-02 0800 — Gate notes from contributor.md",
+        "Memory/Projects/Harbor/Progress/2026-09-30 1700 — Gate timeout tuning.md"
+      ],
+      "total" : 2
+    },
+    "injection-neighbor-04" : {
+      "latency_ms" : 2.666,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md",
+        "Memory/Projects/Harbor/Harbor index.md",
+        "Memory/Projects/Harbor/Notes/Export checklist (pasted).md",
+        "Memory/Projects/Harbor/Handoffs/Resume export work.md"
+      ],
+      "total" : 4
+    },
+    "injection-neighbor-05" : {
+      "latency_ms" : 2.309,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md",
+        "Memory/Projects/Harbor/Notes/Export checklist (pasted).md"
+      ],
+      "total" : 2
+    },
+    "injection-neighbor-06" : {
+      "latency_ms" : 2.341,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md",
+        "Memory/Projects/Harbor/Memories/Notarization tips.md",
+        "Memory/Projects/Harbor/Handoffs/Resume notarization automation.md"
+      ],
+      "total" : 3
+    },
+    "injection-neighbor-07" : {
+      "latency_ms" : 2.623,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Notarization tips.md"
+      ],
+      "total" : 1
+    },
+    "injection-neighbor-08" : {
+      "latency_ms" : 2.332,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/No analytics in Harbor.md",
+        "Memory/Projects/Harbor/Notes/Telemetry FAQ.md",
+        "Memory/Projects/Harbor/Memories/Opt-in crash upload.md"
+      ],
+      "total" : 3
+    },
+    "injection-neighbor-09" : {
+      "latency_ms" : 2.192,
+      "results" : [
+        "Memory/Projects/Harbor/Notes/Telemetry FAQ.md"
+      ],
+      "total" : 1
+    },
+    "injection-neighbor-10" : {
+      "latency_ms" : 2.606,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Conflict copies keep both texts.md",
+        "Memory/Projects/Harbor/Harbor index.md",
+        "Memory/Projects/Harbor/Notes/Conflict handling scratch.md",
+        "Memory/Projects/Harbor/Memories/Last writer wins for conflicts.md",
+        "Memory/Projects/Harbor/Handoffs/Resume conflict UI.md"
+      ],
+      "total" : 5
+    },
+    "injection-neighbor-11" : {
+      "latency_ms" : 2.305,
+      "results" : [
+        "Memory/Projects/Harbor/Notes/Conflict handling scratch.md"
+      ],
+      "total" : 1
+    },
+    "injection-neighbor-12" : {
+      "latency_ms" : 2.741,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Tags stay out of front matter.md",
+        "Memory/Projects/Harbor/Harbor index.md",
+        "Memory/Projects/Harbor/Notes/Tag storage scratch.md"
+      ],
+      "total" : 3
+    },
+    "injection-neighbor-13" : {
+      "latency_ms" : 2.303,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Image assets folder.md",
+        "Memory/Projects/Harbor/Notes/Pasted images scratch.md"
+      ],
+      "total" : 2
+    },
+    "injection-neighbor-14" : {
+      "latency_ms" : 2.298,
+      "results" : [
+        "Memory/Projects/Harbor/Notes/Backup notes.md",
+        "Memory/Projects/Harbor/Memories/Backups with Time Machine.md"
+      ],
+      "total" : 2
+    },
+    "injection-neighbor-15" : {
+      "latency_ms" : 2.866,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md",
+        "Memory/Projects/Harbor/Memories/Atomic document saves.md",
+        "Memory/Projects/Harbor/Harbor index.md",
+        "Memory/Projects/Harbor/Notes/Glossary.md",
+        "Memory/Projects/Harbor/Progress/2026-10-02 0800 — Gate notes from contributor.md",
+        "Memory/Projects/Harbor/Progress/2026-09-30 1700 — Gate timeout tuning.md"
+      ],
+      "total" : 6
+    },
+    "injection-neighbor-16" : {
+      "latency_ms" : 2.655,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md",
+        "Memory/Projects/Harbor/Memories/PDF export uses WebKit printing.md",
+        "Memory/Projects/Harbor/Harbor index.md",
+        "Memory/Projects/Harbor/Notes/Export checklist (pasted).md",
+        "Memory/Projects/Harbor/Handoffs/Resume export work.md"
+      ],
+      "total" : 5
+    },
+    "injection-neighbor-17" : {
+      "latency_ms" : 2.522,
+      "results" : [
+        "Memory/Projects/Harbor/Notes/Release checklist.md",
+        "Memory/Projects/Harbor/Handoffs/Resume notarization automation.md",
+        "Memory/Projects/Harbor/Memories/Notarize with altool.md"
+      ],
+      "total" : 3
+    },
+    "injection-neighbor-18" : {
+      "latency_ms" : 2.37,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/No analytics in Harbor.md",
+        "Memory/Projects/Harbor/Notes/Telemetry FAQ.md",
+        "Memory/Projects/Harbor/Memories/Opt-in crash upload.md"
+      ],
+      "total" : 3
+    },
+    "injection-neighbor-19" : {
+      "latency_ms" : 2.222,
+      "results" : [
+        "Memory/Projects/Harbor/Notes/Conflict handling scratch.md"
+      ],
+      "total" : 1
+    },
+    "injection-neighbor-20" : {
+      "latency_ms" : 2.207,
+      "results" : [
+        "Memory/Projects/Harbor/Notes/Pasted images scratch.md",
+        "Memory/Projects/Harbor/Progress/2026-09-22 1500 — Asset folder cleanup.md"
+      ],
+      "total" : 2
+    },
+    "malformed-metadata-01" : {
+      "latency_ms" : 2.269,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Autosave interval.md"
+      ],
+      "total" : 1
+    },
+    "malformed-metadata-02" : {
+      "latency_ms" : 2.482,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "malformed-metadata-03" : {
+      "latency_ms" : 2.245,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Window restoration.md"
+      ],
+      "total" : 1
+    },
+    "malformed-metadata-04" : {
+      "latency_ms" : 2.159,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "malformed-metadata-05" : {
+      "latency_ms" : 2.287,
+      "results" : [
+        "Memory/Projects/Harbor/Notes/Find bar behaviour.md"
+      ],
+      "total" : 1
+    },
+    "malformed-metadata-06" : {
+      "latency_ms" : 2.217,
+      "results" : [
+        "Memory/Projects/Harbor/Notes/Find bar behaviour.md"
+      ],
+      "total" : 1
+    },
+    "malformed-metadata-07" : {
+      "latency_ms" : 2.206,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Sidebar width.md"
+      ],
+      "total" : 1
+    },
+    "malformed-metadata-08" : {
+      "latency_ms" : 2.331,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Sidebar width.md"
+      ],
+      "total" : 1
+    },
+    "malformed-metadata-09" : {
+      "latency_ms" : 2.232,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Print margins.md",
+        "Memory/Projects/Harbor/Memories/PDF export uses WebKit printing.md"
+      ],
+      "total" : 2
+    },
+    "malformed-metadata-10" : {
+      "latency_ms" : 2.176,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Print margins.md"
+      ],
+      "total" : 1
+    },
+    "malformed-metadata-11" : {
+      "latency_ms" : 2.287,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Typewriter scrolling.md"
+      ],
+      "total" : 1
+    },
+    "malformed-metadata-12" : {
+      "latency_ms" : 2.167,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "malformed-metadata-13" : {
+      "latency_ms" : 2.198,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Status bar layout.md"
+      ],
+      "total" : 1
+    },
+    "malformed-metadata-14" : {
+      "latency_ms" : 2.168,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Status bar layout.md"
+      ],
+      "total" : 1
+    },
+    "malformed-metadata-15" : {
+      "latency_ms" : 2.295,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Table editing.md"
+      ],
+      "total" : 1
+    },
+    "malformed-metadata-16" : {
+      "latency_ms" : 2.231,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "malformed-metadata-17" : {
+      "latency_ms" : 2.208,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Heading folding.md"
+      ],
+      "total" : 1
+    },
+    "malformed-metadata-18" : {
+      "latency_ms" : 2.376,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Heading folding.md"
+      ],
+      "total" : 1
+    },
+    "malformed-metadata-19" : {
+      "latency_ms" : 2.221,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Focus mode.md"
+      ],
+      "total" : 1
+    },
+    "malformed-metadata-20" : {
+      "latency_ms" : 2.228,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Focus mode.md"
+      ],
+      "total" : 1
+    },
+    "multi-hop-01" : {
+      "latency_ms" : 2.339,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-02" : {
+      "latency_ms" : 2.368,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-03" : {
+      "latency_ms" : 2.203,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-04" : {
+      "latency_ms" : 2.168,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-05" : {
+      "latency_ms" : 2.37,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-06" : {
+      "latency_ms" : 2.212,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-07" : {
+      "latency_ms" : 2.306,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-08" : {
+      "latency_ms" : 2.354,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-09" : {
+      "latency_ms" : 2.136,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-10" : {
+      "latency_ms" : 2.186,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-11" : {
+      "latency_ms" : 2.388,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-12" : {
+      "latency_ms" : 2.214,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-13" : {
+      "latency_ms" : 2.272,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-14" : {
+      "latency_ms" : 2.276,
+      "results" : [
+        "Memory/Projects/Harbor/Progress/2026-09-28 1300 — Quick Open tuning.md"
+      ],
+      "total" : 1
+    },
+    "multi-hop-15" : {
+      "latency_ms" : 2.189,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-16" : {
+      "latency_ms" : 2.29,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-17" : {
+      "latency_ms" : 2.203,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-18" : {
+      "latency_ms" : 2.235,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-19" : {
+      "latency_ms" : 2.172,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-20" : {
+      "latency_ms" : 2.346,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-21" : {
+      "latency_ms" : 2.329,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-22" : {
+      "latency_ms" : 2.151,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-23" : {
+      "latency_ms" : 2.758,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-24" : {
+      "latency_ms" : 2.167,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "multi-hop-25" : {
+      "latency_ms" : 2.579,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-01" : {
+      "latency_ms" : 2.232,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-02" : {
+      "latency_ms" : 2.294,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-03" : {
+      "latency_ms" : 2.238,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-04" : {
+      "latency_ms" : 2.315,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-05" : {
+      "latency_ms" : 2.161,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-06" : {
+      "latency_ms" : 2.225,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-07" : {
+      "latency_ms" : 2.301,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-08" : {
+      "latency_ms" : 2.168,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-09" : {
+      "latency_ms" : 2.262,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-10" : {
+      "latency_ms" : 2.272,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-11" : {
+      "latency_ms" : 2.144,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-12" : {
+      "latency_ms" : 2.249,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-13" : {
+      "latency_ms" : 2.186,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-14" : {
+      "latency_ms" : 2.263,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-15" : {
+      "latency_ms" : 2.167,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-16" : {
+      "latency_ms" : 2.227,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-17" : {
+      "latency_ms" : 2.256,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-18" : {
+      "latency_ms" : 2.183,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-19" : {
+      "latency_ms" : 2.329,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-20" : {
+      "latency_ms" : 2.172,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-21" : {
+      "latency_ms" : 2.189,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-22" : {
+      "latency_ms" : 2.273,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-23" : {
+      "latency_ms" : 2.246,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-24" : {
+      "latency_ms" : 2.271,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-25" : {
+      "latency_ms" : 2.259,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-26" : {
+      "latency_ms" : 2.273,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-27" : {
+      "latency_ms" : 2.217,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-28" : {
+      "latency_ms" : 2.162,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-29" : {
+      "latency_ms" : 2.305,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-30" : {
+      "latency_ms" : 2.132,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-31" : {
+      "latency_ms" : 2.283,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Encryption is out of scope.md"
+      ],
+      "total" : 1
+    },
+    "paraphrase-32" : {
+      "latency_ms" : 2.362,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-33" : {
+      "latency_ms" : 2.182,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-34" : {
+      "latency_ms" : 2.207,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "paraphrase-35" : {
+      "latency_ms" : 2.225,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-01" : {
+      "latency_ms" : 2.24,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-02" : {
+      "latency_ms" : 2.508,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-03" : {
+      "latency_ms" : 2.264,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-04" : {
+      "latency_ms" : 2.163,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-05" : {
+      "latency_ms" : 2.175,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-06" : {
+      "latency_ms" : 2.25,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-07" : {
+      "latency_ms" : 2.261,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-08" : {
+      "latency_ms" : 2.702,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Write gate uses flock.md",
+        "Memory/Projects/Harbor/Memories/Atomic document saves.md",
+        "Memory/Projects/Harbor/Harbor index.md",
+        "Memory/Projects/Harbor/Notes/Glossary.md",
+        "Memory/Projects/Harbor/Progress/2026-10-02 0800 — Gate notes from contributor.md",
+        "Memory/Projects/Harbor/Progress/2026-09-30 1700 — Gate timeout tuning.md"
+      ],
+      "total" : 6
+    },
+    "scope-leak-09" : {
+      "latency_ms" : 2.171,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-10" : {
+      "latency_ms" : 2.255,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-11" : {
+      "latency_ms" : 2.142,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-12" : {
+      "latency_ms" : 2.248,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-13" : {
+      "latency_ms" : 2.314,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-14" : {
+      "latency_ms" : 2.202,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-15" : {
+      "latency_ms" : 2.425,
+      "results" : [
+        "Reference/Harbor/Apple notarization guide.md"
+      ],
+      "total" : 1
+    },
+    "scope-leak-16" : {
+      "latency_ms" : 2.218,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-17" : {
+      "latency_ms" : 2.444,
+      "results" : [
+        "Reference/Harbor/WebKit printing quirks.md"
+      ],
+      "total" : 1
+    },
+    "scope-leak-18" : {
+      "latency_ms" : 2.199,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-19" : {
+      "latency_ms" : 2.312,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-20" : {
+      "latency_ms" : 2.175,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-21" : {
+      "latency_ms" : 2.168,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-22" : {
+      "latency_ms" : 2.559,
+      "results" : [
+        "Memory/Projects/Harbor/Notes/Release checklist.md"
+      ],
+      "total" : 1
+    },
+    "scope-leak-23" : {
+      "latency_ms" : 2.153,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "scope-leak-24" : {
+      "latency_ms" : 2.266,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md",
+        "Memory/Projects/Harbor/Memories/Notarization tips.md"
+      ],
+      "total" : 2
+    },
+    "scope-leak-25" : {
+      "latency_ms" : 2.26,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-01" : {
+      "latency_ms" : 2.781,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md",
+        "Memory/Projects/Harbor/Memories/Index cache format v1.md",
+        "Memory/Projects/Harbor/Harbor index.md",
+        "Memory/Projects/Harbor/Handoffs/Resume shard migration.md",
+        "Memory/Projects/Harbor/Progress/2026-10-01 0900 — Shard migration.md"
+      ],
+      "total" : 5
+    },
+    "supersession-02" : {
+      "latency_ms" : 2.538,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-03" : {
+      "latency_ms" : 2.14,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-04" : {
+      "latency_ms" : 2.152,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-05" : {
+      "latency_ms" : 2.684,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Index cache format v1.md",
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md",
+        "Memory/Projects/Harbor/Harbor index.md"
+      ],
+      "total" : 3
+    },
+    "supersession-06" : {
+      "latency_ms" : 2.322,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Move the index cache to SQLite.md",
+        "Memory/Projects/Harbor/Memories/Index cache format v2.md"
+      ],
+      "total" : 2
+    },
+    "supersession-07" : {
+      "latency_ms" : 2.445,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-08" : {
+      "latency_ms" : 2.32,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Last writer wins for conflicts.md",
+        "Memory/Projects/Harbor/Notes/Conflict handling scratch.md"
+      ],
+      "total" : 2
+    },
+    "supersession-09" : {
+      "latency_ms" : 2.163,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-10" : {
+      "latency_ms" : 2.261,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/PDF export uses PDFKit pagination.md"
+      ],
+      "total" : 1
+    },
+    "supersession-11" : {
+      "latency_ms" : 2.278,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-12" : {
+      "latency_ms" : 2.334,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-13" : {
+      "latency_ms" : 2.138,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-14" : {
+      "latency_ms" : 2.235,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-15" : {
+      "latency_ms" : 2.293,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Notarize with altool.md",
+        "Memory/Projects/Harbor/Memories/Notarize with notarytool.md"
+      ],
+      "total" : 2
+    },
+    "supersession-16" : {
+      "latency_ms" : 2.182,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-17" : {
+      "latency_ms" : 2.438,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-18" : {
+      "latency_ms" : 2.289,
+      "results" : [
+        "Memory/Projects/Harbor/Notes/Telemetry FAQ.md",
+        "Memory/Projects/Harbor/Memories/Opt-in crash upload.md"
+      ],
+      "total" : 2
+    },
+    "supersession-19" : {
+      "latency_ms" : 2.222,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-20" : {
+      "latency_ms" : 2.063,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-21" : {
+      "latency_ms" : 2.197,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-22" : {
+      "latency_ms" : 2.488,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-23" : {
+      "latency_ms" : 2.175,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "supersession-24" : {
+      "latency_ms" : 2.21,
+      "results" : [
+        "Memory/Projects/Harbor/Memories/Last writer wins for conflicts.md"
+      ],
+      "total" : 1
+    },
+    "supersession-25" : {
+      "latency_ms" : 2.373,
+      "results" : [
+        "Memory/Projects/Harbor/Notes/Telemetry FAQ.md"
+      ],
+      "total" : 1
+    },
+    "unanswerable-01" : {
+      "latency_ms" : 2.151,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-02" : {
+      "latency_ms" : 2.521,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-03" : {
+      "latency_ms" : 2.234,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-04" : {
+      "latency_ms" : 2.177,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-05" : {
+      "latency_ms" : 2.153,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-06" : {
+      "latency_ms" : 2.157,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-07" : {
+      "latency_ms" : 2.329,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-08" : {
+      "latency_ms" : 2.151,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-09" : {
+      "latency_ms" : 2.179,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-10" : {
+      "latency_ms" : 2.156,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-11" : {
+      "latency_ms" : 2.171,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-12" : {
+      "latency_ms" : 2.505,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-13" : {
+      "latency_ms" : 2.173,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-14" : {
+      "latency_ms" : 2.179,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-15" : {
+      "latency_ms" : 2.195,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-16" : {
+      "latency_ms" : 2.123,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-17" : {
+      "latency_ms" : 2.466,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-18" : {
+      "latency_ms" : 2.338,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-19" : {
+      "latency_ms" : 2.329,
+      "results" : [
+
+      ],
+      "total" : 0
+    },
+    "unanswerable-20" : {
+      "latency_ms" : 2.09,
+      "results" : [
+
+      ],
+      "total" : 0
+    }
+  },
+  "resources" : {
+    "authorize_p50_ms.harbor" : "0.007",
+    "authorize_p50_ms.harbor-reference" : "0.007",
+    "cache_bytes.harbor" : "34779",
+    "cache_bytes.harbor-reference" : "35492",
+    "cold_build_ms.harbor" : "33.0",
+    "cold_build_ms.harbor-reference" : "20.14",
+    "documents" : "71",
+    "fixture_bytes" : "21451",
+    "machine" : "Mac16,5",
+    "memory_gb" : "48",
+    "os" : "Version 15.7.9 (Build 24G830)",
+    "peak_rss_mb_test_process" : "66",
+    "processors" : "16",
+    "rank_p50_ms.harbor" : "0.84",
+    "rank_p50_ms.harbor-reference" : "0.858",
+    "refresh_p50_ms.harbor" : "1.422",
+    "refresh_p50_ms.harbor-reference" : "1.502",
+    "warm_runs_per_query" : "5"
+  },
+  "retrieval" : "memory_search contract_version 1 (#134 lexical, default request)",
+  "summary" : {
+    "dev" : {
+      "exact" : {
+        "answerable" : 18,
+        "empty_results" : 2,
+        "evidence_complete" : 0.889,
+        "injection_above_evidence" : 0,
+        "latency_p50_ms" : 2.35,
+        "latency_p95_ms" : 2.85,
+        "leaks" : 0,
+        "mrr_at_10" : 0.833,
+        "queries" : 18,
+        "recall_at_10" : 0.889,
+        "recall_at_20" : 0.889,
+        "recall_at_5" : 0.889
+      },
+      "injection-neighbor" : {
+        "answerable" : 12,
+        "empty_results" : 0,
+        "evidence_complete" : 0.75,
+        "injection_above_evidence" : 3,
+        "latency_p50_ms" : 2.31,
+        "latency_p95_ms" : 2.87,
+        "leaks" : 0,
+        "mrr_at_10" : 0.792,
+        "queries" : 12,
+        "recall_at_10" : 0.792,
+        "recall_at_20" : 0.792,
+        "recall_at_5" : 0.792
+      },
+      "malformed-metadata" : {
+        "answerable" : 12,
+        "empty_results" : 1,
+        "evidence_complete" : 0.917,
+        "injection_above_evidence" : 0,
+        "latency_p50_ms" : 2.25,
+        "latency_p95_ms" : 2.38,
+        "leaks" : 0,
+        "mrr_at_10" : 0.917,
+        "queries" : 12,
+        "recall_at_10" : 0.917,
+        "recall_at_20" : 0.917,
+        "recall_at_5" : 0.917
+      },
+      "multi-hop" : {
+        "answerable" : 15,
+        "empty_results" : 15,
+        "evidence_complete" : 0,
+        "injection_above_evidence" : 0,
+        "latency_p50_ms" : 2.33,
+        "latency_p95_ms" : 2.76,
+        "leaks" : 0,
+        "mrr_at_10" : 0,
+        "queries" : 15,
+        "recall_at_10" : 0,
+        "recall_at_20" : 0,
+        "recall_at_5" : 0
+      },
+      "overall" : {
+        "answerable" : 95,
+        "empty_results" : 70,
+        "evidence_complete" : 0.463,
+        "injection_above_evidence" : 5,
+        "latency_p50_ms" : 2.26,
+        "latency_p95_ms" : 2.68,
+        "leaks" : 0,
+        "mrr_at_10" : 0.474,
+        "queries" : 120,
+        "recall_at_10" : 0.479,
+        "recall_at_20" : 0.479,
+        "recall_at_5" : 0.479
+      },
+      "paraphrase" : {
+        "answerable" : 21,
+        "empty_results" : 20,
+        "evidence_complete" : 0.048,
+        "injection_above_evidence" : 0,
+        "latency_p50_ms" : 2.19,
+        "latency_p95_ms" : 2.27,
+        "leaks" : 0,
+        "mrr_at_10" : 0.048,
+        "queries" : 21,
+        "recall_at_10" : 0.048,
+        "recall_at_20" : 0.048,
+        "recall_at_5" : 0.048
+      },
+      "scope-leak" : {
+        "answerable" : 2,
+        "empty_results" : 13,
+        "evidence_complete" : 1,
+        "injection_above_evidence" : 0,
+        "latency_p50_ms" : 2.24,
+        "latency_p95_ms" : 2.7,
+        "leaks" : 0,
+        "mrr_at_10" : 1,
+        "queries" : 15,
+        "recall_at_10" : 1,
+        "recall_at_20" : 1,
+        "recall_at_5" : 1
+      },
+      "supersession" : {
+        "answerable" : 15,
+        "empty_results" : 7,
+        "evidence_complete" : 0.333,
+        "injection_above_evidence" : 2,
+        "latency_p50_ms" : 2.28,
+        "latency_p95_ms" : 2.78,
+        "leaks" : 0,
+        "mrr_at_10" : 0.433,
+        "queries" : 15,
+        "recall_at_10" : 0.4,
+        "recall_at_20" : 0.4,
+        "recall_at_5" : 0.4
+      },
+      "unanswerable" : {
+        "answerable" : 0,
+        "empty_results" : 12,
+        "injection_above_evidence" : 0,
+        "latency_p50_ms" : 2.16,
+        "latency_p95_ms" : 2.34,
+        "leaks" : 0,
+        "queries" : 12
+      }
+    },
+    "heldout" : {
+      "exact" : {
+        "answerable" : 12,
+        "empty_results" : 1,
+        "evidence_complete" : 0.917,
+        "injection_above_evidence" : 0,
+        "latency_p50_ms" : 2.35,
+        "latency_p95_ms" : 2.82,
+        "leaks" : 0,
+        "mrr_at_10" : 0.917,
+        "queries" : 12,
+        "recall_at_10" : 0.917,
+        "recall_at_20" : 0.917,
+        "recall_at_5" : 0.917
+      },
+      "injection-neighbor" : {
+        "answerable" : 8,
+        "empty_results" : 0,
+        "evidence_complete" : 0.5,
+        "injection_above_evidence" : 4,
+        "latency_p50_ms" : 2.31,
+        "latency_p95_ms" : 2.74,
+        "leaks" : 0,
+        "mrr_at_10" : 0.438,
+        "queries" : 8,
+        "recall_at_10" : 0.5,
+        "recall_at_20" : 0.5,
+        "recall_at_5" : 0.5
+      },
+      "malformed-metadata" : {
+        "answerable" : 8,
+        "empty_results" : 3,
+        "evidence_complete" : 0.625,
+        "injection_above_evidence" : 0,
+        "latency_p50_ms" : 2.21,
+        "latency_p95_ms" : 2.48,
+        "leaks" : 0,
+        "mrr_at_10" : 0.625,
+        "queries" : 8,
+        "recall_at_10" : 0.625,
+        "recall_at_20" : 0.625,
+        "recall_at_5" : 0.625
+      },
+      "multi-hop" : {
+        "answerable" : 10,
+        "empty_results" : 9,
+        "evidence_complete" : 0,
+        "injection_above_evidence" : 0,
+        "latency_p50_ms" : 2.17,
+        "latency_p95_ms" : 2.37,
+        "leaks" : 0,
+        "mrr_at_10" : 0.1,
+        "queries" : 10,
+        "recall_at_10" : 0.033,
+        "recall_at_20" : 0.033,
+        "recall_at_5" : 0.033
+      },
+      "overall" : {
+        "answerable" : 65,
+        "empty_results" : 51,
+        "evidence_complete" : 0.354,
+        "injection_above_evidence" : 4,
+        "latency_p50_ms" : 2.27,
+        "latency_p95_ms" : 2.62,
+        "leaks" : 0,
+        "mrr_at_10" : 0.362,
+        "queries" : 80,
+        "recall_at_10" : 0.359,
+        "recall_at_20" : 0.359,
+        "recall_at_5" : 0.359
+      },
+      "paraphrase" : {
+        "answerable" : 14,
+        "empty_results" : 14,
+        "evidence_complete" : 0,
+        "injection_above_evidence" : 0,
+        "latency_p50_ms" : 2.27,
+        "latency_p95_ms" : 2.36,
+        "leaks" : 0,
+        "mrr_at_10" : 0,
+        "queries" : 14,
+        "recall_at_10" : 0,
+        "recall_at_20" : 0,
+        "recall_at_5" : 0
+      },
+      "scope-leak" : {
+        "answerable" : 3,
+        "empty_results" : 7,
+        "evidence_complete" : 1,
+        "injection_above_evidence" : 0,
+        "latency_p50_ms" : 2.26,
+        "latency_p95_ms" : 2.56,
+        "leaks" : 0,
+        "mrr_at_10" : 1,
+        "queries" : 10,
+        "recall_at_10" : 1,
+        "recall_at_20" : 1,
+        "recall_at_5" : 1
+      },
+      "supersession" : {
+        "answerable" : 10,
+        "empty_results" : 9,
+        "evidence_complete" : 0,
+        "injection_above_evidence" : 0,
+        "latency_p50_ms" : 2.24,
+        "latency_p95_ms" : 2.54,
+        "leaks" : 0,
+        "mrr_at_10" : 0,
+        "queries" : 10,
+        "recall_at_10" : 0,
+        "recall_at_20" : 0,
+        "recall_at_5" : 0
+      },
+      "unanswerable" : {
+        "answerable" : 0,
+        "empty_results" : 8,
+        "injection_above_evidence" : 0,
+        "latency_p50_ms" : 2.33,
+        "latency_p95_ms" : 2.52,
+        "leaks" : 0,
+        "queries" : 8
+      }
+    }
+  },
+  "version" : 1
+}
