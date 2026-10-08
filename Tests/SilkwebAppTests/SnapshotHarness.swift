@@ -89,6 +89,9 @@ struct SnapshotScenario {
     static let deepDocument = deepFolder + "/Settling In at the Campground.md"
     /// #72: long place-name headings at every depth for Outline tail truncation; written only for its scenario.
     static let longOutline = "Snapshot Fixtures/Outline Long Headings.md"
+    /// #132: agent progress documents with front matter envelopes; written only for their scenario.
+    static let memoryFolder = "Memory/Projects/Silkweb/Progress"
+    static let memoryDocument = memoryFolder + "/2026-10-07 0930 — Helper spike.md"
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
     /// #90: the owner's non-default amber Accent.
@@ -237,6 +240,8 @@ struct SnapshotScenario {
         .init(name: "quick-open", quickQuery: "brew"),
         .init(name: "search-results", searchQuery: "coffee"),
         .init(name: "empty-document", document: "Snapshot Fixtures/Empty Document.md"),
+        // #132: the list skips a well-formed envelope; the malformed row and the editor show the raw text.
+        .init(name: "memory-envelope-list", folder: memoryFolder, document: memoryDocument),
         .init(name: "new-document", folder: "", document: "Snapshot Fixtures/Empty Document.md", createDocument: true),
         .init(
             name: "new-document-in-folder", folder: "Snapshot Fixtures/Empty Folder",
@@ -425,8 +430,37 @@ final class SnapshotHarness {
         ("Road Notes.md", "# Road Notes\n"),
     ]
 
-    func makeFixture(at root: URL, deepPath: Bool = false, longOutline: Bool = false) throws {
+    func makeFixture(at root: URL, deepPath: Bool = false, longOutline: Bool = false, memoryEnvelopes: Bool = false)
+        throws
+    {
         try FileManager.default.copyItem(at: library, to: root)
+        if memoryEnvelopes {
+            // #132: one well-formed v1 progress document and one malformed one; only this scenario gets them.
+            let folder = root.appendingPathComponent(SnapshotScenario.memoryFolder)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let documents = [
+                (
+                    SnapshotScenario.memoryDocument,
+                    "---\nschema: \"silkweb-memory/v1\"\nmemory_id: \"mem_01JA2B3C4D5E6F7G8H9J0K1L2M\"\n"
+                        + "type: \"progress\"\nproject: \"Silkweb\"\nagent: \"claude-code\"\nsession: \"2026-10-07-a\"\n"
+                        + "created_at: \"2026-10-07T09:30:00Z\"\nstatus: \"in-progress\"\nsupersedes: []\n---\n\n"
+                        + "# Helper spike\n\nObjective: prove the helper reads the Library with the app closed.\n\n"
+                        + "Next action: wire `memory_create`.\n"
+                ),
+                (
+                    SnapshotScenario.memoryFolder + "/2026-10-07 0900 — Broken envelope.md",
+                    "---\nschema: \"silkweb-memory/v1\"\nagent: {name: claude-code}\n---\n\n"
+                        + "# Broken envelope\n\nThis envelope isn’t in the subset, so the row shows it as text.\n"
+                ),
+            ]
+            for (index, (path, text)) in documents.enumerated() {
+                let url = root.appendingPathComponent(path)
+                try Data(text.utf8).write(to: url, options: .atomic)
+                let date = Date(timeIntervalSince1970: 1_780_000_000 - Double(index) * 3_600)
+                try FileManager.default.setAttributes(
+                    [.creationDate: date, .modificationDate: date], ofItemAtPath: url.path)
+            }
+        }
         if longOutline {
             let text = """
                 # Settling In
@@ -814,7 +848,8 @@ final class SnapshotHarness {
             } else {
                 try makeFixture(
                     at: root, deepPath: scenario.document == SnapshotScenario.deepDocument,
-                    longOutline: scenario.document == SnapshotScenario.longOutline)
+                    longOutline: scenario.document == SnapshotScenario.longOutline,
+                    memoryEnvelopes: scenario.folder == SnapshotScenario.memoryFolder)
             }
             workspace.root = root
             workspace.recoveryDirectory = root.appendingPathComponent("Snapshot Recovery")
