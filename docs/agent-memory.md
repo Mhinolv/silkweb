@@ -65,7 +65,8 @@ Rules for every operation:
 - No HTTP or other network transport, and no accounts.
 - No `Proposals` Folder. Reviewed edits and organization proposals come after the MVP.
 - No Settings UI in this ticket. Settings ▸ Library ▸ Agent Access (#130) will only edit the grants
-  file below, using the existing `LibraryPathControl` and **Choose…** pattern.
+  file below, using the existing `LibraryPathControl` and **Choose…** pattern. Until then the owner runs
+  [`silkweb grant init`](#setting-up-a-grant-186).
 - No Mac App Store or sandboxed build (see [Deferred: App Store sandbox](#deferred-app-store-sandbox)).
 
 ## Library layout
@@ -222,7 +223,8 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
 - `project` is the exact project key and a single Folder name. Agents choose a grant by project,
   but naming a project never grants access by itself. Access comes only from this file.
 - `library` is the same versioned `LibraryLocation` the app saves (a `path`, plus an optional
-  `bookmark`). The helper resolves it the same way the app does, and never writes the file back.
+  `bookmark`). The helper resolves it the same way the app does. The memory commands and the MCP
+  server never write the file; only the owner's [`silkweb grant init`](#setting-up-a-grant-186) does.
 - `access` is `read` or `read-create`. An unknown value is treated as `read`.
 - **Default template:**
   - Read folders: `Memory/Projects/<Project>/`, plus any `extra_read_folders`. Extra read folders
@@ -234,6 +236,48 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
   `Memory/Projects/Silkweb2` isn’t inside `Memory/Projects/Silkweb`. Symbolic links and hidden items
   are never followed or listed.
 - MCP roots and client names may narrow a grant but never widen it.
+
+### Setting up a grant (#186)
+
+The owner adds a grant with `silkweb grant init`, run in Terminal, instead of editing JSON:
+
+```text
+silkweb grant init [--library <PATH>] [--project <KEY>] [--access read|read-create] [--dry-run] [--grants <FILE>]
+```
+
+- **Modes.** With `--library`, `--project` and `--access` it asks nothing. Otherwise it prompts on
+  stderr for the missing ones: the Library folder (`~` expanded, links resolved, must be a readable
+  folder, reported as local disk or not), the project key (one valid Folder name, NFC) and the
+  profile (Read Only or Read and Create), then asks “Save to …? [y/N]”. Without a terminal on stdin
+  and with an option missing, it exits 64 (`“grant init” needs --library.`) instead of waiting.
+  `--access read-only` means `read`. End of input exits 1 and saves nothing.
+- **Owner only.** Saving to the real grants file needs stdin to be a terminal, even with every option,
+  so an agent's shell can't give itself access (exit 77, “Only the owner can save agent access. Run
+  this in Terminal.”). `--dry-run` and a `--grants` file elsewhere need no terminal. `--grants` is
+  compared with the real file after resolving links, case and hard links. The agent skill says
+  “Never run silkweb grant; ask the owner.”
+- **New project:** appended with `project`, `library.path` (no bookmark), `access`, `created_at` and the
+  default label, limits and read folders. The file is written with `AgentGrantFile.write(to:)`
+  (atomic, sorted keys, `version: 1`); other grants keep their values.
+- **Same answers:** “Agent access for “Silkweb” is already set up.”, exit 0, and the file isn't
+  written (byte-identical).
+- **Never widens.** More access (`read` → `read-create`), another Library, or a revoked grant exits 77
+  with “The grant “Silkweb” already exists with Read Only access. grant init never widens access; edit
+  agent-grants.json to change it. Nothing was saved.” (the reason varies). There's no override.
+  `read-create` → `read` is allowed and reported as “Changed access: Read and Create → Read Only.”
+  Labels, limits and extra read folders are never changed, so they can't be widened either.
+- **Unqualified Library:** `read-create` is still saved, with “Agents can read; creating stays off
+  until the Library is on a local APFS or HFS+ disk.” The interactive default becomes Read Only.
+- **Nothing in the Library.** It only reads the folder's volume details.
+- **Output** (stdout, plain text): a summary (Library, Folder, File), then the `claude mcp add`,
+  `codex mcp add` and Gemini CLI commands from `agent-packages/README.md` › Install with the project
+  key and helper path filled in, and a `memory capabilities` check. The helper path is `argv[0]` made
+  absolute (looked up on `PATH` when bare), links kept; when it can't be found the lines keep
+  `<SILKWEB_HELPER>`. Values with spaces or shell characters are single-quoted. `--dry-run` prints
+  “Dry run. Nothing was saved.”, the grant's JSON and the same commands, and creates no folders; a
+  dry run that would be refused exits with the refusal's status.
+- Exit statuses: 0 ok, 1 cancelled, 64 usage, 74 Library folder missing or file not saved, 77 access
+  (owner only, widening, unreadable or newer grants file).
 
 ### Profiles, limits and revocation (#130)
 
@@ -615,7 +659,8 @@ settled by the next create’s recovery. Either way a retry with the same key re
 grants, scope checks, limits, idempotency and receipts. Every command works with Silkweb closed.
 The binary is the helper from [Helper distribution](#helper-distribution) (`build/helper/silkweb`,
 linked to `~/.local/bin/silkweb`); nothing installs itself. `silkweb --help` prints the summary below
-in a `USAGE` / `COMMANDS` / `OPTIONS` layout.
+in a `USAGE` / `COMMANDS` / `OPTIONS` layout. The owner's setup command, `silkweb grant init`, prints
+plain text rather than the JSON envelope; see [Setting up a grant](#setting-up-a-grant-186).
 
 ### Commands
 
@@ -761,8 +806,9 @@ when this shipped are recorded in the #139 matrix,
 The skill, instruction-file blocks and per-client install, update and uninstall steps live in
 [`agent-packages/`](../agent-packages/README.md). One workflow, `agent-packages/shared/silkweb-memory.md`,
 is copied byte for byte into the Claude Code, Codex and Gemini CLI skills by `scripts/agent_packages.sh`,
-and `AgentPackagesTests` fails when a copy drifts. Silkweb ships no command that creates grants, because
-an agent could run it to widen its own access; the owner edits `agent-grants.json` from the template there.
+and `AgentPackagesTests` fails when a copy drifts. The owner creates the grant with
+[`silkweb grant init`](#setting-up-a-grant-186), which saves only from a terminal, so an agent can't run it
+to give itself access; the README's template covers hand edits.
 
 ### Protocol
 
@@ -933,7 +979,8 @@ Run these once from the repository root. Each step shows its expected output.
    {"ok":true,"result":{"contract_version":1,"helper_version":"0.1.0"},"version":1}
    ```
 
-3. Write the grant, using the Library you want agents to use.
+3. Write the grant, using the Library you want agents to use. (Since #186, `silkweb grant init` does
+   this; see [Setting up a grant](#setting-up-a-grant-186).)
 
    ```sh
    mkdir -p ~/Library/Application\ Support/Silkweb
