@@ -233,7 +233,7 @@ final class AgentMemoryTests: XCTestCase {
         XCTAssertEqual(json["library"] as? String, library.standardizedFileURL.path)
         XCTAssertEqual(json["filesystem"] as? String, "qualified")
         XCTAssertEqual(json["access"] as? String, "read-create")
-        XCTAssertEqual(json["operations"] as? [String], ["capabilities", "list"])
+        XCTAssertEqual(json["operations"] as? [String], ["capabilities", "list", "search", "read"])
         XCTAssertEqual(json["read_roots"] as? [String], ["Memory/Projects/Silkweb", "Notes/Private"])
         XCTAssertEqual((json["create_roots"] as? [String])?.count, 3)
         XCTAssertEqual(json["project_folder_exists"] as? Bool, true)

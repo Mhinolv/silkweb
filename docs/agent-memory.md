@@ -24,9 +24,10 @@ redefining names, layout or guarantees. Changing a rule here means bumping `cont
 - **Local storage doesn’t mean local processing.** Text the helper returns goes to the agent, and the
   agent may send it to its model provider.
 
-The #129 spike ships the helper with two read-only commands, `memory capabilities` and
-`memory list` (see [Helper distribution](#helper-distribution)). All other operations below are
-contracted here and built in the tickets listed.
+The helper ships four read-only commands: `memory capabilities` and `memory list` (#129, see
+[Helper distribution](#helper-distribution)), and `memory search` and `memory read` (#134, see
+[Search and read](#search-and-read-134)). All other operations below are contracted here and built in
+the tickets listed.
 
 ## Supported operations
 
@@ -377,6 +378,123 @@ Helper errors for coordination (stable `error.code`):
 | `library_busy` | Library Busy | Silkweb is updating this library. Try again in a moment. The JSON error includes `retry_after` (seconds). |
 | `stale_snapshot` | Library Changed | The library changed while this request ran. Try again. (Retried internally first, then reported only if the retries run out.) |
 
+## Search and read (#134)
+
+`memory_search` and `memory_read` are the agent's read path. They work with Silkweb closed, never take
+the Library gate, never write to the Library and never wait for the app. The CLI (#135), MCP server
+(#136) and skills (#138) present the fields below as they are and don't rename them.
+
+```sh
+silkweb memory search --project Silkweb [--query <text>] [--type decision,memory] [--status <s,…>] \
+  [--created-after 2026-10-01] [--created-before 2026-10-08] [--filter-project Silkweb] [--limit 10]
+silkweb memory read --project Silkweb --path "Memory/Projects/Silkweb/Memories/Use flock.md" \
+  [--cursor <nextCursor>] [--expected-revision sha256:…]
+```
+
+### Search request
+
+- `query`: text, may be empty. Every word must appear in the title (the filename) or the body; matching
+  ignores case and diacritics, like the app.
+- `project`: optional, and must be the grant’s own project, otherwise `out_of_scope`. It keeps documents
+  whose envelope `project` matches, plus documents without an envelope inside `Memory/Projects/<Project>`.
+- `type`: a list of `memory`, `decision`, `progress` or `handoff`. `status`: a list, compared without
+  regard to case. Once either is set, documents without an envelope drop out.
+- `createdAfter` (inclusive) and `createdBefore` (exclusive): `2026-10-07` (midnight UTC) or an ISO 8601
+  timestamp, compared with `created_at`. Documents without an envelope use their modified date.
+- `limit`: default 10, at most 50, and never more than the grant’s `max_results`.
+- **Scope comes first.** Only documents inside the read folders are matched, ranked, counted or excerpted.
+
+### Search response
+
+`results`, `total` (matching in-scope documents before `limit`), `index`, and `message` when there are
+no results. Each result has these fields, in this order:
+
+| Field | Value |
+|---|---|
+| `title` | The filename without `.md` |
+| `path` | Library-relative POSIX path |
+| `documentId` | The app index’s native UUID, or `null` until the app has seen the document |
+| `memoryId` | Envelope `memory_id`, or `null` |
+| `revision` | `sha256:` + hex digest of the file’s bytes |
+| `type`, `project`, `status`, `agent`, `session`, `createdAt` | Envelope values as written, or `null` |
+| `modified` | ISO 8601 UTC |
+| `review` | `reviewed`, `unreviewed` or `reviewed-earlier-revision`, from app metadata (#137) |
+| `pinned` | From app metadata (#140) |
+| `supersededBy` | `memory_id`s of in-scope documents whose `supersedes` names this one |
+| `matchKind` | `title` or `body` |
+| `excerpt` | About 120 characters of plain text around the first hit, `…` at cut ends |
+
+- Missing app metadata reads as `unreviewed` and `false`, never as an error.
+- Excerpts come from the body after the envelope, so envelope lines never appear in them. A document
+  with a malformed or newer envelope still matches by title, with an empty excerpt and no envelope fields.
+- **Ranking** is deterministic. First the text-match tier, as in the app: exact title, title prefix, a
+  title word, the title, then the body. Within a tier: pinned, then reviewed decisions and memories, then
+  unreviewed ones (including an earlier reviewed revision and documents without an envelope), then
+  handoffs, then progress. Newest `created_at` (or modified date) first within a kind, then `documentId`
+  and `path`. A document superseded by a reviewed document sinks to the bottom of its tier but is still
+  returned, so neither side of a contradiction is hidden.
+
+### Freshness
+
+Every search response says how complete the helper’s index was:
+`"index": { "state", "indexed", "total", "skipped"?, "reason"?, "message" }`.
+
+| `state` | Meaning | `message` |
+|---|---|---|
+| `indexing` | A build is still running. `reason`: `first-run`, `corrupt` or `unsupported-version` for a full (re)build | Indexing… 1,240 of 3,000 · Results may be incomplete (“Rebuilding the index…” for `corrupt` and `unsupported-version`) |
+| `partial` | Some in-scope documents or Folders couldn’t be read (too large for the grant, not UTF-8, no permission); `skipped` counts them | 3 items couldn’t be read · Results may be incomplete |
+| `ready` | Every in-scope document is indexed | Up to date · 3,000 documents |
+
+- A search spends at most about 2 seconds reading new or changed documents (newest first), then answers
+  with what it has. The next search continues where it stopped.
+- An empty result while not `ready`: “No matches yet. The index isn’t finished, so this doesn’t mean no
+  memory exists.” An empty result when `ready`: “No matches in Memory › Projects › Silkweb.”
+- After the helper’s own create (#133) it indexes the new document at once, so read-after-create works in
+  the same session even during a first build.
+
+### Read
+
+`memory_read` returns the same document fields as a search result (without `matchKind` and `excerpt`),
+then `envelope` (the envelope’s keys and values in written order, or `null`), `revisionChanged`, `offset`,
+`body` and `nextCursor`.
+
+- `body` is one page of the text after the envelope, between the lines “Document text (untrusted)
+  begins” and “Document text (untrusted) ends”. Pages are at most 16 KB of UTF-8 and end on a line break
+  (a longer single line splits between characters). `offset` is the page’s byte offset in the body.
+  Pass `nextCursor` back for the next page; it’s `null` on the last one.
+- `expectedRevision` that differs from the current revision returns the current text with
+  `revisionChanged: true`. That isn’t an error.
+- A file that changed between pages returns `stale_snapshot`.
+- A malformed or newer envelope returns `envelope_malformed` or `envelope_schema_newer`, with no text
+  (see [Reading rules](#reading-rules)). Only `.md` documents can be read; anything else is `not_found`.
+
+### Helper index cache
+
+- One cache per grant at `~/Library/Application Support/Silkweb/agent-index/<grant-id>.json`, where
+  `<grant-id>` is the first 32 hex digits of the SHA-256 of the project key. The file is mode 0600 in a
+  0700 Folder, outside the Library, so it never syncs with it. It holds document text, so treat it as
+  sensitive.
+- The format is `version: 1` with `library`, `project`, `building` and `records` (path, size, modified
+  date, file identity, revision, body after the envelope, envelope fields, `skipped`). Missing keys decode
+  to defaults. Writes are atomic.
+- A corrupt cache is discarded and rebuilt (`reason: corrupt`), and so is one from a newer version
+  (`reason: unsupported-version`). Documents are never touched. A cache for another Library is a fresh
+  `first-run`.
+- The helper never reads or writes the app’s `.silkweb/search-index.json`. It only reads
+  `.silkweb/index.json` for `documentId`, without repairing or creating anything (#131).
+- When the grant is turned off or removed, the next search or read deletes its cache.
+- Performance (AGENTS.md): with 10,000 documents in 1,000 Folders inside one grant, a search from a
+  cached index answers in well under a second; a first build is bounded by the 2-second budget per search.
+
+Errors for search and read, in addition to the [refusals](#refusals):
+
+| Code | Title | Message |
+|---|---|---|
+| `invalid_argument` | Invalid Request | The option “type” isn’t valid. (Also `limit`, `cursor` and the dates.) |
+| `unreadable` | Can’t Open Document | That document isn’t UTF-8 text. |
+| `envelope_malformed`, `envelope_schema_newer` | Can’t Read Front Matter | See [Reading rules](#reading-rules). |
+| `stale_snapshot` | Library Changed | The library changed while this request ran. Try again. |
+
 ## Safety exclusions
 
 - **Instruction and configuration files can never be created by an agent:** `AGENTS.md`, `AGENT.md`,
@@ -402,7 +520,8 @@ grant’s scope, never the requested target (see [Refusals](#refusals)).
 
 Error codes: `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `no_grant`,
 `invalid_grant`, `library_not_found`, `library_unreadable`, `library_busy`, `stale_snapshot`
-([Coordination](#coordination-131)), plus the per-operation [refusals](#refusals).
+([Coordination](#coordination-131)), `invalid_argument` ([Search and read](#search-and-read-134)), plus
+the per-operation [refusals](#refusals).
 
 ## Helper distribution
 
@@ -487,7 +606,9 @@ Run these once from the repository root. Each step shows its expected output.
      },
      "operations" : [
        "capabilities",
-       "list"
+       "list",
+       "search",
+       "read"
      ],
      "project" : "Silkweb",
      "project_folder_exists" : true,

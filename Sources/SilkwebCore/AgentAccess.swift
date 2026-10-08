@@ -345,6 +345,8 @@ public enum AgentSecureFiles {
         public let path: String
         public let size: Int
         public let modified: Date
+        /// `device:inode`, so an atomic replace with the same size and date still reads as a change.
+        public var identity: String = ""
     }
 
     /// Opens a Folder (`""` is the Library itself). The caller closes the returned descriptor.
@@ -388,6 +390,12 @@ public enum AgentSecureFiles {
     /// Markdown documents below `root`, sorted by path. Hidden items, links and special files are
     /// skipped; a missing root is empty.
     public static func documents(library: URL, under root: String) throws -> [Document] {
+        var unreadableFolders = 0
+        return try documents(library: library, under: root, unreadableFolders: &unreadableFolders)
+    }
+
+    /// Also counts subfolders that couldn't be opened, so search can say its index is partial (#134).
+    public static func documents(library: URL, under root: String, unreadableFolders: inout Int) throws -> [Document] {
         let descriptor: Int32
         do {
             descriptor = try openFolder(library: library, path: root)
@@ -395,14 +403,17 @@ public enum AgentSecureFiles {
             return []
         }
         var documents: [Document] = []
-        walk(descriptor, prefix: root, into: &documents)
+        walk(descriptor, prefix: root, into: &documents, unreadable: &unreadableFolders)
         return documents.sorted { $0.path < $1.path }
     }
 
     /// Takes ownership of `descriptor`.
-    private static func walk(_ descriptor: Int32, prefix: String, into documents: inout [Document]) {
+    private static func walk(
+        _ descriptor: Int32, prefix: String, into documents: inout [Document], unreadable: inout Int
+    ) {
         guard let folder = fdopendir(descriptor) else {
             close(descriptor)
+            unreadable += 1
             return
         }
         defer { closedir(folder) }
@@ -417,15 +428,19 @@ public enum AgentSecureFiles {
             switch info.st_mode & S_IFMT {
             case S_IFDIR:
                 let child = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-                if child >= 0 { walk(child, prefix: path, into: &documents) }
+                if child >= 0 {
+                    walk(child, prefix: path, into: &documents, unreadable: &unreadable)
+                } else {
+                    unreadable += 1
+                }
             case S_IFREG where (name as NSString).pathExtension.lowercased() == "md":
                 let modified = info.st_mtimespec
                 documents.append(
                     Document(
                         path: path, size: Int(info.st_size),
                         modified: Date(
-                            timeIntervalSince1970: TimeInterval(modified.tv_sec) + TimeInterval(modified.tv_nsec) / 1e9)
-                    ))
+                            timeIntervalSince1970: TimeInterval(modified.tv_sec) + TimeInterval(modified.tv_nsec) / 1e9),
+                        identity: "\(info.st_dev):\(info.st_ino)"))
             default:
                 continue
             }

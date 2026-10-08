@@ -335,8 +335,9 @@ public enum AgentFilesystem: String, Codable, Sendable {
     }
 }
 
-/// The spike's `silkweb memory …` commands: resolve a grant with Silkweb closed and report scope
-/// or list documents. Read-only: it never writes to the Library or the grants file.
+/// The `silkweb memory …` commands: resolve a grant with Silkweb closed, report scope, list, search
+/// and read documents (#134). Read-only: it never writes to the Library or the grants file. Search
+/// keeps its own index cache outside the Library (`AgentMemoryService`).
 public enum AgentHelper {
     public struct Output: Equatable, Sendable {
         public var status: Int32
@@ -347,9 +348,23 @@ public enum AgentHelper {
     public static let usage = """
         Usage: silkweb memory capabilities --project <Project> [--grants <file>]
                silkweb memory list --project <Project> [--grants <file>]
+               silkweb memory search --project <Project> [--query <text>] [--type <t,…>] [--status <s,…>]
+                   [--created-after <date>] [--created-before <date>] [--filter-project <Project>]
+                   [--limit <n>] [--grants <file>]
+               silkweb memory read --project <Project> --path <path> [--cursor <cursor>]
+                   [--expected-revision <sha256:…>] [--grants <file>]
                silkweb version
 
         """
+
+    /// Options each command accepts besides `--project` and `--grants`.
+    static let commandOptions: [String: Set<String>] = [
+        "capabilities": [], "list": [],
+        "search": [
+            "--query", "--type", "--status", "--created-after", "--created-before", "--filter-project", "--limit",
+        ],
+        "read": ["--path", "--cursor", "--expected-revision"],
+    ]
 
     public static func run(_ arguments: [String], home: URL = FileManager.default.homeDirectoryForCurrentUser)
         -> Output
@@ -357,15 +372,29 @@ public enum AgentHelper {
         if arguments == ["version"] {
             return emit(["contract_version": AgentMemoryContract.version, "helper_version": SilkwebCore.version])
         }
-        guard arguments.count >= 2, arguments[0] == "memory", ["capabilities", "list"].contains(arguments[1]),
-            let options = options(Array(arguments.dropFirst(2))), let project = options["--project"]
+        guard arguments.count >= 2, arguments[0] == "memory", let allowed = commandOptions[arguments[1]],
+            let options = options(Array(arguments.dropFirst(2)), allowed: allowed), let project = options["--project"],
+            arguments[1] != "read" || options["--path"] != nil
         else { return Output(status: 64, stdout: "", stderr: usage) }
         let grantsURL = options["--grants"].map { URL(fileURLWithPath: $0) } ?? AgentGrantFile.defaultURL(home: home)
         let session = AgentSession(project: project, store: AgentGrantStore(url: grantsURL))
         do {
-            let operation: AgentOperation = arguments[1] == "list" ? .list : .capabilities
-            let authorization = try session.authorize(operation)
-            return operation == .list ? try list(authorization) : capabilities(authorization)
+            switch arguments[1] {
+            case "search", "read":
+                let service = AgentMemoryService(
+                    session: session, cacheDirectory: AgentMemoryService.defaultCacheDirectory(home: home))
+                let json =
+                    arguments[1] == "search"
+                    ? try service.search(searchRequest(options)).json
+                    : try service.read(
+                        AgentMemoryReadRequest(
+                            path: options["--path"] ?? "", cursor: options["--cursor"],
+                            expectedRevision: options["--expected-revision"])
+                    ).json
+                return Output(status: 0, stdout: json.rendered, stderr: "")
+            case "list": return try list(session.authorize(.list))
+            default: return capabilities(try session.authorize(.capabilities))
+            }
         } catch let failure as AgentAccessError {
             return refusal(failure)
         } catch let gate as LibraryGateError {
@@ -393,7 +422,7 @@ public enum AgentHelper {
             "library": context.library.path,
             "filesystem": context.filesystem.rawValue,
             "access": context.grant.access.rawValue,
-            "operations": ["capabilities", "list"],
+            "operations": ["capabilities", "list", "search", "read"],
             "read_roots": context.scope.readRoots,
             "create_roots": context.scope.createRoots,
             "project_folder_exists": descriptor != nil,
@@ -422,11 +451,37 @@ public enum AgentHelper {
         return emit(["project": context.scope.project, "documents": rows])
     }
 
-    private static func options(_ arguments: [String]) -> [String: String]? {
+    /// `--type`/`--status` take comma-separated lists; dates are `2026-10-07` or ISO 8601 timestamps.
+    static func searchRequest(_ options: [String: String]) throws -> AgentMemorySearchRequest {
+        let list = { (key: String) -> [String] in
+            (options[key] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        }
+        let date = { (key: String) throws -> Date? in
+            guard let text = options[key] else { return nil }
+            guard let date = AgentMemorySearchRequest.date(text) else {
+                throw AgentAccessError.invalidArgument(String(key.dropFirst(2)))
+            }
+            return date
+        }
+        var limit = AgentMemorySearchRequest.defaultLimit
+        if let text = options["--limit"] {
+            guard let value = Int(text) else { throw AgentAccessError.invalidArgument("limit") }
+            limit = value
+        }
+        return AgentMemorySearchRequest(
+            query: options["--query"] ?? "", project: options["--filter-project"], types: list("--type"),
+            statuses: list("--status"), createdAfter: try date("--created-after"),
+            createdBefore: try date("--created-before"), limit: limit)
+    }
+
+    private static func options(_ arguments: [String], allowed: Set<String>) -> [String: String]? {
         guard arguments.count.isMultiple(of: 2) else { return nil }
         var result: [String: String] = [:]
         for index in stride(from: 0, to: arguments.count, by: 2) {
-            guard ["--project", "--grants"].contains(arguments[index]), result[arguments[index]] == nil else {
+            guard ["--project", "--grants"].contains(arguments[index]) || allowed.contains(arguments[index]),
+                result[arguments[index]] == nil
+            else {
                 return nil
             }
             result[arguments[index]] = arguments[index + 1]
