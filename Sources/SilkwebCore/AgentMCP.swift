@@ -27,8 +27,13 @@ public final class AgentMCPServer: @unchecked Sendable {
     /// A line longer than this (about 6× the largest default create, JSON-escaped) is refused unread.
     static let maxLineBytes = 16 << 20
 
-    let session: AgentSession
-    let service: AgentMemoryService
+    /// The grant's session, once one is selected. A server launched before its grant exists (#203) starts without
+    /// one: `grant_request` works, and every `memory_*` call tries `bind` again, so an approval takes effect on the
+    /// next call without a restart.
+    private var bound: (session: AgentSession, service: AgentMemoryService)?
+    private let bind: (() throws -> (AgentSession, AgentMemoryService))?
+    /// Where `grant_request` saves (#203).
+    let requests: AgentAccessRequestStore
     private let agent: String?
     private let client: String?
     private let sessionID: String
@@ -46,12 +51,35 @@ public final class AgentMCPServer: @unchecked Sendable {
     /// Test seam: runs on the tool queue as a call starts, with its request ID.
     var willRun: (@Sendable (String) -> Void)?
 
-    public init(
+    public convenience init(
         session: AgentSession, service: AgentMemoryService, agent: String? = nil, client: String? = nil,
-        sessionID: String? = nil, output: Int32 = STDOUT_FILENO, errors: Int32 = STDERR_FILENO
+        sessionID: String? = nil, requests: AgentAccessRequestStore = .standard, output: Int32 = STDOUT_FILENO,
+        errors: Int32 = STDERR_FILENO
     ) {
-        self.session = session
-        self.service = service
+        self.init(
+            bound: (session, service), bind: nil, agent: agent, client: client, sessionID: sessionID,
+            requests: requests, output: output, errors: errors)
+    }
+
+    /// A server whose grant doesn't exist yet: `bind` selects it, and throws the refusal until it does.
+    convenience init(
+        bind: @escaping () throws -> (AgentSession, AgentMemoryService), agent: String? = nil, client: String? = nil,
+        sessionID: String? = nil, requests: AgentAccessRequestStore = .standard, output: Int32 = STDOUT_FILENO,
+        errors: Int32 = STDERR_FILENO
+    ) {
+        self.init(
+            bound: nil, bind: bind, agent: agent, client: client, sessionID: sessionID, requests: requests,
+            output: output, errors: errors)
+    }
+
+    private init(
+        bound: (session: AgentSession, service: AgentMemoryService)?,
+        bind: (() throws -> (AgentSession, AgentMemoryService))?, agent: String?, client: String?, sessionID: String?,
+        requests: AgentAccessRequestStore, output: Int32, errors: Int32
+    ) {
+        self.bound = bound
+        self.bind = bind
+        self.requests = requests
         self.agent = agent
         self.client = client
         self.sessionID = sessionID ?? Self.newSessionID()
@@ -83,11 +111,15 @@ public final class AgentMCPServer: @unchecked Sendable {
           --session <ID>      Session recorded in created documents (default: one per server)
           --client <NAME>     Client recorded in receipts (default: the client's name)
           --grants <FILE>     Read grants from another file, for testing
+          --requests <FILE>   Save access requests to another file, for testing
           --help              Show this help
+
+        Without a matching grant the server still starts: grant_request asks the owner for
+        access, and the memory tools work once the owner approves.
 
         """
 
-    private static let launchOptions: Set<String> = ["grant", "agent", "session", "client", "grants"]
+    private static let launchOptions: Set<String> = ["grant", "agent", "session", "client", "grants", "requests"]
 
     /// Parses `mcp …`, selects the grant and serves until stdin closes. A launch failure exits before
     /// `initialize` with one `silkweb: …` line on stderr, nothing on stdout, and the CLI's exit
@@ -120,14 +152,32 @@ public final class AgentMCPServer: @unchecked Sendable {
             // The flag wins over the environment; an empty variable counts as unset (as in the CLI).
             let requested =
                 invocation.value("grant") ?? environment["SILKWEB_GRANT"].flatMap { $0.isEmpty ? nil : $0 }
-            let grant = try store.load().select(requested)
-            let session = AgentSession(project: grant.project, store: store)
-            let service = AgentMemoryService(
-                session: session, cacheDirectory: AgentMemoryService.defaultCacheDirectory(home: home))
-            server = AgentMCPServer(
-                session: session, service: service, agent: invocation.value("agent"),
-                client: invocation.value("client"), sessionID: invocation.value("session"), output: output,
-                errors: errors)
+            let requests = AgentAccessRequestStore(
+                url: invocation.value("requests").map { URL(fileURLWithPath: $0) }
+                    ?? AgentAccessRequests.defaultURL(home: home))
+            let bind = { () throws -> (AgentSession, AgentMemoryService) in
+                let grant = try store.load().select(requested)
+                let session = AgentSession(project: grant.project, store: store)
+                return (
+                    session,
+                    AgentMemoryService(
+                        session: session, cacheDirectory: AgentMemoryService.defaultCacheDirectory(home: home))
+                )
+            }
+            do {
+                let (session, service) = try bind()
+                server = AgentMCPServer(
+                    session: session, service: service, agent: invocation.value("agent"),
+                    client: invocation.value("client"), sessionID: invocation.value("session"), requests: requests,
+                    output: output, errors: errors)
+            } catch let missing as AgentAccessError where ["grant_not_found", "no_grants_file"].contains(missing.code) {
+                // #203: no grant yet. Serve anyway, so the agent can ask for one with grant_request.
+                write(
+                    Data(("silkweb: " + missing.message + " Until then, only grant_request works.\n").utf8), to: errors)
+                server = AgentMCPServer(
+                    bind: bind, agent: invocation.value("agent"), client: invocation.value("client"),
+                    sessionID: invocation.value("session"), requests: requests, output: output, errors: errors)
+            }
         } catch let failure as AgentAccessError {
             write(Data(("silkweb: " + failure.message + "\n").utf8), to: errors)
             return AgentHelper.exitStatus(for: failure.code)
@@ -386,6 +436,8 @@ public final class AgentMCPServer: @unchecked Sendable {
     /// Runs one tool through the same functions as its CLI command. Arguments are already
     /// schema-valid; values the services check (dates, cursors, keys) fail as the CLI's do.
     private func perform(_ tool: AgentMCPTool, _ arguments: [String: Any]) throws -> (String, AgentJSON) {
+        if tool == .grantRequest { return try requestAccess(arguments) }
+        let (session, service) = try binding()
         var invocation = AgentHelper.Invocation()
         func option(_ name: String, _ key: String) {
             switch arguments[key] {
@@ -523,11 +575,37 @@ public final class AgentMCPServer: @unchecked Sendable {
             let count = result[key: "receipts"]?.arrayCount ?? 0
             let total = result[key: "total"]?.intValue ?? count
             return ("\(count) of \(total) \(total == 1 ? "receipt" : "receipts"), newest first.", result)
+        case .grantRequest:
+            return try requestAccess(arguments)
         }
+    }
+
+    /// The grant's session, selecting it now if the server started without one.
+    private func binding() throws -> (session: AgentSession, service: AgentMemoryService) {
+        if let bound = lock.withLock({ bound }) { return bound }
+        guard let bind else { throw AgentAccessError.internalError }
+        let made = try bind()
+        lock.withLock { bound = made }
+        return made
+    }
+
+    /// `grant_request` (#203): the same validation and store as `silkweb grant request`. Needs no grant.
+    private func requestAccess(_ arguments: [String: Any]) throws -> (String, AgentJSON) {
+        let name = lock.withLock { clientName }
+        let draft = try AgentAccessRequests.draft(
+            library: arguments["library"] as? String ?? "", project: arguments["project"] as? String ?? "",
+            access: arguments["access"] as? String ?? "", readFolders: arguments["readFolders"] as? [String] ?? [],
+            message: arguments["message"] as? String, agent: agent ?? name ?? "mcp",
+            session: arguments["session"] as? String ?? sessionID, client: client ?? name ?? "mcp")
+        let submitted = try requests.submit(draft)
+        let summary =
+            (submitted.duplicate ? "This request was already waiting. " : "")
+            + AgentAccessRequests.waitingNote(submitted.request.requestId)
+        return (summary, AgentGrantRequests.result(submitted.request, duplicate: submitted.duplicate))
     }
 }
 
-/// The seven tools, in `tools/list` order (`docs/agent-memory.md` › MCP server).
+/// The eight tools, in `tools/list` order (`docs/agent-memory.md` › MCP server).
 public enum AgentMCPTool: String, CaseIterable, Sendable {
     case capabilities = "memory_capabilities"
     case search = "memory_search"
@@ -536,6 +614,8 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
     case createFolder = "memory_create_folder"
     case update = "memory_update"
     case activity = "memory_activity"
+    /// #203: works without a grant; never changes one.
+    case grantRequest = "grant_request"
 
     public var title: String {
         switch self {
@@ -546,6 +626,7 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
         case .createFolder: return "Silkweb: Create Folder"
         case .update: return "Silkweb: Update Document"
         case .activity: return "Silkweb: Recent Agent Activity"
+        case .grantRequest: return "Silkweb: Request Access"
         }
     }
 
@@ -582,6 +663,11 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
         case .activity:
             return "Lists this grant’s create and update receipts in its read folders, newest first. "
                 + "Returns at most the grant’s max_results and never includes document text."
+        case .grantRequest:
+            return "Asks the owner for access to a Library: a project’s Memory folder, Read Only or Read and Create, "
+                + "and optionally extra read folders. Works without a grant. Never grants anything itself: the owner "
+                + "reviews the request in Silkweb or Terminal, and memory tools work once it’s approved. Asking "
+                + "again while a matching request waits returns it with duplicate: true."
         }
     }
 
@@ -735,6 +821,29 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                 ),
                 ("since", S.string("Only receipts from this date or ISO 8601 time on.")),
             ])
+        case .grantRequest:
+            return S.object(
+                [
+                    ("library", S.string("Absolute path of the Library folder, such as /Users/me/Writing.")),
+                    ("project", S.string("Project key: the Folder name under Memory/Projects, such as Silkweb.")),
+                    (
+                        "access",
+                        S.string("read (Read Only) or read-create (Read and Create).", oneOf: ["read", "read-create"])
+                    ),
+                    (
+                        "readFolders",
+                        S.array(
+                            S.string("A Library-relative folder, such as Notes/Swift."),
+                            "Extra folders to read, besides the project’s own. At most 10.")
+                    ),
+                    (
+                        "message",
+                        S.string(
+                            "One line for the owner saying why, at most 280 characters.",
+                            maxLength: AgentAccessRequests.maxMessageLength)
+                    ),
+                    ("session", S.string("Session recorded with the request. Defaults to this server’s session.")),
+                ], required: ["library", "project", "access"])
         }
     }
 
@@ -842,6 +951,11 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
             ]
         case .activity:
             properties = [("receipts", S.list(.object([("type", .string("object"))]))), ("total", S.plain("integer"))]
+        case .grantRequest:
+            properties = [
+                ("duplicate", S.plain("boolean")), ("expiresAt", S.plain("string")), ("requestId", S.plain("string")),
+                ("status", S.plain("string", oneOf: ["pending"])),
+            ]
         }
         properties.append(
             (

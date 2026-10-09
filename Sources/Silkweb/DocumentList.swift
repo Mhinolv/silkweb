@@ -48,9 +48,13 @@ struct DocumentList: View {
                     }
                 } else if workspace.agentScope && workspace.documents.isEmpty && workspace.effectiveTagFilters.isEmpty {
                     ColumnEmptyState {
+                        // #203: the row also shows for access requests alone, before any agent created a Document.
                         ContentUnavailableView(
                             "No Agent Documents", systemImage: "clock.arrow.circlepath",
-                            description: Text("Documents agents create appear here."))
+                            description: Text(
+                                workspace.agentActivity.hasPublished
+                                    ? "Documents agents create appear here."
+                                    : "Agents haven’t created documents in this Library yet."))
                     }
                 } else if workspace.documents.isEmpty && !workspace.effectiveTagFilters.isEmpty {
                     ColumnEmptyState {
