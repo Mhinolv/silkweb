@@ -18,9 +18,18 @@ public enum SearchNavigation {
     }
 
     public static func matchRanges(in text: String, query: String) -> [NSRange] {
+        matchRanges(in: text, terms: query.split(whereSeparator: { $0.isWhitespace }).map(String.init))
+    }
+
+    /// Search Library (#179): the parsed query's words and phrases, a phrase as one range; never filters.
+    public static func matchRanges(in text: String, parsing query: String) -> [NSRange] {
+        matchRanges(in: text, terms: ParsedSearchQuery(query).highlightTerms)
+    }
+
+    public static func matchRanges(in text: String, terms: [String]) -> [NSRange] {
         let source = text as NSString
         var ranges: [NSRange] = []
-        for term in query.split(whereSeparator: { $0.isWhitespace }) {
+        for term in terms where !term.isEmpty {
             var cursor = 0
             while cursor < source.length {
                 let range = source.range(

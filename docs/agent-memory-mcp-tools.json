@@ -83,6 +83,15 @@
               "type" : "string"
             }
           },
+          "retrieval_contract_version" : {
+            "type" : "integer"
+          },
+          "retrieval_modes" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
           "schema" : {
             "type" : "string"
           },
@@ -166,6 +175,14 @@
             "description" : "Most results to return. Default 10.",
             "minimum" : 1,
             "maximum" : 50
+          },
+          "mode" : {
+            "type" : "string",
+            "description" : "default (all words, as above) or ranked: orders by relevance, adds score to each result, and reads \"phrases\", tag:, type:, status:, project:, after: and before: in query.",
+            "enum" : [
+              "default",
+              "ranked"
+            ]
           }
         },
         "additionalProperties" : false
@@ -264,6 +281,9 @@
                 },
                 "excerpt" : {
                   "type" : "string"
+                },
+                "score" : {
+                  "type" : "number"
                 }
               }
             }
@@ -306,6 +326,19 @@
           },
           "message" : {
             "type" : "string"
+          },
+          "mode" : {
+            "type" : "string",
+            "enum" : [
+              "default",
+              "ranked"
+            ]
+          },
+          "ranking_version" : {
+            "type" : "string"
+          },
+          "retrieval_contract_version" : {
+            "type" : "integer"
           },
           "error" : {
             "type" : "object",

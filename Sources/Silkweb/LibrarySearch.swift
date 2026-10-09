@@ -32,6 +32,10 @@ final class LibrarySearch {
     var state: SearchIndexState = .ready
     var error: String?
     @ObservationIgnored private(set) var index: SearchIndex?
+    /// BM25 statistics for Search Library (#179); Quick Open never reads them.
+    @ObservationIgnored weak var knowledge: LibraryKnowledge?
+    /// The Tags typed `tag:` filters match.
+    @ObservationIgnored private var metadata: LibraryMetadata?
     @ObservationIgnored private var root: URL?
     @ObservationIgnored private var buildTask: Task<Void, Never>?
     @ObservationIgnored private var stateTask: Task<Void, Never>?
@@ -59,6 +63,7 @@ final class LibrarySearch {
         isSearching = false; isQuickSearching = false
         root = nil
         index = nil
+        metadata = nil
         text = ""; quickText = ""; results = []; quickResults = []
         folderScope = nil
         error = nil
@@ -66,6 +71,13 @@ final class LibrarySearch {
     }
 
     func install(_ snapshot: LibrarySnapshot) {
+        // A Tag edit leaves the index unchanged but changes what `tag:` matches.
+        let retagged =
+            root == snapshot.rootURL
+            && (metadata?.tags != snapshot.metadata.tags
+                || metadata?.tagsByDocument != snapshot.metadata.tagsByDocument)
+        metadata = snapshot.metadata
+        if retagged { revision += 1 }
         if root != snapshot.rootURL {
             buildTask?.cancel()
             stateTask?.cancel()
@@ -136,6 +148,10 @@ final class LibrarySearch {
             #if DEBUG
                 queryCount += 1
             #endif
+            var ranking: KnowledgeTermStatistics?
+            if !quick, let knowledge = knowledge?.index, knowledge.root == root?.standardizedFileURL {
+                ranking = await knowledge.termStatistics(for: ParsedSearchQuery(queryText).rankingTerms)
+            }
             let hits =
                 quick && queryText.isEmpty
                 ? try await index.recentResults()
@@ -143,7 +159,8 @@ final class LibrarySearch {
                     SearchQuery(
                         queryText,
                         scope: scope.map { .folder($0, includeSubfolders: true) } ?? .library,
-                        mode: quick ? .quickOpen : .library, limit: quick ? 12 : Int.max))
+                        mode: quick ? .quickOpen : .library, limit: quick ? 12 : Int.max, ranking: ranking,
+                        metadata: quick ? nil : metadata))
             try Task.checkCancellation()
             guard self.index === index, queryText == (quick ? quickText : text),
                 quick || scope == folderScope, identity.revision == revision
@@ -205,7 +222,8 @@ extension LibraryWorkspace {
         guard await search.settle(quick: quick) else { return }
         let results = quick ? search.quickResults : filteredSearchResults
         guard let result = results.first(where: { $0.id == selected }) ?? results.first else { return }
-        await openSearchResult(result, findText: quick ? nil : search.text, pinned: pinned)
+        // A filter-only query selects nothing in the editor (#179).
+        await openSearchResult(result, findText: quick ? nil : ParsedSearchQuery(search.text).findText, pinned: pinned)
     }
 
     func openSearchResult(_ result: SearchResult, findText: String? = nil, pinned: Bool = false) async {

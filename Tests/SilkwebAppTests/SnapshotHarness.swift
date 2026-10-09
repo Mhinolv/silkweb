@@ -168,6 +168,10 @@ struct SnapshotScenario {
         .init(name: "empty-library-list-300", folder: "", emptyLibrary: true, listWidth: 300),
         .init(name: "outline-empty", document: "Snapshot Fixtures/Empty Document.md", outline: true),
         .init(name: "search-empty", searchQuery: "silkweb-no-matches-fixture"),
+        // #179: a typed Tag filter (no chips) and a phrase; only the phrase is highlighted.
+        .init(name: "search-filter-phrase", tagState: "typed", searchQuery: "tag:research \"paper filter\""),
+        // #179: filters alone, with no match in the fixture: the unchanged empty state.
+        .init(name: "search-filter-only", searchQuery: "type:decision"),
         .init(
             name: "editor-document", document: "Snapshot Fixtures/Editor Typography.md",
             tabs: ["Snapshot Fixtures/Editor Typography.md"], visibleCaret: "Body:"),
@@ -1280,6 +1284,10 @@ final class SnapshotHarness {
             }
             if scenario.quickQuery != nil || scenario.searchQuery != nil {
                 try await bounded("search index") { await workspace.search.waitForIndex() }
+                // Search Library's BM25 order comes from the knowledge index (#179).
+                if scenario.searchQuery != nil {
+                    try await bounded("knowledge index") { await workspace.knowledge.waitForIndex() }
+                }
                 try await bounded("search query") { await workspace.search.query(quick: scenario.quickQuery != nil) }
                 if let error = workspace.search.error { throw SnapshotFailure.error(error) }
             }

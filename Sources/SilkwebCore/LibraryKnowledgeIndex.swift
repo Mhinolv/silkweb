@@ -130,6 +130,9 @@ public actor LibraryKnowledgeIndex {
         graph.postings(for: term)
     }
 
+    /// BM25 inputs for Search Library (#179). Answers while Documents are still being read; those score zero.
+    public func termStatistics(for terms: [String]) -> KnowledgeTermStatistics { graph.termStatistics(for: terms) }
+
     // MARK: Checkpoint
 
     /// Writes a pending checkpoint now (tests). Quitting drops it instead: the cache is disposable.

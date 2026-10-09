@@ -408,6 +408,9 @@ public final class AgentMCPServer: @unchecked Sendable {
             ] {
                 option(name, key)
             }
+            if arguments["mode"] as? String == AgentMemorySearchRequest.Mode.ranked.rawValue {
+                invocation.flags.insert("ranked")
+            }
             let request = try AgentHelper.searchRequest(invocation, query: [arguments["query"] as? String ?? ""])
             let response = try service.search(request)
             let summary =
@@ -621,6 +624,13 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                 ("createdAfter", S.string("Inclusive. A date such as 2026-10-07 (midnight UTC) or an ISO 8601 time.")),
                 ("createdBefore", S.string("Exclusive. A date such as 2026-10-08 (midnight UTC) or an ISO 8601 time.")),
                 ("limit", S.integer("Most results to return. Default 10.", minimum: 1, maximum: 50)),
+                (
+                    "mode",
+                    S.string(
+                        "default (all words, as above) or ranked: orders by relevance, adds score to each result, and "
+                            + "reads \"phrases\", tag:, type:, status:, project:, after: and before: in query.",
+                        oneOf: AgentMemorySearchRequest.Mode.allCases.map(\.rawValue))
+                ),
             ])
         case .read:
             return S.object([
@@ -772,6 +782,8 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                 ("project", S.plain("string")),
                 ("project_folder_exists", S.plain("boolean")),
                 ("read_roots", S.list(S.plain("string"))),
+                ("retrieval_contract_version", S.plain("integer")),
+                ("retrieval_modes", S.list(S.plain("string"))),
                 ("schema", S.plain("string")),
             ]
         case .search:
@@ -783,6 +795,7 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                             S.documentFields + [
                                 ("matchKind", S.plain("string", oneOf: ["title", "body"])),
                                 ("excerpt", S.plain("string")),
+                                ("score", S.plain("number")),
                             ]))
                 ),
                 ("total", S.plain("integer")),
@@ -797,6 +810,9 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                     ])
                 ),
                 ("message", S.plain("string")),
+                ("mode", S.plain("string", oneOf: AgentMemorySearchRequest.Mode.allCases.map(\.rawValue))),
+                ("ranking_version", S.plain("string")),
+                ("retrieval_contract_version", S.plain("integer")),
             ]
         case .read:
             properties =

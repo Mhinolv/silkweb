@@ -115,7 +115,12 @@ final class SearchIndexTests: XCTestCase {
         XCTAssertEqual(both.count, 5)
         let missing = try await index.query(SearchQuery("cafe absent"))
         XCTAssertTrue(missing.isEmpty)
-        let literal = try await index.query(SearchQuery("\"quote\" tag:tea"))
+        // Search Library reads #179 syntax: `"quote"` is a phrase and `tag:` a filter; an unclosed quote is literal.
+        let phrase = try await index.query(SearchQuery("\"quote\" literal"))
+        XCTAssertEqual(phrase.map(\.displayName), ["Symbols"])
+        let tagged = try await index.query(SearchQuery("\"quote\" tag:tea"))
+        XCTAssertTrue(tagged.isEmpty)
+        let literal = try await index.query(SearchQuery("\"quote tag:tea"))
         XCTAssertEqual(literal.map(\.displayName), ["Symbols"])
         let quick = try await index.query(SearchQuery("cafe", mode: .quickOpen))
         XCTAssertEqual(quick.count, 4)
@@ -134,6 +139,144 @@ final class SearchIndexTests: XCTestCase {
         }
         let hits = try await index.query(SearchQuery("needle"))
         XCTAssertEqual(hits.map(\.displayName), ["Gamma", "Alpha", "Beta"])
+    }
+
+    private func knowledge(_ snapshot: LibrarySnapshot) async throws -> LibraryKnowledgeIndex {
+        let index = LibraryKnowledgeIndex(
+            root: root, cacheDirectory: root.appendingPathComponent(".test-knowledge"), checkpointDelay: .seconds(60))
+        try await index.reconcile(snapshot)
+        return index
+    }
+
+    private func memory(_ id: String, type: String, status: String? = nil, created: String, body: String) -> String {
+        var envelope = MemoryEnvelope(
+            memoryID: id, type: type, project: "Silkweb", agent: "claude-code", session: "s-1",
+            createdAt: AgentMemorySearchRequest.date(created)!)
+        if let status { envelope["status"] = .string(status) }
+        return try! envelope.document(body: body)
+    }
+
+    func testLibraryRanksExactTitleThenBM25ThenNewestThenName() async throws {
+        try note("Flock.md", "Unrelated words.")
+        try note("Locking.md", "# Flock\n\nWhy we flock the library.")
+        try note("Notes.md", "flock flock flock, three times in one body.")
+        try note("Long.md", "One flock. " + String(repeating: "Filler words that dilute the body. ", count: 40))
+        try note("Twin A.md", "Twin flock")
+        try note("Twin B.md", "Twin flock")
+        try note("Elsewhere.md", "No match.")
+        let snapshot = try await LibraryScanner.scan(root: root)
+        let index = SearchIndex(root: root)
+        try await index.reconcile(snapshot)
+        let knowledge = try await knowledge(snapshot)
+        let terms = ParsedSearchQuery("flock").rankingTerms
+        let statistics = await knowledge.termStatistics(for: terms)
+        let twins = snapshot.documents.filter { $0.name.hasPrefix("Twin") }
+        for var document in twins {
+            document.modified = Date(timeIntervalSince1970: 1_000)
+            await index.update(document, body: "Twin flock")
+        }
+        let hits = try await index.query(SearchQuery("flock", ranking: statistics))
+        XCTAssertEqual(hits.first?.displayName, "Flock", "an exact title match stays first")
+        XCTAssertEqual(hits.count, 6)
+        // Then BM25 with the matching Documents' statistics, highest first.
+        let scores = KnowledgeBM25.scores(
+            terms: terms, candidates: snapshot.documents.map(\.relativePath), statistics: statistics)
+        let rest = hits.dropFirst().map { $0.displayName }
+        XCTAssertEqual(
+            rest, rest.sorted { (scores[$0 + ".md"] ?? 0, $1) > (scores[$1 + ".md"] ?? 0, $0) })
+        XCTAssertEqual(rest.last, "Long", "a single hit in a long body ranks last")
+        // Equal scores: newest first, then name.
+        XCTAssertEqual(rest.filter { $0.hasPrefix("Twin") }, ["Twin A", "Twin B"])
+        for var document in twins where document.name == "Twin B.md" {
+            document.modified = Date(timeIntervalSince1970: 2_000)
+            await index.update(document, body: "Twin flock")
+        }
+        let newer = try await index.query(SearchQuery("flock", ranking: statistics))
+        XCTAssertEqual(newer.map(\.displayName).filter { $0.hasPrefix("Twin") }, ["Twin B", "Twin A"])
+        XCTAssertEqual(newer.first { $0.displayName == "Locking" }?.matchKind, .body, "a heading counts as body")
+        XCTAssertEqual(newer.first?.matchKind, .title)
+        // Without statistics (no knowledge index yet) the title tiers still apply.
+        let tiers = try await index.query(SearchQuery("flock"))
+        XCTAssertEqual(tiers.map(\.displayName).first, "Flock")
+        XCTAssertEqual(Set(tiers.map(\.id)), Set(newer.map(\.id)))
+        await index.flushCache()
+    }
+
+    func testLibraryFiltersPhrasesAndTagsNarrowResults() async throws {
+        let project = "Memory/Projects/Silkweb/"
+        try note(
+            project + "Memories/Decision A.md",
+            memory("m_a", type: "decision", status: "open", created: "2026-10-02", body: "gate design"))
+        try note(
+            project + "Memories/Memory B.md", memory("m_b", type: "memory", created: "2026-09-20", body: "gate notes"))
+        try note("Plain.md", "gate plain research")
+        try note(project + "Loose.md", "gate loose\n\n  ends")
+        // Without `created_at`, dates are the modified date.
+        for path in ["Plain.md", project + "Loose.md"] {
+            try FileManager.default.setAttributes(
+                [.modificationDate: AgentMemorySearchRequest.date("2026-10-05")!],
+                ofItemAtPath: root.appendingPathComponent(path).path)
+        }
+        let snapshot = try await LibraryScanner.scan(root: root)
+        let index = SearchIndex(root: root)
+        try await index.reconcile(snapshot)
+        func names(_ text: String, metadata: LibraryMetadata? = nil, mode: SearchQuery.Mode = .library) async throws
+            -> [String]
+        {
+            try await index.query(SearchQuery(text, mode: mode, metadata: metadata)).map(\.displayName).sorted()
+        }
+        var result = try await names("gate type:decision")
+        XCTAssertEqual(result, ["Decision A"])
+        result = try await names("gate TYPE:decision type:memory")
+        XCTAssertEqual(result, ["Decision A", "Memory B"])
+        result = try await names("gate status:OPEN")
+        XCTAssertEqual(result, ["Decision A"])
+        result = try await names("gate status:open type:memory")
+        XCTAssertEqual(result, [])
+        result = try await names("gate project:silkweb")
+        XCTAssertEqual(result, ["Decision A", "Loose", "Memory B"])
+        result = try await names("gate project:Other")
+        XCTAssertEqual(result, [])
+        result = try await names("gate before:2026-10-01")
+        XCTAssertEqual(result, ["Memory B"])
+        result = try await names("gate after:2026-10-01 before:2026-10-03")
+        XCTAssertEqual(result, ["Decision A"])
+        // A filter-only query lists every Document that passes; an unknown key is a word.
+        result = try await names("type:decision")
+        XCTAssertEqual(result, ["Decision A"])
+        result = try await names("folder:Memories")
+        XCTAssertEqual(result, [])
+        // Phrases: adjacent words across any whitespace.
+        result = try await names("\"gate loose ends\"")
+        XCTAssertEqual(result, ["Loose"])
+        result = try await names("\"loose gate\"")
+        XCTAssertEqual(result, [])
+        // Tags: the sidebar's Tag, by name, ignoring case; ANDed with words.
+        var metadata = snapshot.metadata
+        let tag = LibraryTag(name: "Research")
+        metadata.tags = [tag]
+        let plain = try XCTUnwrap(snapshot.documents.first { $0.name == "Plain.md" })
+        metadata.tagsByDocument[plain.id.uuidString] = [tag.id]
+        result = try await names("gate tag:research", metadata: metadata)
+        XCTAssertEqual(result, ["Plain"])
+        result = try await names("tag:research tag:other", metadata: metadata)
+        XCTAssertEqual(result, ["Plain"])
+        result = try await names("design tag:research", metadata: metadata)
+        XCTAssertEqual(result, [])
+        result = try await names("gate tag:research")
+        XCTAssertEqual(result, [], "no metadata, no Tags")
+        // Highlights cover words and phrases, never a filter value.
+        let highlighted = try await index.query(SearchQuery("tag:research \"gate plain\"", metadata: metadata))
+        let hit = try XCTUnwrap(highlighted.first)
+        XCTAssertEqual(hit.matchRanges.map { (hit.snippet as NSString).substring(with: $0) }, ["gate plain"])
+        // Quick Open doesn't parse: a filter is a literal word there.
+        result = try await names("type:decision", mode: .quickOpen)
+        XCTAssertEqual(result, [])
+        result = try await names("\"Decision", mode: .quickOpen)
+        XCTAssertEqual(result, [])
+        result = try await names("Decision", mode: .quickOpen)
+        XCTAssertEqual(result, ["Decision A"])
+        await index.flushCache()
     }
 
     func testScopesLimitsEmptyQueriesAndRecents() async throws {
@@ -319,6 +462,31 @@ final class SearchIndexTests: XCTestCase {
         XCTAssertLessThan(scanTime, 10)
         XCTAssertLessThan(buildTime, 10)
         XCTAssertLessThan(queryTime, 1)
+        // #179: warm BM25 Search Library, 50 results, statistics fetched from the knowledge index per query.
+        let knowledge = try await knowledge(snapshot)
+        var ranked: [TimeInterval] = []
+        for text in ["needle", "cafe needle", "\"body needle\"", "needle type:memory", "note-3 needle"] {
+            for _ in 0..<5 {
+                let clock = Date()
+                let statistics = await knowledge.termStatistics(for: ParsedSearchQuery(text).rankingTerms)
+                let hits = try await index.query(SearchQuery(text, limit: 50, ranking: statistics))
+                ranked.append(Date().timeIntervalSince(clock))
+                XCTAssertEqual(hits.count, text.contains("type:") ? 0 : 50, text)
+            }
+        }
+        var plain: [TimeInterval] = []
+        for text in ["needle", "cafe needle", "\"body needle\"", "needle type:memory", "note-3 needle"] {
+            for _ in 0..<5 {
+                let clock = Date()
+                _ = try await index.query(SearchQuery(text, limit: 50))
+                plain.append(Date().timeIntervalSince(clock))
+            }
+        }
+        let p95 = ranked.sorted()[Int(Double(ranked.count - 1) * 0.95)]
+        print(
+            "Search Library BM25, 10,000 documents: warm p95 \(p95)s for 50 results (0.1s target); "
+                + "without statistics \(plain.sorted()[Int(Double(plain.count - 1) * 0.95)])s")
+        XCTAssertLessThan(p95, 1)
         let cancelled = Task {
             try Task.checkCancellation()
             return try await index.query(SearchQuery("needle", limit: 10000))

@@ -7,8 +7,16 @@ public struct AgentMemorySearchRequest: Equatable, Sendable {
     public static let defaultLimit = 10
     public static let maxLimit = 50
 
+    /// `default` is #134 exactly. `ranked` (#179, CLI `--ranked`) parses the query syntax (`ParsedSearchQuery`),
+    /// ANDs its filters with these parameters and orders by BM25.
+    public enum Mode: String, Sendable, CaseIterable {
+        case `default`
+        case ranked
+    }
+
     /// Free text; empty lists every in-scope document that passes the filters.
     public var query: String
+    public var mode: Mode
     /// Must name the grant's own project. Keeps documents whose envelope `project` matches, and
     /// documents without an envelope inside that project's Folder.
     public var project: String?
@@ -25,9 +33,10 @@ public struct AgentMemorySearchRequest: Equatable, Sendable {
 
     public init(
         query: String = "", project: String? = nil, types: [String] = [], statuses: [String] = [],
-        createdAfter: Date? = nil, createdBefore: Date? = nil, limit: Int = defaultLimit
+        createdAfter: Date? = nil, createdBefore: Date? = nil, limit: Int = defaultLimit, mode: Mode = .default
     ) {
         self.query = query
+        self.mode = mode
         self.project = project
         self.types = types
         self.statuses = statuses
@@ -101,6 +110,8 @@ public struct AgentMemorySearchResult: Equatable, Sendable {
     public let matchKind: SearchResult.MatchKind
     /// About 120 characters of plain text around the first hit, envelope excluded, `…` at cut ends.
     public let excerpt: String
+    /// Ranked mode only: the BM25 score with scope-local statistics, rounded to 4 decimals.
+    public var score: Double? = nil
 }
 
 /// How complete the helper's index was when it answered.
@@ -152,6 +163,8 @@ public struct AgentMemorySearchResponse: Equatable, Sendable {
     public let index: AgentMemoryFreshness
     /// Set only when there are no results, and honest about an unfinished index.
     public let message: String?
+    /// The request's mode. A ranked response echoes it with `ranking_version` and `retrieval_contract_version`.
+    public var mode: AgentMemorySearchRequest.Mode = .default
 }
 
 public struct AgentMemoryReadRequest: Equatable, Sendable {
@@ -286,6 +299,11 @@ public final class AgentMemoryService: @unchecked Sendable {
         let index = loadedIndex(for: context)
         _ = index.refresh(context, options: options)
         index.save()
+        return knowledge(index, context: context)
+    }
+
+    /// The grant's knowledge graph brought up to `index`'s last refresh.
+    private func knowledge(_ index: AgentMemoryIndex, context: AgentAuthorization) -> KnowledgeGraph {
         // Keyed by the effective scope (#178): narrowed MCP roots or grant folders start from a fresh graph,
         // never one listed or resolved against a wider set of Documents.
         let library = context.library.path + "\n" + session.project + "\n" + context.scope.key
@@ -340,7 +358,15 @@ public final class AgentMemoryService: @unchecked Sendable {
         let index = loadedIndex(for: context)
         let freshness = index.refresh(context, options: options)
         index.save()
-        return try index.search(request, context: context, freshness: freshness, reviews: reviews)
+        guard request.mode == .ranked else {
+            return try index.search(request, context: context, freshness: freshness, reviews: reviews)
+        }
+        // Ranked (#179): BM25 statistics from the permitted graph, so hidden Documents never change a score.
+        let parsed = ParsedSearchQuery(request.query)
+        let statistics = PermittedKnowledgeGraph(graph: knowledge(index, context: context), scope: context.scope)
+            .termStatistics(for: parsed.rankingTerms)
+        return try index.search(
+            request, context: context, freshness: freshness, reviews: reviews, ranking: (parsed, statistics))
     }
 
     public func read(_ request: AgentMemoryReadRequest) throws -> AgentMemoryReadResponse {
@@ -528,7 +554,7 @@ final class AgentMemoryIndex {
     private var folded: [String: (title: String, body: [UInt8], date: Date)] = [:]
     private var building: AgentMemoryFreshness.Reason?
     private var dirty = false
-    private var metadata: (stamp: [Int], ids: [String: UUID])?
+    private var metadata: (stamp: [Int], ids: [String: UUID], value: LibraryMetadata?)?
 
     init(url: URL, library: String, project: String) {
         self.url = url
@@ -698,9 +724,11 @@ final class AgentMemoryIndex {
 
     // MARK: Search
 
+    /// `ranking` is set for ranked mode (#179): the parsed query and BM25 inputs from the permitted graph.
     func search(
         _ request: AgentMemorySearchRequest, context: AgentAuthorization, freshness: AgentMemoryFreshness,
-        reviews: AgentMemoryReviewLookup
+        reviews: AgentMemoryReviewLookup,
+        ranking: (query: ParsedSearchQuery, statistics: KnowledgeTermStatistics)? = nil
     ) throws -> AgentMemorySearchResponse {
         let scope = context.scope
         let compare: String.CompareOptions = scope.caseSensitive ? [] : [.caseInsensitive]
@@ -743,7 +771,28 @@ final class AgentMemoryIndex {
             let documentID: UUID?
             let review: AgentMemoryReview
             let pinned: Bool
+            var score = 0.0
+            var title = false
         }
+        func hit(_ record: Record, tier: Int, date: Date) -> Hit {
+            let (state, pinned) = review(record)
+            let sinks =
+                (record.envelope?.memoryID).flatMap { supersededBy[$0] }?.contains {
+                    reviewByMemoryID[$0] == .reviewed
+                } ?? false
+            let category: Int
+            switch record.envelope?.type {
+            case _ where pinned: category = 0
+            case "handoff": category = 3
+            case "progress": category = 4
+            default: category = state == .reviewed ? 1 : 2
+            }
+            return Hit(
+                record: record, tier: tier, sinks: sinks, category: category, date: date,
+                documentID: ids[record.path], review: state, pinned: pinned)
+        }
+        let tags = ranking?.query.tags.isEmpty == false ? documentTags(context.library) : [:]
+        var filtered: [(record: Record, title: String, body: [UInt8], date: Date)] = []
         var hits: [Hit] = []
         for record in candidates {
             let envelope = record.envelope
@@ -767,6 +816,17 @@ final class AgentMemoryIndex {
             let date = fold.date
             if let after = request.createdAfter, date < after { continue }
             if let before = request.createdBefore, date >= before { continue }
+            if let query = ranking?.query {
+                guard
+                    query.admits(
+                        type: envelope?.type, status: envelope?.status, project: envelope?.project, path: record.path,
+                        date: date, caseSensitive: scope.caseSensitive),
+                    query.admits(tags: tags[record.path] ?? [])
+                else { continue }
+                // Text is matched once the filtered set's statistics are known.
+                filtered.append((record, fold.title, fold.body, date))
+                continue
+            }
             guard terms.allSatisfy({ fold.title.contains($0) || Self.contains(fold.body, $0) }) else { continue }
             let tier: Int
             if text.isEmpty || fold.title == text {
@@ -782,40 +842,51 @@ final class AgentMemoryIndex {
             } else {
                 tier = 4
             }
-            let (state, pinned) = review(record)
-            let sinks =
-                (envelope?.memoryID).flatMap { supersededBy[$0] }?.contains {
-                    reviewByMemoryID[$0] == .reviewed
-                } ?? false
-            let category: Int
-            switch envelope?.type {
-            case _ where pinned: category = 0
-            case "handoff": category = 3
-            case "progress": category = 4
-            default: category = state == .reviewed ? 1 : 2
+            hits.append(hit(record, tier: tier, date: date))
+        }
+        if let (query, statistics) = ranking {
+            // Scope-local statistics: the permitted Documents that passed every filter.
+            let scores = KnowledgeBM25.scores(
+                terms: query.rankingTerms, candidates: filtered.map(\.record.path), statistics: statistics)
+            let text = query.foldedText
+            for entry in filtered where Self.matches(query, title: entry.title, body: entry.body) {
+                var ranked = hit(entry.record, tier: !query.hasText || entry.title == text ? 0 : 1, date: entry.date)
+                ranked.score = scores[entry.record.path] ?? 0
+                ranked.title = query.matchesTitle(entry.title)
+                hits.append(ranked)
             }
-            hits.append(
-                Hit(
-                    record: record, tier: tier, sinks: sinks, category: category, date: date,
-                    documentID: ids[record.path], review: state, pinned: pinned))
+            // An exact title first, then score, newest first, then document ID and path.
+            hits.sort { a, b in
+                if a.tier != b.tier { return a.tier < b.tier }
+                if a.score != b.score { return a.score > b.score }
+                if a.date != b.date { return a.date > b.date }
+                let left = a.documentID?.uuidString ?? "~", right = b.documentID?.uuidString ?? "~"
+                if left != right { return left < right }
+                return a.record.path < b.record.path
+            }
+        } else {
+            // Deterministic: tier, superseded last, kind, newest first, then document ID and path.
+            hits.sort { a, b in
+                if a.tier != b.tier { return a.tier < b.tier }
+                if a.sinks != b.sinks { return !a.sinks }
+                if a.category != b.category { return a.category < b.category }
+                if a.date != b.date { return a.date > b.date }
+                let left = a.documentID?.uuidString ?? "~", right = b.documentID?.uuidString ?? "~"
+                if left != right { return left < right }
+                return a.record.path < b.record.path
+            }
         }
-        // Deterministic: tier, superseded last, kind, newest first, then document ID and path.
-        hits.sort { a, b in
-            if a.tier != b.tier { return a.tier < b.tier }
-            if a.sinks != b.sinks { return !a.sinks }
-            if a.category != b.category { return a.category < b.category }
-            if a.date != b.date { return a.date > b.date }
-            let left = a.documentID?.uuidString ?? "~", right = b.documentID?.uuidString ?? "~"
-            if left != right { return left < right }
-            return a.record.path < b.record.path
-        }
+        let query = ranking?.query
         let results = hits.prefix(limit).map { hit in
             AgentMemorySearchResult(
                 document: info(
                     hit.record, documentID: hit.documentID, review: hit.review, pinned: hit.pinned,
                     supersededBy: (hit.record.envelope?.memoryID).flatMap { supersededBy[$0] }.map { $0.sorted() }
                         ?? []),
-                matchKind: hit.tier == 4 ? .body : .title, excerpt: searchSnippet(hit.record.body, terms: terms).0)
+                // Ranked: a heading counts as body.
+                matchKind: query.map { $0.hasText && !hit.title ? .body : .title } ?? (hit.tier == 4 ? .body : .title),
+                excerpt: searchSnippet(hit.record.body, terms: query?.highlightTerms ?? terms).0,
+                score: query == nil ? nil : (hit.score * 10_000).rounded() / 10_000)
         }
         var message: String?
         if results.isEmpty {
@@ -824,7 +895,23 @@ final class AgentMemoryIndex {
                 ? "No matches in " + scope.readRoots.map(AgentMemoryContract.displayPath).joined(separator: ", ") + "."
                 : "No matches yet. The index isn’t finished, so this doesn’t mean no memory exists."
         }
-        return AgentMemorySearchResponse(results: results, total: hits.count, index: freshness, message: message)
+        return AgentMemorySearchResponse(
+            results: results, total: hits.count, index: freshness, message: message,
+            mode: ranking == nil ? .default : .ranked)
+    }
+
+    /// Ranked mode: words anywhere in the folded title or body bytes; a phrase's words adjacent.
+    static func matches(_ query: ParsedSearchQuery, title: String, body: [UInt8]) -> Bool {
+        guard query.foldedWords.allSatisfy({ title.contains($0) || contains(body, $0) }) else { return false }
+        var text: String?
+        return query.foldedPhrases.allSatisfy { phrase in
+            if ParsedSearchQuery.contains(title, phrase: phrase) { return true }
+            // Decode the body only when every word of the phrase is in it.
+            guard phrase.split(separator: " ").allSatisfy({ contains(body, String($0)) }) else { return false }
+            let decoded = text ?? String(decoding: body, as: UTF8.self)
+            text = decoded
+            return ParsedSearchQuery.contains(decoded, phrase: phrase)
+        }
     }
 
     /// Byte search over folded UTF-8: `String.contains` compares Characters and is far slower on
@@ -862,9 +949,23 @@ final class AgentMemoryIndex {
         ]
         if let metadata, metadata.stamp == stamp { return metadata.ids }
         let loaded = try? LibraryMetadataStore.loadReportingReset(root: library, repair: false)
-        let ids = loaded.map { $0.wasReset ? [:] : $0.metadata.IDsByPath } ?? [:]
-        metadata = (stamp, ids)
-        return ids
+        let value = loaded.flatMap { $0.wasReset ? nil : $0.metadata }
+        metadata = (stamp, value?.IDsByPath ?? [:], value)
+        return value?.IDsByPath ?? [:]
+    }
+
+    /// Tag names by path from the same file, for ranked `tag:` (#179).
+    func documentTags(_ library: URL) -> [String: Set<String>] {
+        _ = documentIDs(library)
+        guard let value = metadata?.value else { return [:] }
+        let names = Dictionary(value.tags.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        var tags: [String: Set<String>] = [:]
+        for (path, id) in value.IDsByPath {
+            if let ids = value.tagsByDocument[id.uuidString], !ids.isEmpty {
+                tags[path] = Set(ids.compactMap { names[$0] })
+            }
+        }
+        return tags
     }
 
     // MARK: Read

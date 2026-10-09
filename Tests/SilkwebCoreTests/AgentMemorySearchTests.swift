@@ -687,6 +687,209 @@ final class AgentMemorySearchTests: XCTestCase {
         XCTAssertLessThan(bounded.index.indexed, 10_000)
     }
 
+    // MARK: Ranked mode (#179)
+
+    func testDefaultModeKeepsQuerySyntaxLiteral() throws {
+        try writeFixture()
+        let session = service()
+        // #134: filters and quotes are plain words unless the request opts in.
+        XCTAssertEqual(try session.search(AgentMemorySearchRequest(query: "flock type:decision")).total, 0)
+        XCTAssertEqual(try session.search(AgentMemorySearchRequest(query: "\"flock gate\"")).total, 0)
+        XCTAssertEqual(try session.search(AgentMemorySearchRequest(query: "flock gate")).total, 3)
+        let output = run(["memory", "search", "flock"])
+        XCTAssertEqual(output.status, 0)
+        for key in ["score", "mode", "ranking_version", "retrieval_contract_version"] {
+            XCTAssertFalse(output.stdout.contains("\"\(key)\""), key)
+        }
+        XCTAssertNil(try session.search(AgentMemorySearchRequest(query: "flock")).results.first?.score)
+    }
+
+    func testRankedModeParsesFiltersAndAndsThemWithParameters() throws {
+        try writeFixture()
+        var metadata = LibraryMetadata(IDsByPath: ["\(projectPath)/Notes.md": UUID()])
+        let tag = LibraryTag(name: "Research")
+        metadata.tags = [tag]
+        metadata.tagsByDocument[metadata.IDsByPath["\(projectPath)/Notes.md"]!.uuidString] = [tag.id]
+        try LibraryMetadataStore.save(metadata, root: library)
+        let session = service()
+        func titles(_ query: String, types: [String] = [], statuses: [String] = []) throws -> [String] {
+            try session.search(
+                AgentMemorySearchRequest(query: query, types: types, statuses: statuses, limit: 50, mode: .ranked)
+            ).results.map(\.document.title).sorted()
+        }
+        let spike = "2026-10-05 0900 — Spike"
+        XCTAssertEqual(try titles("flock type:decision"), ["Gate decision"])
+        XCTAssertEqual(try titles("flock Type:DECISION type:handoff"), ["Gate decision", "Resume"])
+        XCTAssertEqual(try titles("flock type:decision", types: ["handoff"]), [], "ANDed with the parameters")
+        XCTAssertEqual(try titles("flock status:OPEN"), ["Resume"])
+        XCTAssertEqual(try titles("flock status:open", statuses: ["accepted"]), [])
+        XCTAssertEqual(try titles("flock project:silkweb"), [spike, "Gate decision", "Notes", "Preference", "Resume"])
+        XCTAssertEqual(try titles("flock project:Other"), [], "never an error, never out of scope")
+        XCTAssertEqual(try titles("flock after:2026-10-04"), [spike, "Resume"])
+        XCTAssertEqual(try titles("flock before:2026-10-01"), ["Notes"])
+        XCTAssertEqual(try titles("flock after:yesterday"), [], "a bad date is a literal word")
+        XCTAssertEqual(try titles("\"flock gate\""), [spike, "Gate decision", "Resume"])
+        XCTAssertEqual(try titles("\"gate flock\""), [])
+        XCTAssertEqual(try titles("type:progress"), [spike], "filters alone list every match")
+        XCTAssertEqual(try titles("flock folder:Memories"), [], "unknown keys are words until #32")
+        XCTAssertEqual(try titles("\"flock"), [], "an unclosed quote is a literal word")
+        XCTAssertEqual(try titles("flock tag:research"), ["Notes"])
+        XCTAssertEqual(try titles("flock tag:other"), [])
+
+        // Exact title first, then score; `matchKind` keeps title|body and a heading counts as body.
+        let exact = try session.search(AgentMemorySearchRequest(query: "resume", mode: .ranked))
+        XCTAssertEqual(exact.results.first?.document.title, "Resume")
+        let ranked = try session.search(AgentMemorySearchRequest(query: "flock gate", mode: .ranked))
+        XCTAssertEqual(ranked.mode, .ranked)
+        XCTAssertEqual(ranked.total, 3)
+        let scores = ranked.results.compactMap(\.score)
+        XCTAssertEqual(scores.count, 3)
+        XCTAssertEqual(scores, scores.sorted(by: >))
+        XCTAssertEqual(scores.map { ($0 * 10_000).rounded() / 10_000 }, scores, "4 decimals")
+        XCTAssertTrue(ranked.results.allSatisfy { $0.matchKind == .body })
+        XCTAssertEqual(
+            try session.search(AgentMemorySearchRequest(query: "gate", mode: .ranked)).results.first?.matchKind,
+            .title)
+        // The same request twice: the same order and scores.
+        XCTAssertEqual(try session.search(AgentMemorySearchRequest(query: "flock gate", mode: .ranked)), ranked)
+        let empty = try session.search(AgentMemorySearchRequest(query: "nothing", mode: .ranked))
+        XCTAssertEqual(empty.message, "No matches in Memory › Projects › Silkweb.")
+    }
+
+    func testCLIRankedPrintsScoreLastAndEchoesTheMode() throws {
+        try writeFixture()
+        let output = run(["memory", "search", "flock", "\"flock gate\"", "--ranked"])
+        XCTAssertEqual(output.status, 0, output.stderr)
+        let excerpt = try XCTUnwrap(output.stdout.range(of: "\"excerpt\" : ")).lowerBound
+        let score = try XCTUnwrap(output.stdout.range(of: "\"score\" : ")).lowerBound
+        XCTAssertLessThan(excerpt, score)
+        XCTAssertNotNil(output.stdout.range(of: #""score" : \d+\.\d{4}\n"#, options: .regularExpression), output.stdout)
+        let json = try result(output)
+        XCTAssertEqual(json["total"] as? Int, 3)
+        XCTAssertEqual(json["mode"] as? String, "ranked")
+        XCTAssertEqual(json["ranking_version"] as? String, KnowledgeBM25.rankingVersion)
+        XCTAssertEqual(json["retrieval_contract_version"] as? Int, 1)
+        let rows = try XCTUnwrap(json["results"] as? [[String: Any]])
+        XCTAssertTrue(rows.allSatisfy { ($0["score"] as? Double).map { $0 > 0 } == true })
+
+        XCTAssertEqual(run(["memory", "read", "\(projectPath)/Notes.md", "--ranked"]).status, 64)
+        XCTAssertEqual(run(["memory", "search", "--ranked=yes"]).status, 64)
+        let capabilities = try result(run(["memory", "capabilities"]))
+        XCTAssertEqual(capabilities["retrieval_contract_version"] as? Int, 1)
+        XCTAssertEqual(capabilities["retrieval_modes"] as? [String], ["default", "ranked"])
+    }
+
+    func testRankedScoresIgnoreDocumentsOutsideTheGrant() throws {
+        try write("\(projectPath)/Alpha.md", "flock gate alpha\n")
+        try write("\(projectPath)/Beta.md", "# Beta\n\nflock beta and more words for the body\n")
+        try write("\(projectPath)/Gamma.md", "gamma only\n")
+        let request = AgentMemorySearchRequest(query: "flock", mode: .ranked)
+        let alone = try service().search(request)
+        // Many out-of-scope Documents with the term would change document frequency and lengths if they counted.
+        for index in 0..<30 {
+            try write("Notes/Hidden \(index).md", String(repeating: "flock ", count: index + 1) + "hidden secret\n")
+            try write("Memory/Projects/Silkweb2/Leak \(index).md", "# Flock\n\nflock flock\n")
+        }
+        let session = service()
+        let crowded = try session.search(request)
+        XCTAssertEqual(crowded.results.map(\.document.path), alone.results.map(\.document.path))
+        XCTAssertEqual(crowded.results.map(\.score), alone.results.map(\.score))
+        XCTAssertEqual(crowded.total, 2)
+        // A wider grant sees them, and the same Documents score differently.
+        try writeGrants(extra: ["Notes"])
+        let wider = try service().search(AgentMemorySearchRequest(query: "flock", limit: 50, mode: .ranked))
+        XCTAssertEqual(wider.total, 32)
+        let alpha = { (response: AgentMemorySearchResponse) in
+            response.results.first { $0.document.title == "Alpha" }?.score
+        }
+        XCTAssertNotEqual(alpha(wider), alpha(crowded))
+    }
+
+    /// The same query syntax narrows Search Library and ranked `memory_search` to the same Documents.
+    func testFiltersNarrowTheAppAndTheHelperAlike() async throws {
+        try writeFixture()
+        let snapshot = try await LibraryScanner.scan(root: library)
+        let index = SearchIndex(root: library)
+        try await index.reconcile(snapshot)
+        let session = service()
+        for query in [
+            "flock type:decision", "flock type:decision type:handoff", "status:open", "flock project:Silkweb",
+            "flock after:2026-10-04", "flock before:2026-10-02", "\"flock gate\"", "type:memory type:progress",
+            "flock folder:x", "\"flock gate\" status:accepted",
+        ] {
+            let app = try await index.query(SearchQuery(query, scope: .library, limit: 100))
+            let helper = try session.search(AgentMemorySearchRequest(query: query, limit: 50, mode: .ranked))
+            // The app searches the whole Library; compare inside the grant.
+            let inScope = app.filter { $0.folderPathComponents.starts(with: ["Memory", "Projects", "Silkweb"]) }
+            XCTAssertEqual(
+                inScope.map(\.displayName).sorted(), helper.results.map(\.document.title).sorted(), query)
+        }
+        await index.flushCache()
+    }
+
+    func testRankedSearchMeetsTheWarmBudgetOnTenThousandDocuments() throws {
+        let project = library.appendingPathComponent(projectPath)
+        let words = ["gate", "flock", "cache", "sidebar", "export", "theme", "outline", "index", "search", "folder"]
+        for folder in 0..<1_000 {
+            let directory = project.appendingPathComponent("Folder \(folder)")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            for document in 0..<10 {
+                let number = folder * 10 + document
+                let body =
+                    "# \(words[number % 10].capitalized) note \(number)\n\n" + "Text about \(words[number % 7]) and "
+                    + "\(words[number % 3]) for document \(number). "
+                    + String(repeating: "Filler words keep it realistic. ", count: 20)
+                try Data(
+                    memory(
+                        "m_\(number)", type: ["memory", "decision", "progress", "handoff"][document % 4], body: body
+                    ).utf8
+                ).write(to: directory.appendingPathComponent("Note \(document).md"))
+            }
+        }
+        let session = service(options: AgentMemoryIndexOptions(timeBudget: .seconds(120)))
+        let first = try session.search(AgentMemorySearchRequest(query: "gate", mode: .ranked))
+        XCTAssertEqual(first.index.state, .ready)
+        var totals: [TimeInterval] = []
+        var defaults: [TimeInterval] = []
+        for query in ["flock gate", "cache type:decision", "\"text about sidebar\"", "export", "theme index"] {
+            for _ in 0..<4 {
+                var clock = Date()
+                let response = try session.search(AgentMemorySearchRequest(query: query, limit: 50, mode: .ranked))
+                totals.append(Date().timeIntervalSince(clock))
+                XCTAssertFalse(response.results.isEmpty, query)
+                clock = Date()
+                _ = try session.search(AgentMemorySearchRequest(query: query, limit: 50))
+                defaults.append(Date().timeIntervalSince(clock))
+            }
+        }
+        // The refresh walk plus the per-request graph sync and permitted view (#177/#178), without ranking.
+        var views: [TimeInterval] = []
+        for _ in 0..<10 {
+            let clock = Date()
+            _ = try session.permittedGraph()
+            views.append(Date().timeIntervalSince(clock))
+        }
+        // The ranking stage alone: statistics from the permitted graph and BM25.
+        let graph = try session.permittedGraph()
+        var ranking: [TimeInterval] = []
+        for query in ["flock gate", "cache type:decision", "\"text about sidebar\"", "export", "theme index"] {
+            for _ in 0..<4 {
+                let clock = Date()
+                let parsed = ParsedSearchQuery(query)
+                let statistics = graph.termStatistics(for: parsed.rankingTerms)
+                _ = KnowledgeBM25.scores(
+                    terms: parsed.rankingTerms, candidates: statistics.lengths.keys, statistics: statistics)
+                ranking.append(Date().timeIntervalSince(clock))
+            }
+        }
+        let p95 = { (values: [TimeInterval]) in values.sorted()[Int(Double(values.count - 1) * 0.95)] }
+        print(
+            "Ranked agent search, 10,000 documents / 1,000 folders: warm p95 \(p95(totals))s end to end "
+                + "(refresh walk included; default mode \(p95(defaults))s; refresh and permitted graph alone "
+                + "\(p95(views))s), \(p95(ranking))s statistics and BM25 (target 0.1s)")
+        XCTAssertLessThan(p95(totals), 2, "the #134 warm budget still holds")
+    }
+
     // MARK: Helpers
 
     private func permissions(_ url: URL) throws -> Int {
