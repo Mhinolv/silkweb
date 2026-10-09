@@ -7,12 +7,15 @@ import SwiftUI
 /// AppKit owns the dividers; the hosted panes keep their existing observation and focus.
 struct LibrarySplitView: NSViewControllerRepresentable {
     let workspace: LibraryWorkspace
+    /// The window's sections (#195); without one the sidebar shows this workspace's Library alone.
+    var registry: LibraryWindowRegistry? = nil
 
     func makeNSViewController(context: Context) -> LibrarySplitViewController {
-        LibrarySplitViewController(workspace: workspace, autosaveName: workspace.columnAutosaveName)
+        LibrarySplitViewController(workspace: workspace, autosaveName: workspace.columnAutosaveName, registry: registry)
     }
 
     func updateNSViewController(_ controller: LibrarySplitViewController, context: Context) {
+        controller.show(workspace)
         controller.updateRequests()
     }
 }
@@ -21,7 +24,12 @@ final class LibrarySplitViewController: NSSplitViewController {
     private static let baseConstrainsSplitPosition = NSSplitViewController.instancesRespond(
         to: #selector(NSSplitViewDelegate.splitView(_:constrainSplitPosition:ofSubviewAt:)))
     let navigationController: NSSplitViewController
-    private let workspace: LibraryWorkspace
+    /// The current Library (#195): the list and the editor show it; the sidebar shows every section.
+    private(set) var workspace: LibraryWorkspace
+    private let registry: LibraryWindowRegistry?
+    private let sidebarHost: NSHostingController<LibrarySidebarPane>
+    private let listHost: NSHostingController<AnyView>
+    private let detailHost: NSHostingController<AnyView>
     private var lastSidebarToggleRequest: Int
     private var lastFocusRequest: Int
     private var navigationObserver: NSObjectProtocol?
@@ -29,23 +37,30 @@ final class LibrarySplitViewController: NSSplitViewController {
 
     var sidebarItem: NSSplitViewItem { navigationController.splitViewItems[0] }
 
-    init(workspace: LibraryWorkspace, autosaveName: String? = AppDefaults.columnAutosaveName) {
+    init(
+        workspace: LibraryWorkspace, autosaveName: String? = AppDefaults.columnAutosaveName,
+        registry: LibraryWindowRegistry? = nil
+    ) {
         let navigationController = LibraryNavigationSplitViewController()
         self.navigationController = navigationController
         self.workspace = workspace
+        self.registry = registry
+        sidebarHost = Self.host(LibrarySidebarPane(workspace: workspace, registry: registry))
+        listHost = Self.host(Self.list(workspace, sectioned: registry != nil))
+        detailHost = Self.host(Self.detail(workspace))
         lastSidebarToggleRequest = workspace.sidebarToggleRequest
         lastFocusRequest = workspace.focusRequest
         super.init(nibName: nil, bundle: nil)
         navigationController.libraryController = self
 
-        let sidebar = NSSplitViewItem(sidebarWithViewController: Self.host(LibrarySidebarPane(workspace: workspace)))
+        let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarHost)
         sidebar.minimumThickness = 180
         sidebar.maximumThickness = 320
         sidebar.holdingPriority = NSLayoutConstraint.Priority(260)
         sidebar.canCollapseFromWindowResize = false
         sidebar.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
 
-        let list = NSSplitViewItem(contentListWithViewController: Self.host(LibraryDocumentPane(workspace: workspace)))
+        let list = NSSplitViewItem(contentListWithViewController: listHost)
         list.minimumThickness = 240
         list.maximumThickness = 480
         list.holdingPriority = NSLayoutConstraint.Priority(250)
@@ -63,7 +78,7 @@ final class LibrarySplitViewController: NSSplitViewController {
         navigation.canCollapseFromWindowResize = false
         navigation.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
         navigation.holdingPriority = NSLayoutConstraint.Priority(260)
-        let detail = NSSplitViewItem(viewController: Self.host(DocumentDetail(workspace: workspace)))
+        let detail = NSSplitViewItem(viewController: detailHost)
         detail.minimumThickness = 420
         detail.holdingPriority = NSLayoutConstraint.Priority(240)
         addSplitViewItem(navigation)
@@ -91,6 +106,31 @@ final class LibrarySplitViewController: NSSplitViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         applySidebars(animated: false)
+    }
+
+    /// Each Library gets fresh list and editor views: their AppKit coordinators hold one workspace for life.
+    private static func list(_ workspace: LibraryWorkspace, sectioned: Bool) -> AnyView {
+        AnyView(LibraryDocumentPane(workspace: workspace, sectioned: sectioned).id(ObjectIdentifier(workspace)))
+    }
+
+    private static func detail(_ workspace: LibraryWorkspace) -> AnyView {
+        AnyView(DocumentDetail(workspace: workspace).id(ObjectIdentifier(workspace)))
+    }
+
+    /// Another section became current (#195): the columns, their widths and the sidebar stay; the list and the
+    /// editor switch to its Library.
+    func show(_ next: LibraryWorkspace) {
+        guard next !== workspace else { return }
+        let previous = workspace
+        if previous.librarySplitController === self { previous.librarySplitController = nil }
+        workspace = next
+        next.librarySplitController = self
+        lastSidebarToggleRequest = next.sidebarToggleRequest
+        lastFocusRequest = next.focusRequest
+        sidebarHost.rootView = LibrarySidebarPane(workspace: next, registry: registry)
+        listHost.rootView = Self.list(next, sectioned: registry != nil)
+        detailHost.rootView = Self.detail(next)
+        if navigationItem.isCollapsed != next.sidebarsHidden { applySidebars(animated: false) }
     }
 
     private static func host<Content: View>(_ content: Content) -> NSHostingController<Content> {
@@ -210,13 +250,25 @@ private final class LibraryNavigationSplitViewController: NSSplitViewController 
     }
 }
 
-private struct LibrarySidebarPane: View {
+struct LibrarySidebarPane: View {
     let workspace: LibraryWorkspace
+    var registry: LibraryWindowRegistry? = nil
 
     var body: some View {
         Group {
-            if let snapshot = workspace.snapshot {
-                sidebar(snapshot)
+            if let registry, registry.sections.contains(where: { $0.snapshot != nil }) {
+                // #195: every open Library is a section under its own header; there is no `LIBRARY` caption.
+                VStack(alignment: .leading, spacing: 0) {
+                    LibrarySectionsSidebar(registry: registry, current: workspace)
+                    addMenu
+                }
+            } else if registry == nil, let snapshot = workspace.snapshot {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("LIBRARY").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16)
+                        .padding(.top, 12)
+                    FolderSidebar(snapshot: snapshot, workspace: workspace)
+                    addMenu
+                }
             } else {
                 DelayedLibraryProgress(count: workspace.loadingCount)
             }
@@ -225,28 +277,36 @@ private struct LibrarySidebarPane: View {
         .background(Color.silkwebPaneBackground.ignoresSafeArea())
     }
 
-    private func sidebar(_ snapshot: LibrarySnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("LIBRARY").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 12)
-            FolderSidebar(snapshot: snapshot, workspace: workspace)
-            Menu {
-                Button("New Folder") { workspace.create(folder: true) }
-                Button("New Document") { workspace.create(folder: false) }
-            } label: {
-                Image(systemName: "plus")
-            }
-            .menuStyle(.borderlessButton).fixedSize().padding(8)
-            .accessibilityLabel("Add").help("Add")
-            .disabled(!workspace.canMutate)
+    /// The footer `+` acts on the current Library.
+    private var addMenu: some View {
+        Menu {
+            Button("New Folder") { workspace.create(folder: true) }
+            Button("New Document") { workspace.create(folder: false) }
+        } label: {
+            Image(systemName: "plus")
         }
+        .menuStyle(.borderlessButton).fixedSize().padding(8)
+        .accessibilityLabel("Add").help("Add")
+        .disabled(!workspace.canMutate)
     }
 }
 
 private struct LibraryDocumentPane: View {
     let workspace: LibraryWorkspace
+    /// #195: a section that is still loading shows its progress here, beside the other sections in the sidebar.
+    var sectioned = false
     @FocusState private var focused: Bool
 
     var body: some View {
+        if sectioned, workspace.snapshot == nil, workspace.loading {
+            DelayedLibraryProgress(count: workspace.loadingCount)
+                .background(Color.silkwebPaneBackground.ignoresSafeArea())
+        } else {
+            list
+        }
+    }
+
+    private var list: some View {
         DocumentList(workspace: workspace)
             .focused($focused)
             .onChange(of: focused) { if focused { workspace.focusColumn = 1 } }

@@ -7,7 +7,7 @@ import SwiftUI
         // Library windows never tab natively: no tab bar, Merge All Windows or clash with ⇧⌘[ / ⇧⌘] (#194).
         NSWindow.allowsAutomaticWindowTabbing = false
     }
-    /// Every open Library, window by window (#194); see `LibraryWindowRegistry.prepareToQuit`.
+    /// Every open Library, the current one first (#195); see `LibraryWindowRegistry.prepareToQuit`.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         WritingSettings.shared.flush()
         Task { sender.reply(toApplicationShouldTerminate: await registry.prepareToQuit()) }
@@ -32,7 +32,9 @@ struct EditorWindowLifecycle: NSViewRepresentable {
         return probe
     }
     func updateNSView(_ view: WindowProbe, context: Context) {
-        view.window?.isDocumentEdited = workspace.allEditors.contains { $0.state.isDirty }
+        context.coordinator.workspace = workspace
+        let libraries = registry?.workspaces ?? [workspace]
+        view.window?.isDocumentEdited = libraries.contains { $0.allEditors.contains { $0.state.isDirty } }
     }
     final class WindowProbe: NSView {
         var attached: ((NSWindow) -> Void)?
@@ -42,7 +44,8 @@ struct EditorWindowLifecycle: NSViewRepresentable {
         }
     }
     @MainActor final class Coordinator: NSObject, NSWindowDelegate {
-        let workspace: LibraryWorkspace
+        /// The current Library: tab keys act on it (#195).
+        var workspace: LibraryWorkspace
         weak var previousDelegate: NSWindowDelegate?
         private var keyMonitor: Any?
         deinit { if let keyMonitor { NSEvent.removeMonitor(keyMonitor) } }
@@ -83,7 +86,7 @@ struct EditorWindowLifecycle: NSViewRepresentable {
                 window.delegate = self
             }
             workspace.attachedWindow = window
-            registry?.register(workspace, window: window)
+            registry?.register(window: window)
         }
         /// The compact bar stays visible in full screen (1.65); its leading items move into the freed space.
         func window(
@@ -97,8 +100,11 @@ struct EditorWindowLifecycle: NSViewRepresentable {
         }
         func windowWillClose(_ notification: Notification) {
             previousDelegate?.windowWillClose?(notification)
-            registry?.close(workspace)
-            Task { await workspace.didCloseWindow() }
+            if let registry {
+                Task { await registry.windowClosed() }
+            } else {
+                Task { await workspace.didCloseWindow() }
+            }
         }
         override func responds(to selector: Selector!) -> Bool {
             super.responds(to: selector) || previousDelegate?.responds(to: selector) == true
@@ -109,7 +115,13 @@ struct EditorWindowLifecycle: NSViewRepresentable {
             guard !checkingClose else { return false }
             checkingClose = true
             Task {
-                let permitted = await workspace.prepareToExit(.closeWindow)
+                // Every section's unsaved text, the current Library first (#195).
+                let permitted: Bool
+                if let registry {
+                    permitted = await registry.prepareToExit(.closeWindow)
+                } else {
+                    permitted = await workspace.prepareToExit(.closeWindow)
+                }
                 checkingClose = false
                 if permitted { allowingClose = true; sender.performClose(nil); allowingClose = false }
             }

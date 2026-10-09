@@ -25,13 +25,6 @@ enum AppDefaults {
     /// into the runner's domain (#67); tests that check restore pass their own name.
     static let columnAutosaveName: String? = NSClassFromString("XCTestCase") == nil ? "Silkweb.LibraryColumns" : nil
 
-    /// Each library window keeps its own column widths (#194). Slot 0, the first window, keeps the legacy name so
-    /// widths saved before multiple windows survive; later windows add `.Window<n>`.
-    static func windowColumnAutosaveName(base: String?, slot: Int) -> String? {
-        guard let base else { return nil }
-        return slot == 0 ? base : base + ".Window\(slot + 1)"
-    }
-
     /// Registered only by the XCTest branch of `store`; runs at test-process exit.
     private static func removeTestStore() {
         guard let suite = UserDefaults(suiteName: testSuiteName) else { return }
