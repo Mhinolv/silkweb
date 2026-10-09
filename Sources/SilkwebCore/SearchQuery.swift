@@ -237,9 +237,10 @@ public struct ParsedSearchQuery: Equatable, Sendable {
     /// The envelope and date filters, with the #134 rules: `type:`/`status:` drop Documents without one;
     /// `project:` keeps the envelope's project, or a Document without one inside that project's Folder (like
     /// `memory_search`'s `project`); dates compare `created_at`, else the modified date. Types and statuses
-    /// ignore case.
+    /// ignore case. `project:` naming the grant's `agentFolder` (#206) looks in `Memory/Agents/<Key>` instead.
     public func admits(
-        type: String?, status: String?, project: String?, path: String, date: Date?, caseSensitive: Bool = false
+        type: String?, status: String?, project: String?, path: String, date: Date?, caseSensitive: Bool = false,
+        agentFolder: String? = nil
     ) -> Bool {
         if !types.isEmpty, !types.contains(where: { $0.lowercased() == type?.lowercased() }) { return false }
         if !statuses.isEmpty, !statuses.contains(where: { $0.lowercased() == status?.lowercased() }) { return false }
@@ -247,7 +248,9 @@ public struct ParsedSearchQuery: Equatable, Sendable {
             let options: String.CompareOptions = caseSensitive ? [] : [.caseInsensitive]
             let admitted = projects.contains { wanted in
                 if let project { return project.compare(wanted, options: options) == .orderedSame }
-                return AgentScope.contains(AgentMemoryContract.projectRoot(wanted), path, caseSensitive: caseSensitive)
+                let isAgent = agentFolder.map { wanted.compare($0, options: options) == .orderedSame } ?? false
+                let root = isAgent ? AgentMemoryContract.agentRoot(wanted) : AgentMemoryContract.projectRoot(wanted)
+                return AgentScope.contains(root, path, caseSensitive: caseSensitive)
             }
             if !admitted { return false }
         }

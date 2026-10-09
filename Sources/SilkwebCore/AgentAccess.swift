@@ -97,6 +97,11 @@ public struct AgentAccessError: Error, Equatable, Sendable {
             message: "That location is outside this grant’s \(kind) folders\(scope).")
     }
 
+    /// #206: `agent-memories` on a grant the owner gave no `agent_folder`.
+    public static let noAgentFolder = Self(
+        code: "out_of_scope", title: noAccess,
+        message: "This grant has no agent folder. Ask the owner to add one with “silkweb grant init --agent-folder”.")
+
     public static let createNotAllowed = Self(
         code: "create_not_allowed", title: noAccess,
         message: "This grant is Read Only. Ask the owner to switch it to Read and Create.")
@@ -266,7 +271,7 @@ public struct AgentAccessError: Error, Equatable, Sendable {
 
     static func scope(_ error: AgentScopeError, in scope: AgentScope) -> Self {
         switch error {
-        case .invalidProject, .invalidPath: return .invalidPath
+        case .invalidProject, .invalidAgentFolder, .invalidPath: return .invalidPath
         case .outsideRead: return .outOfScope(scope.readRoots)
         case .outsideCreate: return .outOfScope(scope.createRoots, kind: "create")
         case .excluded: return .excluded
@@ -456,7 +461,10 @@ public final class AgentSession: @unchecked Sendable {
         do {
             scope = try AgentScope(grant: grant, createAllowed: filesystem == .qualified, caseSensitive: caseSensitive)
         } catch let error as AgentScopeError {
-            throw AgentAccessError(code: "invalid_grant", title: AgentAccessError.noAccess, message: error.message)
+            // #206: an invalid agent folder is bad input in the grants file (exit 65), never silently ignored.
+            throw AgentAccessError(
+                code: error == .invalidAgentFolder ? "invalid_agent_folder" : "invalid_grant",
+                title: AgentAccessError.noAccess, message: error.message)
         }
         if let clientRoots { scope = scope.narrowed(to: clientRoots) }
         resolved = (grant, library, filesystem, scope)

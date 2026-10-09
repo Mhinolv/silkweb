@@ -216,7 +216,8 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
       "project": "Silkweb",
       "library": { "version": 1, "path": "/Users/me/Writing" },
       "access": "read-create",
-      "extra_read_folders": ["Reference/Silkweb"]
+      "extra_read_folders": ["Reference/Silkweb"],
+      "agent_folder": "Claude"
     }
   ]
 }
@@ -233,12 +234,24 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
   [`grant approve`](#access-requests-203) (or Approve… in the app) do.
 - `access` is `read`, `read-create` or `read-create-update` (#204). An unknown value is treated as
   `read`, so a build that doesn’t know a profile falls back to the narrowest.
+- `agent_folder` (#206, optional) is an owner-set key such as `Claude`: one valid Folder name under
+  `Memory/Agents`. It's never inferred from the agent's `--agent` claim. Every grant (on any project) with
+  the same key shares `Memory/Agents/<Key>/`, so an agent's working rules follow it across projects. A
+  value that isn't a valid Folder name (empty, `/`, a leading `.`, control characters, or not a string)
+  fails that grant closed: every operation exits 65 with `invalid_agent_folder` (“The agent folder isn’t a
+  valid folder name.”); other grants keep working. `null` or a missing key means no agent folder. The file
+  stays `version: 1`: older helpers ignore the key, which only narrows them.
 - **Default template:**
-  - Read folders: `Memory/Projects/<Project>/`, plus any `extra_read_folders`. Extra read folders
-    are read-only, relative to the Library, and validated like any other path.
-  - Create folders: `Memory/Projects/<Project>/Memories`, `…/Progress` and `…/Handoffs`, and only
-    for `read-create` and `read-create-update` grants on a qualified filesystem. Updates happen only
-    inside the create folders too.
+  - Read folders: `Memory/Projects/<Project>/`, the whole `Memory/Agents/<Key>/` when the grant has an
+    `agent_folder` (so documents the owner placed at its top level are found), plus any
+    `extra_read_folders`. Extra read folders are read-only, relative to the Library, and validated like any
+    other path.
+  - Create folders: `Memory/Projects/<Project>/Memories`, `…/Progress` and `…/Handoffs`, plus
+    `Memory/Agents/<Key>/Memories` with an `agent_folder`, and only for `read-create` and
+    `read-create-update` grants on a qualified filesystem. Updates happen only inside the create folders
+    too. The agent folder takes only `memory` and `decision` documents (anything else is
+    `envelope_invalid_field`), and their envelope `project` is the agent folder key, not the grant's
+    project. Receipts still belong to the grant.
 - Containment is checked per path component and compared like APFS: Unicode normalization never
   matters, and case is ignored unless the Library’s volume is case-sensitive.
   `Memory/Projects/Silkweb2` isn’t inside `Memory/Projects/Silkweb`. Symbolic links and hidden items
@@ -250,13 +263,15 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
 The owner adds a grant with `silkweb grant init`, run in Terminal, instead of editing JSON:
 
 ```text
-silkweb grant init [--library <PATH>] [--project <KEY>] [--access read|read-create|read-create-update] [--dry-run] [--grants <FILE>]
+silkweb grant init [--library <PATH>] [--project <KEY>] [--access read|read-create|read-create-update] [--agent-folder <KEY>] [--yes] [--dry-run] [--grants <FILE>]
 ```
 
 - **Modes.** With `--library`, `--project` and `--access` it asks nothing. Otherwise it prompts on
   stderr for the missing ones: the Library folder (`~` expanded, links resolved, must be a readable
   folder, reported as local disk or not), the project key (one valid Folder name, NFC) and the
-  profile (Read Only, Read and Create, or Read, Create and Update), then asks “Save to …? [y/N]”. Without a terminal on stdin
+  profile (Read Only, Read and Create, or Read, Create and Update), then the optional agent folder
+  (“Agent folder under Memory/Agents (optional, Return to skip): ”, same rules as the project key), then
+  asks “Save to …? [y/N]”. Without a terminal on stdin
   and with an option missing, it exits 64 (`“grant init” needs --library.`) instead of waiting.
   `--access read-only` means `read`. End of input exits 1 and saves nothing.
 - **Owner only.** Saving to the real grants file needs stdin to be a terminal, even with every option,
@@ -275,6 +290,14 @@ silkweb grant init [--library <PATH>] [--project <KEY>] [--access read|read-crea
   agent-grants.json to change it. Nothing was saved.” (the reason varies). There's no override.
   `read-create` → `read` is allowed and reported as “Changed access: Read and Create → Read Only.”
   Labels, limits and extra read folders are never changed, so they can't be widened either.
+- **Adding an agent folder (#206)** is the one widening init allows. `--agent-folder <Key>` on an existing
+  grant without one prints what it adds (“This adds the agent folder “Claude” to the grant “Silkweb”:”,
+  then its `Read` folder and, for create profiles, its `Create` folder) and asks “Add the agent folder to
+  “Silkweb”? [y/N]”. `--yes` skips the question; without a terminal and without `--yes` it exits 77
+  (“Adding an agent folder widens the grant “Silkweb”. Run this in Terminal to confirm, or add --yes.
+  Nothing was saved.”). The summary says “Added agent folder: Memory/Agents/Claude.” A different key than
+  the grant's own exits 77 like any other widening; leaving `--agent-folder` out keeps the grant's key. An
+  invalid key exits 64.
 - **Unqualified Library:** `read-create` is still saved, with “Agents can read; creating stays off
   until the Library is on a local APFS or HFS+ disk.” The interactive default becomes Read Only.
 - **Nothing in the Library.** It only reads the folder's volume details.
@@ -571,8 +594,10 @@ silkweb memory read --id 5E0C…-documentId
 
 - `query`: text, may be empty. Every word must appear in the title (the filename) or the body; matching
   ignores case and diacritics, like the app.
-- `project`: optional, and must be the grant’s own project, otherwise `out_of_scope`. It keeps documents
-  whose envelope `project` matches, plus documents without an envelope inside `Memory/Projects/<Project>`.
+- `project`: optional, and must be the grant’s own project or its `agent_folder` key (#206), otherwise
+  `out_of_scope`. It keeps documents whose envelope `project` matches, plus documents without an envelope
+  inside `Memory/Projects/<Project>` (or `Memory/Agents/<Key>` for the agent folder key). Ranked `project:`
+  reads the agent folder key the same way.
 - `type`: a list of `memory`, `decision`, `progress` or `handoff`. `status`: a list, compared without
   regard to case. Once either is set, documents without an envelope drop out.
 - `createdAfter` (inclusive) and `createdBefore` (exclusive): `2026-10-07` (midnight UTC) or an ISO 8601
@@ -608,8 +633,9 @@ no results. Each result has these fields, in this order:
 - **Ranking** is deterministic. First the text-match tier, as in the app: exact title, title prefix, a
   title word, the title, then the body. Within a tier: pinned, then reviewed decisions and memories, then
   unreviewed ones (including an earlier reviewed revision and documents without an envelope), then
-  handoffs, then progress. Newest `created_at` (or modified date) first within a kind, then `documentId`
-  and `path`. A document superseded by a reviewed document sinks to the bottom of its tier but is still
+  handoffs, then progress. Within a kind, project documents come before agent folder documents (#206),
+  then newest `created_at` (or modified date) first, then `documentId` and `path`. Ranked mode puts project
+  documents first among equal scores the same way. A document superseded by a reviewed document sinks to the bottom of its tier but is still
   returned, so neither side of a contradiction is hidden.
 
 ### Freshness
@@ -704,7 +730,10 @@ silkweb memory create-folder "Memory/Projects/Silkweb/Progress/Sprint 1"
 
 - **Where it goes:** `--folder memories|progress|handoffs` picks an entry folder, and `--type` picks the
   envelope type (`memory` and `decision` → `Memories`, `progress` → `Progress`, `handoff` → `Handoffs`);
-  either one alone is enough. Or `--folder` names a Folder inside a create folder, and then `--type` is
+  either one alone is enough. `--folder agent-memories` (#206) is the grant's `Memory/Agents/<Key>/Memories`
+  for `memory` (the default) or `decision`; another `--type` is `invalid_argument`, and a grant without an
+  `agent_folder` refuses it with `out_of_scope` (“This grant has no agent folder. Ask the owner to add one
+  with “silkweb grant init --agent-folder”.”). Or `--folder` names a Folder inside a create folder, and then `--type` is
   required. Missing Folders are made on demand in the case given (the defaults are title case) and get
   identities in the app index like any new Folder. `create-folder` is idempotent: an existing Folder
   returns `"created": false`.
@@ -904,7 +933,7 @@ asks for access with `silkweb grant request`, which answers in the JSON envelope
 silkweb memory capabilities
 silkweb memory search  [QUERY…] [--project P] [--type T]… [--status S]… [--created-after D] [--created-before D] [--limit N]
 silkweb memory read    <PATH> | --id DOCUMENT_ID  [--cursor C] [--expected-revision R]
-silkweb memory create  --folder memories|progress|handoffs|<PATH> --title T --body-file <FILE|->
+silkweb memory create  --folder memories|progress|handoffs|agent-memories|<PATH> --title T --body-file <FILE|->
                        --agent A --session S [--type T] [--idempotency-key K] [--status S]
                        [--observed-at D] [--review-after D] [--supersedes MEMORY_ID]…
 silkweb memory create-folder <PATH>
@@ -917,7 +946,7 @@ silkweb --version | --help
 
 | Command | Result (`result` in the envelope) |
 |---|---|
-| `capabilities` | `access`, `profile` (Read Only / Read and Create), `label`, `project`, `library`, `filesystem`, `read_roots`, `create_roots`, `project_folder_exists`, `limits`, `operations`, `schema` (`silkweb-memory/v1`), `contract_version`, `helper_version`. Never document counts. |
+| `capabilities` | `access`, `profile` (Read Only / Read and Create), `label`, `project`, `library`, `filesystem`, `read_roots`, `create_roots`, `agent_folder`, `agent_read_root`, `agent_create_root` (#206; `null` without an agent folder, or when it isn't readable or creatable), `project_folder_exists`, `limits`, `operations`, `schema` (`silkweb-memory/v1`), `contract_version`, `helper_version`. Never document counts. |
 | `search` | The [search response](#search-response), fields in the documented order. The query is the command’s remaining words joined by spaces; put `--` before a query that starts with “-”. `--type` and `--status` repeat or take comma-separated lists. `--project` is the search filter, not grant selection. |
 | `read` | The [read response](#read). `--id` takes the app index’s `documentId`; an ID the index doesn’t know and one outside the read folders are both `not_found`. |
 | `create` | `{"outcome", "path", "receipt", "replayed"}` ([Create and receipts](#create-and-receipts-133)). `--folder memories`, `progress` or `handoffs` (any case) picks the entry folder and the default type (`memory`, `progress`, `handoff`); `--type decision` with `memories` makes a decision. A Library-relative `--folder` needs `--type`. Without `--idempotency-key`, the helper uses a fresh `cli-<UUID>` key, so a retry creates another document. A replay exits 0. |
@@ -968,7 +997,7 @@ and `--supersedes` (create).
 |---|---|---|
 | 0 | Success, including a replayed create | — |
 | 64 | Usage or bad argument | `invalid_argument` |
-| 65 | Bad input data | `envelope_malformed`, `envelope_schema_newer`, `envelope_invalid_field`, `too_large`, `idempotency_conflict`, `not_found`, `revision_changed`, `request_not_found`, `request_decided` |
+| 65 | Bad input data | `envelope_malformed`, `envelope_schema_newer`, `envelope_invalid_field`, `too_large`, `idempotency_conflict`, `not_found`, `revision_changed`, `request_not_found`, `request_decided`, `invalid_agent_folder` |
 | 69 | Busy; try again | `library_busy`, `stale_snapshot`, `rate_limited`, `document_has_unsaved_changes`, `too_many_requests` |
 | 70 | Unexpected helper failure | `internal_error` |
 | 74 | Library I/O | `library_not_found`, `library_unreadable`, `unreadable`, `write_failed`, `disk_full`, `permission_denied` |
@@ -1092,7 +1121,7 @@ ask before running it. `memory list` stays CLI-only. Arguments are camelCase ver
 
 | Tool | Arguments |
 |---|---|
-| `memory_search` | `query`, `project`, `type` (list of `memory`, `decision`, `progress`, `handoff`), `status` (list), `createdAfter`, `createdBefore`, `limit` (1–50) |
+| `memory_search` | `query`, `project` (the grant's project or `agent_folder`), `type` (list of `memory`, `decision`, `progress`, `handoff`), `status` (list), `createdAfter`, `createdBefore`, `limit` (1–50) |
 | `memory_read` | `path` or `documentId` (exactly one), `cursor`, `expectedRevision` |
 | `memory_create` | `title` and `body` (required); `folder` (`memories`, `progress`, `handoffs`) or `type`, or `folderPath` with `type`; `idempotencyKey` (1–200 characters), `session`, `status`, `observedAt`, `reviewAfter`, `supersedes` (list) |
 | `memory_create_folder` | `path` (required) |

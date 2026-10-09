@@ -18,6 +18,16 @@ public enum AgentMemoryContract {
 
     public static func projectRoot(_ project: String) -> String { projectsFolder + "/" + project }
 
+    /// #206: agent-level memory shared by every grant with the same `agent_folder`.
+    public static let agentsFolder = "Memory/Agents"
+    /// The one create folder inside an agent folder.
+    public static let agentMemoriesFolder = "Memories"
+
+    public static func agentRoot(_ agentFolder: String) -> String { agentsFolder + "/" + agentFolder }
+    public static func agentMemoriesRoot(_ agentFolder: String) -> String {
+        agentRoot(agentFolder) + "/" + agentMemoriesFolder
+    }
+
     /// “Memory › Projects › Silkweb” for anything a human reads; JSON keeps POSIX paths.
     public static func displayPath(_ path: String) -> String {
         path.split(separator: "/").joined(separator: " › ")
@@ -74,6 +84,10 @@ public struct AgentGrant: Codable, Equatable, Sendable {
     public var extraReadFolders: [String]
     /// Owner-facing name used in refusals; empty means “<Project> project”.
     public var label: String
+    /// #206: the owner-set key of `Memory/Agents/<Key>`, read whole and created in under `Memories`. Never
+    /// inferred from the agent's claim. A value that isn't a valid Folder name (or isn't a string) fails the
+    /// grant closed.
+    public var agentFolder: String?
     public var limits: AgentGrantLimits
     public var createdAt: Date?
     /// Set when the owner turns access off. Sessions fail closed on their next operation.
@@ -82,13 +96,14 @@ public struct AgentGrant: Codable, Equatable, Sendable {
     public init(
         project: String, library: LibraryLocation, access: Access = .readCreate, extraReadFolders: [String] = [],
         label: String = "", limits: AgentGrantLimits = AgentGrantLimits(), createdAt: Date? = nil,
-        revokedAt: Date? = nil
+        revokedAt: Date? = nil, agentFolder: String? = nil
     ) {
         self.project = project
         self.library = library
         self.access = access
         self.extraReadFolders = extraReadFolders
         self.label = label
+        self.agentFolder = agentFolder
         self.limits = limits
         self.createdAt = createdAt
         self.revokedAt = revokedAt
@@ -103,6 +118,7 @@ public struct AgentGrant: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case project, library, access, label, limits
         case extraReadFolders = "extra_read_folders"
+        case agentFolder = "agent_folder"
         case createdAt = "created_at"
         case revokedAt = "revoked_at"
     }
@@ -115,6 +131,12 @@ public struct AgentGrant: Codable, Equatable, Sendable {
         access = (try? values.decodeIfPresent(Access.self, forKey: .access)) ?? .read
         extraReadFolders = try values.decodeIfPresent([String].self, forKey: .extraReadFolders) ?? []
         label = (try? values.decodeIfPresent(String.self, forKey: .label)) ?? ""
+        // A non-string value is kept as an invalid key, so the grant fails to load rather than losing its folder.
+        if values.contains(.agentFolder), try !values.decodeNil(forKey: .agentFolder) {
+            agentFolder = (try? values.decode(String.self, forKey: .agentFolder)) ?? ""
+        } else {
+            agentFolder = nil
+        }
         limits = (try? values.decodeIfPresent(AgentGrantLimits.self, forKey: .limits)) ?? AgentGrantLimits()
         createdAt = (try? values.decodeIfPresent(String.self, forKey: .createdAt)).flatMap { $0 }.flatMap(Self.date)
         // Any non-null `revoked_at`, even one that can't be parsed, keeps the grant off (fail closed).
@@ -132,6 +154,7 @@ public struct AgentGrant: Codable, Equatable, Sendable {
         try values.encode(access, forKey: .access)
         try values.encode(extraReadFolders, forKey: .extraReadFolders)
         if !label.isEmpty { try values.encode(label, forKey: .label) }
+        try values.encodeIfPresent(agentFolder, forKey: .agentFolder)
         try values.encode(limits, forKey: .limits)
         try values.encodeIfPresent(createdAt.map(Self.string), forKey: .createdAt)
         try values.encodeIfPresent(revokedAt.map(Self.string), forKey: .revokedAt)
@@ -201,6 +224,7 @@ public struct AgentGrantFile: Codable, Equatable, Sendable {
 
 public enum AgentScopeError: Error, Equatable {
     case invalidProject
+    case invalidAgentFolder
     case invalidPath(String)
     case outsideRead(String)
     case outsideCreate(String)
@@ -211,6 +235,7 @@ public enum AgentScopeError: Error, Equatable {
         let display = { (path: String) in "“\(AgentMemoryContract.displayPath(path))”" }
         switch self {
         case .invalidProject: return "The project name isn’t a valid folder name."
+        case .invalidAgentFolder: return "The agent folder isn’t a valid folder name."
         case .invalidPath(let path): return "\(display(path)) isn’t a path inside the Library."
         case .outsideRead(let path): return "\(display(path)) is outside this grant’s read folders."
         case .outsideCreate(let path): return "\(display(path)) is outside this grant’s create folders."
@@ -224,6 +249,8 @@ public enum AgentScopeError: Error, Equatable {
 /// Code that touches disk goes through `AgentSecureFiles`, which refuses links on the way.
 public struct AgentScope: Equatable, Sendable {
     public let project: String
+    /// #206: the grant's agent folder key, if it has one.
+    public let agentFolder: String?
     public let readRoots: [String]
     public let createRoots: [String]
     /// Matches the Library's volume. Case-insensitive containment on a case-sensitive volume would let
@@ -235,10 +262,16 @@ public struct AgentScope: Equatable, Sendable {
         guard (try? LibraryMutations.validateName(grant.project)) == grant.project else {
             throw AgentScopeError.invalidProject
         }
+        if let key = grant.agentFolder, (try? LibraryMutations.validateName(key)) != key {
+            throw AgentScopeError.invalidAgentFolder
+        }
         project = grant.project
+        agentFolder = grant.agentFolder
         self.caseSensitive = caseSensitive
         let root = AgentMemoryContract.projectRoot(project)
         var reads = [root]
+        // The whole agent folder is readable, so documents the owner placed at its top level are found too.
+        if let agentFolder { reads.append(AgentMemoryContract.agentRoot(agentFolder)) }
         for folder in grant.extraReadFolders {
             let normalized = try Self.normalize(folder)
             if !reads.contains(where: { Self.contains($0, normalized, caseSensitive: caseSensitive) }) {
@@ -248,11 +281,15 @@ public struct AgentScope: Equatable, Sendable {
         readRoots = reads
         createRoots =
             createAllowed && grant.access.allowsCreate
-            ? AgentMemoryContract.entryFolders.map { root + "/" + $0 } : []
+            ? AgentMemoryContract.entryFolders.map { root + "/" + $0 }
+                + (agentFolder.map { [AgentMemoryContract.agentMemoriesRoot($0)] } ?? []) : []
     }
 
-    private init(project: String, readRoots: [String], createRoots: [String], caseSensitive: Bool) {
+    private init(
+        project: String, agentFolder: String?, readRoots: [String], createRoots: [String], caseSensitive: Bool
+    ) {
         self.project = project
+        self.agentFolder = agentFolder
         self.readRoots = readRoots
         self.createRoots = createRoots
         self.caseSensitive = caseSensitive
@@ -278,8 +315,15 @@ public struct AgentScope: Equatable, Sendable {
             return result
         }
         return AgentScope(
-            project: project, readRoots: intersect(readRoots), createRoots: intersect(createRoots),
-            caseSensitive: caseSensitive)
+            project: project, agentFolder: agentFolder, readRoots: intersect(readRoots),
+            createRoots: intersect(createRoots), caseSensitive: caseSensitive)
+    }
+
+    /// #206: whether `path` is in the agent folder rather than the project's. Search ranks these after project
+    /// documents, and creates there carry the agent folder key as their envelope `project`.
+    public func isAgentLevel(_ path: String) -> Bool {
+        guard let agentFolder else { return false }
+        return contains(AgentMemoryContract.agentRoot(agentFolder), path)
     }
 
     public func checkRead(_ path: String) throws -> String {
