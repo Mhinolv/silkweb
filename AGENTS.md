@@ -111,19 +111,20 @@ Flow labels (exactly one at a time): `needs-pm` → `needs-ux` → `ready` → `
 `needs-owner-check` (or closed). Plus `bug`/`feature`, `P0`–`P3`, `owner-request`, `blocked`.
 
 Rules:
-- Integration branch is `team/roadmap`; never commit to main. One issue = one branch `<n>-<slug>` cut from
-  `team/roadmap` = one PR into `team/roadmap`.
+- Integration branch is `main` (owner decision 2026-10-09; `team/roadmap` is retired). One issue = one branch
+  `<n>-<slug>` cut from `main` = one PR into `main`. Never commit directly to `main`; the Orchestrator merges PRs into
+  `main` without asking the owner once the gates below pass.
 - Commits: `#<n>: <summary>`. Stage only the files changed for that issue. Never `git add -A`.
 - Every PR uses `.github/pull_request_template.md` (Issue / What changed / How it was tested / Screenshots);
   the `PR template` check fails otherwise. Its `## Issue` line uses `Refs #n` while the owner still has to check the
-  issue, otherwise `Closes #n`. Neither keyword closes anything on `team/roadmap` (see below).
+  issue, otherwise `Closes #n`.
 - Merge requires: `qa-pass`, a passing `CI / ci-gate`, a passing `PR template / check` (these two are the required
-  checks on `team/roadmap`), and (bugs) the regression test proven to fail on the pre-fix code. Closing keywords don't
-  fire on `team/roadmap`, so the Orchestrator closes issues explicitly.
+  checks on `main`), and (bugs) the regression test proven to fail on the pre-fix code. The Orchestrator closes issues
+  explicitly (`merge_pr.sh`), so `Refs #n` items stay open for the owner check.
 - CI (`.github/workflows/ci.yml`) has three fixed checks: `CI / classify` lists the PR's changed files, `CI /
   build-format` runs the pinned toolchain check, format lint and build on macOS (no tests), and `CI / ci-gate` is the
   merge evidence. `./scripts/build.sh test` is still mandatory locally (Engineer, QA, Orchestrator post-merge).
-- CI runs on every PR into `team/roadmap` when it is opened, reopened, marked ready, or pushed to (`synchronize`).
+- CI runs on every PR into `main` when it is opened, reopened, marked ready, or pushed to (`synchronize`).
   Docs-only PRs (every changed file is a `*.md` outside `Sources/` and `Tests/`, under `docs/`,
   `.github/pull_request_template.md`, `.git-blame-ignore-revs` or `LICENSE`) skip macOS:
   `ci-gate: PASS — docs-only`. Draft PRs also skip macOS: `ci-gate: PASS — draft, macOS deferred until ready`. Every
