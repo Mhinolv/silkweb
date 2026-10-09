@@ -23,7 +23,11 @@ struct QuickOpenPanel: View {
             }
         }
         .onExitCommand { workspace.search.dismissQuickOpen() }
-        .task(id: SearchRequestIdentity(text: workspace.search.quickText, revision: workspace.search.revision)) {
+        .task(
+            id: SearchRequestIdentity(
+                text: workspace.search.quickText, allLibraries: workspace.search.quickSearchesAllLibraries,
+                revision: workspace.search.revision)
+        ) {
             await workspace.search.query(quick: true)
         }
         .onChange(of: workspace.search.quickText) { selected = nil }
@@ -54,6 +58,12 @@ struct QuickOpenPanel: View {
                     .onKeyPress(.downArrow) {
                         move(1); return .handled
                     }
+                // #197 (owner decision): this Library by default; the toggle shows only while another is open.
+                if !search.otherLibraries().isEmpty {
+                    Toggle("All Libraries", isOn: $search.quickAllLibraries)
+                        .toggleStyle(.button).controlSize(.small)
+                        .help("Search every open library")
+                }
             }.padding(16)
             Divider()
             HStack(spacing: 4) {

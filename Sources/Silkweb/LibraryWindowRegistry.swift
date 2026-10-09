@@ -45,7 +45,19 @@ import SilkwebCore
         current = first
         workspaces = [first]
         super.init()
-        first.shell = self
+        adopt(first)
+    }
+
+    /// A workspace in this window: its Search Library and Quick Open can reach the other sections (#197).
+    private func adopt(_ workspace: LibraryWorkspace) {
+        workspace.shell = self
+        workspace.search.otherLibraries = { [weak self, weak workspace] in
+            guard let self, let workspace else { return [] }
+            return self.sections.compactMap { other in
+                guard other !== workspace, let root = other.root, other.snapshot != nil else { return nil }
+                return LibrarySearch.Peer(name: root.lastPathComponent, root: root, search: other.search)
+            }
+        }
     }
 
     /// Commands, Settings ▸ Library and the window's columns act here.
@@ -62,7 +74,7 @@ import SilkwebCore
 
     private func newWorkspace() -> LibraryWorkspace {
         let workspace = makeWorkspace()
-        workspace.shell = self
+        adopt(workspace)
         // Only the launch workspace restores the last-opened Library.
         workspace.restoresLastLibrary = false
         workspace.attachedWindow = window
@@ -186,6 +198,115 @@ import SilkwebCore
         }
         saveSession()
         return true
+    }
+
+    // MARK: Tabs (#197)
+
+    /// A tab in the window's strip and the Library it belongs to.
+    struct StripTab {
+        let workspace: LibraryWorkspace
+        let tab: DocumentTab
+        var key: Key { Key(workspace: ObjectIdentifier(workspace), id: tab.id) }
+
+        /// Two copies of one Library can share document IDs; the Library keeps their tabs apart.
+        struct Key: Hashable {
+            let workspace: ObjectIdentifier
+            let id: UUID
+        }
+    }
+
+    /// How the Libraries' tabs interleave in the strip; each Library keeps its own order. Not saved: relaunch lists
+    /// each Library's tabs in sidebar order.
+    @ObservationIgnored private var tabOrder: [StripTab.Key] = []
+    /// Bumped when a drag or Move Tab changes only the interleaving.
+    private(set) var tabOrderRevision = 0
+
+    /// One strip in the user's order, whichever Library each tab belongs to; never grouped by Library.
+    var stripTabs: [StripTab] {
+        _ = tabOrderRevision
+        let entries = sections.flatMap { workspace in workspace.tabs.map { StripTab(workspace: workspace, tab: $0) } }
+        guard entries.count > 1 else {
+            tabOrder = entries.map(\.key)
+            return entries
+        }
+        let byKey = Dictionary(entries.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        let order = TabStripOrder.merge(
+            stored: tabOrder,
+            groups: sections.map { workspace in workspace.tabs.map { StripTab(workspace: workspace, tab: $0).key } })
+        tabOrder = order
+        return order.compactMap { byKey[$0] }
+    }
+
+    /// The strip shows tabs from two or more Libraries: each tab names its Library.
+    var stripSpansLibraries: Bool { Self.spansLibraries(stripTabs) }
+
+    static func spansLibraries(_ strip: [StripTab]) -> Bool {
+        guard let first = strip.first?.workspace else { return false }
+        return strip.contains { $0.workspace !== first }
+    }
+
+    /// The current Library's active tab, the one the editor shows.
+    var activeStripIndex: Int? {
+        guard let id = current.activeTabID else { return nil }
+        return stripTabs.firstIndex { $0.workspace === current && $0.tab.id == id }
+    }
+
+    /// A click, Return or ⌃⇥ on a tab. Another Library's tab makes that Library current first: its section expands
+    /// and selects its remembered scope; the list doesn't jump to the document (Window ▸ Reveal in Library does).
+    func activate(_ entry: StripTab) {
+        guard workspaces.contains(where: { $0 === entry.workspace }), !entry.workspace.mutating else { return }
+        guard entry.workspace !== current else { return entry.workspace.activateTab(entry.tab.id) }
+        focus(entry.workspace)
+        // `activateTab` keeps the editor focused if it was.
+        entry.workspace.activateTab(entry.tab.id, syncSelection: false)
+        if let name = entry.workspace.root?.lastPathComponent {
+            NSAccessibility.post(
+                element: NSApplication.shared, notification: .announcementRequested,
+                userInfo: [
+                    .announcement: "\(name) library",
+                    .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+                ])
+        }
+    }
+
+    /// Show Next / Previous Tab: through the whole strip, crossing Libraries.
+    func cycleTab(_ delta: Int) {
+        let strip = stripTabs
+        guard !current.mutating, !strip.isEmpty else { return }
+        let index = activeStripIndex ?? 0
+        activate(strip[(index + delta % strip.count + strip.count) % strip.count])
+    }
+
+    /// A tab dragged to the gap before `gap`. Its own Library's order follows, so the strip and each Library agree.
+    func moveTab(_ entry: StripTab, toGap gap: Int) {
+        let order = TabStripOrder.move(entry.key, toGap: gap, in: stripTabs.map(\.key))
+        tabOrder = order
+        let workspace = entry.workspace
+        let ids = order.filter { $0.workspace == ObjectIdentifier(workspace) }.map(\.id)
+        if ids != workspace.tabs.map(\.id) {
+            workspace.tabs = ids.compactMap { id in workspace.tabs.first { $0.id == id } }
+            workspace.persistSession()
+        }
+        tabOrderRevision += 1
+    }
+
+    /// Window ▸ Move Tab Left / Right: the active tab, one place in the strip.
+    func moveActiveTab(_ delta: Int) {
+        let strip = stripTabs
+        guard let index = activeStripIndex, strip.indices.contains(index + delta) else { return }
+        moveTab(strip[index], toGap: delta > 0 ? index + delta + 1 : index + delta)
+    }
+
+    /// Close Other Tabs / Close Tabs to the Right, across the strip. A tab that can't close (unsaved text it
+    /// couldn't save) stops there and is shown.
+    func closeTabs(otherThan entry: StripTab, toRight: Bool = false) async {
+        let strip = stripTabs
+        guard let index = strip.firstIndex(where: { $0.key == entry.key }) else { return }
+        let others = toRight ? Array(strip.dropFirst(index + 1)) : strip.filter { $0.key != entry.key }
+        for other in others where !(await other.workspace.closeTab(other.tab.id)) {
+            activate(other)
+            break
+        }
     }
 
     // MARK: Open Recent
@@ -412,9 +533,17 @@ import SilkwebCore
 
     /// The library window is up. Repeated calls (the probe moving between hierarchies) are harmless.
     func register(window: NSWindow) {
+        let reopened = !hasWindow
         self.window = window
         hasWindow = true
         for workspace in workspaces { workspace.attachedWindow = window }
+        // #197: the strip lists every Library's tabs, so they all come back with the window, not only the current
+        // Library's.
+        if reopened, !resumesEditors.isEmpty {
+            let resuming = workspaces.filter { resumesEditors.contains(ObjectIdentifier($0)) }
+            resumesEditors.removeAll()
+            Task { for workspace in resuming { await workspace.resumeEditor() } }
+        }
     }
 
     /// The window closed: every section keeps its Library; its tabs reopen when the window comes back.

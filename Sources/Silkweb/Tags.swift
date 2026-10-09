@@ -139,13 +139,13 @@ extension LibraryWorkspace {
     }
     var filteredSearchResults: [SearchResult] {
         guard let snapshot else { return search.results }
-        guard !effectiveTagFilters.isEmpty || search.folderScope != nil else { return search.results }
+        guard !effectiveTagFilters.isEmpty || search.searchScope != nil else { return search.results }
         let documents = snapshot.presentation.documentsByID
         return search.results.filter { result in
             guard let document = documents[result.id] else { return false }
             // Folder search always includes descendants; the toggle only scopes the plain list.
             return TagEditor.matches(
-                document, folder: search.folderScope == nil ? nil : selectedFolder,
+                document, folder: search.searchScope == nil ? nil : selectedFolder,
                 includeSubfolders: true, tags: effectiveTagFilters, metadata: snapshot.metadata)
         }
     }

@@ -135,7 +135,10 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
                 coordinator.finishDrag(accepted: false)
                 header.coordinator = nil
                 rebuilt = true
-            } else if header.coordinator == nil, let snapshot = header.workspace.snapshot {
+            } else if header.coordinator == nil, !header.workspace.sectionCollapsed,
+                let snapshot = header.workspace.snapshot
+            {
+                // #197: a collapsed section draws only its header; its folder tree is built when it first expands.
                 let coordinator = FolderSidebar.Coordinator(workspace: header.workspace, snapshot: snapshot)
                 coordinator.sections = self
                 coordinator.header = header
