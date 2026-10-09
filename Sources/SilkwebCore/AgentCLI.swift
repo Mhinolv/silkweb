@@ -3,7 +3,8 @@ import Foundation
 /// The `silkweb memory …` command line (#135, `docs/agent-memory.md` › Command line): a thin layer
 /// over the same services MCP uses (#136). It resolves a grant with Silkweb closed, then reports
 /// scope, lists, searches and reads documents (#134), creates documents and Folders (#133) and lists
-/// this grant's receipts. Only creates write to the Library; nothing writes the grants file.
+/// this grant's receipts. Only creates write to the Library; only `grant init` (#186,
+/// `AgentGrantInit.swift`) writes the grants file.
 ///
 /// stdout always carries exactly one JSON object, `{"ok":true,"result":…,"version":1}` or
 /// `{"error":{…},"ok":false,"version":1}`, so scripts can parse it whatever happened. stderr carries
@@ -23,6 +24,7 @@ public enum AgentHelper {
           silkweb memory <command> [arguments] [options]
           silkweb mcp [--grant G] [--agent A] [--session S] [--client C]
                                         Stdio MCP server for agents (stdout is MCP only)
+          silkweb grant init [...]      Set up agent access for one project (owner only)
 
         COMMANDS
           capabilities                  This grant’s scope, limits and commands
@@ -173,7 +175,8 @@ public enum AgentHelper {
     // MARK: Parsing
 
     /// `--name value` and `--name=value`; `--` ends the options, so a query may start with “-”.
-    static func parse(_ arguments: [String]) throws -> Invocation {
+    /// `flags` are the options that take no value.
+    static func parse(_ arguments: [String], flags: Set<String> = flags) throws -> Invocation {
         var invocation = Invocation()
         var index = 0
         var literal = false
