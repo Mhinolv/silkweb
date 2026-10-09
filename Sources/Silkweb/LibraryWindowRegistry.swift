@@ -1,124 +1,328 @@
 import AppKit
 import Observation
+import SilkwebCore
 
-/// One `LibraryWorkspace` per library window (#194). The app's commands and Settings ▸ Library are registered once
-/// and act on `target`: the key library window, or the last one to be key while Settings or a panel is in front.
+/// The library window's open Libraries (#195): one window, each Library a sidebar section with its own
+/// `LibraryWorkspace` (#194: own watcher, index, tabs). The section holding the selection is `current`; the list,
+/// the editor and every command act on it. Sections never duplicate: the key is the canonical root path.
 @MainActor @Observable final class LibraryWindowRegistry: NSObject {
     static let shared = LibraryWindowRegistry()
+    static let recentsKey = "recentLibraries"
 
-    /// Open library windows' workspaces, the most recently key first.
-    private(set) var workspaces: [LibraryWorkspace] = []
-    /// The workspace without a window: the launch one, or the last one closed, which the next library window
-    /// adopts so a Dock click reopens the last Library as the single `Window` scene did. Never nil while
-    /// `workspaces` is empty; it only changes together with `workspaces`, which publishes the change.
-    @ObservationIgnored private var spare: LibraryWorkspace?
-    /// A window has taken `spare` and not attached yet; another new window gets a fresh workspace.
-    @ObservationIgnored private var spareClaimed = false
-    /// Per-window split autosave slot; 0 keeps the legacy name (see `AppDefaults.windowColumnAutosaveName(base:slot:)`).
-    @ObservationIgnored private var slots: [ObjectIdentifier: Int] = [:]
-    @ObservationIgnored private let columnAutosaveBase: String?
-    @ObservationIgnored private let makeWorkspace: @MainActor (String?) -> LibraryWorkspace
+    /// Every workspace in the window, in the order its section was added. A workspace without a Library is the
+    /// welcome (or can't-open) screen; there is one only while no section is open.
+    private(set) var workspaces: [LibraryWorkspace]
+    /// The current Library: the section that holds the selection.
+    private(set) var current: LibraryWorkspace
+    /// File ▸ Open Recent ▸ and the welcome screen's Recent Libraries, most recent first.
+    private(set) var recents: RecentLibraries
+    /// The library window is up; commands bring it back first otherwise.
+    private(set) var hasWindow = false
+    @ObservationIgnored private weak var window: NSWindow?
+    /// Sections whose tabs closed with the window; each reopens its tabs when it is next current.
+    @ObservationIgnored private var resumesEditors: Set<ObjectIdentifier> = []
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let makeWorkspace: @MainActor () -> LibraryWorkspace
+    /// Presents an alert and returns true for its first button. Tests replace it.
+    @ObservationIgnored var presentAlert: @MainActor (NSAlert, NSWindow?) async -> Bool =
+        LibraryWorkspace.presentAlert(_:window:)
 
     init(
-        columnAutosaveBase: String? = AppDefaults.columnAutosaveName,
-        makeWorkspace: @escaping @MainActor (String?) -> LibraryWorkspace = { LibraryWorkspace(columnAutosaveName: $0) }
+        defaults: UserDefaults = AppDefaults.store,
+        makeWorkspace: @escaping @MainActor () -> LibraryWorkspace = { LibraryWorkspace() }
     ) {
-        self.columnAutosaveBase = columnAutosaveBase
+        self.defaults = defaults
         self.makeWorkspace = makeWorkspace
-        let first = makeWorkspace(AppDefaults.windowColumnAutosaveName(base: columnAutosaveBase, slot: 0))
-        spare = first
+        recents = Self.loadRecents(defaults)
+        let first = makeWorkspace()
+        current = first
+        workspaces = [first]
         super.init()
-        slots[ObjectIdentifier(first)] = 0
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(windowBecameKey(_:)), name: NSWindow.didBecomeKeyNotification, object: nil)
+        first.shell = self
     }
 
-    deinit { NotificationCenter.default.removeObserver(self) }
+    /// Commands, Settings ▸ Library and the window's columns act here.
+    var target: LibraryWorkspace { current }
 
-    /// Library-wide commands and Settings ▸ Library act here. With no library window open it is the workspace the
-    /// next window adopts.
-    var target: LibraryWorkspace { workspaces.first ?? spare! }
+    /// Open Libraries in sidebar order.
+    var sections: [LibraryWorkspace] { workspaces.filter { $0.root != nil } }
 
-    /// The open library window whose Library is at `root` (canonical file URL comparison).
+    /// The open section whose Library is at `root` (canonical file URL comparison).
     func workspace(for root: URL) -> LibraryWorkspace? {
         let root = root.standardizedFileURL.resolvingSymlinksInPath()
-        return workspaces.first { $0.root?.standardizedFileURL.resolvingSymlinksInPath() == root }
+        return sections.first { $0.root?.standardizedFileURL.resolvingSymlinksInPath() == root }
     }
 
-    func isOpen(_ workspace: LibraryWorkspace) -> Bool { workspaces.contains { $0 === workspace } }
-
-    /// A new library window's workspace. The first one takes over the spare (with its saved Library and column
-    /// widths); later ones start on the welcome screen with their own autosave slot.
-    func adopt() -> LibraryWorkspace {
-        if let spare, !spareClaimed {
-            spareClaimed = true
-            return spare
-        }
-        let used = Set(slots.values)
-        let slot = (0...).first { !used.contains($0) }!
-        let workspace = makeWorkspace(AppDefaults.windowColumnAutosaveName(base: columnAutosaveBase, slot: slot))
-        // Only the adopted spare restores the last-opened Library, so two windows never open it twice.
+    private func newWorkspace() -> LibraryWorkspace {
+        let workspace = makeWorkspace()
+        workspace.shell = self
+        // Only the launch workspace restores the last-opened Library.
         workspace.restoresLastLibrary = false
-        slots[ObjectIdentifier(workspace)] = slot
+        workspace.attachedWindow = window
         return workspace
     }
 
-    func slot(of workspace: LibraryWorkspace) -> Int? { slots[ObjectIdentifier(workspace)] }
+    // MARK: Sections
 
-    /// The workspace's window is up. Repeated calls (the probe moving between windows) are harmless.
-    func register(_ workspace: LibraryWorkspace, window: NSWindow) {
-        workspace.attachedWindow = window
-        if workspace === spare {
-            spare = nil
-            spareClaimed = false
+    /// Open Folder in Place…, New Library…, the welcome screen and Open Recent (#195): focuses the section if the
+    /// folder is open, else checks it can be read and appends a section (or opens it on the welcome screen). A
+    /// failure alerts on the current Library and changes no section or selection (#102).
+    @discardableResult
+    func add(_ url: URL, usesSecurityScope: Bool = false) async -> LibraryWorkspace? {
+        let url = url.standardizedFileURL.resolvingSymlinksInPath()
+        if let open = workspace(for: url) {
+            focus(open)
+            return open
         }
-        if !isOpen(workspace) {
-            if window.isKeyWindow { workspaces.insert(workspace, at: 0) } else { workspaces.append(workspace) }
-        } else if window.isKeyWindow {
-            activate(workspace)
+        let title = "“\(url.lastPathComponent)” couldn’t be opened."
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try LibraryLocationRestore.validateDirectory(url, scoped: usesSecurityScope)
+            }.value
+        } catch {
+            fail(title, Self.message(for: error))
+            return nil
+        }
+        // A second request for the same folder may have landed while this one was checking.
+        if let open = workspace(for: url) {
+            focus(open)
+            return open
+        }
+        let previous = current
+        let inPlace = current.root == nil && !current.loading
+        let workspace = inPlace ? current : newWorkspace()
+        if !inPlace { workspaces.append(workspace) }
+        workspace.beginOpening(url)
+        workspace.open(url, usesSecurityScope: usesSecurityScope)
+        focus(workspace)
+        await workspace.waitForLoad()
+        // An appended section that couldn't load leaves again; the welcome screen keeps its error instead.
+        if !inPlace, workspace.snapshot == nil, let error = workspace.error,
+            workspaces.contains(where: { $0 === workspace })
+        {
+            await workspace.releaseLibrary()
+            workspaces.removeAll { $0 === workspace }
+            if current === workspace {
+                setCurrent(workspaces.contains { $0 === previous } ? previous : sections.last ?? welcomeWorkspace())
+            }
+            fail(title, error)
+            return nil
+        }
+        return workspace
+    }
+
+    /// Already open: expands the section, selects its remembered scope and scrolls it into view. No alert.
+    func focus(_ workspace: LibraryWorkspace) {
+        guard workspaces.contains(where: { $0 === workspace }) else { return }
+        workspace.sectionCollapsed = false
+        workspace.sectionRevealRequest += 1
+        setCurrent(workspace)
+    }
+
+    private func setCurrent(_ workspace: LibraryWorkspace) {
+        guard workspace !== current else { return }
+        current = workspace
+        if resumesEditors.remove(ObjectIdentifier(workspace)) != nil {
+            Task { await workspace.resumeEditor() }
         }
     }
 
-    /// The window closed: only its workspace leaves. The last one waits as the spare for the next window.
-    func close(_ workspace: LibraryWorkspace) {
-        guard isOpen(workspace) else { return }
-        if workspaces.count == 1, spare == nil {
-            spare = workspace
-        } else {
-            slots[ObjectIdentifier(workspace)] = nil
+    private func welcomeWorkspace() -> LibraryWorkspace {
+        if let empty = workspaces.first(where: { $0.root == nil }) { return empty }
+        let empty = newWorkspace()
+        workspaces.append(empty)
+        return empty
+    }
+
+    /// Settings ▸ Library ▸ Choose Library… (and Locate… on a can't-open screen) replace this section in place:
+    /// `open` flushes first, and a refused flush keeps it (#102). A folder already open elsewhere is focused.
+    func replace(_ workspace: LibraryWorkspace, with url: URL) {
+        if let open = self.workspace(for: url), open !== workspace {
+            focus(open)
+            return
         }
+        workspace.open(url)
+        focus(workspace)
+    }
+
+    /// File ▸ Close Library and the section header's context menu (#195; owner decision 2026-10-09): asks first
+    /// whenever one of the Library's tabs has unsaved changes, saves them, then closes only that Library's tabs.
+    /// A failed save alerts and closes nothing. The files stay on disk and the folder stays in Open Recent.
+    @discardableResult
+    func closeLibrary(_ workspace: LibraryWorkspace) async -> Bool {
+        guard let root = workspace.root, workspaces.contains(where: { $0 === workspace }) else { return false }
+        let name = root.lastPathComponent
+        await workspace.waitForNavigation()
+        guard !workspace.mutating else { return false }
+        if workspace.allEditors.contains(where: { $0.state.isDirty }) {
+            guard await presentAlert(Self.closeLibraryAlert(name), window) else { return false }
+        }
+        guard await workspace.flushEditors() else {
+            _ = await presentAlert(Self.saveFailedAlert(name), window)
+            return false
+        }
+        let order = sections
+        guard let index = order.firstIndex(where: { $0 === workspace }) else { return false }
+        await workspace.saveSessionNow()
+        await workspace.releaseLibrary()
         workspaces.removeAll { $0 === workspace }
+        resumesEditors.remove(ObjectIdentifier(workspace))
+        if current === workspace {
+            // The next section's remembered scope, else the previous one's; the welcome screen after the last.
+            let remaining = sections
+            if remaining.isEmpty {
+                setCurrent(welcomeWorkspace())
+            } else {
+                focus(remaining[min(index, remaining.count - 1)])
+            }
+        }
+        return true
     }
 
-    func activate(_ workspace: LibraryWorkspace) {
-        guard let index = workspaces.firstIndex(where: { $0 === workspace }), index > 0 else { return }
-        workspaces.insert(workspaces.remove(at: index), at: 0)
+    // MARK: Open Recent
+
+    /// Called by `LibraryWorkspace.open` after a successful load: the entry is recorded only then.
+    func libraryDidOpen(_ location: LibraryLocation) {
+        recents.record(location)
+        saveRecents()
     }
 
-    @objc private func windowBecameKey(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow,
-            let workspace = workspaces.first(where: { $0.libraryWindow === window })
-        else { return }
-        activate(workspace)
+    func recentItems() -> [RecentLibraryItem] {
+        recents.items(openPaths: Set(sections.compactMap { $0.root?.path }))
     }
 
-    /// Every workspace: open windows in quit order (key or last-active first), then the spare.
-    var allWorkspaces: [LibraryWorkspace] { workspaces + [spare].compactMap { $0 } }
+    func openRecent(_ path: String) async {
+        if let open = workspace(for: URL(fileURLWithPath: path)) {
+            focus(open)
+            return
+        }
+        guard let location = recents.entry(path: path) else { return }
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        let resolved = try? await Task.detached(priority: .userInitiated) {
+            try LibraryLocationRestore.restore(location)
+        }.value
+        guard let resolved else {
+            if await presentAlert(Self.missingRecentAlert(name), window) {
+                recents.remove(path: path)
+                saveRecents()
+            }
+            return
+        }
+        // The bookmark followed a moved folder: the old path's entry gives way to the new one.
+        if RecentLibraries.canonicalPath(resolved.url.path) != RecentLibraries.canonicalPath(path) {
+            recents.remove(path: path)
+            saveRecents()
+        }
+        await add(resolved.url, usesSecurityScope: resolved.usesSecurityScope)
+    }
 
-    /// Quit (#193): one window at a time, the key (or last-active) one first. Each window comes to the front before
-    /// its unsaved-changes alert; Cancel in any alert stops the quit and leaves every window open. Tests replace
-    /// `prepare`.
-    func prepareToQuit(_ prepare: ((LibraryWorkspace) async -> Bool)? = nil) async -> Bool {
+    func clearRecents() {
+        recents.clear()
+        saveRecents()
+    }
+
+    private static func loadRecents(_ defaults: UserDefaults) -> RecentLibraries {
+        if let data = defaults.data(forKey: recentsKey) {
+            return (try? JSONDecoder().decode(RecentLibraries.self, from: data)) ?? RecentLibraries()
+        }
+        let legacy = defaults.data(forKey: "libraryLocation").flatMap {
+            try? JSONDecoder().decode(LibraryLocation.self, from: $0)
+        }
+        return .seeded(from: legacy)
+    }
+
+    private func saveRecents() {
+        guard let data = try? JSONEncoder().encode(recents) else { return }
+        defaults.set(data, forKey: Self.recentsKey)
+    }
+
+    // MARK: Alerts
+
+    /// The existing failure alert (`mutationFailure` style) on the current Library.
+    private func fail(_ title: String, _ message: String) {
+        current.mutationRevealURLs = []
+        current.mutationErrorTitle = title
+        current.mutationError = message
+    }
+
+    private static func message(for error: Error) -> String {
+        switch error as? LibraryLocationError {
+        case .notFound: "The folder may have been moved, renamed or deleted."
+        case .unreadable: "Silkweb doesn’t have permission to read it."
+        case nil: error.localizedDescription
+        }
+    }
+
+    static func closeLibraryAlert(_ name: String) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "Close “\(name)”?"
+        alert.informativeText =
+            "Some of its documents have unsaved changes. Silkweb saves them before closing the library."
+        alert.addButton(withTitle: "Close Library")
+        alert.addButton(withTitle: "Cancel")
+        return alert
+    }
+
+    static func saveFailedAlert(_ name: String) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "“\(name)” couldn’t be saved."
+        alert.informativeText = "The library stays open with its documents."
+        alert.addButton(withTitle: "Cancel")
+        return alert
+    }
+
+    static func missingRecentAlert(_ name: String) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "“\(name)” can’t be opened."
+        alert.informativeText = "The folder may have been moved, renamed or deleted."
+        alert.addButton(withTitle: "Remove from Recents")
+        alert.addButton(withTitle: "Cancel")
+        return alert
+    }
+
+    // MARK: Window and Quit
+
+    /// The library window is up. Repeated calls (the probe moving between hierarchies) are harmless.
+    func register(window: NSWindow) {
+        self.window = window
+        hasWindow = true
+        for workspace in workspaces { workspace.attachedWindow = window }
+    }
+
+    /// The window closed: every section keeps its Library; its tabs reopen when the window comes back.
+    func windowClosed() async {
+        hasWindow = false
+        for workspace in workspaces {
+            await workspace.didCloseWindow()
+            if workspace !== current { resumesEditors.insert(ObjectIdentifier(workspace)) }
+        }
+    }
+
+    /// The current Library first, then the others in sidebar order.
+    var allWorkspaces: [LibraryWorkspace] { [current] + workspaces.filter { $0 !== current } }
+
+    /// Quit and Close Window: one Library at a time; each becomes current before its unsaved-changes alert, and
+    /// Cancel in any alert stops and leaves every section open. Tests replace `prepare`.
+    func prepareToExit(
+        _ reason: DocumentSession.ExitReason, _ prepare: ((LibraryWorkspace) async -> Bool)? = nil
+    ) async -> Bool {
         for workspace in allWorkspaces {
             let permitted: Bool
             if let prepare {
                 permitted = await prepare(workspace)
             } else {
-                permitted = await workspace.prepareToExit(.quit) { workspace.libraryWindow?.makeKeyAndOrderFront(nil) }
+                permitted = await workspace.prepareToExit(reason) { [weak self] in
+                    self?.focus(workspace)
+                    self?.window?.makeKeyAndOrderFront(nil)
+                }
             }
             guard permitted else { return false }
         }
         return true
+    }
+
+    func prepareToQuit(_ prepare: ((LibraryWorkspace) async -> Bool)? = nil) async -> Bool {
+        await prepareToExit(.quit, prepare)
     }
 
     func flushEditors() async {

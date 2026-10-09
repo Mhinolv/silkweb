@@ -15,6 +15,7 @@ Silkweb should feel like a first-party Mac app: native controls, system colors, 
 | **Trash** (always the macOS Trash) | Recycle bin, Delete permanently |
 | **All Documents** (virtual sidebar view) | Inbox, Everything |
 | **Include Subfolders**, **Move To…**, **Move to Trash**, **Reveal in Finder**, **Open Folder in Place…**, **New Library…**, **Import Folder Copy…**, **Quick Open**, **Search Library**, **Outline**, **Document Info**, **Editor / Split / Preview**, **Focus Mode**, **Typewriter Mode** | — |
+| **section** (an open Library in the sidebar), **current Library** (the section holding the selection), **Close Library**, **Open Recent**, **Recent Libraries** (#195) | Workspace, Vault, Tab group |
 
 Copy style: sentence case for messages and title case for menu items and buttons. Use curly quotes around names (“Drafts”). Show paths relative to the library with “ › ” separators (`Writing › Drafts`). Documents display without the `.md` extension.
 
@@ -23,9 +24,9 @@ Copy style: sentence case for messages and title case for menu items and buttons
 - Window: minimum 900×560, default 1200×760. Frame is autosaved.
 - Column widths: sidebar min 180 / ideal 220 / max 320. List min 240 / ideal 300 / max 480. Detail min 420. Inspector min 200 / ideal 240 / max 320.
 - Compact unified toolbar: items share the traffic-lights row (`.unifiedCompact`, about 38 pt, no title row). Library group leading (Hide Sidebars, New Document, Sort By, Filter by Tag), then a flexible empty gap, then the view group trailing (View Mode, Show Outline, Show Document Info). No path, no count and no title in the bar (#91: the path lives in the status bar, §5.6). Layout: AppKit places the items (after the traffic lights, or after the sidebar column); Silkweb never moves them while any traffic light shows. The gap is the flexible part (an empty item the toolbar controller sizes, since macOS 15 has no SwiftUI flexible toolbar spacer): it fills the room the other items leave, up to the bar's edge or the titlebar area AppKit reserves over the Outline inspector, and gives way first (lowest overflow priority, 16 pt minimum); below 900 pt Filter by Tag overflows into » first, then Sort By; no button goes into » at 900 pt or wider. Only in full screen or with every window button hidden do the items slide to a 12 pt leading inset (0.2 s, none under Reduce Motion), and only where AppKit lets the row take the freed room: after a sidebar-column section, or once AppKit refuses the wider row, they keep AppKit's placement so the trailing items keep their edge (#54). The trailing Info glyph ends 12 pt from the bar's edge, or 12 pt before the inspector's titlebar area, mirroring the leading inset, windowed and in full screen (#68). The toolbar never auto-hides in full screen. The window title (Window menu and AX) remains the document name and `navigationSubtitle` the count; neither is visible in the bar (1.65, #91).
-- Sidebar layout:
+- Sidebar layout: one **section** per open Library (#195, Finder-style), in the order they were added, even when only one is open:
 ```
-LIBRARY
+My Library                        ⌄   ← section header (current Library: labelColor)
   [doc.on.doc]      All Documents (1,204)
   [books.vertical]  My Library (12)     ← root folder (dir name); root docs live here
      ▸ [folder]     Projects (8)
@@ -34,7 +35,12 @@ LIBRARY
 ▾ [tag]             Tags (2)          ← sibling of library root; always present, including Tags (0) (1.21)
     [tag]           draft (3)
     [tag]           research (9)
+Kyoto                             ⌄   ← another section (secondaryLabelColor)
+  [doc.on.doc]      All Documents (310)
+  …
 ```
+- Section header (#195): an `NSOutlineView` group row with the folder name, 11 pt semibold, no symbol, count or thread guide; the current Library's header in `labelColor`, the others `secondaryLabelColor`; 12 pt above every header except the first. The native Show/Hide chevron collapses the whole section (its selection is kept). Context menu: Reveal in Finder, a separator, Close Library (text only). AX: a group labelled “<name> library”, value “current” on the current Library. The rows under a header are exactly a lone Library's rows; the list, editor, tabs, the footer `+` and every command act on the current Library. Selecting a row in another section makes it current.
+- Adding a section (⌘O, ⌥⌘N, welcome, Open Recent): an open folder (canonical path) is focused (expanded, its remembered scope selected and scrolled into view) with no alert; a new one is checked first, appended and made current; a failure alerts (“Name” couldn’t be opened. / created.) and changes no section. Settings ▸ Choose Library… replaces the current section in place. Close Library asks first when any of its tabs has unsaved changes (owner decision 2026-10-09), saves, then closes only its tabs; a failed save alerts and closes nothing. Closing the last section shows the welcome screen, which lists up to five **Recent Libraries** (missing ones tertiary, “Not found”).
 - Nested rows hang from 1.5 pt `SilkwebThread` guides with 6 pt rounded elbows (16 pt per level, guide = centre of the parent's chevron slot; geometry in `ThreadGuides`); leading native chevrons tinted `tertiaryLabelColor`. The selection capsule alone marks the scope shown in the list (no coral node, owner decision in 1.65); that row's AX value appends “current folder” (1.63).
 - Sidebar counts are inline after the name: a space and the direct count in parentheses, `secondaryLabelColor`, same font as the title with monospaced digits, `(0)` shown. The name truncates first; the count never clips. No trailing count column.
 - Tags scroll in the same tree after the library root’s last visible descendant. The group count is distinct tags; child counts are documents. The group is a keyboard focus stop without changing document scope. Disclosure, double-click, and arrow keys expand/collapse; window session saves expansion (default expanded, selected tags reveal their group). Tag rows support inline rename and delete, but no drag/drop.
@@ -74,10 +80,12 @@ Before adding any shortcut, check it against this table. 1.25 audits the final m
 | File | New Folder | ⇧⌘N | 1.6 |
 | File | New Library… | ⌥⌘N | 1.4 |
 | File | Open Folder in Place… | ⌘O | 1.4 |
+| File | Open Recent ▸ (up to 10, ✓ on open sections, Clear Menu) | — | #195 |
 | File | Quick Open… | ⇧⌘O | 1.20 |
 | File | Open in New Tab | ⌘T | 1.26 |
 | File | Import Folder Copy… | ⇧⌘I | 1.10 |
 | File | Close Tab / Close Window | ⌘W / ⇧⌘W († ⌘W closes a tab only while the library window is key; otherwise the front window) | 1.26 |
+| File | Close Library (the current Library's section and tabs; after Close Window) | — | #195 |
 | File | Save (flush autosave now) | ⌘S | 1.5 |
 | File | Rename… | ↩ † (sidebar/list focused; no menu key equivalent) | 1.6 |
 | File | Move To… | ⌃⌘M † (sidebar/list focused) | 1.7 |

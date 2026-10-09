@@ -17,6 +17,8 @@ struct FolderSidebar: NSViewRepresentable {
         var children: [Item] = [] { didSet { for child in children { child.parent = self } } }
         /// Thread guides walk up through parents (silkweb-1.63).
         weak var parent: Item?
+        /// The section's coordinator in the multi-Library sidebar (#195).
+        weak var owner: Coordinator?
         init(folder: LibraryFolder?, title: String) { self.folder = folder; self.title = title }
     }
 
@@ -28,14 +30,7 @@ struct FolderSidebar: NSViewRepresentable {
 
     static func makeScrollView(coordinator: Coordinator) -> NSScrollView {
         let workspace = coordinator.workspace
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        // With legacy scroll bars (a mouse attached) a short folder list shows no empty track (1.81).
-        scroll.autohidesScrollers = true
-        // Paint over the sidebar item's wallpaper-tinted material (1.56).
-        scroll.drawsBackground = true
-        scroll.backgroundColor = .silkwebPaneBackground
-        let outline = SidebarOutlineView()
+        let (scroll, outline) = makeOutline()
         workspace.sidebarOutline = outline
         outline.renameSelected = { [weak coordinator] in coordinator?.renameSelection() }
         outline.toggleDisclosure = { [weak coordinator] row in coordinator?.toggleDisclosure(at: row) ?? false }
@@ -48,6 +43,29 @@ struct FolderSidebar: NSViewRepresentable {
         outline.didResign = { workspace.libraryFocusChanged() }
         outline.contextMenu = { [weak coordinator = coordinator] event in coordinator?.menu(event) }
         outline.moveFocus = { backwards in workspace.focus(backwards ? 2 : 1) }
+        outline.delegate = coordinator
+        outline.dataSource = coordinator
+        outline.expandHovered = { [weak coordinator] in
+            guard coordinator?.hovered != nil else { return false }
+            coordinator?.expandHover(); return true
+        }
+        outline.dragEnded = { [weak coordinator] in coordinator?.finishDrag(accepted: false) }
+        outline.setAccessibilityLabel("Folders")
+        coordinator.outline = outline
+        coordinator.restore()
+        return scroll
+    }
+
+    /// The source-list outline both sidebars share: one Library's, and the window's sections (#195).
+    static func makeOutline() -> (NSScrollView, SidebarOutlineView) {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        // With legacy scroll bars (a mouse attached) a short folder list shows no empty track (1.81).
+        scroll.autohidesScrollers = true
+        // Paint over the sidebar item's wallpaper-tinted material (1.56).
+        scroll.drawsBackground = true
+        scroll.backgroundColor = .silkwebPaneBackground
+        let outline = SidebarOutlineView()
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("folders"))
         outline.addTableColumn(column)
         outline.outlineTableColumn = column
@@ -56,23 +74,13 @@ struct FolderSidebar: NSViewRepresentable {
         outline.backgroundColor = .silkwebPaneBackground
         outline.rowHeight = Spacing.sidebarRowHeight
         outline.indentationPerLevel = ThreadRowView.indentation
-        outline.delegate = coordinator
-        outline.dataSource = coordinator
         outline.registerForDraggedTypes([NSPasteboard.PasteboardType(UTType.silkwebMove.identifier)])
         outline.setDraggingSourceOperationMask(.move, forLocal: true)
         outline.setDraggingSourceOperationMask([], forLocal: false)
-        outline.expandHovered = { [weak coordinator] in
-            guard coordinator?.hovered != nil else { return false }
-            coordinator?.expandHover(); return true
-        }
-        outline.dragEnded = { [weak coordinator] in coordinator?.finishDrag(accepted: false) }
         outline.allowsEmptySelection = true
         outline.autosaveExpandedItems = false
-        outline.setAccessibilityLabel("Folders")
         scroll.documentView = outline
-        coordinator.outline = outline
-        coordinator.restore()
-        return scroll
+        return (scroll, outline)
     }
 
     static func dismantleNSView(_ view: NSScrollView, coordinator: Coordinator) {
@@ -83,7 +91,11 @@ struct FolderSidebar: NSViewRepresentable {
         Self.update(view, coordinator: context.coordinator, snapshot: snapshot)
     }
 
-    static func update(_ view: NSScrollView, coordinator: Coordinator, snapshot: LibrarySnapshot) {
+    /// `isCurrent` is false for another Library's section (#195): its rows follow its Library, but only the
+    /// current section moves the selection or takes focus.
+    static func update(
+        _ view: NSScrollView, coordinator: Coordinator, snapshot: LibrarySnapshot, isCurrent: Bool = true
+    ) {
         let workspace = coordinator.workspace
         if coordinator.rootURL != snapshot.rootURL || coordinator.revision != workspace.revision
             || coordinator.agentVisible != workspace.hasAgentActivity
@@ -115,7 +127,7 @@ struct FolderSidebar: NSViewRepresentable {
         coordinator.updateCurrentScope()
         if coordinator.lastFocusRequest != workspace.focusRequest {
             coordinator.lastFocusRequest = workspace.focusRequest
-            if workspace.focusColumn == 0, workspace.rename == nil {
+            if isCurrent, workspace.focusColumn == 0, workspace.rename == nil {
                 view.window?.makeFirstResponder(coordinator.outline)
             }
         }
@@ -158,6 +170,11 @@ struct FolderSidebar: NSViewRepresentable {
         private(set) var currentItem: Item?
         private var hoverMonitor: Any?
         private var dragCache: (name: NSPasteboard.Name, count: Int, revision: Int, library: UUID, paths: [String]?)?
+        /// #195: this Library is one section of the window's sidebar, under `header`; nil for a lone Library.
+        weak var sections: SidebarSections?
+        weak var header: SidebarSections.Header?
+        /// Only the current Library's section holds the outline's selection.
+        var isCurrent: Bool { sections.map { $0.current === workspace } ?? true }
 
         private let readDragData: (NSPasteboard) -> Data?
 
@@ -227,13 +244,15 @@ struct FolderSidebar: NSViewRepresentable {
                 tagsGroup = group
                 roots.append(group)
             }
+            for item in itemsByPath.values { item.owner = self }
+            for item in roots + (tagsGroup?.children ?? []) { item.owner = self }
             return true
         }
 
         func updateVisibleCounts() {
             guard let outline else { return }
             for row in 0..<outline.numberOfRows {
-                if let item = outline.item(atRow: row) as? Item,
+                if let item = outline.item(atRow: row) as? Item, item.owner == nil || item.owner === self,
                     let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarFolderCell
                 {
                     applyCount(to: cell, item: item)
@@ -310,30 +329,49 @@ struct FolderSidebar: NSViewRepresentable {
         func restore() {
             guard let outline else { return }
             restoring = true
-            outline.reloadData()
+            if let sections, let header {
+                // Only this Library's rows reload; the other sections keep theirs (#195).
+                sections.reload(header)
+            } else {
+                outline.reloadData()
+            }
+            applyExpansion()
+            selectedTagID = workspace.session.selectedTagID
+            let item = scopeItem()
+            if isCurrent {
+                if let item { select(item) }
+                if item == nil { outline.deselectAll(nil) }
+            }
+            selectedFolder = .some(workspace.session.selectedFolder)
+            agentScope = workspace.agentScope
+            restoring = false
+            updateCurrentScope()
+            sections?.didRestore(self)
+        }
+
+        /// Expands the saved folders and the Tags group. Also after a collapsed section is shown again (#195).
+        func applyExpansion() {
+            guard let outline else { return }
+            let wasRestoring = restoring
+            restoring = true
+            defer { restoring = wasRestoring }
             for path in workspace.session.expandedFolders.sorted(by: { $0.count < $1.count }) {
                 if let item = itemsByPath[path] { outline.expandItem(item) }
             }
-            selectedTagID = workspace.session.selectedTagID
             if let group = tagsGroup {
                 if workspace.session.selectedTagID != nil { workspace.tagsExpanded = true }
                 if workspace.tagsExpanded { outline.expandItem(group) }
             }
             tagsExpanded = workspace.tagsExpanded
-            let item = scopeItem()
-            if let item { select(item) }
-            if item == nil { outline.deselectAll(nil) }
-            selectedFolder = .some(workspace.session.selectedFolder)
-            agentScope = workspace.agentScope
-            restoring = false
-            updateCurrentScope()
         }
 
         /// Selects the scope's row without reloading; a no-op when it is already selected.
         func selectScope() {
             selectedFolder = .some(workspace.session.selectedFolder)
             agentScope = workspace.agentScope
-            guard let outline, let item = scopeItem(), outline.item(atRow: outline.selectedRow) as? Item !== item else {
+            guard isCurrent, let outline, let item = scopeItem(),
+                outline.item(atRow: outline.selectedRow) as? Item !== item
+            else {
                 return
             }
             restoring = true
