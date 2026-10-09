@@ -7,67 +7,55 @@ struct SilkwebApp: App {
     private let registry = LibraryWindowRegistry.shared
 
     var body: some Scene {
-        // One workspace per window (#194). `.newItem` is replaced below, so there is no File ▸ New Window.
-        WindowGroup("Silkweb", id: LibraryWindow.sceneID) {
+        // One library window; each open Library is a sidebar section (#195). `.newItem` is replaced below, so
+        // there is no File ▸ New Window.
+        Window("Silkweb", id: LibraryWindow.sceneID) {
             LibraryWindow(registry: registry)
         }
         .defaultSize(width: 1200, height: 760)
         // One slim bar: toolbar items share the traffic-lights row (silkweb-1.65).
         .windowToolbarStyle(.unifiedCompact(showsTitle: false))
-        // Registered once; every action resolves the key (or last-active) library window when it runs.
+        // Registered once; every action resolves the current Library when it runs.
         .commands { LibraryWindowCommands(registry: registry) }
         // Silkweb ▸ Settings… ⌘, (1.24).
         Settings { LibraryWindowSettings(registry: registry) }
     }
 }
 
-/// A library window's content: the workspace it adopted from the registry, kept for the window's lifetime.
+/// The library window's content: the current Library's columns beside every section (#195).
 struct LibraryWindow: View {
     static let sceneID = "library"
     let registry: LibraryWindowRegistry
-    @State private var holder = Holder()
-
-    /// Adopts on first use, outside any published state, so building the view never publishes.
-    @MainActor final class Holder {
-        private var workspace: LibraryWorkspace?
-        func workspace(from registry: LibraryWindowRegistry) -> LibraryWorkspace {
-            if let workspace { return workspace }
-            let adopted = registry.adopt()
-            workspace = adopted
-            return adopted
-        }
-    }
 
     var body: some View {
-        let workspace = holder.workspace(from: registry)
-        LibraryWorkspaceView(workspace: workspace)
-            .background(EditorWindowLifecycle(workspace: workspace, registry: registry))
+        LibraryWorkspaceView(workspace: registry.current, registry: registry)
+            .background(EditorWindowLifecycle(workspace: registry.current, registry: registry))
             .onAppear { WritingSettings.shared.applyAppearance() }
     }
 }
 
-/// App-level commands for whichever library window they target (#194, extends #104).
+/// App-level commands for the current Library (#195, extends #104).
 struct LibraryWindowCommands: Commands {
     let registry: LibraryWindowRegistry
     @Environment(\.openWindow) private var openWindow
     var body: some Commands {
         let workspace = registry.target
-        WorkspaceCommands(workspace: workspace) {
-            // Open Folder in Place… / New Library… with every window closed: bring the Library's window back first.
-            if !registry.isOpen(workspace) { openWindow(id: LibraryWindow.sceneID) }
+        WorkspaceCommands(workspace: workspace, registry: registry) {
+            // Open Folder in Place… / New Library… with the window closed: bring it back first.
+            if !registry.hasWindow { openWindow(id: LibraryWindow.sceneID) }
         }
         PrintCommands(workspace: workspace)
     }
 }
 
-/// Settings ▸ Library shows and replaces the last-active library window's Library, live (#194).
+/// Settings ▸ Library shows and replaces the current Library, live (#195).
 struct LibraryWindowSettings: View {
     let registry: LibraryWindowRegistry
     @Environment(\.openWindow) private var openWindow
     var body: some View {
         let workspace = registry.target
         SettingsView(settings: WritingSettings.shared, workspace: workspace) {
-            if !registry.isOpen(workspace) { openWindow(id: LibraryWindow.sceneID) }
+            if !registry.hasWindow { openWindow(id: LibraryWindow.sceneID) }
         }
     }
 }
@@ -75,6 +63,8 @@ struct LibraryWindowSettings: View {
 /// Separate command observation from the window scene so idle activity can be tested offscreen.
 struct WorkspaceCommands: Commands {
     let workspace: LibraryWorkspace
+    /// The window's sections: Open Recent ▸ and Close Library (#195). Offscreen command tests leave it out.
+    var registry: LibraryWindowRegistry? = nil
     /// Runs before Open Folder in Place… and New Library… so the chosen Library has a window to show in.
     var showWindow: () -> Void = {}
     var body: some Commands {
@@ -99,6 +89,9 @@ struct WorkspaceCommands: Commands {
                 showWindow(); workspace.chooseFolder()
             }
             .keyboardShortcut("o")
+            if let registry {
+                OpenRecentMenu(registry: registry, showWindow: showWindow)
+            }
             Button("Open in New Tab") { workspace.openSelectionInNewTab() }
                 .keyboardShortcut("t").disabled(!state.canOpenTab)
             Button("Quick Open…") { workspace.search.toggleQuickOpen() }
@@ -110,7 +103,7 @@ struct WorkspaceCommands: Commands {
             }
             .keyboardShortcut("n", modifiers: [.command, .option])
         }
-        TabCommands(workspace: workspace)
+        TabCommands(workspace: workspace, registry: registry)
         CommandGroup(replacing: .undoRedo) {
             Button(state.undoTitle) {
                 if workspace.usesTextUndo {
@@ -187,8 +180,32 @@ struct WorkspaceCommands: Commands {
     }
 }
 
+/// File ▸ Open Recent ▸ (#195): up to 10 Libraries, most recent first; open sections are checked.
+struct OpenRecentMenu: View {
+    let registry: LibraryWindowRegistry
+    var showWindow: () -> Void = {}
+    var body: some View {
+        let items = registry.recentItems()
+        Menu("Open Recent") {
+            ForEach(items) { item in
+                Toggle(
+                    item.title,
+                    isOn: Binding(
+                        get: { item.isOpen },
+                        set: { _ in
+                            showWindow()
+                            Task { await registry.openRecent(item.path) }
+                        }))
+            }
+            Divider()
+            Button("Clear Menu") { registry.clearRecents() }.disabled(items.isEmpty)
+        }
+    }
+}
+
 struct TabCommands: Commands {
     let workspace: LibraryWorkspace
+    var registry: LibraryWindowRegistry? = nil
     var body: some Commands {
         // Tab-scoped items and Save act only while the library window is key (#104).
         let key = workspace.menuState.libraryKey
@@ -218,6 +235,11 @@ struct TabCommands: Commands {
             }.keyboardShortcut("w")
             Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
+            if let registry {
+                // #195: closes only the current Library's section and tabs; no shortcut.
+                Button("Close Library") { Task { await registry.closeLibrary(workspace) } }
+                    .disabled(workspace.root == nil)
+            }
             Divider()
             Button("Save") { Task { await workspace.editor.save() } }
                 .keyboardShortcut("s").disabled(!key || workspace.editor.url == nil || workspace.editor.readOnly)

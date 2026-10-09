@@ -141,8 +141,15 @@ final class LibraryWorkspace {
     @ObservationIgnored weak var librarySplitController: LibrarySplitViewController?
     /// Set by the window lifecycle (#194): this workspace's own window, whatever screen it shows.
     @ObservationIgnored weak var attachedWindow: NSWindow?
-    /// Only one window restores the last-opened Library at launch (#194); see `LibraryWindowRegistry.adopt`.
+    /// Only the launch workspace restores the last-opened Library (#194, #195).
     @ObservationIgnored var restoresLastLibrary = true
+    /// The library window's sections (#195). Offscreen tests that host one workspace leave it out; opening a
+    /// folder then replaces this workspace's Library, as before sections.
+    @ObservationIgnored weak var shell: LibraryWindowRegistry?
+    /// The sidebar section's header is collapsed (#195). Kept for this launch only.
+    var sectionCollapsed = false
+    /// Bumped when the section is focused: the sidebar selects and scrolls to its scope.
+    var sectionRevealRequest = 0
     /// The two views whose focus enables Rename, Move To… and Move to Trash (#104).
     @ObservationIgnored weak var sidebarOutline: SidebarOutlineView?
     @ObservationIgnored weak var documentTable: DocumentTableView?
@@ -303,15 +310,51 @@ final class LibraryWorkspace {
         }
     }
 
-    func chooseFolder() {
+    /// Open Folder in Place… adds a sidebar section (or focuses the open one, #195); `replacing` (Settings ▸ Choose
+    /// Library…, Locate…) opens the folder in this section instead.
+    func chooseFolder(replacing: Bool = false) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.prompt = "Open"
         panel.message = "Choose a folder to use as your Silkweb library. Documents stay where they are."
         panel.begin { [weak self] response in
-            if response == .OK, let url = panel.url { self?.open(url) }
+            if response == .OK, let url = panel.url { self?.openChosen(url, replacing: replacing) }
         }
+    }
+
+    func openChosen(_ url: URL, replacing: Bool = false) {
+        guard let shell else { return open(url) }
+        if replacing {
+            shell.replace(self, with: url)
+        } else {
+            Task { await shell.add(url) }
+        }
+    }
+
+    /// A new section shows as loading from the first frame; the load itself starts in `open`.
+    func beginOpening(_ url: URL) {
+        root = url
+        error = nil
+        loading = true
+        loadingCount = nil
+    }
+
+    /// Close Library (#195): stops this Library's watcher, index and loads and closes its tabs. The caller has
+    /// already saved them.
+    func releaseLibrary() async {
+        loadTask?.cancel()
+        mediaRetryTask?.cancel()
+        saveTask?.cancel()
+        agentReloadTask?.cancel()
+        watcher?.stop()
+        watcher = nil
+        search.reset()
+        knowledge.reset()
+        await didCloseWindow()
+        scope?.stopAccessingSecurityScopedResource()
+        scope = nil
+        loading = false
     }
 
     func newLibrary() {
@@ -329,7 +372,7 @@ final class LibraryWorkspace {
         do {
             // Never adopt or replace an existing item through the Create command.
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
-            open(url)
+            openChosen(url)
         } catch {
             // The current library, welcome or error screen stays behind the alert (#102).
             mutationFailure(error, title: "“\(url.lastPathComponent)” couldn’t be created.")
@@ -454,6 +497,7 @@ final class LibraryWorkspace {
                 let location = await Task.detached(priority: .utility) { LibraryLocation.saving(url) }.value
                 guard !Task.isCancelled else { return }
                 persistLocation(location)
+                shell?.libraryDidOpen(location)
                 loading = false
                 await migrateMedia()
             } catch {
@@ -796,6 +840,8 @@ final class LibraryWorkspace {
 
 struct LibraryWorkspaceView: View {
     @Bindable var workspace: LibraryWorkspace
+    /// The window's sections (#195): the sidebar lists every open Library and the welcome screen its recents.
+    var registry: LibraryWindowRegistry? = nil
 
     var body: some View {
         Group {
@@ -805,11 +851,15 @@ struct LibraryWorkspaceView: View {
                 } description: {
                     Text(error)
                 } actions: {
+                    // Locate… opens the folder in this Library's place; another folder adds a section (#195).
                     Button(workspace.errorTitle == "Library Not Found" ? "Locate…" : "Choose Folder Again…") {
-                        workspace.chooseFolder()
+                        workspace.chooseFolder(replacing: true)
                     }
                     if workspace.errorTitle == "Library Not Found" {
                         Button("Open Another Folder…") { workspace.chooseFolder() }
+                    }
+                    if let registry, workspace.root != nil, registry.sections.count > 1 {
+                        Button("Close Library") { Task { await registry.closeLibrary(workspace) } }
                     }
                 }
             } else if workspace.snapshot != nil || workspace.loading {
@@ -872,7 +922,7 @@ struct LibraryWorkspaceView: View {
     }
 
     private var libraryColumns: some View {
-        LibrarySplitView(workspace: workspace)
+        LibrarySplitView(workspace: workspace, registry: registry)
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Picker(
@@ -958,12 +1008,15 @@ struct LibraryWorkspaceView: View {
             HStack(spacing: 16) {
                 welcomeCard(
                     "Open Folder in Place…", symbol: "folder",
-                    hint: "Use an existing folder of Markdown files where it is.", action: workspace.chooseFolder
+                    hint: "Use an existing folder of Markdown files where it is.", action: { workspace.chooseFolder() }
                 )
                 .keyboardShortcut(.defaultAction)
                 welcomeCard(
                     "New Library…", symbol: "plus.rectangle.on.folder", hint: "Start an empty library in a new folder.",
                     action: workspace.newLibrary)
+            }
+            if let registry, !registry.recents.entries.isEmpty {
+                WelcomeRecents(registry: registry).padding(.top, 8)
             }
             Text("To copy files in instead, use File › Import Folder Copy…").font(.caption).foregroundStyle(.tertiary)
         }

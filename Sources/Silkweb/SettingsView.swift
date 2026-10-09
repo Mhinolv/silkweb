@@ -476,7 +476,7 @@ struct LibrarySettingsTab: View {
                     }
                     .disabled(workspace.root == nil)
                     Button("Choose Library…") {
-                        showWindow(); workspace.chooseFolder()
+                        showWindow(); workspace.chooseFolder(replacing: true)
                     }
                 }
             } header: {
