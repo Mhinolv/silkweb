@@ -30,15 +30,36 @@ public struct AgentGrant: Codable, Equatable, Sendable {
     public enum Access: String, Codable, Sendable {
         case read
         case readCreate = "read-create"
+        /// #204: also updates documents an agent created, inside the create folders.
+        case readCreateUpdate = "read-create-update"
 
         /// Owner-facing profile names.
-        public var displayName: String { self == .read ? "Read Only" : "Read and Create" }
+        public var displayName: String {
+            switch self {
+            case .read: return "Read Only"
+            case .readCreate: return "Read and Create"
+            case .readCreateUpdate: return "Read, Create and Update"
+            }
+        }
+
+        public var allowsCreate: Bool { self != .read }
+        public var allowsUpdate: Bool { self == .readCreateUpdate }
+
+        /// Profiles in order of how much they allow, so `grant init` can tell narrowing from widening.
+        public var rank: Int {
+            switch self {
+            case .read: return 0
+            case .readCreate: return 1
+            case .readCreateUpdate: return 2
+            }
+        }
 
         public init(from decoder: Decoder) throws {
             let value = try decoder.singleValueContainer().decode(String.self)
             switch value {
             case "read", "read-only": self = .read
             case "read-create": self = .readCreate
+            case "read-create-update": self = .readCreateUpdate
             default:
                 throw DecodingError.dataCorrupted(
                     .init(codingPath: decoder.codingPath, debugDescription: "Unknown access level"))
@@ -226,7 +247,7 @@ public struct AgentScope: Equatable, Sendable {
         }
         readRoots = reads
         createRoots =
-            createAllowed && grant.access == .readCreate
+            createAllowed && grant.access.allowsCreate
             ? AgentMemoryContract.entryFolders.map { root + "/" + $0 } : []
     }
 
@@ -284,6 +305,10 @@ public struct AgentScope: Equatable, Sendable {
         }
         return normalized
     }
+
+    /// An existing document an update may replace (#204): the same rules as a new one, so updates stay
+    /// inside the create folders and never touch instruction files or reserved Folders.
+    public func checkUpdate(_ path: String) throws -> String { try checkCreate(path) }
 
     /// A new Folder inside one of the create folders, named by the rules for new names.
     public func checkCreateFolder(_ path: String) throws -> String {

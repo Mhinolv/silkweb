@@ -128,14 +128,15 @@ struct DocumentRow: View {
     let pointerState: DocumentRowPointerState
     /// Shown only when the list spans folders; a single-folder scope already names its folder.
     var location: String? = nil
-    /// #137: in Agent Activity scope only, the receipt that created this Document; the row shows its date and agent.
+    /// #137: in Agent Activity scope only, the latest agent write to this Document; the row shows its date and
+    /// agent, and “Updated” when it was an update (#204).
     var agentEntry: AgentActivityEntry? = nil
     @Environment(\.locale) private var locale
     @State private var summary: DocumentSummary?
     private var title: String { URL(fileURLWithPath: document.name).deletingPathExtension().lastPathComponent }
     private var sortsByCreated: Bool { agentEntry == nil && workspace.listPreference.key == .created }
     private var date: Date? {
-        agentEntry.map { $0.created ?? document.created } ?? (sortsByCreated ? document.created : document.modified)
+        agentEntry.map { $0.date ?? document.created } ?? (sortsByCreated ? document.created : document.modified)
     }
     private var dateText: String? {
         date.map {
@@ -156,10 +157,14 @@ struct DocumentRow: View {
             }
             HStack(spacing: 0) {
                 if let dateText { Text(dateText).fixedSize().layoutPriority(1) }
-                // The date and agent never truncate; the location gives way first.
+                // The date, agent and “Updated” never truncate; the location gives way first.
                 if let agent = agentEntry?.agent {
                     if dateText != nil { Text(" · ").foregroundStyle(.tertiary).fixedSize().layoutPriority(1) }
                     Text(agent).fixedSize().layoutPriority(1)
+                    if agentEntry?.isUpdate == true {
+                        Text(" · ").foregroundStyle(.tertiary).fixedSize().layoutPriority(1)
+                        Text("Updated").fixedSize().layoutPriority(1)
+                    }
                 }
                 if let location {
                     if dateText != nil || agentEntry != nil {
@@ -206,7 +211,9 @@ struct DocumentRow: View {
             let sentence = summary.excerpt.prefix { !".!?。".contains($0) }
             value += (value.isEmpty ? "" : ". ") + sentence
         }
-        if let agent = agentEntry?.agent { value += (value.isEmpty ? "" : ", ") + "agent-created by " + agent }
+        if let entry = agentEntry {
+            value += (value.isEmpty ? "" : ", ") + (entry.isUpdate ? "updated by " : "agent-created by ") + entry.agent
+        }
         return value
     }
 }

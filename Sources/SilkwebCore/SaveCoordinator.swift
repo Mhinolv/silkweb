@@ -108,12 +108,17 @@ public actor SaveCoordinator {
     private var recoveryFailures: [URL: DocumentSaveFailure] = [:]
     private var unreadableRecovery: [URL] = []
     private var observers: [URL: [UUID: AsyncStream<DocumentSaveState>.Continuation]] = [:]
+    /// #204: held while a document has unsaved changes, so an agent update refuses instead of overwriting them.
+    private let markers: DocumentEditingMarker.Holder?
+    /// Each URL's Library-relative path for its marker (`nil` outside the Library), worked out once.
+    private var markerPaths: [URL: String?] = [:]
 
     public init(
         store: DocumentStore = DocumentStore(), recoveryDirectory: URL? = nil, busyRetryDelay: Duration = .seconds(2)
     ) {
         self.store = store
         self.busyRetryDelay = busyRetryDelay
+        markers = store.gate.map { DocumentEditingMarker.Holder(root: $0.root) }
         self.recoveryDirectory =
             recoveryDirectory
             ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -167,6 +172,7 @@ public actor SaveCoordinator {
         guard await commit(url, explicit: false)?.isDirty != true else { return false }
         entries[url] = nil
         recoveryFailures[url] = nil
+        syncMarker(url)
         return true
     }
 
@@ -180,6 +186,7 @@ public actor SaveCoordinator {
         scheduled.removeValue(forKey: url)?.cancel()
         entries[url] = nil
         recoveryFailures[url] = nil
+        syncMarker(url)
     }
 
     public func state(for url: URL) -> DocumentSaveState? { entries[url.standardizedFileURL]?.state }
@@ -378,6 +385,8 @@ public actor SaveCoordinator {
         if target != old {
             entries[old] = nil
             entries[target] = entry
+            syncMarker(old)
+            syncMarker(target)
             try? FileManager.default.removeItem(at: recoveryURL(old))
         }
         do {
@@ -478,6 +487,7 @@ public actor SaveCoordinator {
         let loaded = try store.load(target)
         guard let latest = entries[url] else { throw CocoaError(.fileWriteUnknown) }
         entries[url] = nil
+        syncMarker(url)
         entries[target] = Entry(
             text: latest.text, revision: loaded.revision, state: latest.text == entry.text ? .clean : .dirty)
         if latest.text != entry.text { scheduleSave(target) }
@@ -499,9 +509,31 @@ public actor SaveCoordinator {
     }
 
     private func publish(_ url: URL) {
+        syncMarker(url)
         guard let state = entries[url]?.state else { return }
         for continuation in observers[url, default: [:]].values { continuation.yield(state) }
     }
+
+    /// Holds the editing marker while `url` has unsaved changes (any dirty state, conflicts included) and lets
+    /// it go otherwise. File work happens only on a change between the two, never per keystroke.
+    private func syncMarker(_ url: URL) {
+        guard let markers else { return }
+        let relative: String?
+        if let cached = markerPaths[url] {
+            relative = cached
+        } else {
+            let root = markers.root.path + "/"
+            let standardized = url.standardizedFileURL.path
+            let path = standardized.hasPrefix(root) ? standardized : url.resolvingSymlinksInPath().path
+            relative = path.hasPrefix(root) ? String(path.dropFirst(root.count)) : nil
+            markerPaths[url] = .some(relative)
+        }
+        guard let relative else { return }
+        if entries[url]?.state.isDirty == true { markers.hold(relative) } else { markers.release(relative) }
+    }
+
+    /// Test seam: whether this coordinator holds the editing marker for a Library-relative path.
+    func isHoldingEditingMarker(_ relativePath: String) -> Bool { markers?.isHolding(relativePath) ?? false }
 
     private func removeObserver(_ id: UUID, url: URL) { observers[url]?[id] = nil }
 }

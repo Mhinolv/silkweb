@@ -21,8 +21,10 @@ redefining names, layout or guarantees. Changing a rule here means bumping `cont
   - `silkweb memory …`: one-shot CLI commands that print JSON (#135).
 - The helper works while the Silkweb app is **closed**. No daemon runs in the background. When the app
   opens again, it picks up the new documents from disk like any other external change.
-- Agents read only what the owner grants, which by default is the project’s `Memory` folder. In MVP
-  they can create new documents but never edit, replace, move or delete existing ones.
+- Agents read only what the owner grants, which by default is the project’s `Memory` folder. They can
+  create new documents. With a **Read, Create and Update** grant they can also update a document an
+  agent created, as long as nobody edited it since (#204, see [Update](#update-204)). They never
+  update the owner’s documents, and never move, rename or delete anything.
 - Memory is ordinary Markdown in ordinary Folders, so the owner can read it without Silkweb.
 - **Local storage doesn’t mean local processing.** Text the helper returns goes to the agent, and the
   agent may send it to its model provider.
@@ -30,9 +32,10 @@ redefining names, layout or guarantees. Changing a rule here means bumping `cont
 The helper ships these commands: `memory capabilities` and `memory list` (#129, see
 [Helper distribution](#helper-distribution)), `memory search` and `memory read` (#134, see
 [Search and read](#search-and-read-134)), `memory create` and `memory create-folder` (#133, see
-[Create and receipts](#create-and-receipts-133)) and `memory activity` (#135). Every command, flag,
-exit status and error code is listed in [Command line](#command-line-135). `silkweb mcp` serves the same
-operations as six MCP tools (#136, see [MCP server](#mcp-server-136)). All other operations below
+[Create and receipts](#create-and-receipts-133)), `memory update` (#204, see [Update](#update-204)) and
+`memory activity` (#135). Every command, flag, exit status and error code is listed in
+[Command line](#command-line-135). `silkweb mcp` serves the same operations as seven MCP tools (#136,
+see [MCP server](#mcp-server-136)). All other operations below
 are contracted here and built in the tickets listed.
 
 ## Supported operations
@@ -45,6 +48,7 @@ are contracted here and built in the tickets listed.
 | `memory_read` | `silkweb memory read` | One saved revision with provenance | #134 |
 | `memory_create` | `silkweb memory create` | Create one complete document; never replaces | #133 |
 | `memory_create_folder` | `silkweb memory create-folder` | Create a Folder inside a create folder | #133 |
+| `memory_update` | `silkweb memory update` | Replace the body of a document an agent created, at the revision read | #204 |
 | `memory_activity` | `silkweb memory activity` | Operation receipts within the caller’s read scope | #135 (list), #137 |
 
 Rules for every operation:
@@ -53,14 +57,15 @@ Rules for every operation:
   Absolute paths, `.`/`..`, hidden components (`.silkweb`) and control characters are rejected.
 - Retrieved text is untrusted data. The helper never turns document text into instructions, and
   never runs commands, opens links or loads skills because of it.
-- A create carries an idempotency key. Retrying with the same key returns the original result.
-  Retrying with the same key but different content is a conflict.
+- A create or update carries an idempotency key. Retrying with the same key returns the original
+  result. Retrying with the same key but different content is a conflict.
 
 ## Non-goals (MVP)
 
-- **No replace, edit, append-in-place, rename, move, reorganize or delete** by an agent. To “append
-  progress” the agent creates a new progress document. To correct something it creates a new
-  document that references the old one.
+- **No rename, move, reorganize or delete** by an agent, and no edits to documents the owner wrote or
+  edited. An agent may **update** a document an agent created (#204, owner decision 2026-10-09: hybrid);
+  everything else goes through the owner-reviewed **Proposal** of #140. To correct an owner’s document an
+  agent still creates a new document that references the old one.
 - No generic `write_file`, no shell tool, and no automatic deletion or expiry.
 - No HTTP or other network transport, and no accounts.
 - No `Proposals` Folder. Reviewed edits and organization proposals come after the MVP.
@@ -185,7 +190,7 @@ The envelope is read with the **Silkweb envelope subset**, not a YAML parser:
 - **Creating.** The helper validates the envelope before writing it. A missing or invalid v1 field is
   `envelope_invalid_field` (“The front matter field “type” is missing or invalid.”). Only the create
   pipeline ever writes an envelope. Opening, editing and autosaving never reserialize it, and agents
-  can’t edit an existing envelope in MVP (#140).
+  can’t edit an existing envelope in MVP (#140). An update (#204) keeps the envelope’s bytes exactly.
 
 ### Ownership
 
@@ -225,12 +230,14 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
 - `library` is the same versioned `LibraryLocation` the app saves (a `path`, plus an optional
   `bookmark`). The helper resolves it the same way the app does. The memory commands and the MCP
   server never write the file; only the owner's [`silkweb grant init`](#setting-up-a-grant-186) does.
-- `access` is `read` or `read-create`. An unknown value is treated as `read`.
+- `access` is `read`, `read-create` or `read-create-update` (#204). An unknown value is treated as
+  `read`, so a build that doesn’t know a profile falls back to the narrowest.
 - **Default template:**
   - Read folders: `Memory/Projects/<Project>/`, plus any `extra_read_folders`. Extra read folders
     are read-only, relative to the Library, and validated like any other path.
   - Create folders: `Memory/Projects/<Project>/Memories`, `…/Progress` and `…/Handoffs`, and only
-    for `read-create` grants on a qualified filesystem.
+    for `read-create` and `read-create-update` grants on a qualified filesystem. Updates happen only
+    inside the create folders too.
 - Containment is checked per path component and compared like APFS: Unicode normalization never
   matters, and case is ignored unless the Library’s volume is case-sensitive.
   `Memory/Projects/Silkweb2` isn’t inside `Memory/Projects/Silkweb`. Symbolic links and hidden items
@@ -242,13 +249,13 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
 The owner adds a grant with `silkweb grant init`, run in Terminal, instead of editing JSON:
 
 ```text
-silkweb grant init [--library <PATH>] [--project <KEY>] [--access read|read-create] [--dry-run] [--grants <FILE>]
+silkweb grant init [--library <PATH>] [--project <KEY>] [--access read|read-create|read-create-update] [--dry-run] [--grants <FILE>]
 ```
 
 - **Modes.** With `--library`, `--project` and `--access` it asks nothing. Otherwise it prompts on
   stderr for the missing ones: the Library folder (`~` expanded, links resolved, must be a readable
   folder, reported as local disk or not), the project key (one valid Folder name, NFC) and the
-  profile (Read Only or Read and Create), then asks “Save to …? [y/N]”. Without a terminal on stdin
+  profile (Read Only, Read and Create, or Read, Create and Update), then asks “Save to …? [y/N]”. Without a terminal on stdin
   and with an option missing, it exits 64 (`“grant init” needs --library.`) instead of waiting.
   `--access read-only` means `read`. End of input exits 1 and saves nothing.
 - **Owner only.** Saving to the real grants file needs stdin to be a terminal, even with every option,
@@ -261,7 +268,8 @@ silkweb grant init [--library <PATH>] [--project <KEY>] [--access read|read-crea
   (atomic, sorted keys, `version: 1`); other grants keep their values.
 - **Same answers:** “Agent access for “Silkweb” is already set up.”, exit 0, and the file isn't
   written (byte-identical).
-- **Never widens.** More access (`read` → `read-create`), another Library, or a revoked grant exits 77
+- **Never widens.** More access (`read` → `read-create` → `read-create-update`), another Library, or a
+  revoked grant exits 77
   with “The grant “Silkweb” already exists with Read Only access. grant init never widens access; edit
   agent-grants.json to change it. Nothing was saved.” (the reason varies). There's no override.
   `read-create` → `read` is allowed and reported as “Changed access: Read and Create → Read Only.”
@@ -297,10 +305,13 @@ still load unchanged:
 }
 ```
 
-- **Profiles:** `read` is shown as **Read Only** and `read-create` as **Read and Create**. `read-only`
-  is accepted as another spelling of `read`. Read Only allows capabilities, list, search, read and
-  activity inside the read folders. Read and Create adds create and create-folder, only inside the
-  create folders. Agents can’t replace or delete anything with either profile.
+- **Profiles:** `read` is shown as **Read Only**, `read-create` as **Read and Create** and
+  `read-create-update` as **Read, Create and Update** (#204). `read-only` is accepted as another spelling
+  of `read`. Read Only allows capabilities, list, search, read and activity inside the read folders. Read
+  and Create adds create and create-folder, only inside the create folders. Read, Create and Update adds
+  [update](#update-204) of documents an agent created, only inside the create folders. No profile lets an
+  agent delete anything or change the owner’s documents. If #140 ships, profiles become orthogonal flags
+  rather than more combined names.
 - The template is called **Project memory** (see the default template above).
 - `label` is the owner-facing name used in messages. When it’s empty, it’s “<Project> project”.
 - `limits` bound one document read (`max_read_bytes`), the rows one search, list or activity page
@@ -340,6 +351,7 @@ document text or the requested target.
 | `rate_limited` | Too many requests. Try again in N seconds. |
 | `too_large` | That document is larger than this grant’s read limit (1 MB). For creates: This document is larger than the grant allows (256 KB). Nothing was created. |
 | `not_found` | There’s no document at that location. (Only for targets inside the scope, and for any ID that is unknown or outside it.) |
+| `update_not_allowed` | This grant can’t update documents. Ask the owner to switch it to Read, Create and Update. (On an unqualified filesystem: This Library isn’t on a local disk, so agents can only read it.) |
 
 The Settings ▸ Library ▸ Agent Access section comes later and only edits this file. Until then the
 owner writes it by hand (see [Spike](#spike-app-closed-access-in-terminal-macos-15) step 3); the CLI
@@ -352,7 +364,7 @@ network volumes are qualified later.
 
 | Library on | `filesystem` | Reads | Creates |
 |---|---|---|---|
-| Local APFS or HFS+ volume | `qualified` | Yes | Yes, if the grant is `read-create` |
+| Local APFS or HFS+ volume | `qualified` | Yes | Yes, if the grant is `read-create` (updates: `read-create-update`) |
 | iCloud Drive (`~/Library/Mobile Documents`) | `unqualified` | Yes | No |
 | File Provider sync, such as Dropbox or Google Drive (`~/Library/CloudStorage`) | `unqualified` | Yes | No |
 | Network volume (SMB, AFP, NFS), or a FAT/exFAT disk | `unqualified` | Yes | No |
@@ -386,7 +398,9 @@ How the write path keeps it (built in #130–#133):
 6. Report success only after the document is durably on disk.
 
 The app keeps its dirty-buffer protection. An external change never replaces unsaved editor text,
-and conflicts keep both versions.
+and conflicts keep both versions. An [update](#update-204) (#204) replaces a document only at the
+revision the agent read, never while the app has unsaved changes to it, and keeps the replaced text
+as an earlier version.
 
 ### Coordination (#131)
 
@@ -673,6 +687,97 @@ document was published (the document exists, so “Nothing was created” would 
 ([Cancellation and shutdown](#cancellation-and-shutdown)), and a CLI process that is killed is a crash,
 settled by the next create’s recovery. Either way a retry with the same key replays or creates once.
 
+## Update (#204)
+
+**Owner decision (2026-10-09): hybrid.** An agent updates a document directly only when an agent created
+it and nobody edited it since. Everything the owner wrote or edited goes through #140’s reviewed
+**Proposal**. In owner-facing text this is an **Update**, never an edit, overwrite or patch.
+
+```sh
+silkweb memory read "Memory/Projects/Silkweb/Handoffs/Next steps.md"          # note result.revision
+silkweb memory update "Memory/Projects/Silkweb/Handoffs/Next steps.md" --expected-revision sha256:… \
+  --idempotency-key handoff-2 --agent claude-code --session 2026-10-09-a --body-file - < body.md
+```
+
+- **Grant:** `read-create-update` (**Read, Create and Update**) on a qualified filesystem. Other grants get
+  `update_not_allowed`; `memory_capabilities.operations` lists `update` only when it’s allowed.
+- **Target:** a path or `--id` (`documentId`), inside a create folder, `.md`, never an instruction file
+  (the same checks as a create: `out_of_scope`, `invalid_path`, `excluded_name`, `not_found`).
+- **Text:** the body replaces everything after the envelope and its blank line, exactly what
+  `memory_read` returns as the body. The envelope’s bytes never change. A body that brings its own
+  envelope is refused, and the finished document must fit `max_create_bytes` (`too_large`).
+- **Eligible** when the document has a v1 envelope whose `memory_id` has a published Silkweb receipt
+  (create or update), and its current bytes equal the `contentDigest` of the latest one. Otherwise
+  `update_requires_proposal`: the owner wrote it, only the envelope claims an agent, or it was edited
+  after the last agent write. One owner edit makes a document proposal-only; reverting it byte for byte
+  makes it eligible again, because the bytes are then the agent’s.
+- **Compare-and-swap:** `--expected-revision` (`expectedRevision`) is required and must equal the current
+  `revision`. Otherwise `revision_changed`, with the current revision in `error.currentRevision`, and
+  nothing is written. Re-read and decide again.
+- **Unsaved changes in the app:** while Silkweb has unsaved changes for the document (any Edited, saving,
+  failed or conflict state), its save coordinator holds a shared `flock` on
+  `.silkweb/editing/<key>.lock` (`DocumentEditingMarker`; the key is a digest of the Library-relative
+  path in NFC and lower case). The helper probes it without waiting and refuses with
+  `document_has_unsaved_changes`; disk and the buffer are untouched, and the agent retries later. The
+  kernel drops the lock when the app quits or crashes, so a stale marker never blocks updates, and the app
+  removes the file when the buffer is clean again. The app shows nothing.
+
+**Commit order.** Everything below holds the [Library gate](#coordination-131):
+
+1. Interrupted updates are recovered (below).
+2. The key’s receipt is checked: same payload → replay, different payload → `idempotency_conflict`.
+3. Scope, envelope, compare-and-swap, eligibility and unsaved changes are checked.
+4. The new file is written to `.silkweb/agent-update-staging/<attempt>.md` (with the document’s
+   permissions) and flushed, then the intent `<attempt>.json`.
+5. The current bytes are saved as `.silkweb/agent-history/<documentId>/v<n> <yyyy-MM-dd HHmmss>Z.md`
+   (`<memory_id>` when the index doesn’t know the document; `v0` is the create’s text).
+6. The document is read again: if it changed (a writer that doesn’t take the gate) or the app now has
+   unsaved changes, the staged file and saved version are removed and the update is refused.
+7. The staged file is renamed over the document (one atomic replace) and the Folder is flushed.
+8. The receipt is written, then the intent is removed.
+
+**Earlier versions** are plain Markdown files, readable without Silkweb, never indexed, searched or listed
+(they live under `.silkweb/`). Document Info shows how many still exist and reveals the newest in Finder.
+There’s no in-app restore yet; copy the text back by hand.
+
+**Idempotency** works as for creates, with its own operation IDs (`silkweb-update/v1`), so an update key
+never matches a create key. The payload is the target (`path` or `documentId`), `expectedRevision`, the
+body, agent and session. A replay returns the original receipt with `"replayed": true`, whatever the
+document holds now.
+
+**Recovery** runs silently before every update. An intent whose staged file is still there never
+replaced the document: receipt `abandoned`, and the staged file, intent and saved version are removed.
+An intent without its staged file replaced the document: its receipt (`updated`) is written. Staged and
+temporary files without an intent are removed.
+
+**Receipt** (`version: 2`, the create keys plus these; create receipts stay `version: 1` without them):
+
+| Key | Value |
+|---|---|
+| `operation` | `update` (receipts without the key are creates) |
+| `sequence` | Agent writes to this document: the create is 0, then 1, 2 … |
+| `baseDigest` | The revision the update replaced |
+| `previousVersion` | Library-relative path of the saved earlier version |
+| `outcome` | `updated`, `abandoned` or `refused` |
+| `createdAt` | When the update was recorded; `destination` is the document’s path at the time |
+
+**Output.** `{"outcome": "updated"|"duplicate", "path": …, "receipt": {…}, "replayed": …, "revision": …}`;
+`revision` is the document’s new revision, ready for the next update.
+
+**Update codes:**
+
+| Code | Title | Message |
+|---|---|---|
+| `update_not_allowed` | No Agent Access | This grant can’t update documents. Ask the owner to switch it to Read, Create and Update. |
+| `update_requires_proposal` | Owner Review Needed | This document was edited after an agent last wrote it, so agents can only propose changes. Nothing was changed. (Without a receipt: Silkweb has no record of an agent creating this document, …) |
+| `revision_changed` | Document Changed | The document changed since you read it. Nothing was changed. Read it again and retry with its new revision. `error.currentRevision` carries the current revision. |
+| `document_has_unsaved_changes` | Document Being Edited | This document has unsaved changes in Silkweb. Nothing was changed. Try again later. |
+| `too_large` | Document Too Large | This document is larger than the grant allows (256 KB). Nothing was changed. |
+
+**In the app,** a clean open Document reloads through the normal external-change path: caret and
+selection are clamped to the new length, scroll, focus and tab stay put, and no undo entry is added.
+There are no banners, sounds or announcements (see [In the app](#in-the-app-137)).
+
 ## Command line (#135)
 
 `silkweb memory …` is the shell-facing face of the same services the MCP server uses (#136): the same
@@ -692,6 +797,8 @@ silkweb memory create  --folder memories|progress|handoffs|<PATH> --title T --bo
                        --agent A --session S [--type T] [--idempotency-key K] [--status S]
                        [--observed-at D] [--review-after D] [--supersedes MEMORY_ID]…
 silkweb memory create-folder <PATH>
+silkweb memory update  <PATH> | --id DOCUMENT_ID  --expected-revision R --body-file <FILE|->
+                       --agent A --session S [--idempotency-key K]
 silkweb memory activity [--limit N] [--since D]
 silkweb memory list
 silkweb --version | --help
@@ -704,6 +811,7 @@ silkweb --version | --help
 | `read` | The [read response](#read). `--id` takes the app index’s `documentId`; an ID the index doesn’t know and one outside the read folders are both `not_found`. |
 | `create` | `{"outcome", "path", "receipt", "replayed"}` ([Create and receipts](#create-and-receipts-133)). `--folder memories`, `progress` or `handoffs` (any case) picks the entry folder and the default type (`memory`, `progress`, `handoff`); `--type decision` with `memories` makes a decision. A Library-relative `--folder` needs `--type`. Without `--idempotency-key`, the helper uses a fresh `cli-<UUID>` key, so a retry creates another document. A replay exits 0. |
 | `create-folder` | `{"created", "path"}`. Idempotent. |
+| `update` | `{"outcome", "path", "receipt", "replayed", "revision"}` ([Update](#update-204)). A path or `--id`, not both. Without `--idempotency-key`, the helper uses a fresh `cli-<UUID>` key; the revision check still stops a second write. |
 | `activity` | `{"receipts": […], "total": N}`: this grant’s [receipts](#create-and-receipts-133) (sorted keys, never body text), newest first. Receipts whose destination is outside the read folders are dropped before counting. `--limit` defaults to 20 and is capped by the grant’s `max_results`; `--since` is a date or ISO 8601 timestamp. Reads `.silkweb/agent-events/` only and never takes the gate. |
 | `list` | `{"documents": [{"modified", "path", "size"}], "project"}` (#129). |
 
@@ -733,13 +841,15 @@ and `--supersedes` (create).
 ### Output
 
 - stdout carries **exactly one JSON object** with sorted top-level keys, for success and failure alike:
-  `{"ok":true,"result":…,"version":1}` or `{"error":{"code","message","retryAfter"?,"title"},"ok":false,"version":1}`.
+  `{"ok":true,"result":…,"version":1}` or
+  `{"error":{"code","currentRevision"?,"message","retryAfter"?,"title"},"ok":false,"version":1}`.
   `version` is the envelope’s version. Search and read results keep their documented field order;
   every other object has sorted keys.
 - stderr carries only human lines, `silkweb: <message>`: the refusal message, or a note such as
   “Recovered interrupted creates: 1 abandoned.” It never contains document text, excerpts or
   out-of-grant paths, and has no colour or progress output.
-- `retryAfter` (seconds) comes with `library_busy` and `rate_limited`.
+- `retryAfter` (seconds) comes with `library_busy` and `rate_limited`; `currentRevision` with
+  `revision_changed`.
 
 ### Exit statuses and error codes
 
@@ -747,11 +857,11 @@ and `--supersedes` (create).
 |---|---|---|
 | 0 | Success, including a replayed create | — |
 | 64 | Usage or bad argument | `invalid_argument` |
-| 65 | Bad input data | `envelope_malformed`, `envelope_schema_newer`, `envelope_invalid_field`, `too_large`, `idempotency_conflict`, `not_found` |
-| 69 | Busy; try again | `library_busy`, `stale_snapshot`, `rate_limited` |
+| 65 | Bad input data | `envelope_malformed`, `envelope_schema_newer`, `envelope_invalid_field`, `too_large`, `idempotency_conflict`, `not_found`, `revision_changed` |
+| 69 | Busy; try again | `library_busy`, `stale_snapshot`, `rate_limited`, `document_has_unsaved_changes` |
 | 70 | Unexpected helper failure | `internal_error` |
 | 74 | Library I/O | `library_not_found`, `library_unreadable`, `unreadable`, `write_failed`, `disk_full`, `permission_denied` |
-| 77 | Access | `grant_required`, `grant_not_found`, `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `no_grant`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `invalid_path`, `excluded_name` |
+| 77 | Access | `grant_required`, `grant_not_found`, `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `no_grant`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `invalid_path`, `excluded_name`, `update_not_allowed`, `update_requires_proposal` |
 
 - **One bad-input code.** `invalid_argument` covers usage mistakes (unknown command or option, a
   repeated or missing option, `--body` text), bad values (`--limit`, `--type`, dates, `--id`, `--cursor`)
@@ -836,8 +946,9 @@ to give itself access; the README's template covers hand edits.
   `2025-06-18`, `2025-03-26` and `2024-11-05`; any other requested version is answered with the newest.
 - `serverInfo`: name `silkweb`, title “Silkweb”, version = the app's marketing version. Capabilities:
   `tools` only (`listChanged: false`); no resources, prompts, sampling or logging. `instructions`:
-  “Read and create Markdown documents in the Silkweb Library folders this grant allows. Existing
-  documents are never changed or deleted.”
+  “Read and create Markdown documents in the Silkweb Library folders this grant allows. Grants that
+  allow updates can also replace the body of documents an agent created; earlier versions are kept.
+  Nothing is ever deleted.”
 - Supported requests: `initialize`, `ping`, `tools/list`, `tools/call`. Notifications:
   `notifications/initialized` and `notifications/cancelled`; others are ignored.
 - **stdout carries MCP frames only.** stderr carries `silkweb: …` lines: refusals as
@@ -856,10 +967,12 @@ In `tools/list` order. The full definitions, with input and output schemas, are 
 | `memory_read` | Silkweb: Read Document | true | false | true | false | `read` |
 | `memory_create` | Silkweb: Create Document | false | false | true (with `idempotencyKey`) | false | `create` |
 | `memory_create_folder` | Silkweb: Create Folder | false | false | true | false | `create-folder` |
+| `memory_update` | Silkweb: Update Document | false | true | true (with `idempotencyKey`) | false | `update` |
 | `memory_activity` | Silkweb: Recent Agent Activity | true | false | true | false | `activity` |
 
-`memory_create` is `destructiveHint: false` because it never replaces anything. `memory list` stays
-CLI-only. Arguments are camelCase versions of the CLI options:
+`memory_create` is `destructiveHint: false` because it never replaces anything. `memory_update` is
+`destructiveHint: true` because it replaces existing text (kept as an earlier version), so clients may
+ask before running it. `memory list` stays CLI-only. Arguments are camelCase versions of the CLI options:
 
 | Tool | Arguments |
 |---|---|
@@ -867,6 +980,7 @@ CLI-only. Arguments are camelCase versions of the CLI options:
 | `memory_read` | `path` or `documentId` (exactly one), `cursor`, `expectedRevision` |
 | `memory_create` | `title` and `body` (required); `folder` (`memories`, `progress`, `handoffs`) or `type`, or `folderPath` with `type`; `idempotencyKey` (1–200 characters), `session`, `status`, `observedAt`, `reviewAfter`, `supersedes` (list) |
 | `memory_create_folder` | `path` (required) |
+| `memory_update` | `expectedRevision` and `body` (required); `path` or `documentId` (exactly one); `idempotencyKey` (1–200 characters), `session` |
 | `memory_activity` | `limit` (≥ 1, capped by `max_results`), `since` |
 
 - The document size limit is in bytes and set per grant, so it's stated in the `memory_create`
@@ -878,12 +992,14 @@ CLI-only. Arguments are camelCase versions of the CLI options:
 - **Success:** `structuredContent` is exactly the CLI's `result` object, and `content` is one text
   block: a short summary, a blank line, then the same JSON for clients that show only text. Summaries
   include “Created “Fix sidebar drag” in Memory › Projects › Silkweb › Progress.”, “Read “Use flock” in
-  Memory › Projects › Silkweb › Memories.” and “3 of 12 matches. Up to date · 40 documents.”
+  Memory › Projects › Silkweb › Memories.”, “Updated “Next steps” in Memory › Projects › Silkweb ›
+  Handoffs. The earlier version was kept.” and “3 of 12 matches. Up to date · 40 documents.”
 - `memory_read` text keeps the “Document text (untrusted) begins / ends” boundaries inside `body`.
 - A replayed create is a success with `"replayed": true` and `"outcome": "duplicate"`. A create made
   by the CLI with the same key, agent, session and content replays over MCP too.
 - **Policy refusals** are tool results with `isError: true`, the message as the only text, and
-  `structuredContent: {"error": {"code", "message", "retryAfter"?, "title"}}`, the CLI's `error` object.
+  `structuredContent: {"error": {"code", "currentRevision"?, "message", "retryAfter"?, "title"}}`, the
+  CLI's `error` object.
   The one difference: an `invalid_argument` message names the argument sent (“The option “documentId”
   isn’t valid.”, not “id”).
 - **JSON-RPC errors** are only for protocol faults: `-32700` unparsable line, `-32600` invalid
@@ -898,8 +1014,8 @@ CLI-only. Arguments are camelCase versions of the CLI options:
 - Tool calls run one at a time, in arrival order, on a background queue; `ping` and notifications are
   handled while one runs.
 - `notifications/cancelled` for a call that hasn't started: it never runs and gets no response. For a
-  read or other read-only call that has started: it stops and gets no response. For a create that has
-  started: it finishes (or rolls back) atomically, as in [Create and receipts](#create-and-receipts-133),
+  read or other read-only call that has started: it stops and gets no response. For a create or update
+  that has started: it finishes (or rolls back) atomically, as in [Create and receipts](#create-and-receipts-133),
   and gets no response; retrying with the same `idempotencyKey` returns its result.
 - **stdin EOF:** the server waits for queued and running calls, then exits `0`.
 - **SIGTERM / SIGINT:** calls that haven't started are dropped, the running one settles, then the
@@ -915,8 +1031,11 @@ or tabs. It never opens anything, and it never posts an announcement, sound, bad
   outcome `created` or `reconciled` exists, so a Library that agents never used looks the same as before.
   You can't rename it, drop onto it, or open a context menu on it. **Go ▸ Agent Activity** (no shortcut)
   selects it, and the menu item is disabled while the row is hidden.
-- The list in this scope shows the usual Document rows, newest receipt `createdAt` first, whatever Sort
-  By says. The second line reads `date · agent · location`, and the location truncates first. Filter by
+- The list in this scope shows the usual Document rows, newest receipt `createdAt` (create or update)
+  first, whatever Sort By says. The second line reads `date · agent · location`, or
+  `date · agent · Updated · location` when the latest agent write was an [update](#update-204) (#204);
+  the location truncates first, and the strip still counts Documents, not operations. The row's
+  accessibility value ends with “agent-created by claude-code” or “updated by claude-code”. Filter by
   Tag still applies. A pinned strip reads “Agent activity · N documents” and has an **All Agents ▾**
   pull-down that lists each claimed `agent` with its count. The choice lasts for the window session
   only. A receipt finds its Document by `documentId`, so renames and moves are followed. It falls back
@@ -925,13 +1044,22 @@ or tabs. It never opens anything, and it never posts an announcement, sound, bad
   - Agent: “Agent-created · claude-code”, or “claude-code (claimed)” when there's no receipt.
   - Session (claimed by the agent).
   - Client.
-  - Operation: monospaced and selectable, or “No Silkweb receipt”.
+  - Operation: monospaced and selectable, or “No Silkweb receipt”. After an update, the latest
+    operation.
   - Created.
+  - Last update (#204): “Oct 9, 2026 at 3:10 PM · 2 updates”, only once an agent updated it.
   - **Since creation**: “Unchanged” or “Edited after creation”. It compares the current bytes with the
-    receipt's `contentDigest`, so a rename or move isn't an edit. It never says who edited.
+    latest receipt's `contentDigest`, so a rename or move isn't an edit. It never says who edited. After an
+    update the label is **Since last agent write** and the edited value “Edited after agent update · Oct 9
+    at 3:10 PM”.
+  - Agent updates (#204): “Allowed” when the bytes are the agent's, “Proposals only · edited in Silkweb”
+    when they were edited since, “Proposals only · no Silkweb receipt” for an envelope-only claim. Text
+    only, no colour or icon.
+  - Earlier versions (#204): “2 saved · Show in Finder”, only when saved versions still exist. The link
+    (“Show earlier versions in Finder” for VoiceOver) reveals the newest one.
   - Review: “Not reviewed”, display only until #140.
-- **Refresh:** the watcher ignores `.silkweb/`, except that changes under `.silkweb/agent-events/` reload
-  the receipts on their own debounce. That reload never rescans the Library and never writes anything,
+- **Refresh:** the watcher ignores `.silkweb/`, except that changes under `.silkweb/agent-events/` and
+  `.silkweb/agent-history/` reload the receipts on their own debounce. That reload never rescans the Library and never writes anything,
   so it can't feed back into the index, search or autosave. The new Document itself arrives through the
   normal external-change refresh. The two can land in either order.
 

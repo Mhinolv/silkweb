@@ -16,7 +16,8 @@
             "type" : "string",
             "enum" : [
               "read",
-              "read-create"
+              "read-create",
+              "read-create-update"
             ]
           },
           "contract_version" : {
@@ -105,6 +106,9 @@
               },
               "retryAfter" : {
                 "type" : "integer"
+              },
+              "currentRevision" : {
+                "type" : "string"
               },
               "title" : {
                 "type" : "string"
@@ -348,6 +352,9 @@
               "retryAfter" : {
                 "type" : "integer"
               },
+              "currentRevision" : {
+                "type" : "string"
+              },
               "title" : {
                 "type" : "string"
               }
@@ -502,6 +509,9 @@
               "retryAfter" : {
                 "type" : "integer"
               },
+              "currentRevision" : {
+                "type" : "string"
+              },
               "title" : {
                 "type" : "string"
               }
@@ -629,6 +639,9 @@
               "retryAfter" : {
                 "type" : "integer"
               },
+              "currentRevision" : {
+                "type" : "string"
+              },
               "title" : {
                 "type" : "string"
               }
@@ -682,6 +695,9 @@
               "retryAfter" : {
                 "type" : "integer"
               },
+              "currentRevision" : {
+                "type" : "string"
+              },
               "title" : {
                 "type" : "string"
               }
@@ -698,9 +714,107 @@
       }
     },
     {
+      "name" : "memory_update",
+      "title" : "Silkweb: Update Document",
+      "description" : "Replaces the body (the text after the front matter) of a document an agent created in Memories, Progress or Handoffs. Needs expectedRevision, the revision from memory_read: if the document changed since, nothing is written and the error carries currentRevision. Documents the owner wrote or edited are refused with update_requires_proposal, and a document with unsaved changes in Silkweb with document_has_unsaved_changes (try again later). The earlier text is kept. Retrying with the same idempotencyKey returns the original result.",
+      "inputSchema" : {
+        "type" : "object",
+        "properties" : {
+          "path" : {
+            "type" : "string",
+            "description" : "Library-relative path of a document in a create folder, such as Memory/Projects/Silkweb/Handoffs/Next steps.md. Or documentId."
+          },
+          "documentId" : {
+            "type" : "string",
+            "description" : "The documentId from a search or read result, instead of path."
+          },
+          "expectedRevision" : {
+            "type" : "string",
+            "description" : "The revision from memory_read. If the document changed since, nothing is written."
+          },
+          "body" : {
+            "type" : "string",
+            "description" : "The new Markdown text after the front matter, replacing all of it. The front matter stays as it is."
+          },
+          "idempotencyKey" : {
+            "type" : "string",
+            "description" : "Request key, 1 to 200 characters. Reuse it when retrying.",
+            "minLength" : 1,
+            "maxLength" : 200
+          },
+          "session" : {
+            "type" : "string",
+            "description" : "Session recorded in the receipt. Defaults to this server’s session."
+          }
+        },
+        "required" : [
+          "expectedRevision",
+          "body"
+        ],
+        "additionalProperties" : false
+      },
+      "outputSchema" : {
+        "type" : "object",
+        "properties" : {
+          "outcome" : {
+            "type" : "string",
+            "enum" : [
+              "updated",
+              "duplicate"
+            ]
+          },
+          "path" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "receipt" : {
+            "type" : "object"
+          },
+          "replayed" : {
+            "type" : "boolean"
+          },
+          "revision" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "error" : {
+            "type" : "object",
+            "properties" : {
+              "code" : {
+                "type" : "string"
+              },
+              "message" : {
+                "type" : "string"
+              },
+              "retryAfter" : {
+                "type" : "integer"
+              },
+              "currentRevision" : {
+                "type" : "string"
+              },
+              "title" : {
+                "type" : "string"
+              }
+            }
+          }
+        }
+      },
+      "annotations" : {
+        "title" : "Silkweb: Update Document",
+        "readOnlyHint" : false,
+        "destructiveHint" : true,
+        "idempotentHint" : true,
+        "openWorldHint" : false
+      }
+    },
+    {
       "name" : "memory_activity",
       "title" : "Silkweb: Recent Agent Activity",
-      "description" : "Lists this grant’s create receipts in its read folders, newest first. Returns at most the grant’s max_results and never includes document text.",
+      "description" : "Lists this grant’s create and update receipts in its read folders, newest first. Returns at most the grant’s max_results and never includes document text.",
       "inputSchema" : {
         "type" : "object",
         "properties" : {
@@ -739,6 +853,9 @@
               },
               "retryAfter" : {
                 "type" : "integer"
+              },
+              "currentRevision" : {
+                "type" : "string"
               },
               "title" : {
                 "type" : "string"
