@@ -1311,6 +1311,9 @@ final class SnapshotHarness {
                     let target = Self.descendants(controller.view).compactMap { $0 as? NSTableView }.first {
                         ($0 is SidebarOutlineView) == (scenario.document != nil)
                     }
+                    // The fixtures' outside image and non-UTF-8 document raise the unsupported-links confirmation; as
+                    // a sheet it would order this window on screen. Answer it like Rename Anyway.
+                    workspace.presentMoveAlert = { _, _ in true }
                     window.makeFirstResponder(target)
                     try await wait("rename ended by click-away") { workspace.rename == nil && !workspace.mutating }
                 }

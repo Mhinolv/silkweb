@@ -138,13 +138,14 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
                 if !header.workspace.sectionCollapsed { outline.expandItem(header) }
                 header.coordinator?.restore()
             }
-        } else {
-            for header in headers {
-                syncCollapse(header)
-                guard let coordinator = header.coordinator, let snapshot = header.workspace.snapshot else { continue }
-                FolderSidebar.update(
-                    view, coordinator: coordinator, snapshot: snapshot, isCurrent: header.workspace === current)
-            }
+        }
+        // Also after a rebuild: the rows' update reads what they follow (rename, tags, scope), so SwiftUI calls
+        // this again when it changes. A rebuild alone left a rename begun next with no field (QA #195).
+        for header in headers {
+            if !rebuilt { syncCollapse(header) }
+            guard let coordinator = header.coordinator, let snapshot = header.workspace.snapshot else { continue }
+            FolderSidebar.update(
+                view, coordinator: coordinator, snapshot: snapshot, isCurrent: header.workspace === current)
         }
         restoringDepth -= 1
         if rebuilt || currentChanged { applyCurrent() }

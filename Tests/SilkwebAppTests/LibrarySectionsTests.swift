@@ -586,4 +586,74 @@ final class LibrarySectionsTests: XCTestCase {
                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         XCTAssertTrue(outline.menu(for: folderEvent)?.items.map(\.title).contains("Move to Trash") == true)
     }
+
+    /// QA #195: inline rename through the sections outline, as the app ships it. A folder's field appears in its
+    /// row, a click-away commits and leaves focus where it went; the same for a document in the list.
+    /// The Libraries are open and the folder selected before the window is built, as at launch: the sidebar's only
+    /// update is the one that builds its sections.
+    func testRenameInTheSectionsSidebarShowsTheFieldAndCommitsOnClickAway() async throws {
+        let registry = makeRegistry()
+        let alpha = try await added(registry, try library("Alpha", document: "Alpha"))
+        let beta = try await added(registry, try library("Beta", document: "Beta"))
+        beta.selectFolder("Notes")
+        await beta.waitForNavigation()
+        let (window, sidebar) = try hostWindow(registry)
+        try await settle(window)
+        let outline = try XCTUnwrap(sidebar()?.outline)
+        func exists(_ path: String) -> Bool {
+            FileManager.default.fileExists(atPath: beta.root!.appendingPathComponent(path).path)
+        }
+        func type(_ label: String, _ text: String) async throws {
+            _ = try await waitUntil("\(label): rename field") {
+                window.contentView?.layoutSubtreeIfNeeded()
+                return beta.rename != nil
+                    && Self.descendants(window.contentView!).contains {
+                        ($0 as? RenameNameField)?.currentEditor() != nil
+                    }
+            }
+            let field = try XCTUnwrap(
+                Self.descendants(window.contentView!).compactMap { $0 as? RenameNameField }.first {
+                    $0.currentEditor() != nil
+                })
+            let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
+            editor.insertText(text, replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+        }
+        func finished(_ label: String) async throws {
+            _ = try await waitUntil("\(label): rename finished") { beta.rename == nil && !beta.mutating }
+            try await settle(window)
+        }
+
+        // A folder: the field sits in Beta's Notes row; clicking the list commits and the list keeps focus.
+        beta.beginRename(LibraryRename(path: "Notes", isFolder: true))
+        try await type("folder", "Renamed")
+        let fieldRow = outline.row(
+            for: try XCTUnwrap(Self.descendants(outline).compactMap { $0 as? RenameNameField }.first))
+        XCTAssertEqual((outline.item(atRow: fieldRow) as? FolderSidebar.Item)?.folder?.relativePath, "Notes")
+        XCTAssertTrue((outline.item(atRow: fieldRow) as? FolderSidebar.Item)?.owner?.workspace === beta)
+        let list = try XCTUnwrap(
+            Self.descendants(window.contentView!).compactMap { $0 as? NSTableView }.first {
+                !($0 is SidebarOutlineView)
+            })
+        XCTAssertTrue(window.makeFirstResponder(list))
+        try await finished("folder")
+        XCTAssertTrue(exists("Renamed"), "a click-away commits a valid folder name")
+        XCTAssertFalse(exists("Notes"))
+        XCTAssertTrue(window.firstResponder === list)
+        XCTAssertEqual(
+            rows(outline),
+            [
+                "# Alpha", "All Documents", "Alpha", "Notes", "Tags",
+                "# Beta", "All Documents", "Beta", "Renamed", "Tags",
+            ], "only Beta's section follows the rename")
+
+        // A document: the field is in the list; clicking the sections outline commits and the outline keeps focus.
+        beta.beginRename(LibraryRename(path: "Renamed/Beta.md", isFolder: false))
+        try await type("document", "Beta Notes")
+        XCTAssertTrue(window.makeFirstResponder(outline))
+        try await finished("document")
+        XCTAssertTrue(exists("Renamed/Beta Notes.md"), "a click-away commits a valid document name")
+        XCTAssertTrue(window.firstResponder === outline)
+        XCTAssertTrue(registry.current === beta)
+        XCTAssertNil(alpha.rename)
+    }
 }
