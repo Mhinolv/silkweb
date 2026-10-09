@@ -54,19 +54,38 @@ steps 1 and 2. Then check it:
 
 ### 2. Create the grant
 
-Silkweb doesn't ship a command that creates or widens grants: an agent can run any command it can see,
-so it could use one to give itself more access. You edit the grants file yourself. A Settings section,
-Agent Access, will replace this step later.
-
-The file is `~/Library/Application Support/Silkweb/agent-grants.json`. Create its folder:
+Run `grant init` yourself, in Terminal. It asks for the Library folder, the project key and the access
+profile, then adds the grant to `~/Library/Application Support/Silkweb/agent-grants.json`:
 
 ```sh
-mkdir -p ~/Library/Application\ Support/Silkweb
+/Users/me/.local/bin/silkweb grant init
 ```
 
-If the file doesn't exist yet, save this template as `agent-grants.json` in that folder and set
-`project`, `label` and `library.path`. If it already exists, add only the object inside `grants` to its
-list and keep the other grants.
+Or give every answer as an option, so it asks nothing:
+
+```sh
+/Users/me/.local/bin/silkweb grant init --library ~/Writing --project Silkweb --access read-create
+```
+
+- `--access` is `read-create` (Read and Create) or `read` (Read Only).
+- It keeps the other grants in the file, and running it again with the same answers changes nothing.
+  It never widens an existing grant: more access, another Library, or turning a grant back on. To do
+  that, edit the file as shown below. Going from Read and Create to Read Only is allowed.
+- It never creates anything in the Library. If the Library isn't on a local APFS or HFS+ disk, the
+  grant is still saved, with a warning: agents can read it, but creating stays off.
+- `--dry-run` shows the grant and the commands without saving anything.
+- **Saving needs a terminal.** An agent's shell isn't one, so an agent that runs `grant init` can't
+  give itself access. Agents' skills tell them never to run it.
+
+When it's done, it prints the `claude mcp add`, `codex mcp add` and Gemini CLI commands from
+[Install](#install) with your helper path and project key filled in.
+
+#### Editing the file by hand
+
+Labels, limits and extra read folders aren't set by `grant init`; edit the file for those. If the file
+doesn't exist yet, save this template as `agent-grants.json` in
+`~/Library/Application Support/Silkweb/` and set `project`, `label` and `library.path`. If it already
+exists, add only the object inside `grants` to its list and keep the other grants.
 
 ```json
 {

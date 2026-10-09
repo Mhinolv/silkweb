@@ -8,7 +8,11 @@ if arguments.first == "mcp" {
     // The stdio MCP server (#136): stdout carries MCP frames only, until stdin closes.
     exit(AgentMCPServer.main(arguments, handlesTermination: true))
 }
-let output = AgentHelper.run(arguments)
+// `grant init` (#186): owner setup. Prompts go to stderr as they're asked; stdout is plain text.
+let output =
+    arguments.first == "grant"
+    ? AgentGrantInit.run(arguments, console: .standard, executable: CommandLine.arguments.first)
+    : AgentHelper.run(arguments)
 FileHandle.standardOutput.write(Data(output.stdout.utf8))
 FileHandle.standardError.write(Data(output.stderr.utf8))
 exit(output.status)
