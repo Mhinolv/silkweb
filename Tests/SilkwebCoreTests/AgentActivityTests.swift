@@ -140,7 +140,7 @@ final class AgentActivityTests: XCTestCase {
         let entries = AgentActivity.load(root: library).entries(in: snapshot)
         XCTAssertEqual(entries.map(\.document.relativePath), [third.path, renamed, first.path])
         XCTAssertEqual(entries.map(\.receipt.operationId), [third, second, first].map(\.receipt.operationId))
-        XCTAssertEqual(entries.first?.created, fixedDate.addingTimeInterval(600))
+        XCTAssertEqual(entries.first?.date, fixedDate.addingTimeInterval(600))
         let agents = AgentActivity.agents(in: entries)
         XCTAssertEqual(agents.map(\.name), ["agent-2", "agent-10"])
         XCTAssertEqual(agents.map(\.count), [2, 1])
@@ -173,7 +173,7 @@ final class AgentActivityTests: XCTestCase {
         let entries = activity.entries(in: snapshot)
         XCTAssertEqual(entries.map(\.receipt.operationId), ["op_d", "op_b2", "op_a", "op_c"])
         XCTAssertEqual(entries.map(\.document.relativePath), ["D.md", "B.md", "A.md", "C.md"])
-        XCTAssertNil(entries.last?.created)
+        XCTAssertNil(entries.last?.date)
         XCTAssertEqual(entries.first?.agent, "Unknown agent")
         XCTAssertEqual(AgentActivity().entries(in: snapshot), [])
     }

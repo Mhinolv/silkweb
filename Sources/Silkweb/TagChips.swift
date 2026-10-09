@@ -56,7 +56,8 @@ struct DocumentInfo: View {
                         if let provenance, provenance.path == document.relativePath,
                             let value = provenance.provenance
                         {
-                            AgentProvenanceSection(provenance: value, modified: document.modified)
+                            AgentProvenanceSection(
+                                provenance: value, modified: document.modified, root: workspace.snapshot?.rootURL)
                         }
                     }
                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading)

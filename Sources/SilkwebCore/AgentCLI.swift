@@ -3,7 +3,8 @@ import Foundation
 /// The `silkweb memory …` command line (#135, `docs/agent-memory.md` › Command line): a thin layer
 /// over the same services MCP uses (#136). It resolves a grant with Silkweb closed, then reports
 /// scope, lists, searches and reads documents (#134), creates documents and Folders (#133) and lists
-/// this grant's receipts. Only creates write to the Library; only `grant init` (#186,
+/// this grant's receipts, and updates documents an agent created (#204). Only creates and updates write to
+/// the Library; only `grant init` (#186,
 /// `AgentGrantInit.swift`) writes the grants file.
 ///
 /// stdout always carries exactly one JSON object, `{"ok":true,"result":…,"version":1}` or
@@ -38,6 +39,9 @@ public enum AgentHelper {
               --agent A --session S [--type T] [--idempotency-key K] [--status S]
               [--observed-at D] [--review-after D] [--supersedes MEMORY_ID]...
           create-folder <PATH>          Create a Folder inside a create folder
+          update <PATH> | --id ID       Replace the body of a document an agent created
+              --expected-revision R --body-file <FILE|-> --agent A --session S
+              [--idempotency-key K]
           activity [--limit N] [--since D]
                                         This grant’s receipts, newest first
           list                          Document paths, sizes and dates, no text
@@ -86,6 +90,9 @@ public enum AgentHelper {
             ],
             repeatable: ["supersedes"], required: ["title", "body-file", "agent", "session"]),
         "create-folder": Command(arguments: 1...1),
+        "update": Command(
+            arguments: 0...1, options: ["id", "expected-revision", "body-file", "idempotency-key"],
+            required: ["expected-revision", "body-file", "agent", "session"]),
         "activity": Command(options: ["limit", "since"]),
     ]
 
@@ -135,10 +142,8 @@ public enum AgentHelper {
 
     /// The failure envelope on stdout, the message on stderr, and the code's exit status.
     static func refusal(_ failure: AgentAccessError, pretty: Bool = false) -> Output {
-        var error: [String: Any] = ["code": failure.code, "message": failure.message, "title": failure.title]
-        if let seconds = failure.retryAfter { error["retryAfter"] = seconds }
         let json = AgentJSON.object([
-            ("error", AgentJSON(sortingKeysOf: error)), ("ok", .bool(false)), ("version", .int(outputVersion)),
+            ("error", AgentJSON(sortingKeysOf: failure.fields)), ("ok", .bool(false)), ("version", .int(outputVersion)),
         ])
         return Output(
             status: exitStatus(for: failure.code), stdout: json.rendered(pretty: pretty),
@@ -152,15 +157,15 @@ public enum AgentHelper {
         case "invalid_argument":
             return 64
         case "envelope_malformed", "envelope_schema_newer", "envelope_invalid_field", "too_large",
-            "idempotency_conflict", "not_found":
+            "idempotency_conflict", "not_found", "revision_changed":
             return 65
-        case "library_busy", "stale_snapshot", "rate_limited":
+        case "library_busy", "stale_snapshot", "rate_limited", "document_has_unsaved_changes":
             return 69
         case "library_not_found", "library_unreadable", "unreadable", "write_failed", "disk_full", "permission_denied":
             return 74
         case "grant_required", "grant_not_found", "grant_revoked", "no_grant", "no_grants_file",
             "invalid_grants_file", "unsupported_grants_version", "invalid_grant", "out_of_scope",
-            "create_not_allowed", "invalid_path", "excluded_name":
+            "create_not_allowed", "invalid_path", "excluded_name", "update_not_allowed", "update_requires_proposal":
             return 77
         default:
             return 70
@@ -219,7 +224,7 @@ public enum AgentHelper {
         guard words.first == "memory" else {
             throw usage(words.isEmpty ? "Choose a command." : "That isn’t a silkweb command.")
         }
-        let names = "capabilities, search, read, create, create-folder, activity or list"
+        let names = "capabilities, search, read, create, create-folder, update, activity or list"
         guard words.count >= 2 else { throw usage("Choose a memory command: \(names).") }
         guard let command = commands[words[1]] else { throw usage("That isn’t a memory command. Use \(names).") }
         let name = words[1]
@@ -240,8 +245,8 @@ public enum AgentHelper {
         if let missing = command.required.first(where: { invocation.options[$0] == nil }) {
             throw usage("“memory \(name)” needs --\(missing).")
         }
-        if name == "read", arguments.isEmpty == (invocation.value("id") == nil) {
-            throw usage("“memory read” needs a path or --id, not both.")
+        if name == "read" || name == "update", arguments.isEmpty == (invocation.value("id") == nil) {
+            throw usage("“memory \(name)” needs a path or --id, not both.")
         }
         return (name, arguments)
     }
@@ -294,6 +299,13 @@ public enum AgentHelper {
             return (try service.read(request).json, nil)
         case "create":
             return try create(session.authorize(.create), invocation: invocation, standardInput: standardInput)
+        case "update":
+            let path = arguments.first.map(nfc)
+            let context = try session.authorize(.update, path: path)
+            let body = try body(
+                invocation, limit: context.grant.limits.maxCreateBytes, tooLarge: AgentAccessError.updateTooLarge,
+                standardInput: standardInput)
+            return (try update(context, invocation: invocation, path: path, body: body, keyPrefix: "cli-").json, nil)
         case "create-folder":
             let authorization = try session.authorize(.createFolder, path: nfc(arguments[0]))
             let folder = try AgentCreateService(authorization: authorization).createFolder(authorization.path ?? "")
@@ -325,7 +337,8 @@ public enum AgentHelper {
             "access": context.grant.access.rawValue,
             "profile": context.grant.access.displayName,
             "operations": ["capabilities", "list", "search", "read", "activity"]
-                + (context.scope.createRoots.isEmpty ? [] : ["create", "create-folder"]),
+                + (context.scope.createRoots.isEmpty ? [] : ["create", "create-folder"])
+                + (context.scope.createRoots.isEmpty || !context.grant.access.allowsUpdate ? [] : ["update"]),
             "read_roots": context.scope.readRoots,
             "create_roots": context.scope.createRoots,
             "project_folder_exists": descriptor != nil,
@@ -344,19 +357,53 @@ public enum AgentHelper {
         -> (AgentJSON, String?)
     {
         let (type, folder) = try destination(invocation)
-        let limit = context.grant.limits.maxCreateBytes
+        let body = try body(
+            invocation, limit: context.grant.limits.maxCreateBytes, tooLarge: AgentAccessError.createTooLarge,
+            standardInput: standardInput)
+        let created = try publish(
+            context, invocation: invocation, type: type, folder: folder, body: body, keyPrefix: "cli-")
+        return (created.json, created.note)
+    }
+
+    /// The text from `--body-file`, or stdin for `-`, read only up to `limit`.
+    private static func body(
+        _ invocation: Invocation, limit: Int, tooLarge: (Int) -> AgentAccessError,
+        standardInput: FileHandle = .standardInput
+    ) throws -> String {
         let source = invocation.value("body-file") ?? "-"
         let handle = source == "-" ? standardInput : FileHandle(forReadingAtPath: source)
         guard let handle, let data = try? handle.read(upToCount: limit + 1) ?? Data() else {
             throw AgentAccessError.invalidRequest("The document text couldn’t be read.")
         }
-        guard data.count <= limit else { throw AgentAccessError.createTooLarge(limit: limit) }
+        guard data.count <= limit else { throw tooLarge(limit) }
         guard let body = String(data: data, encoding: .utf8) else {
             throw AgentAccessError.invalidRequest("The document text must be UTF-8.")
         }
-        let created = try publish(
-            context, invocation: invocation, type: type, folder: folder, body: body, keyPrefix: "cli-")
-        return (created.json, created.note)
+        return body
+    }
+
+    /// One update (#204), shared with `memory_update`. A replay of the same key and payload succeeds with
+    /// `"replayed": true`; the result carries the document's new `revision` for the next update.
+    static func update(
+        _ context: AgentAuthorization, invocation: Invocation, path: String?, body: String, keyPrefix: String
+    ) throws -> (json: AgentJSON, result: AgentUpdateResult) {
+        let value = invocation.value
+        let id = try value("id").map { text -> UUID in
+            guard let id = UUID(uuidString: text) else { throw AgentAccessError.invalidArgument("id") }
+            return id
+        }
+        let request = AgentUpdateRequest(
+            // Without a key a retry can't be recognized; the revision check still stops a second write.
+            idempotencyKey: value("idempotency-key") ?? keyPrefix + UUID().uuidString, path: path, documentID: id,
+            expectedRevision: value("expected-revision") ?? "", body: body, agent: value("agent") ?? "",
+            session: value("session") ?? "", client: value("client") ?? "cli")
+        let result = try AgentUpdateService(authorization: context).update(request)
+        let receipt = try JSONSerialization.jsonObject(with: AgentReceipt.encoded(result.receipt))
+        let fields: [String: Any] = [
+            "outcome": result.outcome.rawValue, "replayed": result.replayed, "path": result.path ?? NSNull(),
+            "revision": result.revision ?? NSNull(), "receipt": receipt,
+        ]
+        return (AgentJSON(sortingKeysOf: fields), result)
     }
 
     /// The envelope type and the Library-relative Folder (`nil` for the type's entry folder) from

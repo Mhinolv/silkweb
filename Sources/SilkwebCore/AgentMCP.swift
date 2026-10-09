@@ -21,7 +21,8 @@ public final class AgentMCPServer: @unchecked Sendable {
     public static let serverTitle = "Silkweb"
     public static let instructions =
         "Read and create Markdown documents in the Silkweb Library folders this grant allows. "
-        + "Existing documents are never changed or deleted."
+        + "Grants that allow updates can also replace the body of documents an agent created; earlier "
+        + "versions are kept. Nothing is ever deleted."
 
     /// A line longer than this (about 6× the largest default create, JSON-escaped) is refused unread.
     static let maxLineBytes = 16 << 20
@@ -371,11 +372,10 @@ public final class AgentMCPServer: @unchecked Sendable {
 
     private func refusal(_ failure: AgentAccessError, tool: AgentMCPTool) -> AgentJSON {
         note(tool.rawValue + ": " + failure.message)
-        var error: [String: Any] = ["code": failure.code, "message": failure.message, "title": failure.title]
-        if let seconds = failure.retryAfter { error["retryAfter"] = seconds }
         return .object([
             ("content", .array([Self.text(failure.message)])),
-            ("structuredContent", .object([("error", AgentJSON(sortingKeysOf: error))])), ("isError", .bool(true)),
+            ("structuredContent", .object([("error", AgentJSON(sortingKeysOf: failure.fields))])),
+            ("isError", .bool(true)),
         ])
     }
 
@@ -469,6 +469,39 @@ public final class AgentMCPServer: @unchecked Sendable {
                 : "Created “\(title)” in \(place)."
             return (summary, created.json)
 
+        case .update:
+            for (name, key) in [
+                ("id", "documentId"), ("expected-revision", "expectedRevision"), ("idempotency-key", "idempotencyKey"),
+                ("session", "session"),
+            ] {
+                option(name, key)
+            }
+            let name = lock.withLock { clientName }
+            invocation.options["agent"] = [agent ?? name ?? "mcp"]
+            invocation.options["client"] = [client ?? name ?? "mcp"]
+            if invocation.options["session"] == nil { invocation.options["session"] = [sessionID] }
+            let path = (arguments["path"] as? String).map(AgentHelper.nfc)
+            let context = try session.authorize(.update, path: path)
+            let body = arguments["body"] as? String ?? ""
+            let limit = context.grant.limits.maxCreateBytes
+            guard body.utf8.count <= limit else { throw AgentAccessError.updateTooLarge(limit: limit) }
+            let updated = try AgentHelper.update(
+                context, invocation: invocation, path: path, body: body, keyPrefix: "mcp-")
+            guard let current = updated.result.path else {
+                return (
+                    "Already updated earlier. The document is no longer in this grant’s read folders.", updated.json
+                )
+            }
+            if !updated.result.replayed { service.didCreate(current, authorization: context) }
+            let title = ((current as NSString).lastPathComponent as NSString).deletingPathExtension
+            let place = AgentMemoryContract.displayPath((current as NSString).deletingLastPathComponent)
+            return (
+                updated.result.replayed
+                    ? "Already updated “\(title)” in \(place). This is the original result."
+                    : "Updated “\(title)” in \(place). The earlier version was kept.",
+                updated.json
+            )
+
         case .createFolder:
             let authorization = try session.authorize(
                 .createFolder, path: AgentHelper.nfc(arguments["path"] as? String ?? ""))
@@ -491,13 +524,14 @@ public final class AgentMCPServer: @unchecked Sendable {
     }
 }
 
-/// The six tools, in `tools/list` order (`docs/agent-memory.md` › MCP server).
+/// The seven tools, in `tools/list` order (`docs/agent-memory.md` › MCP server).
 public enum AgentMCPTool: String, CaseIterable, Sendable {
     case capabilities = "memory_capabilities"
     case search = "memory_search"
     case read = "memory_read"
     case create = "memory_create"
     case createFolder = "memory_create_folder"
+    case update = "memory_update"
     case activity = "memory_activity"
 
     public var title: String {
@@ -507,11 +541,12 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
         case .read: return "Silkweb: Read Document"
         case .create: return "Silkweb: Create Document"
         case .createFolder: return "Silkweb: Create Folder"
+        case .update: return "Silkweb: Update Document"
         case .activity: return "Silkweb: Recent Agent Activity"
         }
     }
 
-    public var readOnly: Bool { self != .create && self != .createFolder }
+    public var readOnly: Bool { self != .create && self != .createFolder && self != .update }
 
     public var description: String {
         switch self {
@@ -534,8 +569,15 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
         case .createFolder:
             return "Creates a folder inside a create folder. Never moves, renames or deletes. An existing folder "
                 + "is returned with created: false."
+        case .update:
+            return "Replaces the body (the text after the front matter) of a document an agent created in "
+                + "Memories, Progress or Handoffs. Needs expectedRevision, the revision from memory_read: if the "
+                + "document changed since, nothing is written and the error carries currentRevision. Documents "
+                + "the owner wrote or edited are refused with update_requires_proposal, and a document with "
+                + "unsaved changes in Silkweb with document_has_unsaved_changes (try again later). The earlier "
+                + "text is kept. Retrying with the same idempotencyKey returns the original result."
         case .activity:
-            return "Lists this grant’s create receipts in its read folders, newest first. "
+            return "Lists this grant’s create and update receipts in its read folders, newest first. "
                 + "Returns at most the grant’s max_results and never includes document text."
         }
     }
@@ -548,7 +590,9 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
             (
                 "annotations",
                 .object([
-                    ("title", .string(title)), ("readOnlyHint", .bool(readOnly)), ("destructiveHint", .bool(false)),
+                    // An update replaces existing text (kept as an earlier version), so clients may confirm it.
+                    ("title", .string(title)), ("readOnlyHint", .bool(readOnly)),
+                    ("destructiveHint", .bool(self == .update)),
                     ("idempotentHint", .bool(true)), ("openWorldHint", .bool(false)),
                 ])
             ),
@@ -645,6 +689,34 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                                 + "Memory/Projects/Silkweb/Progress/Sprint 1.")
                     )
                 ], required: ["path"])
+        case .update:
+            return S.object(
+                [
+                    (
+                        "path",
+                        S.string(
+                            "Library-relative path of a document in a create folder, such as "
+                                + "Memory/Projects/Silkweb/Handoffs/Next steps.md. Or documentId.")
+                    ),
+                    ("documentId", S.string("The documentId from a search or read result, instead of path.")),
+                    (
+                        "expectedRevision",
+                        S.string("The revision from memory_read. If the document changed since, nothing is written.")
+                    ),
+                    (
+                        "body",
+                        S.string(
+                            "The new Markdown text after the front matter, replacing all of it. The front matter "
+                                + "stays as it is.")
+                    ),
+                    (
+                        "idempotencyKey",
+                        S.string(
+                            "Request key, 1 to 200 characters. Reuse it when retrying.", minLength: 1,
+                            maxLength: AgentCreateService.maxKeyLength)
+                    ),
+                    ("session", S.string("Session recorded in the receipt. Defaults to this server’s session.")),
+                ], required: ["expectedRevision", "body"])
         case .activity:
             return S.object([
                 (
@@ -668,6 +740,8 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
             return "folderPath needs type."
         case .create where values["folder"] == nil && values["type"] == nil:
             return "give folder or type."
+        case .update where (values["path"] == nil) == (values["documentId"] == nil):
+            return "give path or documentId, not both."
         default:
             return nil
         }
@@ -679,7 +753,7 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
         switch self {
         case .capabilities:
             properties = [
-                ("access", S.plain("string", oneOf: ["read", "read-create"])),
+                ("access", S.plain("string", oneOf: ["read", "read-create", "read-create-update"])),
                 ("contract_version", S.plain("integer")),
                 ("create_roots", S.list(S.plain("string"))),
                 ("filesystem", S.plain("string", oneOf: ["qualified", "unqualified"])),
@@ -742,6 +816,14 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
             ]
         case .createFolder:
             properties = [("created", S.plain("boolean")), ("path", S.plain("string"))]
+        case .update:
+            properties = [
+                ("outcome", S.plain("string", oneOf: ["updated", "duplicate"])),
+                ("path", S.nullable("string")),
+                ("receipt", .object([("type", .string("object"))])),
+                ("replayed", S.plain("boolean")),
+                ("revision", S.nullable("string")),
+            ]
         case .activity:
             properties = [("receipts", S.list(.object([("type", .string("object"))]))), ("total", S.plain("integer"))]
         }
@@ -750,7 +832,7 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                 "error",
                 S.record([
                     ("code", S.plain("string")), ("message", S.plain("string")), ("retryAfter", S.plain("integer")),
-                    ("title", S.plain("string")),
+                    ("currentRevision", S.plain("string")), ("title", S.plain("string")),
                 ])
             ))
         return S.record(properties)

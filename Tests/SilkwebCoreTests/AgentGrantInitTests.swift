@@ -151,19 +151,22 @@ final class AgentGrantInitTests: XCTestCase {
             Access:
               1  Read Only        Agents search and read.
               2  Read and Create  Agents can also add documents. They never edit or delete.
+              3  Read, Create and Update
+                                  Agents can also update documents an agent created. They never
+                                  change yours or delete anything; earlier versions are kept.
 
-            """ + "Choose 1 or 2 [2]: Save to \(grantsURL.path)? [y/N] ")
+            """ + "Choose 1, 2 or 3 [2]: Save to \(grantsURL.path)? [y/N] ")
         XCTAssertTrue(output.stdout.hasPrefix("Saved agent access for “Silkweb” (Read and Create).\n"))
         XCTAssertTrue(output.stdout.hasSuffix(installBlock()))
     }
 
     func testInteractiveModeRepromptsAfterInvalidAnswersAndOnlyAsksForMissingFlags() throws {
         let (output, prompts) = run(
-            ["--library", library.path], answers: ["a/b", ".hidden", "Notes", "3", "1", "yes"], terminal: true)
+            ["--library", library.path], answers: ["a/b", ".hidden", "Notes", "4", "1", "yes"], terminal: true)
         XCTAssertEqual(output.status, 0, output.stderr)
         XCTAssertFalse(prompts.contains("Library folder:"), "--library was given")
         XCTAssertEqual(prompts.components(separatedBy: "The project name isn’t a valid folder name.").count, 3)
-        XCTAssertTrue(prompts.contains("  Choose 1 or 2.\n"))
+        XCTAssertTrue(prompts.contains("  Choose 1, 2 or 3.\n"))
         XCTAssertEqual(try load().grants.map(\.access), [.read])
 
         let missing = run(
@@ -172,7 +175,7 @@ final class AgentGrantInitTests: XCTestCase {
         XCTAssertEqual(missing.output.status, 0, missing.output.stderr)
         XCTAssertEqual(missing.prompts.components(separatedBy: "  That folder doesn’t exist.\n").count, 3)
         XCTAssertFalse(missing.prompts.contains("Project key:"))
-        XCTAssertFalse(missing.prompts.contains("Choose 1 or 2"))
+        XCTAssertFalse(missing.prompts.contains("Choose 1, 2 or 3"))
         XCTAssertEqual(try load().grants.map(\.project), ["Notes", "Other"])
     }
 
@@ -373,7 +376,7 @@ final class AgentGrantInitTests: XCTestCase {
             interactive.prompts.contains(
                 "  ! \(synced.path) — not a local disk. Agents can read; creating stays off until the Library is on a local APFS or HFS+ disk.\n"
             ), interactive.prompts)
-        XCTAssertTrue(interactive.prompts.contains("Choose 1 or 2 [1]: "))
+        XCTAssertTrue(interactive.prompts.contains("Choose 1, 2 or 3 [1]: "))
         XCTAssertEqual(try load().grant(for: "Asked")?.access, .read)
         let chosen = run([], answers: [synced.path, "Chosen", "2", "y"], terminal: true)
         XCTAssertTrue(chosen.output.stdout.contains("  ! Agents can read;"))
