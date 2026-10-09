@@ -403,6 +403,56 @@ final class SaveCoordinatorTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: future.path))
     }
 
+    /// #208: the per-note lookup reads only that note's files: its own corrupt draft is set aside, a newer-format
+    /// one stays in place, and one saved under the other spelling of the temporary folder moves to this one.
+    func testRecoveryDraftForOneDocumentReadsOnlyItsOwnFiles() async throws {
+        let url = try document("Mine.md", text: "on disk")
+        XCTAssertTrue(url.path.hasPrefix("/var/"), url.path)
+        let canonical = recovery.appendingPathComponent(
+            DocumentRevision(data: Data(url.standardizedFileURL.absoluteString.utf8)).digest + ".json")
+        let coordinator = SaveCoordinator(recoveryDirectory: recovery)
+        let none = await coordinator.recoveryDraft(for: url)
+        XCTAssertNil(none)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recovery.path))
+
+        try FileManager.default.createDirectory(at: recovery, withIntermediateDirectories: true)
+        let other = recovery.appendingPathComponent("other.json")
+        try Data("{".utf8).write(to: other)
+        try Data("{ corrupt".utf8).write(to: canonical)
+        let corrupt = await coordinator.recoveryDraft(for: url)
+        XCTAssertNil(corrupt)
+        let reported = await coordinator.takeUnreadableRecoveryFiles()
+        XCTAssertEqual(reported.map(\.lastPathComponent), [canonical.lastPathComponent])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: other.path), "Another note's file is never read")
+
+        try Data(#"{"formatVersion":99,"documentURL":"file:///x.md","text":"t"}"#.utf8).write(to: canonical)
+        let future = await coordinator.recoveryDraft(for: url)
+        XCTAssertNil(future)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: canonical.path))
+        try FileManager.default.removeItem(at: canonical)
+
+        // Saved under `/private/var/…` (no `formatVersion`, as the earliest builds wrote it), opened as `/var/…`.
+        let spelled = URL(fileURLWithPath: "/private" + url.path)
+        let legacy = recovery.appendingPathComponent(
+            DocumentRevision(data: Data(spelled.absoluteString.utf8)).digest + ".json")
+        XCTAssertNotEqual(legacy, canonical)
+        try JSONSerialization.data(withJSONObject: ["documentURL": spelled.absoluteString, "text": "older draft"])
+            .write(to: legacy)
+        let lookup = await coordinator.recoveryDraft(for: url)
+        let found = try XCTUnwrap(lookup)
+        XCTAssertEqual(found.text, "older draft")
+        XCTAssertEqual(found.documentURL, url.standardizedFileURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: canonical.path), "Moved where Discard and Save clear it")
+        let again = await coordinator.recoveryDraft(for: url)
+        XCTAssertEqual(again, found)
+        let launch = try await coordinator.pendingRecoveryDrafts()
+        XCTAssertEqual(launch, [found])
+        try await coordinator.discardRecovery(url)
+        let discarded = await coordinator.recoveryDraft(for: url)
+        XCTAssertNil(discarded)
+    }
+
     /// silkweb-1.70 (4): restored text stays off disk until the user keeps it.
     func testRestoredDraftIsNotAutosavedUntilKeptAndDiscardReloadsDisk() async throws {
         for text in ["", "日本語 🕸\n", String(repeating: "x", count: 1_000_000)] {

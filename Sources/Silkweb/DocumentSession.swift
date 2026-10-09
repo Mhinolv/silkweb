@@ -109,10 +109,10 @@ final class DocumentSession {
         orphanDraft = false
         guard let destination else { return true }
         do {
-            // Each draft decodes on its own; an unreadable one never blocks opening (1.70).
-            let drafts = (try? await coordinator.pendingRecoveryDrafts()) ?? []
+            // Only this note's draft is read (#208); an unreadable one never blocks opening (1.70).
+            let found = await coordinator.recoveryDraft(for: destination)
             unreadableRecovery = await coordinator.takeUnreadableRecoveryFiles()
-            if let draft = drafts.first(where: { $0.documentURL.standardizedFileURL == destination }) {
+            if let draft = found {
                 await coordinator.restore(draft)
                 text = draft.text
                 state = await coordinator.state(for: destination) ?? .dirty
