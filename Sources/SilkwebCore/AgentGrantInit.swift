@@ -40,8 +40,8 @@ public enum AgentGrantInit {
 
     public static let help = """
         USAGE
-          silkweb grant init [--library <PATH>] [--project <KEY>] [--access read|read-create]
-                             [--dry-run] [--grants <FILE>]
+          silkweb grant init [--library <PATH>] [--project <KEY>]
+                             [--access read|read-create|read-create-update] [--dry-run] [--grants <FILE>]
 
         Sets up agent access for one project in agent-grants.json. Asks for anything the options
         leave out. Never widens an existing grant and never writes inside the Library.
@@ -49,7 +49,8 @@ public enum AgentGrantInit {
         OPTIONS
           --library <PATH>    The Library folder agents may use (~ is expanded)
           --project <KEY>     Project key, the Folder name under Memory/Projects
-          --access <LEVEL>    read (Read Only) or read-create (Read and Create)
+          --access <LEVEL>    read (Read Only), read-create (Read and Create) or
+                              read-create-update (Read, Create and Update)
           --dry-run           Show the grant and install commands without saving anything
           --grants <FILE>     Write another grants file, for testing
           --help              Show this help
@@ -134,7 +135,8 @@ public enum AgentGrantInit {
             switch text {
             case "read", "read-only": return .read
             case "read-create": return .readCreate
-            default: throw Failure.usage("The option “--access” must be read or read-create.")
+            case "read-create-update": return .readCreateUpdate
+            default: throw Failure.usage("The option “--access” must be read, read-create or read-create-update.")
             }
         }
         let missing = ["library", "project", "access"].filter { invocation.value($0) == nil }
@@ -208,14 +210,18 @@ public enum AgentGrantInit {
                 Access:
                   1  Read Only        Agents search and read.
                   2  Read and Create  Agents can also add documents. They never edit or delete.
+                  3  Read, Create and Update
+                                      Agents can also update documents an agent created. They never
+                                      change yours or delete anything; earlier versions are kept.
 
                 """)
             while access == nil {
-                switch try ask("Choose 1 or 2 [\(preferred)]: ") {
+                switch try ask("Choose 1, 2 or 3 [\(preferred)]: ") {
                 case "1": access = .read
                 case "2": access = .readCreate
+                case "3": access = .readCreateUpdate
                 case "": access = preferred == 1 ? .read : .readCreate
-                default: console.write("  Choose 1 or 2.\n")
+                default: console.write("  Choose 1, 2 or 3.\n")
                 }
             }
         }
@@ -277,7 +283,7 @@ public enum AgentGrantInit {
         if !sameLibrary(grant.library, library) {
             throw refuse("already uses another Library (\(grant.library.path ?? "a saved location"))")
         }
-        if grant.access == .read, access == .readCreate {
+        if access.rank > grant.access.rank {
             throw refuse("already exists with \(grant.access.displayName) access")
         }
         guard grant.access != access else { return (file, grant, .unchanged) }
@@ -381,7 +387,7 @@ public enum AgentGrantInit {
         }
         let disk = filesystem == .qualified ? "local disk" : "not a local disk"
         lines.append("  Library  \(grant.library.path ?? "") — \(disk)")
-        if filesystem == .unqualified, grant.access == .readCreate { lines.append("  ! " + notLocalWarning) }
+        if filesystem == .unqualified, grant.access.allowsCreate { lines.append("  ! " + notLocalWarning) }
         lines.append("  Folder   " + AgentMemoryContract.projectRoot(grant.project))
         lines.append("  File     " + fileName)
         return lines.joined(separator: "\n") + "\n"

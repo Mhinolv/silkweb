@@ -67,10 +67,12 @@ struct AgentActivityStrip: View {
     }
 }
 
-/// Document Info's text-only Agent block (#137): no box and no colour, the same label/value pairs as above it.
+/// Document Info's text-only Agent block (#137, #204): no box and no colour, the same label/value pairs as above it.
 struct AgentProvenanceSection: View {
     let provenance: AgentProvenance
     let modified: Date?
+    /// The Library, for revealing the newest earlier version in Finder.
+    var root: URL? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -97,16 +99,29 @@ struct AgentProvenanceSection: View {
             if let created = provenance.created {
                 pair("Created", created.formatted(date: .abbreviated, time: .shortened))
             }
-            if let since = provenance.sinceCreation {
+            if provenance.updates > 0 {
                 pair(
-                    "Since creation",
-                    since == .unchanged
-                        ? "Unchanged"
-                        : "Edited after creation"
-                            + (modified.map {
-                                " · " + $0.formatted(.dateTime.month().day().hour().minute())
-                            }
-                                ?? ""))
+                    "Last update",
+                    (provenance.lastUpdate.map { $0.formatted(date: .abbreviated, time: .shortened) + " · " } ?? "")
+                        + provenance.updatesLabel)
+            }
+            if let since = provenance.sinceValue(
+                edited: modified.map { $0.formatted(.dateTime.month().day().hour().minute()) })
+            {
+                pair(provenance.sinceLabel, since)
+            }
+            if let updates = provenance.agentUpdates { pair("Agent updates", updates.label) }
+            if provenance.earlierVersions > 0 {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Earlier versions").font(.headline)
+                    HStack(spacing: 0) {
+                        Text("\(provenance.earlierVersions) saved · ").font(.caption)
+                        Button("Show in Finder") { revealNewestVersion() }
+                            .buttonStyle(.link).font(.caption)
+                            .accessibilityLabel("Show earlier versions in Finder")
+                    }
+                }
+                .accessibilityElement(children: .contain)
             }
             // Display only; the review workflow and its controls come with #140.
             pair("Review", "Not reviewed")
@@ -115,6 +130,12 @@ struct AgentProvenanceSection: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Agent provenance")
+    }
+
+    /// Selects the newest saved version in Finder; plain `.md` files, readable without Silkweb.
+    private func revealNewestVersion() {
+        guard let root, let path = provenance.newestVersion else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([root.appendingPathComponent(path)])
     }
 
     private func pair(_ label: String, _ value: String) -> some View {
@@ -147,14 +168,15 @@ struct AgentProvenanceLoader: ViewModifier {
     }
 
     func body(content: Content) -> some View {
-        let receipt = document.flatMap { workspace.agentEntry(for: $0)?.receipt }
+        let receipts = document.flatMap { workspace.agentEntry(for: $0)?.receipts } ?? []
         content.task(
-            id: Identity(path: document?.relativePath, modified: document?.modified, receipt: receipt?.operationId)
+            id: Identity(
+                path: document?.relativePath, modified: document?.modified, receipt: receipts.last?.operationId)
         ) {
             guard let document, let root = workspace.snapshot?.rootURL else { return }
             let path = document.relativePath
             let provenance = await Task.detached(priority: .utility) {
-                AgentProvenance.load(relativePath: path, root: root, receipt: receipt)
+                AgentProvenance.load(relativePath: path, root: root, receipts: receipts)
             }.value
             guard !Task.isCancelled else { return }
             let next = LoadedAgentProvenance(path: path, provenance: provenance)

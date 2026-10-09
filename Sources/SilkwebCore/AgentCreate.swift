@@ -5,15 +5,27 @@ import Foundation
 /// What one create operation ended as (`docs/agent-memory.md` › Create and receipts).
 public enum AgentCreateOutcome: String, Codable, Sendable {
     case created, duplicate, reconciled, abandoned, refused
+    /// An update (#204) replaced the document's body.
+    case updated
 
-    /// A document was published for this key, so the key can never create another one.
-    public var isPublished: Bool { self == .created || self == .duplicate || self == .reconciled }
+    /// A document was published (or updated) for this key, so the key can never write another one.
+    public var isPublished: Bool {
+        self == .created || self == .duplicate || self == .reconciled || self == .updated
+    }
+}
+
+/// Which operation a receipt records. Receipts without the key are creates.
+public enum AgentReceiptOperation: String, Codable, Sendable {
+    case create, update
 }
 
 /// The audit record for one idempotency key, `.silkweb/agent-events/<operationId>.json`. It never
 /// holds document text. Versioned and decoded tolerantly; keys are sorted so it diffs cleanly.
+/// Create receipts keep version 1's shape; update receipts (#204) are version 2 and add `operation`,
+/// `sequence`, `baseDigest` and `previousVersion`.
 public struct AgentReceipt: Codable, Equatable, Sendable {
     public static let currentVersion = 1
+    public static let updateVersion = 2
 
     public var version = currentVersion
     /// Derived from the grant and the idempotency key, so a retry finds its receipt without an index.
@@ -40,12 +52,20 @@ public struct AgentReceipt: Codable, Equatable, Sendable {
     public var outcome: AgentCreateOutcome
     /// The refusal's `error.code` for a `refused` receipt.
     public var refusal: String?
+    public var operation: AgentReceiptOperation = .create
+    /// Agent writes to this document so far: 0 for its create, then 1, 2 … for each update.
+    public var sequence = 0
+    /// Update only: the revision (`sha256:` digest) the update replaced.
+    public var baseDigest: String?
+    /// Update only: the Library-relative copy of the replaced text under `.silkweb/agent-history/`.
+    public var previousVersion: String?
 
     public init(
         operationId: String, idempotencyKey: String, grantId: String, client: String, agent: String,
         session: String, createdAt: String, destination: String? = nil, documentId: UUID? = nil,
         memoryId: String? = nil, contentDigest: String? = nil, requestDigest: String, byteCount: Int = 0,
-        outcome: AgentCreateOutcome, refusal: String? = nil
+        outcome: AgentCreateOutcome, refusal: String? = nil, operation: AgentReceiptOperation = .create,
+        sequence: Int = 0, baseDigest: String? = nil, previousVersion: String? = nil
     ) {
         self.operationId = operationId
         self.idempotencyKey = idempotencyKey
@@ -62,11 +82,17 @@ public struct AgentReceipt: Codable, Equatable, Sendable {
         self.byteCount = byteCount
         self.outcome = outcome
         self.refusal = refusal
+        self.operation = operation
+        self.sequence = sequence
+        self.baseDigest = baseDigest
+        self.previousVersion = previousVersion
+        if operation == .update { version = Self.updateVersion }
     }
 
     private enum CodingKeys: String, CodingKey {
         case version, operationId, idempotencyKey, grantId, client, agent, session, createdAt, destination
         case documentId, memoryId, contentDigest, requestDigest, byteCount, outcome, refusal
+        case operation, sequence, baseDigest, previousVersion
     }
 
     public init(from decoder: Decoder) throws {
@@ -89,6 +115,10 @@ public struct AgentReceipt: Codable, Equatable, Sendable {
         // An outcome from a newer build counts as published, so a retry can never duplicate a document.
         outcome = string(.outcome).flatMap(AgentCreateOutcome.init(rawValue:)) ?? .created
         refusal = string(.refusal)
+        operation = string(.operation).flatMap(AgentReceiptOperation.init(rawValue:)) ?? .create
+        sequence = max(0, (try? values.decodeIfPresent(Int.self, forKey: .sequence)) ?? nil ?? 0)
+        baseDigest = string(.baseDigest)
+        previousVersion = string(.previousVersion)
     }
 
     /// Every field is written, `null` included, so receipts from one version all have the same shape.
@@ -110,6 +140,11 @@ public struct AgentReceipt: Codable, Equatable, Sendable {
         try values.encode(byteCount, forKey: .byteCount)
         try values.encode(outcome, forKey: .outcome)
         try values.encode(refusal, forKey: .refusal)
+        guard operation == .update else { return }
+        try values.encode(operation, forKey: .operation)
+        try values.encode(sequence, forKey: .sequence)
+        try values.encode(baseDigest, forKey: .baseDigest)
+        try values.encode(previousVersion, forKey: .previousVersion)
     }
 
     static func encoded(_ value: some Encodable) throws -> Data {
@@ -297,7 +332,7 @@ public struct AgentCreateService: Sendable {
         self.maxBytes = maxBytes
     }
 
-    private var gate: LibraryGate { LibraryGate(root: library) }
+    var gate: LibraryGate { LibraryGate(root: library) }
 
     // MARK: Create
 
@@ -621,7 +656,7 @@ public struct AgentCreateService: Sendable {
         }
     }
 
-    private func writeReceipt(_ receipt: AgentReceipt) throws {
+    func writeReceipt(_ receipt: AgentReceipt) throws {
         let root = try AgentCreateFiles.openRoot(library)
         defer { close(root) }
         let events = try AgentCreateFiles.metadataFolder(root, Self.eventsFolder, create: true)!
@@ -649,7 +684,7 @@ public struct AgentCreateService: Sendable {
         return Self.memoryID(in: folder.descriptor, name) == memoryID ? readable(destination) : nil
     }
 
-    private func readable(_ path: String) -> String? { (try? scope.checkRead(path)) != nil ? path : nil }
+    func readable(_ path: String) -> String? { (try? scope.checkRead(path)) != nil ? path : nil }
 
     /// Adds identities to the app index like any new document or Folder. Best effort: the document
     /// is already published, and an unreadable or newer index is left alone for the app to recover.
@@ -666,7 +701,7 @@ public struct AgentCreateService: Sendable {
         return id
     }
 
-    private static func index(_ library: URL) -> LibraryMetadata? {
+    static func index(_ library: URL) -> LibraryMetadata? {
         guard let loaded = try? LibraryMetadataStore.loadReportingReset(root: library, repair: false),
             !loaded.wasReset
         else { return nil }
@@ -676,7 +711,7 @@ public struct AgentCreateService: Sendable {
     // MARK: Helpers
 
     /// Filesystem failures become one stable refusal; a link where a Folder should be is `invalid_path`.
-    private func mapFilesystemErrors<T>(_ body: () throws -> T) throws -> T {
+    func mapFilesystemErrors<T>(_ body: () throws -> T) throws -> T {
         do {
             return try body()
         } catch let error as AgentAccessError {
@@ -807,7 +842,7 @@ enum AgentCreateFiles {
 
     static func names(_ folder: Int32) -> [String] { entries(folder).map(\.name) }
 
-    private static func entries(_ folder: Int32) -> [(name: String, inode: UInt64)] {
+    static func entries(_ folder: Int32) -> [(name: String, inode: UInt64)] {
         let copy = dup(folder)
         guard copy >= 0 else { return [] }
         guard let directory = fdopendir(copy) else {

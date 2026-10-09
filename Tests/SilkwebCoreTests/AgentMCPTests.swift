@@ -177,7 +177,8 @@ final class AgentMCPTests: XCTestCase {
         XCTAssertEqual(
             result["instructions"] as? String,
             "Read and create Markdown documents in the Silkweb Library folders this grant allows. "
-                + "Existing documents are never changed or deleted.")
+                + "Grants that allow updates can also replace the body of documents an agent created; earlier "
+                + "versions are kept. Nothing is ever deleted.")
 
         for version in AgentMCPServer.protocolVersions {
             XCTAssertEqual(
@@ -197,7 +198,7 @@ final class AgentMCPTests: XCTestCase {
             tools.compactMap { $0["name"] as? String },
             [
                 "memory_capabilities", "memory_search", "memory_read", "memory_create", "memory_create_folder",
-                "memory_activity",
+                "memory_update", "memory_activity",
             ])
         let expected: [String: (title: String, readOnly: Bool)] = [
             "memory_capabilities": ("Silkweb: What This Grant Allows", true),
@@ -205,6 +206,7 @@ final class AgentMCPTests: XCTestCase {
             "memory_read": ("Silkweb: Read Document", true),
             "memory_create": ("Silkweb: Create Document", false),
             "memory_create_folder": ("Silkweb: Create Folder", false),
+            "memory_update": ("Silkweb: Update Document", false),
             "memory_activity": ("Silkweb: Recent Agent Activity", true),
         ]
         for tool in tools {
@@ -212,7 +214,8 @@ final class AgentMCPTests: XCTestCase {
             let annotations = try XCTUnwrap(tool["annotations"] as? [String: Any])
             XCTAssertEqual(tool["title"] as? String, expected[name]?.title)
             XCTAssertEqual(annotations["readOnlyHint"] as? Bool, expected[name]?.readOnly, name)
-            XCTAssertEqual(annotations["destructiveHint"] as? Bool, false, "\(name) never replaces anything")
+            // Only an update replaces existing text (kept as an earlier version).
+            XCTAssertEqual(annotations["destructiveHint"] as? Bool, name == "memory_update", name)
             XCTAssertEqual(annotations["idempotentHint"] as? Bool, true, name)
             XCTAssertEqual(annotations["openWorldHint"] as? Bool, false, name)
             XCTAssertNotNil(tool["inputSchema"] as? [String: Any], name)
@@ -448,6 +451,72 @@ final class AgentMCPTests: XCTestCase {
         XCTAssertFalse(stderr.contains("private words") || stderr.contains("Diary"), stderr)
         XCTAssertFalse(stderr.contains("first") || stderr.contains("second"), "never body text")
         XCTAssertTrue(stderr.hasPrefix("silkweb: memory_read: "), stderr)
+    }
+
+    /// #204: `memory_update` over the same service as `memory update`: read → update → stale revision → replay,
+    /// and the refusal for grants without updates matches the CLI's.
+    func testUpdateToolReplacesTheBodyAndRefusesLikeTheCLI() throws {
+        try writeGrants([grant(access: .readCreateUpdate)])
+        _ = try initialize()
+        let created = try call(
+            2, "memory_create", ["folder": "handoffs", "title": "Next steps", "body": "Start.", "idempotencyKey": "c1"])
+        let path = try XCTUnwrap(try structured(created)["path"] as? String)
+        let read = try structured(try call(3, "memory_read", ["path": path]))
+        let revision = try XCTUnwrap(read["revision"] as? String)
+        let documentID = try XCTUnwrap(read["documentId"] as? String)
+
+        let updated = try call(
+            4, "memory_update",
+            ["path": path, "expectedRevision": revision, "body": "# Next steps\n\nFinish.\n", "idempotencyKey": "u1"])
+        XCTAssertEqual(updated["isError"] as? Bool, false, "\(updated)")
+        let result = try structured(updated)
+        XCTAssertEqual(result["outcome"] as? String, "updated")
+        XCTAssertEqual(result["path"] as? String, path)
+        XCTAssertTrue(
+            try text(updated).hasPrefix(
+                "Updated “Next steps” in Memory › Projects › Silkweb › Handoffs. The earlier version was kept.\n\n"))
+        XCTAssertFalse(try text(updated).contains("Finish"), "an update never echoes body text")
+        let receipt = try XCTUnwrap(result["receipt"] as? [String: Any])
+        XCTAssertEqual(receipt["client"] as? String, "test-client")
+        XCTAssertEqual(receipt["session"] as? String, "s1")
+        // Read-after-update in the same session sees the new text and revision.
+        let reread = try structured(try call(5, "memory_read", ["documentId": documentID]))
+        XCTAssertEqual(reread["revision"] as? String, result["revision"] as? String)
+        XCTAssertTrue((reread["body"] as? String)?.contains("Finish.") == true)
+
+        // The old revision: refused with the current one, nothing written.
+        let stale = try refusal(
+            try call(6, "memory_update", ["documentId": documentID, "expectedRevision": revision, "body": "Again."]))
+        XCTAssertEqual(stale["code"] as? String, "revision_changed")
+        XCTAssertEqual(stale["currentRevision"] as? String, result["revision"] as? String)
+        // A replay of the first call is its original result.
+        let replay = try call(
+            7, "memory_update",
+            ["path": path, "expectedRevision": revision, "body": "# Next steps\n\nFinish.\n", "idempotencyKey": "u1"])
+        XCTAssertEqual(try structured(replay)["replayed"] as? Bool, true)
+        // Both or neither of path and documentId is a protocol error.
+        let both = try request(
+            8, "tools/call",
+            [
+                "name": "memory_update",
+                "arguments": [
+                    "path": path, "documentId": documentID, "expectedRevision": "r",
+                    "body": "x",
+                ],
+            ])
+        XCTAssertEqual((both["error"] as? [String: Any])?["code"] as? Int, -32602)
+
+        try writeGrants([grant(access: .readCreate)])
+        let notAllowed = try refusal(
+            try call(9, "memory_update", ["path": path, "expectedRevision": revision, "body": "x"]))
+        XCTAssertEqual(notAllowed["code"] as? String, "update_not_allowed")
+        let cliError = try cliError(
+            cli(
+                [
+                    "memory", "update", path, "--expected-revision", revision, "--body-file", "-", "--agent", "a",
+                    "--session", "s",
+                ], stdin: "x"))
+        XCTAssertEqual(cliError as NSDictionary, notAllowed as NSDictionary)
     }
 
     func testRateLimitIsSharedAcrossTheSession() throws {

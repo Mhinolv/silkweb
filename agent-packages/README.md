@@ -67,7 +67,8 @@ Or give every answer as an option, so it asks nothing:
 /Users/me/.local/bin/silkweb grant init --library ~/Writing --project Silkweb --access read-create
 ```
 
-- `--access` is `read-create` (Read and Create) or `read` (Read Only).
+- `--access` is `read-create` (Read and Create), `read-create-update` (Read, Create and Update: agents
+  may also update documents an agent created) or `read` (Read Only).
 - It keeps the other grants in the file, and running it again with the same answers changes nothing.
   It never widens an existing grant: more access, another Library, or turning a grant back on. To do
   that, edit the file as shown below. Going from Read and Create to Read Only is allowed.
@@ -109,7 +110,8 @@ exists, add only the object inside `grants` to its list and keep the other grant
 ```
 
 - `project` is the Folder name under `Memory/Projects` and the `<GRANT_ID>` you use below.
-- `access` is `read-create` (Read and Create) or `read` (Read Only).
+- `access` is `read-create` (Read and Create), `read-create-update` (Read, Create and Update) or `read`
+  (Read Only).
 - To turn the grant off, add `"revoked_at": "2026-10-08T17:00:00Z"` (any date). Agents are refused on
   their next operation.
 
@@ -154,8 +156,9 @@ Add the fragment to your user `CLAUDE.md` (replace `Silkweb` with your project k
 
 **Check it worked.** Start `claude` in any folder:
 
-1. Run `/mcp`. The `silkweb` server is connected and lists the six tools: `memory_capabilities`,
-   `memory_search`, `memory_read`, `memory_create`, `memory_create_folder` and `memory_activity`.
+1. Run `/mcp`. The `silkweb` server is connected and lists the seven tools: `memory_capabilities`,
+   `memory_search`, `memory_read`, `memory_create`, `memory_create_folder`, `memory_update` and
+   `memory_activity`.
 2. Ask “Call memory_capabilities.” The answer includes your grant label, “Silkweb project”.
 3. Ask “Which skills do you have?” The list includes `silkweb-memory`.
 

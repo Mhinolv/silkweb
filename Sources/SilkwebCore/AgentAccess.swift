@@ -5,8 +5,10 @@ import Foundation
 public enum AgentOperation: String, CaseIterable, Sendable {
     case capabilities, list, search, read, activity, create
     case createFolder = "create-folder"
+    /// #204: only Read, Create and Update grants on a qualified filesystem.
+    case update
 
-    /// Only Read and Create grants on a qualified filesystem may run these.
+    /// Only Read and Create (or Read, Create and Update) grants on a qualified filesystem may run these.
     public var creates: Bool { self == .create || self == .createFolder }
 }
 
@@ -65,12 +67,24 @@ public struct AgentAccessError: Error, Equatable, Sendable {
     public let message: String
     /// Seconds before retrying a `library_busy` or `rate_limited` refusal; CLI JSON `retryAfter`.
     public let retryAfter: Int?
+    /// The document's revision now, for `revision_changed` (#204); CLI JSON `currentRevision`.
+    public let currentRevision: String?
 
-    public init(code: String, title: String, message: String, retryAfter: Int? = nil) {
+    public init(code: String, title: String, message: String, retryAfter: Int? = nil, currentRevision: String? = nil) {
         self.code = code
         self.title = title
         self.message = message
         self.retryAfter = retryAfter
+        self.currentRevision = currentRevision
+    }
+
+    /// The `error` object the CLI and MCP send: code, message, title, and `retryAfter` or
+    /// `currentRevision` when they apply.
+    var fields: [String: Any] {
+        var error: [String: Any] = ["code": code, "message": message, "title": title]
+        if let retryAfter { error["retryAfter"] = retryAfter }
+        if let currentRevision { error["currentRevision"] = currentRevision }
+        return error
     }
 
     static let noAccess = "No Agent Access"
@@ -91,6 +105,48 @@ public struct AgentAccessError: Error, Equatable, Sendable {
     public static let createNotQualified = Self(
         code: "create_not_allowed", title: noAccess,
         message: "This Library isn’t on a local disk, so agents can only read it.")
+
+    /// #204: the grant isn't Read, Create and Update.
+    public static let updateNotAllowed = Self(
+        code: "update_not_allowed", title: noAccess,
+        message: "This grant can’t update documents. Ask the owner to switch it to Read, Create and Update.")
+
+    /// Same code as a grant without updates: updating is off because the Library isn't on a qualified disk.
+    public static let updateNotQualified = Self(
+        code: "update_not_allowed", title: noAccess,
+        message: "This Library isn’t on a local disk, so agents can only read it.")
+
+    /// #204: only documents an agent wrote, unchanged since its last write, are updated directly. Anything
+    /// else (owner-written or edited in Silkweb) goes through an owner-reviewed proposal (#140).
+    public static func updateRequiresProposal(edited: Bool) -> Self {
+        Self(
+            code: "update_requires_proposal", title: "Owner Review Needed",
+            message: edited
+                ? "This document was edited after an agent last wrote it, so agents can only propose changes. "
+                    + "Nothing was changed."
+                : "Silkweb has no record of an agent creating this document, so agents can only propose changes. "
+                    + "Nothing was changed.")
+    }
+
+    /// #204: the document isn't at the revision the agent read. Carries the current one.
+    public static func revisionChanged(current: String) -> Self {
+        Self(
+            code: "revision_changed", title: "Document Changed",
+            message: "The document changed since you read it. Nothing was changed. Read it again and retry "
+                + "with its new revision.", currentRevision: current)
+    }
+
+    /// #204: Silkweb has unsaved changes for this document. The agent retries later.
+    public static let documentHasUnsavedChanges = Self(
+        code: "document_has_unsaved_changes", title: "Document Being Edited",
+        message: "This document has unsaved changes in Silkweb. Nothing was changed. Try again later.")
+
+    /// An update larger than the grant's `max_create_bytes`. Nothing was changed.
+    public static func updateTooLarge(limit: Int) -> Self {
+        Self(
+            code: "too_large", title: "Document Too Large",
+            message: "This document is larger than the grant allows (\(max(1, limit / 1024)) KB). Nothing was changed.")
+    }
 
     /// One message for traversal, links, special files and `.silkweb` paths, so a caller can't tell
     /// which check failed.
@@ -345,14 +401,19 @@ public final class AgentSession: @unchecked Sendable {
         try limiter.admit(limit: grant.limits.requestsPerMinute, now: now())
 
         if operation.creates {
-            guard grant.access == .readCreate else { throw AgentAccessError.createNotAllowed }
+            guard grant.access.allowsCreate else { throw AgentAccessError.createNotAllowed }
             guard context.filesystem == .qualified else { throw AgentAccessError.createNotQualified }
+        }
+        if operation == .update {
+            guard grant.access.allowsUpdate else { throw AgentAccessError.updateNotAllowed }
+            guard context.filesystem == .qualified else { throw AgentAccessError.updateNotQualified }
         }
         var normalized: String?
         if let path {
             do {
                 switch operation {
                 case .create: normalized = try context.scope.checkCreate(path)
+                case .update: normalized = try context.scope.checkUpdate(path)
                 case .createFolder: normalized = try context.scope.checkCreateFolder(path)
                 default: normalized = try context.scope.checkRead(path)
                 }

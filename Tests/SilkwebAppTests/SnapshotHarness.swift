@@ -264,6 +264,13 @@ struct SnapshotScenario {
         .init(name: "agent-receipt-arrives", agentActivity: "arrives"),
         // #139: an edited Document stays open and selected while a new agent row appears in its Folder.
         .init(name: "agent-qual-dirty-open", dirtyActive: true, agentActivity: "dirty-open"),
+        // #204: “Next session” updated by an agent: twice and unchanged since (Info: Allowed, 2 saved), once and then
+        // edited (Info: Proposals only), its Updated row among created rows, and an update reloading it while
+        // it's open and focused.
+        .init(name: "agent-provenance-updated", agentActivity: "updated"),
+        .init(name: "agent-provenance-proposals-only", agentActivity: "proposals-only"),
+        .init(name: "agent-activity-updated-row", agentActivity: "updated-row"),
+        .init(name: "agent-update-open-clean", agentActivity: "update-open"),
         .init(name: "new-document", folder: "", document: "Snapshot Fixtures/Empty Document.md", createDocument: true),
         .init(
             name: "new-document-in-folder", folder: "Snapshot Fixtures/Empty Folder",
@@ -854,10 +861,50 @@ final class SnapshotHarness {
                     folder: nil, documents: [try path("Next session")], pinned: true, changesScope: true, agents: true)
             }
             await workspace.waitForNavigation()
-            if ["info", "claimed-only"].contains(state) {
+            if ["info", "claimed-only", "updated", "proposals-only"].contains(state) {
                 workspace.inspectorInfo = true
                 workspace.preview.showsOutline = true
             }
+        }
+    }
+
+    /// #204: replaces “title”'s body through `AgentUpdateService` at a fixed UTC time and pins its file dates.
+    private func agentUpdate(_ root: URL, title: String, key: String, body: String, at seconds: TimeInterval) throws {
+        let library = root.resolvingSymlinksInPath()
+        guard let path = agentPaths[title] else { throw SnapshotFailure.error("Missing agent fixture \(title)") }
+        let date = Date(timeIntervalSince1970: seconds)
+        let grant = AgentGrant(
+            project: "Silkweb", library: LibraryLocation(path: library.path), access: .readCreateUpdate)
+        var service = AgentUpdateService(
+            library: library, grantId: "Silkweb", scope: try AgentScope(grant: grant),
+            maxBytes: AgentGrantLimits.defaultMaxCreateBytes, maxReadBytes: AgentGrantLimits.defaultMaxReadBytes)
+        service.now = { date }
+        let url = library.appendingPathComponent(path)
+        _ = try service.update(
+            AgentUpdateRequest(
+                idempotencyKey: key, path: path, expectedRevision: AgentCreateService.digest(try Data(contentsOf: url)),
+                body: body, agent: "claude-code", session: "7f3a2c19", client: "Claude Code"))
+        try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
+    }
+
+    /// #204 fixtures on “Next session” (created Oct 7 09:30 UTC): updates at 15:10 and 15:20, and for
+    /// "proposals-only" one update then an owner edit at 15:30.
+    func makeAgentUpdateFixture(_ state: String, at root: URL) throws {
+        let first = "# Next session\n\nObjective: next session.\n\nNext action: ship agent updates.\n"
+        let second = first + "\nUpdated after the review.\n"
+        switch state {
+        case "updated", "updated-row":
+            try agentUpdate(root, title: "Next session", key: "update-1", body: first, at: 1_791_385_800)
+            try agentUpdate(root, title: "Next session", key: "update-2", body: second, at: 1_791_386_400)
+        case "proposals-only":
+            try agentUpdate(root, title: "Next session", key: "update-1", body: first, at: 1_791_385_800)
+            guard let path = agentPaths["Next session"] else { throw SnapshotFailure.error("Missing Next session") }
+            let url = root.resolvingSymlinksInPath().appendingPathComponent(path)
+            try Data((try String(contentsOf: url, encoding: .utf8) + "\nOwner: checked by hand.\n").utf8).write(to: url)
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date(timeIntervalSince1970: 1_791_387_000)], ofItemAtPath: url.path)
+        default:
+            break
         }
     }
 
@@ -983,7 +1030,10 @@ final class SnapshotHarness {
                     at: root, deepPath: scenario.document == SnapshotScenario.deepDocument,
                     longOutline: scenario.document == SnapshotScenario.longOutline,
                     memoryEnvelopes: scenario.folder == SnapshotScenario.memoryFolder)
-                if scenario.agentActivity != nil { try makeAgentFixture(at: root) }
+                if let state = scenario.agentActivity {
+                    try makeAgentFixture(at: root)
+                    try makeAgentUpdateFixture(state, at: root)
+                }
                 if scenario.agentActivity == "dirty-open" {
                     let notes = root.appendingPathComponent(SnapshotScenario.ownerNotes)
                     try Data("# Owner notes\n\nWhat I still need to check before the release.\n".utf8).write(to: notes)
@@ -1179,7 +1229,25 @@ final class SnapshotHarness {
                     workspace.editor.text == text, workspace.editor.state == .dirty
                 else { throw SnapshotFailure.error("The agent row moved the edited Document's selection or state") }
             }
-            if ["info", "claimed-only"].contains(scenario.agentActivity) {
+            if scenario.agentActivity == "update-open", let root = workspace.root {
+                // An agent updates “Next session” while it's selected, open and focused: the editor reloads in
+                // place, and the selection, tabs and focus don't move.
+                let responder = window.firstResponder
+                let tabs = workspace.tabs.map(\.id)
+                try agentUpdate(
+                    root, title: "Next session", key: "update-open",
+                    body: "# Next session\n\nObjective: next session.\n\nNext action: ship agent updates.\n",
+                    at: 1_791_385_800)
+                await workspace.reconcileFinderChanges()
+                await workspace.reloadAgentActivity()
+                controller.view.layoutSubtreeIfNeeded()
+                guard let selected = agentPaths["Next session"], workspace.session.selectedDocuments == [selected],
+                    workspace.tabs.map(\.id) == tabs, window.firstResponder === responder,
+                    workspace.editor.text.hasSuffix("Next action: ship agent updates.\n"),
+                    workspace.editor.state == .clean, workspace.agentEntries.first?.isUpdate == true
+                else { throw SnapshotFailure.error("The update didn't reload in place, or moved selection or focus") }
+            }
+            if ["info", "claimed-only", "updated", "proposals-only"].contains(scenario.agentActivity) {
                 // The Agent block reads the Document off the main thread.
                 try await Task.sleep(for: .milliseconds(400))
                 controller.view.layoutSubtreeIfNeeded()

@@ -60,19 +60,24 @@ import Foundation
         classify(paths, root: root).library
     }
 
-    /// `library`: some event lies outside `.silkweb`. `receipts`: some event touches `.silkweb/agent-events`
-    /// (or `.silkweb` itself, which may have been replaced). No paths (dropped/coalesced events) is both.
+    /// `library`: some event lies outside `.silkweb`. `receipts`: some event touches `.silkweb/agent-events` or
+    /// `.silkweb/agent-history` (or `.silkweb` itself, which may have been replaced). No paths (dropped/coalesced
+    /// events) is both.
     nonisolated static func classify(_ paths: [String], root: String) -> (library: Bool, receipts: Bool) {
         guard !paths.isEmpty else { return (true, true) }
         let metadata = eventPathForm(root) + "/.silkweb"
         let events = metadata + "/agent-events"
+        // #204: earlier versions an update saved; Info counts them.
+        let history = metadata + "/agent-history"
         var library = false
         var receipts = false
         for raw in paths {
             let path = eventPathForm(raw)
             if path != metadata && !path.hasPrefix(metadata + "/") {
                 library = true
-            } else if path == metadata || path == events || path.hasPrefix(events + "/") {
+            } else if path == metadata || path == events || path.hasPrefix(events + "/") || path == history
+                || path.hasPrefix(history + "/")
+            {
                 receipts = true
             }
             if library && receipts { break }
