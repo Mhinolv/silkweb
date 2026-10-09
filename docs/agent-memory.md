@@ -339,7 +339,7 @@ document text or the requested target.
 | `grant_revoked` | Agent access “Silkweb project” was turned off. Ask the owner to turn it back on. |
 | `rate_limited` | Too many requests. Try again in N seconds. |
 | `too_large` | That document is larger than this grant’s read limit (1 MB). For creates: This document is larger than the grant allows (256 KB). Nothing was created. |
-| `not_found` | There’s no document at that location. (Only for targets inside the scope.) |
+| `not_found` | There’s no document at that location. (Only for targets inside the scope, and for any ID that is unknown or outside it.) |
 
 The Settings ▸ Library ▸ Agent Access section comes later and only edits this file. Until then the
 owner writes it by hand (see [Spike](#spike-app-closed-access-in-terminal-macos-15) step 3); the CLI
@@ -537,7 +537,8 @@ then `envelope` (the envelope’s keys and values in written order, or `null`), 
   `.silkweb/index.json` for `documentId`, without repairing or creating anything (#131).
 - When the grant is turned off or removed, the next search or read deletes its cache.
 - The knowledge index (#177) keeps its own checkpoints beside it in `<grant-id>.knowledge/` (0700, files
-  0600), built from the grant's readable Documents only, and deleted with the JSON cache. The app keeps a
+  0600), built from the grant's readable Documents only, keyed by the effective scope (narrower MCP roots or
+  grant folders rebuild it, #178), and deleted with the JSON cache. The app keeps a
   separate one per Library in `~/Library/Caches/Silkweb/knowledge/<Library name>-<hash>/`. Each folder
   holds `manifest.json` (`version: 1`, `library`, `generation`, `checkpoint`), the immutable
   `checkpoint-<generation>.json` it names, and `publish.lock` (`flock`). A publisher stages the

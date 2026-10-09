@@ -118,11 +118,39 @@ follows the traversal order.
 - **Document text is not redacted.** A permitted Document’s own text may contain a link to an
   out-of-scope path. That text is returned like any other text, but no tool resolves the link,
   reports a title for it or says whether it exists.
-- **Refusals reuse #130 word for word.** A graph request that starts from an out-of-scope path or ID
+- **Refusals reuse #130 word for word.** A graph request that starts from an out-of-scope path
   returns `out_of_scope`: “That location is outside this grant’s read folders (Memory › Projects ›
-  Silkweb).” Whether the target exists is never revealed.
+  Silkweb).” One that starts from an out-of-scope ID returns `not_found`, like an unknown ID (#178).
+  Whether the target exists is never revealed.
 - Hidden items and symbolic links are never followed or listed, as in `agent-memory.md` › Grants.
 - Caches and query caches are keyed by the effective scope and are never shared across grants.
+
+### Permitted graph
+
+Every helper retrieval goes through one permitted graph view (#178, `PermittedKnowledgeGraph`). A
+narrowed grant reads like a smaller Library, never like a Library with holes in it:
+
+- Out-of-scope Documents are **absent**. There are no placeholders, “1 hidden link”, `null` titles or
+  `hiddenCount`/`omitted` fields.
+- `total`, degrees and link counts, `index.indexed`/`index.total`, `skipped`, and truncation signals
+  (`nextCursor`, `truncated`, budget notes) are computed on the permitted Documents only. A path that
+  connects only through a hidden Document doesn’t exist; it isn’t reported as blocked or over budget.
+  A hidden Document that is still being indexed never makes a permitted answer wait.
+- Empty results reuse the `memory_search` messages. There’s no scope-specific variant.
+- **IDs** (`documentId`, `memoryId`, graph seeds): unknown and out-of-scope both return `not_found`
+  with the same code, title, message and exit status. **Paths** keep `out_of_scope`, decided from the
+  path string before the disk is touched; `invalid_path` stays the one message for links, `..` and
+  substitution. See `agent-memory.md` › [Refusals](agent-memory.md#refusals).
+- **Cursors** name the effective scope, the permitted Documents’ revisions and the request. One from
+  wider roots, an edited grant, or a permitted Document that has changed since fails with
+  `invalid_argument` (“That cursor has expired. Search again without “cursor”.”), one message for
+  every reason. A change to a hidden Document never expires one. The first page afterwards is fresh,
+  with no warning or flag. A read cursor keeps `stale_snapshot` for a changed file, and a revoked
+  grant stays `grant_revoked`.
+- **Caches** are keyed by the effective scope: narrower MCP roots or grant folders start a fresh graph
+  in the grant’s `<grant-id>.knowledge/` instead of reusing one built for a wider scope.
+- **Cancellation** returns the existing MCP cancellation response with no partial results.
+- The app’s own backlinks and graph (#30, #184) show the owner’s full Library and are not filtered.
 
 ## Ranking signals
 
