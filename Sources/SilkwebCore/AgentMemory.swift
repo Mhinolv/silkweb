@@ -5,6 +5,8 @@ import Foundation
 /// (#130); creates and receipts in `AgentCreate.swift` (#133).
 public enum AgentMemoryContract {
     public static let version = 1
+    /// `retrieval_contract_version` in `knowledge-graph-retrieval.md`, reported by capabilities and ranked modes.
+    public static let retrievalVersion = 1
     public static let projectsFolder = "Memory/Projects"
     /// Title-case entry folders, in display order. `Proposals` is reserved and never created in MVP.
     public static let entryFolders = ["Memories", "Progress", "Handoffs"]

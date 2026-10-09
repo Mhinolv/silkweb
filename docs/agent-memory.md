@@ -456,6 +456,8 @@ silkweb memory read --id 5E0C…-documentId
   timestamp, compared with `created_at`. Documents without an envelope use their modified date.
 - `limit`: default 10, at most 50, and never more than the grant’s `max_results`.
 - **Scope comes first.** Only documents inside the read folders are matched, ranked, counted or excerpted.
+- `mode`: `default` (everything above, unchanged) or `ranked` (CLI `--ranked`, #179): BM25 order, query
+  syntax and a trailing `score`. See [`knowledge-graph-retrieval.md` › Ranking signals](knowledge-graph-retrieval.md#ranking-signals).
 
 ### Search response
 

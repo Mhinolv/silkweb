@@ -7,6 +7,8 @@ public indirect enum AgentJSON: Sendable {
     case array([AgentJSON])
     case string(String)
     case int(Int)
+    /// A number written with exactly `places` decimals, such as a ranked `score`.
+    case decimal(Double, places: Int)
     case bool(Bool)
     case null
 
@@ -63,6 +65,10 @@ public indirect enum AgentJSON: Sendable {
             output += (indent ?? "") + "]"
         case .string(let string): output += Self.quoted(string)
         case .int(let value): output += String(value)
+        case .decimal(let value, let places):
+            output +=
+                value.isFinite
+                ? String(format: "%.\(places)f", locale: Locale(identifier: "en_US_POSIX"), value) : "null"
         case .bool(let value): output += value ? "true" : "false"
         case .null: output += "null"
         }
@@ -120,10 +126,16 @@ extension AgentMemorySearchResponse {
             AgentJSON.object(
                 result.document.jsonFields + [
                     ("matchKind", .string(result.matchKind.rawValue)), ("excerpt", .string(result.excerpt)),
-                ])
+                ] + (result.score.map { [("score", AgentJSON.decimal($0, places: 4))] } ?? []))
         }
         var fields: [(String, AgentJSON)] = [("results", .array(rows)), ("total", .int(total)), ("index", index.json)]
         if let message { fields.append(("message", .string(message))) }
+        if mode != .default {
+            fields += [
+                ("mode", .string(mode.rawValue)), ("ranking_version", .string(KnowledgeBM25.rankingVersion)),
+                ("retrieval_contract_version", .int(AgentMemoryContract.retrievalVersion)),
+            ]
+        }
         return .object(fields)
     }
 }

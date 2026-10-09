@@ -30,7 +30,9 @@ public enum AgentHelper {
           capabilities                  This grant’s scope, limits and commands
           search [QUERY]                Search the read folders
               [--project P] [--type T]... [--status S]... [--created-after D]
-              [--created-before D] [--limit N]
+              [--created-before D] [--limit N] [--ranked]
+              --ranked orders by relevance and reads "phrases", tag:, type:,
+              status:, project:, after: and before: in QUERY
           read <PATH> | --id ID         Read one page of a document
               [--cursor C] [--expected-revision R]
           create                        Create one document; never replaces anything
@@ -69,7 +71,7 @@ public enum AgentHelper {
     }
 
     private static let globalOptions: Set<String> = ["grant", "agent", "session", "client", "grants"]
-    private static let flags: Set<String> = ["pretty", "help", "version"]
+    private static let flags: Set<String> = ["pretty", "help", "version", "ranked"]
 
     private static let commands: [String: Command] = [
         "capabilities": Command(),
@@ -240,6 +242,9 @@ public enum AgentHelper {
         if let missing = command.required.first(where: { invocation.options[$0] == nil }) {
             throw usage("“memory \(name)” needs --\(missing).")
         }
+        if invocation.flags.contains("ranked"), name != "search" {
+            throw usage("The option “--ranked” isn’t valid for “memory \(name)”.")
+        }
         if name == "read", arguments.isEmpty == (invocation.value("id") == nil) {
             throw usage("“memory read” needs a path or --id, not both.")
         }
@@ -327,6 +332,8 @@ public enum AgentHelper {
             "operations": ["capabilities", "list", "search", "read", "activity"]
                 + (context.scope.createRoots.isEmpty ? [] : ["create", "create-folder"]),
             "read_roots": context.scope.readRoots,
+            "retrieval_contract_version": AgentMemoryContract.retrievalVersion,
+            "retrieval_modes": AgentMemorySearchRequest.Mode.allCases.map(\.rawValue),
             "create_roots": context.scope.createRoots,
             "project_folder_exists": descriptor != nil,
             "limits": [
@@ -470,7 +477,8 @@ public enum AgentHelper {
         return AgentMemorySearchRequest(
             query: query.joined(separator: " "), project: value("project").map(nfc), types: list("type"),
             statuses: list("status"), createdAfter: try date("created-after"),
-            createdBefore: try date("created-before"), limit: limit)
+            createdBefore: try date("created-before"), limit: limit,
+            mode: invocation.flags.contains("ranked") ? .ranked : .default)
     }
 }
 

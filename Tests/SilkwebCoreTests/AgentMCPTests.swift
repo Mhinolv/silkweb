@@ -297,6 +297,16 @@ final class AgentMCPTests: XCTestCase {
         let found = try XCTUnwrap(try structured(search)["results"] as? [[String: Any]])
         XCTAssertEqual(found.compactMap { $0["path"] as? String }, [path])
         XCTAssertTrue(try text(search).hasPrefix("1 of 1 match."))
+        // Ranked mode (#179): query filters, a trailing score and the echoed mode; an unknown mode is refused.
+        let ranked = try structured(call(60, "memory_search", ["query": "quartz gate type:memory", "mode": "ranked"]))
+        let rankedRows = try XCTUnwrap(ranked["results"] as? [[String: Any]])
+        XCTAssertEqual(rankedRows.compactMap { $0["path"] as? String }, [path])
+        XCTAssertNotNil(rankedRows.first?["score"] as? Double)
+        XCTAssertEqual(ranked["mode"] as? String, "ranked")
+        XCTAssertEqual(
+            try structured(call(61, "memory_search", ["query": "quartz gate type:memory"]))["total"] as? Int, 0)
+        let unknownMode = try request(62, "tools/call", ["name": "memory_search", "arguments": ["mode": "fast"]])
+        XCTAssertEqual((unknownMode["error"] as? [String: Any])?["code"] as? Int, -32602)
 
         let read = try call(7, "memory_read", ["path": path])
         let page = try structured(read)
