@@ -163,8 +163,13 @@ final class LibraryWorkspace {
     /// The library window's sections (#195). Offscreen tests that host one workspace leave it out; opening a
     /// folder then replaces this workspace's Library, as before sections.
     @ObservationIgnored weak var shell: LibraryWindowRegistry?
-    /// The sidebar section's header is collapsed (#195). Kept for this launch only.
-    var sectionCollapsed = false
+    /// The sidebar section's header is collapsed (#195), saved with the open sections for relaunch (#196).
+    var sectionCollapsed = false {
+        didSet { if sectionCollapsed != oldValue { shell?.saveSession() } }
+    }
+    /// This section's saved folder (bookmark and path, #196): set when the Library opens, or from the app session
+    /// for a section that couldn't be found at launch.
+    @ObservationIgnored var libraryLocation: LibraryLocation?
     /// Bumped when the section is focused: the sidebar selects and scrolls to its scope.
     var sectionRevealRequest = 0
     /// The two views whose focus enables Rename, Move To… and Move to Trash (#104).
@@ -307,6 +312,19 @@ final class LibraryWorkspace {
                 loadTask = nil
             }
         }
+    }
+
+    /// Relaunch (#196): a saved section whose folder can't be found or read keeps its place and shows why.
+    func showUnavailable(_ failure: LibraryLocationError) {
+        let name = root?.lastPathComponent ?? "Library"
+        loading = false
+        loadingCount = nil
+        errorTitle = failure.title
+        errorSymbol = failure == .notFound ? "externaldrive.badge.questionmark" : "lock"
+        error =
+            failure == .notFound
+            ? "Silkweb can’t find “\(name)”. It may have been moved, renamed, or be on a disconnected drive."
+            : "Silkweb doesn’t have permission to read “\(name)”."
     }
 
     private func persistLocation(_ location: LibraryLocation) {
@@ -524,6 +542,7 @@ final class LibraryWorkspace {
                 let location = await Task.detached(priority: .utility) { LibraryLocation.saving(url) }.value
                 guard !Task.isCancelled else { return }
                 persistLocation(location)
+                libraryLocation = location
                 shell?.libraryDidOpen(location)
                 loading = false
                 await migrateMedia()
@@ -865,31 +884,43 @@ final class LibraryWorkspace {
     }
 }
 
+/// Library Not Found / Can’t Open Library: the whole window, or beside the sidebar for a section (#196).
+struct LibraryUnavailableView: View {
+    let workspace: LibraryWorkspace
+    var registry: LibraryWindowRegistry? = nil
+
+    var body: some View {
+        ContentUnavailableView {
+            Label(workspace.errorTitle, systemImage: workspace.errorSymbol)
+        } description: {
+            Text(workspace.error ?? "")
+        } actions: {
+            // Locate… opens the folder in this Library's place; another folder adds a section (#195).
+            Button(workspace.errorTitle == "Library Not Found" ? "Locate…" : "Choose Folder Again…") {
+                workspace.chooseFolder(replacing: true)
+            }
+            if workspace.errorTitle == "Library Not Found" {
+                Button("Open Another Folder…") { workspace.chooseFolder() }
+            }
+            if let registry, registry.sections.contains(where: { $0 === workspace }) {
+                Button("Close Library") { Task { await registry.closeLibrary(workspace) } }
+            }
+        }
+    }
+}
+
 struct LibraryWorkspaceView: View {
     @Bindable var workspace: LibraryWorkspace
     /// The window's sections (#195): the sidebar lists every open Library and the welcome screen its recents.
     var registry: LibraryWindowRegistry? = nil
 
     var body: some View {
+        // #196: a Library section that can't open keeps the sidebar; its view replaces the editor.
+        let isSection = registry?.sections.contains { $0 === workspace } == true
         Group {
-            if let error = workspace.error {
-                ContentUnavailableView {
-                    Label(workspace.errorTitle, systemImage: workspace.errorSymbol)
-                } description: {
-                    Text(error)
-                } actions: {
-                    // Locate… opens the folder in this Library's place; another folder adds a section (#195).
-                    Button(workspace.errorTitle == "Library Not Found" ? "Locate…" : "Choose Folder Again…") {
-                        workspace.chooseFolder(replacing: true)
-                    }
-                    if workspace.errorTitle == "Library Not Found" {
-                        Button("Open Another Folder…") { workspace.chooseFolder() }
-                    }
-                    if let registry, workspace.root != nil, registry.sections.count > 1 {
-                        Button("Close Library") { Task { await registry.closeLibrary(workspace) } }
-                    }
-                }
-            } else if workspace.snapshot != nil || workspace.loading {
+            if workspace.error != nil, !isSection {
+                LibraryUnavailableView(workspace: workspace, registry: registry)
+            } else if workspace.snapshot != nil || workspace.loading || isSection {
                 libraryColumns
             } else {
                 welcome
@@ -940,7 +971,9 @@ struct LibraryWorkspaceView: View {
         .sheet(item: $workspace.pdfProgress) { progress in PDFProgressSheet(progress: progress) }
         .sheet(isPresented: $workspace.showsAccessRequests) { AccessRequestsSheet(workspace: workspace) }
         .task {
-            workspace.restore(); await workspace.resumeEditor()
+            // #196: the app restores every saved section; a lone workspace its last Library.
+            if let registry { registry.restoreSession() } else { workspace.restore() }
+            await workspace.resumeEditor()
         }
         .onChange(of: workspace.session) { workspace.persistSession() }
         .onChange(of: workspace.preview.mode) { workspace.persistSession() }

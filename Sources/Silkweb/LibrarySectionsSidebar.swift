@@ -30,10 +30,20 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
         var title: String
         /// Built once the Library has loaded; a loading section shows only its header.
         var coordinator: FolderSidebar.Coordinator?
+        /// #196: the Library couldn't open (missing at launch, unreadable): one “Not Found” row under a ⚠︎ header.
+        var unavailable: Unavailable?
         init(workspace: LibraryWorkspace) {
             self.workspace = workspace
             title = workspace.root?.lastPathComponent ?? ""
         }
+        var isUnavailable: Bool { workspace.snapshot == nil && workspace.error != nil && !workspace.loading }
+    }
+
+    /// The only row of a section that couldn't open; selecting it shows the Library Not Found view (#196).
+    @MainActor final class Unavailable: NSObject {
+        unowned let header: Header
+        init(header: Header) { self.header = header }
+        var title: String { header.workspace.errorTitle == "Library Not Found" ? "Not Found" : "Can’t Open" }
     }
 
     static let headerSpacing: CGFloat = 12
@@ -114,6 +124,10 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
             let title = header.workspace.root?.lastPathComponent ?? ""
             if header.title != title {
                 header.title = title
+                rebuilt = true
+            }
+            if header.isUnavailable != (header.unavailable != nil) {
+                header.unavailable = header.isUnavailable ? Unavailable(header: header) : nil
                 rebuilt = true
             }
             // A replaced Library (Settings ▸ Choose Library…) builds a new tree once it has loaded.
@@ -208,10 +222,22 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
         if let coordinator = currentCoordinator {
             coordinator.selectScope()
             coordinator.updateCurrentScope()
-        } else {
+        } else if !selectUnavailable() {
             outline.deselectAll(nil)
         }
         restoringDepth -= 1
+    }
+
+    /// The current Library couldn't open: its “Not Found” row holds the selection (#196).
+    @discardableResult
+    private func selectUnavailable() -> Bool {
+        guard let outline, let item = headers.first(where: { $0.workspace === current })?.unavailable else {
+            return false
+        }
+        let row = outline.row(forItem: item)
+        guard row >= 0 else { return false }
+        if outline.selectedRow != row { outline.selectRowIndexes([row], byExtendingSelection: false) }
+        return true
     }
 
     /// Focusing an open Library: its section expands, its remembered scope is selected and scrolled into view.
@@ -219,7 +245,7 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
         guard let outline, let header = headers.first(where: { $0.workspace === current }) else { return }
         restoringDepth += 1
         syncCollapse(header)
-        currentCoordinator?.selectScope()
+        if let coordinator = currentCoordinator { coordinator.selectScope() } else { selectUnavailable() }
         restoringDepth -= 1
         let headerRow = outline.row(forItem: header)
         if headerRow >= 0 { outline.scrollRowToVisible(headerRow) }
@@ -231,7 +257,7 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
         switch item {
         case nil: headers.count
-        case let header as Header: header.coordinator?.roots.count ?? 0
+        case let header as Header: header.coordinator?.roots.count ?? (header.unavailable == nil ? 0 : 1)
         case let item as FolderSidebar.Item: item.children.count
         default: 0
         }
@@ -239,7 +265,7 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
 
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
         switch item {
-        case let header as Header: header.coordinator!.roots[index]
+        case let header as Header: header.coordinator?.roots[index] ?? header.unavailable!
         case let item as FolderSidebar.Item: item.children[index]
         default: headers[index]
         }
@@ -297,6 +323,7 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
     }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
+        if let unavailable = item as? Unavailable { return unavailableCell(outlineView, unavailable) }
         guard let header = item as? Header else {
             return (item as? FolderSidebar.Item)?.owner?.outlineView(outlineView, viewFor: tableColumn, item: item)
         }
@@ -310,14 +337,65 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
 
     private func configure(_ cell: SectionHeaderCell, header: Header) {
         let isCurrent = header.workspace === current
+        let unavailable = header.unavailable != nil
         cell.textField?.stringValue = header.title
-        cell.textField?.textColor = isCurrent ? .labelColor : .secondaryLabelColor
+        // #196: a Library that couldn't open stays secondary, with a trailing warning.
+        cell.textField?.textColor = isCurrent && !unavailable ? .labelColor : .secondaryLabelColor
+        cell.showsWarning = unavailable
         cell.setAccessibilityLabel("\(header.title) library")
-        cell.setAccessibilityValue(isCurrent ? "current" : nil)
+        let value = [isCurrent ? "current" : nil, header.unavailable?.title.lowercased()].compactMap { $0 }
+        cell.setAccessibilityValue(value.isEmpty ? nil : value.joined(separator: ", "))
+    }
+
+    /// “Not Found” under a ⚠︎ header: tertiary, no count.
+    private func unavailableCell(_ outlineView: NSOutlineView, _ item: Unavailable) -> NSView {
+        let identifier = NSUserInterfaceItemIdentifier("sectionUnavailable")
+        let cell =
+            outlineView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView
+            ?? {
+                let cell = NSTableCellView()
+                cell.identifier = identifier
+                let image = NSImageView()
+                let text = NSTextField(labelWithString: "")
+                text.font = .systemFont(ofSize: 13)
+                text.textColor = .tertiaryLabelColor
+                text.lineBreakMode = .byTruncatingTail
+                image.contentTintColor = .tertiaryLabelColor
+                for view in [image, text] as [NSView] {
+                    view.translatesAutoresizingMaskIntoConstraints = false
+                    cell.addSubview(view)
+                }
+                cell.imageView = image
+                cell.textField = text
+                NSLayoutConstraint.activate([
+                    image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
+                    image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                    image.widthAnchor.constraint(equalToConstant: 16),
+                    image.heightAnchor.constraint(equalToConstant: 16),
+                    text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
+                    text.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
+                    text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                ])
+                return cell
+            }()
+        cell.textField?.stringValue = item.title
+        cell.imageView?.image = NSImage(
+            systemSymbolName: item.header.workspace.errorSymbol, accessibilityDescription: nil)
+        cell.setAccessibilityElement(true)
+        cell.setAccessibilityLabel("\(item.header.title), \(item.title.lowercased())")
+        return cell
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
-        guard !restoring, let owner = selectedOwner else { return }
+        guard !restoring else { return }
+        if let outline, let item = outline.item(atRow: outline.selectedRow) as? Unavailable {
+            // #196: the section becomes current and shows Library Not Found.
+            registry.focus(item.header.workspace)
+            current = item.header.workspace
+            applyCurrentHeaders()
+            return
+        }
+        guard let owner = selectedOwner else { return }
         if owner.workspace !== current {
             // A row in another section: that Library becomes current, then the row's scope is shown as usual.
             registry.focus(owner.workspace)
@@ -360,13 +438,23 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
     private func menu(_ event: NSEvent) -> NSMenu? {
         guard let outline else { return nil }
         let row = outline.row(at: outline.convert(event.locationInWindow, from: nil))
-        guard let header = outline.item(atRow: row) as? Header else { return owner(ofRow: row)?.menu(event) }
+        let item = outline.item(atRow: row)
+        guard let header = item as? Header ?? (item as? Unavailable)?.header else {
+            return owner(ofRow: row)?.menu(event)
+        }
         let menu = NSMenu()
         menu.autoenablesItems = false
-        let reveal = menu.addItem(
-            withTitle: "Reveal in Finder", action: #selector(revealLibrary(_:)), keyEquivalent: "")
-        reveal.target = self
-        reveal.representedObject = header.workspace
+        if header.unavailable != nil {
+            // #196: Locate… replaces the section in place.
+            let locate = menu.addItem(withTitle: "Locate…", action: #selector(locateLibrary(_:)), keyEquivalent: "")
+            locate.target = self
+            locate.representedObject = header.workspace
+        } else {
+            let reveal = menu.addItem(
+                withTitle: "Reveal in Finder", action: #selector(revealLibrary(_:)), keyEquivalent: "")
+            reveal.target = self
+            reveal.representedObject = header.workspace
+        }
         menu.addItem(.separator())
         let close = menu.addItem(withTitle: "Close Library", action: #selector(closeLibrary(_:)), keyEquivalent: "")
         close.target = self
@@ -380,6 +468,10 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
         }
     }
 
+    @objc private func locateLibrary(_ sender: NSMenuItem) {
+        (sender.representedObject as? LibraryWorkspace)?.chooseFolder(replacing: true)
+    }
+
     @objc private func closeLibrary(_ sender: NSMenuItem) {
         guard let workspace = sender.representedObject as? LibraryWorkspace else { return }
         Task { await registry.closeLibrary(workspace) }
@@ -388,6 +480,18 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
 
 /// A Library section's header: the folder name, 11 pt semibold, under 12 pt of space (none above the first).
 final class SectionHeaderCell: NSTableCellView {
+    /// #196: an 11 pt orange warning after the name while the Library can't open.
+    let warning = NSImageView()
+    private lazy var warningHidden = warning.widthAnchor.constraint(equalToConstant: 0)
+
+    var showsWarning: Bool {
+        get { !warning.isHidden }
+        set {
+            warning.isHidden = !newValue
+            warningHidden.isActive = !newValue
+        }
+    }
+
     init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
         self.identifier = identifier
@@ -399,11 +503,20 @@ final class SectionHeaderCell: NSTableCellView {
         text.setAccessibilityElement(false)
         addSubview(text)
         textField = text
+        warning.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .regular))
+        warning.contentTintColor = .systemOrange
+        warning.setAccessibilityElement(false)
+        warning.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(warning)
         NSLayoutConstraint.activate([
             text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
-            text.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -4),
             text.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.sidebarRowHeight / 2),
+            warning.leadingAnchor.constraint(equalTo: text.trailingAnchor, constant: 4),
+            warning.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -4),
+            warning.centerYAnchor.constraint(equalTo: text.centerYAnchor),
         ])
+        showsWarning = false
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
     }
