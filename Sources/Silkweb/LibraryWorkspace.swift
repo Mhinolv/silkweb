@@ -57,7 +57,9 @@ final class LibraryWorkspace {
     var exporting = false
     var pdfProgress: PDFProgress?
     @ObservationIgnored let printInfo = PrintCoordinator.defaultPrintInfo()
-    var mutating = false
+    var mutating = false {
+        didSet { if oldValue && !mutating { openPendingSelection() } }
+    }
     var revision = 0
     var mutationError: String?
     var mutationErrorTitle = ""
@@ -133,7 +135,11 @@ final class LibraryWorkspace {
             if agentScope && (session.selectedFolder != nil || session.selectedTagID != nil) { agentScope = false }
         }
     }
-    var loading = false
+    var loading = false {
+        didSet { if oldValue && !loading { openPendingSelection() } }
+    }
+    /// #209: the last document click while loading or mutating, by ID. It opens once the library is idle.
+    @ObservationIgnored private(set) var pendingSelection: (root: URL?, ids: [UUID], pinned: Bool)?
     var mediaProgress: (name: String, done: Int, total: Int)?
     var mediaFailures: [AssetFailure] = []
     var mediaDirectoryName = "media"
@@ -378,6 +384,7 @@ final class LibraryWorkspace {
     /// Close Library (#195): stops this Library's watcher, index and loads and closes its tabs. The caller has
     /// already saved them.
     func releaseLibrary() async {
+        pendingSelection = nil
         loadTask?.cancel()
         mediaRetryTask?.cancel()
         saveTask?.cancel()
@@ -431,6 +438,7 @@ final class LibraryWorkspace {
             guard !mutating else { return }
             // A refused switch leaves the current library exactly as it was (#102).
             guard await flushEditors() else { return }
+            pendingSelection = nil
             tagFilters = []
             tags = []
             tagCounts = [:]
@@ -759,8 +767,29 @@ final class LibraryWorkspace {
         navigate(folder: nil, documents: [String(url.path.dropFirst(root.path.count + 1))])
     }
 
-    func selectDocuments(_ paths: Set<String>) {
-        navigate(folder: session.selectedFolder, documents: paths)
+    func selectDocuments(_ paths: Set<String>, pinned: Bool = false) {
+        guard loading || mutating else {
+            return navigate(folder: session.selectedFolder, documents: paths, pinned: pinned)
+        }
+        // #209: a busy library queues the click instead of dropping it. The list shows it at once; the last click
+        // opens when the library is idle.
+        guard let snapshot else { return }
+        pendingSelection = (root, paths.compactMap { snapshot.metadata.IDsByPath[$0] }, pinned)
+        session.selectedDocuments = paths
+    }
+
+    /// The queued click follows renames and moves by ID; a target trashed or out of the list's scope is dropped.
+    private func openPendingSelection() {
+        guard !loading, !mutating, let pending = pendingSelection else { return }
+        pendingSelection = nil
+        guard pending.root == root, snapshot != nil else { return }
+        let listed = Set(documents.map(\.relativePath))
+        let paths = Set(pending.ids.compactMap { itemPathsByID[$0] }).intersection(listed)
+        guard !paths.isEmpty else {
+            session.selectedDocuments.formIntersection(listed)
+            return
+        }
+        navigate(folder: session.selectedFolder, documents: paths, pinned: pending.pinned)
     }
 
     func selectFolder(_ path: String?) {
@@ -772,6 +801,7 @@ final class LibraryWorkspace {
         agents: Bool = false
     ) {
         guard !loading, !mutating else { return }
+        pendingSelection = nil
         // The list follows the click at once (#70); the editor swaps in when the buffer has loaded.
         let shown = (
             folder: session.selectedFolder, documents: session.selectedDocuments, tag: session.selectedTagID,

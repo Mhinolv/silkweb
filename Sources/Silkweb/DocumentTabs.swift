@@ -120,14 +120,15 @@ extension LibraryWorkspace {
                     String(url.path.dropFirst((root?.path.count ?? 0) + 1))
                 })
         else { return }
-        navigate(folder: session.selectedFolder, documents: [path], pinned: true)
+        selectDocuments([path], pinned: true)
     }
 
     func activateTab(_ id: UUID, syncSelection: Bool = true) {
         guard let tab = tabs.first(where: { $0.id == id }) else { return }
         let wasEditing = NSApp?.keyWindow?.firstResponder is PlainMarkdownTextView
         activeTabID = id
-        if syncSelection, search.text.isEmpty,
+        // A click queued while the library is busy (#209) is newer than any background activation.
+        if syncSelection, pendingSelection == nil, search.text.isEmpty,
             let document = snapshot?.documents.first(where: { $0.id == id })
         {
             session.selectedFolder = (document.relativePath as NSString).deletingLastPathComponent
