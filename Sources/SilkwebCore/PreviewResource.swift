@@ -7,10 +7,15 @@ public enum PreviewResource {
     /// Keep existing escapes intact when a readable Markdown path mixes Unicode
     /// and percent-encoded punctuation. Foundation otherwise escapes '%' again.
     public static func resolve(_ destination: String, relativeTo document: URL) -> URL? {
+        guard let encoded = encoded(destination) else { return nil }
+        return URL(string: encoded, relativeTo: document)?.absoluteURL
+    }
+
+    /// Escapes only characters a URL can't hold, keeping existing escapes (shared with link resolution, #176).
+    static func encoded(_ destination: String) -> String? {
         let allowed = CharacterSet(
             charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~:/?#[]@!$&'()*+,;=%")
-        guard let encoded = destination.addingPercentEncoding(withAllowedCharacters: allowed) else { return nil }
-        return URL(string: encoded, relativeTo: document)?.absoluteURL
+        return destination.addingPercentEncoding(withAllowedCharacters: allowed)
     }
 
     public static func assetURL(for file: URL, root: URL) -> URL? {

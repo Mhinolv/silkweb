@@ -112,7 +112,8 @@ final class LibraryMoveTests: XCTestCase {
         }
         let engine = try LibraryMutations(root: root)
         _ = try await engine.createDocument(named: "a(b).md", in: "A", text: "target")
-        _ = try await engine.createDocument(named: "Links.md", text: "[bad](A/a(b).md)")
+        // #176: balanced parentheses are now rewritten; backslash escapes still can't be, in the author's form.
+        _ = try await engine.createDocument(named: "Links.md", text: "[bad](A/a\\(b\\).md)")
         try await workspace.refresh(LibraryChangeSet(changes: []))
         var alerts: [(buttons: [String], message: String, list: String)] = []
         var answer = false
@@ -153,7 +154,7 @@ final class LibraryMoveTests: XCTestCase {
             XCTAssertEqual(alerts.count, count + 2)
             XCTAssertNil(workspace.mutationError)
             XCTAssertTrue(exists(renamed), renamed)
-            XCTAssertEqual(try links(), "[bad](A/a(b).md)")
+            XCTAssertEqual(try links(), "[bad](A/a\\(b\\).md)")
             XCTAssertEqual(workspace.libraryUndo.map(\.title), ["Undo Rename"])
             workspace.undoLibrary()
             try await wait(workspace)

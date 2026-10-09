@@ -36,17 +36,28 @@ public struct LibrarySnapshot: Sendable {
     /// `recoveredMetadataURL`, no copy could be set aside.
     public internal(set) var metadataWasReset = false
 
-    /// The scanned document a link's relative path names (#151). An exact spelling wins; on a case-insensitive
-    /// volume a case alias resolves to the on-disk spelling, as the move/import link rewrite treats it.
+    /// The scanned document a link's relative path names (#151), by the shared link rule (#176): an exact spelling
+    /// wins; on a case-insensitive volume a single case alias resolves to the on-disk spelling. Several matches
+    /// with no exact spelling are ambiguous and name no document.
     public func document(linkedAt path: String, caseSensitive: Bool? = nil) -> LibraryDocument? {
-        if let document = documents.first(where: { $0.relativePath == path }) { return document }
-        let caseSensitive =
-            caseSensitive
-            ?? ((try? rootURL.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]))?
-                .volumeSupportsCaseSensitiveNames != false)
-        guard !caseSensitive else { return nil }
-        let key = path.precomposedStringWithCanonicalMapping.lowercased()
-        return documents.first { $0.relativePath.precomposedStringWithCanonicalMapping.lowercased() == key }
+        let key = MarkdownLinkResolver.fold(path)
+        var equivalent: [LibraryDocument] = []
+        var folded: [LibraryDocument] = []
+        for document in documents where MarkdownLinkResolver.fold(document.relativePath) == key {
+            folded.append(document)
+            if document.relativePath == path { equivalent.append(document) }
+        }
+        let match = MarkdownLinkResolver.match(
+            path, equivalent: equivalent.map(\.relativePath), folded: folded.map(\.relativePath),
+            caseSensitive: caseSensitive ?? self.caseSensitive)
+        guard case .item(let spelling) = match else { return nil }
+        return folded.first { $0.relativePath.utf8.elementsEqual(spelling.utf8) }
+    }
+
+    /// Whether the library volume distinguishes letter case; assumed when it can't be read.
+    public var caseSensitive: Bool {
+        (try? rootURL.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]))?
+            .volumeSupportsCaseSensitiveNames != false
     }
 }
 

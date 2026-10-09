@@ -60,29 +60,54 @@ public enum MarkdownExtensions {
     }
 
     /// Split unescaped pipes. Unescape pipe escapes (including in code spans); preserve other escapes.
-    static func tableCells(_ line: String) -> [String]? {
+    static func tableCells(_ line: String) -> [String]? { splitCells(line, tracking: false)?.map(\.text) }
+
+    /// UTF-16 offsets of each cell character (and the cell end), from the start of the trimmed line (#176).
+    /// A cell whose offsets can't be matched to its text gets none.
+    static func tableCellOffsets(_ line: String) -> [[Int]]? {
+        splitCells(line, tracking: true)?.map { cell in
+            // One offset per character of `raw`; trim both alike.
+            var offsets = ArraySlice(cell.offsets)
+            var characters = Substring(cell.raw)
+            func space(_ character: Character?) -> Bool {
+                character?.unicodeScalars.allSatisfy(CharacterSet.whitespaces.contains) == true
+            }
+            while space(characters.first) { characters.removeFirst(); offsets.removeFirst() }
+            while space(characters.last) { characters.removeLast(); offsets.removeLast() }
+            guard let last = characters.last, String(characters) == cell.text, offsets.count == characters.count
+            else { return [] }
+            return Array(offsets) + [offsets.last! + last.utf16.count]
+        }
+    }
+
+    private static func splitCells(_ line: String, tracking: Bool) -> [(text: String, raw: String, offsets: [Int])]? {
         let text = line.trimmingCharacters(in: .whitespaces)
-        var cells: [String] = []
+        var cells: [(raw: String, offsets: [Int])] = []
         var pending = ""
+        var offsets: [Int] = []
+        var offset = 0
         var escaped = false
         var hasPipe = false
         for character in text {
+            defer { offset += character.utf16.count }
             if escaped {
-                if character == "|" { pending.removeLast() }
+                if character == "|" { pending.removeLast(); if tracking { offsets.removeLast() } }
                 pending.append(character); escaped = false
             } else if character == "\\" {
                 pending.append(character); escaped = true
             } else if character == "|" {
-                cells.append(pending); pending = ""; hasPipe = true
+                cells.append((pending, offsets)); pending = ""; offsets = []; hasPipe = true
+                continue
             } else {
                 pending.append(character)
             }
+            if tracking { offsets.append(offset) }
         }
         guard hasPipe else { return nil }
-        cells.append(pending)
+        cells.append((pending, offsets))
         if text.hasPrefix("|") { cells.removeFirst() }
-        if cells.last == "", text.hasSuffix("|") { cells.removeLast() }
-        return cells.map { $0.trimmingCharacters(in: .whitespaces) }
+        if cells.last?.raw == "", text.hasSuffix("|") { cells.removeLast() }
+        return cells.map { ($0.raw.trimmingCharacters(in: .whitespaces), $0.raw, $0.offsets) }
     }
 
     static func tableAlignments(_ line: String) -> [MarkdownTableAlignment?]? {

@@ -1,131 +1,140 @@
 import Foundation
 
-/// Bounded grammar: single-line inline links/images, optional quoted titles,
-/// angle-delimited paths, and reference definitions. Nested/escaped destinations,
-/// HTML and multiline syntax are preserved and reported. Code is never rewritten.
+/// Rewrites relative destinations for moved items, reading links exactly as the renderer does (`MarkdownLinks`,
+/// #176): inline links and images, angle-delimited paths and reference definitions. Code and escaped syntax are
+/// never rewritten or reported. Destinations Silkweb can't rewrite are preserved and reported.
 public enum MarkdownDestinations {
     public struct Result: Sendable {
         public let text: String
         public let unsupported: [String]
     }
 
-    private static let pattern =
-        #"!?\[(?:\\.|[^\]\\\n])*\]\((<[^>\n]*>|[^\s()]+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\)|^ {0,3}\[(?!\^)[^\]\n]+\]:\s*(<[^>\n]*>|[^\s()]+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*$"#
-    private static let regex = try! NSRegularExpression(pattern: pattern)
-    private static let candidates = try! NSRegularExpression(
-        pattern:
-            #"!?\[(?:\\.|[^\]\\\n])*\]\([^\n]*?(?:\)|$)|^ {0,3}\[(?!\^)[^\]\n]+\]:[^\n]*|!?\[\[[^\]\n]+\]\]|<[^>\n]+(?:href|src)\s*=[^>\n]*>"#,
-        options: .caseInsensitive)
-    private static let delimiters = try! NSRegularExpression(pattern: #"\]\("#)
-    private static let code = try! NSRegularExpression(pattern: #"(`+).*?\1"#)
-
+    /// `resolver` picks the on-disk spelling of a target (case aliases, ambiguity); without one,
+    /// `canonicalPaths` maps folded paths to spellings.
     public static func rewrite(
         _ text: String, source: String, changes: LibraryChangeSet, canonicalPaths: [String: String] = [:],
-        visit: ((String) -> Void)? = nil
+        resolver: MarkdownLinkResolver? = nil, visit: ((String) -> Void)? = nil
     ) -> Result {
-        let newSource = changes.remapping(source)
-        var output = ""
-        var unsupported: [String] = []
-        var fence: String?
-        // Split like the parser (LF, CRLF or CR) and write each original terminator back.
-        // Indented lines are not code: the parser has no indented code and renders their links.
+        let scan = MarkdownLinks.scan(text)
         let body = text as NSString
-        var offset = 0
-        while offset < body.length {
-            let lineRange = body.lineRange(for: NSRange(location: offset, length: 0))
-            offset = NSMaxRange(lineRange)
-            var contentsEnd = 0
-            body.getLineStart(nil, end: nil, contentsEnd: &contentsEnd, for: lineRange)
-            let line = body.substring(
-                with: NSRange(location: lineRange.location, length: contentsEnd - lineRange.location))
-            let terminator = body.substring(
-                with: NSRange(location: contentsEnd, length: NSMaxRange(lineRange) - contentsEnd))
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if let marker = fence {
-                if trimmed.hasPrefix(marker),
-                    trimmed.drop(while: { $0 == marker.first! }).trimmingCharacters(in: .whitespaces).isEmpty
-                {
-                    fence = nil
-                }
-                output += line + terminator
+        let output = NSMutableString(string: text)
+        var unsupported: [(Int, String)] = scan.unsupported.map { ($0.range.location, $0.syntax) }
+        let newSource = changes.remapping(source)
+        for link in scan.links.reversed() {
+            let destination = link.destination
+            visit?(destination)
+            func report() { unsupported.append((link.range.location, body.substring(with: link.range))) }
+            guard !destination.hasPrefix("#"), !destination.hasPrefix("/"), !destination.contains(":") else {
                 continue
             }
-            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-                fence = String(trimmed.prefix(while: { $0 == trimmed.first! })); output += line + terminator; continue
-            }
-            let ns = line as NSString
-            let full = NSRange(location: 0, length: ns.length)
-            // Mask inline code, including variable-length backtick delimiters.
-            let codeRanges = code.matches(in: line, range: full).map(\.range)
-            func inCode(_ range: NSRange) -> Bool { codeRanges.contains { NSIntersectionRange($0, range).length > 0 } }
-            func escaped(_ range: NSRange) -> Bool {
-                var offset = range.location
-                var count = 0
-                while offset > 0, ns.character(at: offset - 1) == 92 { count += 1; offset -= 1 }
-                return count % 2 == 1
-            }
-            let matches = regex.matches(in: line, range: full).filter { !inCode($0.range) && !escaped($0.range) }
-            let mutable = NSMutableString(string: line)
-            for match in matches.reversed() {
-                let range = match.range(at: match.range(at: 1).location == NSNotFound ? 2 : 1)
-                let original = ns.substring(with: range)
-                let angled = original.hasPrefix("<") && original.hasSuffix(">")
-                let destination = angled ? String(original.dropFirst().dropLast()) : original
-                visit?(destination)
-                guard !destination.hasPrefix("#"), !destination.hasPrefix("/"),
-                    !destination.contains(":")
-                else { continue }
-                guard !destination.contains("\\"), !destination.contains("("), !destination.contains(")"),
-                    destination.removingPercentEncoding != nil
-                else {
-                    unsupported.append(ns.substring(with: match.range)); continue
+            // Backslash escapes and malformed encoding can't be rewritten in the author's form.
+            guard !link.written.contains("\\"), destination.removingPercentEncoding != nil else { report(); continue }
+            let suffixStart = destination.firstIndex(where: { $0 == "#" || $0 == "?" }) ?? destination.endIndex
+            let suffix = String(destination[suffixStart...])
+            let encodedPath = String(destination[..<suffixStart])
+            guard let path = encodedPath.removingPercentEncoding, !path.isEmpty else { continue }
+            guard let relativeTarget = MarkdownLinkResolver.join(source, path) else { report(); continue }
+            let actualTarget: String
+            if let resolver {
+                switch resolver.match(relativeTarget) {
+                case .item(let spelling): actualTarget = spelling
+                case .none: actualTarget = relativeTarget
+                case .ambiguous(let candidates):
+                    // Never guess which of several spellings moved.
+                    if newSource != source || candidates.contains(where: { changes.remapping($0) != $0 }) { report() }
+                    continue
                 }
-                let suffixStart = destination.firstIndex(where: { $0 == "#" || $0 == "?" }) ?? destination.endIndex
-                let suffix = String(destination[suffixStart...])
-                let encodedPath = String(destination[..<suffixStart])
-                guard let path = encodedPath.removingPercentEncoding, !path.isEmpty else { continue }
-                let base = URL(fileURLWithPath: "/silkweb-root/" + source).deletingLastPathComponent()
-                let target = base.appendingPathComponent(path).standardizedFileURL.path
-                guard target == "/silkweb-root" || target.hasPrefix("/silkweb-root/") else {
-                    unsupported.append(ns.substring(with: match.range)); continue
-                }
-                let relativeTarget = String(target.dropFirst("/silkweb-root/".count))
-                let actualTarget =
-                    canonicalPaths[relativeTarget] ?? canonicalPaths[
-                        relativeTarget.precomposedStringWithCanonicalMapping.lowercased()] ?? relativeTarget
-                let mappedTarget = changes.remapping(actualTarget)
-                let newTarget = mappedTarget == actualTarget ? relativeTarget : mappedTarget
-                guard newSource != source || newTarget != relativeTarget else { continue }
-                let parent = (newSource as NSString).deletingLastPathComponent.split(separator: "/").map(String.init)
-                let components = newTarget.split(separator: "/").map(String.init)
-                var common = 0
-                while common < min(parent.count, components.count), parent[common] == components[common] { common += 1 }
-                let relative = (Array(repeating: "..", count: parent.count - common) + components.dropFirst(common))
-                    .joined(separator: "/")
-                var allowed = CharacterSet.urlPathAllowed
-                allowed.remove(charactersIn: "?#%()<>\\")
-                let normalized = relative.isEmpty ? "." : relative
-                let trailingSlash = path.hasSuffix("/") ? "/" : ""
-                let replacement =
-                    (normalized.addingPercentEncoding(withAllowedCharacters: allowed) ?? normalized) + trailingSlash
-                    + suffix
-                mutable.replaceCharacters(in: range, with: angled ? "<" + replacement + ">" : replacement)
+            } else {
+                actualTarget =
+                    canonicalPaths[relativeTarget] ?? canonicalPaths[MarkdownLinkResolver.fold(relativeTarget)]
+                    ?? relativeTarget
             }
-            let candidateMatches = candidates.matches(in: line, range: full)
-            for candidate in candidateMatches where !inCode(candidate.range) && !escaped(candidate.range) {
-                if !matches.contains(where: { $0.range.location == candidate.range.location }) {
-                    unsupported.append(ns.substring(with: candidate.range))
-                }
-            }
-            for delimiter in delimiters.matches(in: line, range: full) where !inCode(delimiter.range) {
-                if !matches.contains(where: { NSLocationInRange(delimiter.range.location, $0.range) })
-                    && !candidateMatches.contains(where: { NSLocationInRange(delimiter.range.location, $0.range) })
-                {
-                    unsupported.append(line)
-                }
-            }
-            output += (mutable as String) + terminator
+            let mappedTarget = changes.remapping(actualTarget)
+            let newTarget =
+                mappedTarget == actualTarget
+                ? relativeTarget : authorSpelling(mappedTarget, actual: actualTarget, written: relativeTarget)
+            guard newSource != source || newTarget != relativeTarget else { continue }
+            let parent = (newSource as NSString).deletingLastPathComponent.split(separator: "/").map(String.init)
+            let components = newTarget.split(separator: "/").map(String.init)
+            var common = 0
+            while common < min(parent.count, components.count), parent[common] == components[common] { common += 1 }
+            let relative = (Array(repeating: "..", count: parent.count - common) + components.dropFirst(common))
+                .joined(separator: "/")
+            let normalized = relative.isEmpty ? "." : relative
+            let trailingSlash = path.hasSuffix("/") ? "/" : ""
+            // Keep the author's form: a path written readably stays readable; anything else is encoded.
+            let encoded =
+                readable(path, angled: link.isAngleBracketed) == encodedPath
+                ? readable(normalized, angled: link.isAngleBracketed)
+                : normalized.addingPercentEncoding(withAllowedCharacters: encodedPathAllowed) ?? normalized
+            output.replaceCharacters(in: link.destinationRange, with: encoded + trailingSlash + suffix)
         }
-        return Result(text: output, unsupported: unsupported)
+        return Result(
+            text: output as String, unsupported: unsupported.sorted { $0.0 < $1.0 }.map(\.1))
+    }
+
+    /// `mapped` with the trailing components it shares with `actual` (the on-disk spelling) written as the
+    /// author wrote them when they differ only in Unicode normalisation. Case aliases still take the on-disk
+    /// spelling (#151); moved names come from the change.
+    static func authorSpelling(_ mapped: String, actual: String, written: String) -> String {
+        let mapped = mapped.split(separator: "/", omittingEmptySubsequences: false)
+        let actual = actual.split(separator: "/", omittingEmptySubsequences: false)
+        let written = written.split(separator: "/", omittingEmptySubsequences: false)
+        guard actual.count == written.count else { return mapped.joined(separator: "/") }
+        var result = mapped
+        var offset = 1
+        while offset <= min(mapped.count, actual.count),
+            mapped[mapped.count - offset].utf8.elementsEqual(actual[actual.count - offset].utf8)
+        {
+            // Swift compares strings by canonical equivalence: equal means only normalisation differs.
+            if written[written.count - offset] == actual[actual.count - offset] {
+                result[mapped.count - offset] = written[written.count - offset]
+            }
+            offset += 1
+        }
+        return result.joined(separator: "/")
+    }
+
+    private static let encodedPathAllowed: CharacterSet = {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "?#%()<>\\")
+        return allowed
+    }()
+
+    private static let readableASCII: CharacterSet = {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "?#%<>\\()")
+        return allowed
+    }()
+
+    /// Percent-encodes only what the destination syntax needs: spaces and unbalanced parentheses outside
+    /// angle brackets, and `%`, `#`, `?`, `<`, `>`, `\` and controls anywhere. Other Unicode stays as is.
+    static func readable(_ path: String, angled: Bool) -> String {
+        var depth = 0
+        var balanced = true
+        for character in path {
+            if character == "(" { depth += 1; if depth > MarkdownParser.maximumNesting { balanced = false } }
+            if character == ")" { depth -= 1; if depth < 0 { balanced = false } }
+        }
+        balanced = balanced && depth == 0
+        var result = ""
+        for scalar in path.unicodeScalars {
+            let keep: Bool
+            if scalar == " " {
+                keep = angled
+            } else if scalar == "(" || scalar == ")" {
+                keep = angled || balanced
+            } else if scalar.isASCII {
+                keep = readableASCII.contains(scalar)
+            } else {
+                keep = !CharacterSet.controlCharacters.contains(scalar) && !CharacterSet.newlines.contains(scalar)
+            }
+            if keep {
+                result.unicodeScalars.append(scalar)
+            } else {
+                result += String(scalar).addingPercentEncoding(withAllowedCharacters: CharacterSet()) ?? ""
+            }
+        }
+        return result
     }
 }

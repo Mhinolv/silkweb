@@ -287,7 +287,18 @@ public enum HTMLRenderer {
         title.map { " title=\"" + escape($0) + "\"" } ?? ""
     }
 
-    static func allowed(_ destination: String, image: Bool, options: Options) -> Bool {
+    /// What a destination is before any library check. `nil` is blocked everywhere. Shared with link
+    /// resolution (#176) so the preview, the index and the rename rewrite read destinations alike.
+    enum Destination: Equatable {
+        /// `http(s)` with a host, `mailto:` (links) or an allowed `data:` image.
+        case external
+        /// A `file:` URL; allowed only inside `Options.libraryRoot`.
+        case file(URL)
+        /// A relative reference, possibly fragment-only; containment depends on the document.
+        case relative(URLComponents)
+    }
+
+    static func destination(_ destination: String, image: Bool) -> Destination? {
         // Reject controls, backslashes and malformed encodings before URL interpretation.
         guard !destination.contains("\\"),
             !destination.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
@@ -295,45 +306,56 @@ public enum HTMLRenderer {
             !decoded.contains("\\"),
             !decoded.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
             let components = URLComponents(string: destination)
-        else { return false }
+        else { return nil }
         if let scheme = components.scheme?.lowercased() {
             switch scheme {
-            case "https", "http": return components.host?.isEmpty == false
-            case "mailto": return !image && !components.path.isEmpty
+            case "https", "http": return components.host?.isEmpty == false ? .external : nil
+            case "mailto": return !image && !components.path.isEmpty ? .external : nil
             case "data":
-                guard image, let comma = destination.firstIndex(of: ",") else { return false }
+                guard image, let comma = destination.firstIndex(of: ",") else { return nil }
                 let header = destination[..<comma].lowercased()
                 guard
                     [
                         "data:image/png;base64", "data:image/jpeg;base64", "data:image/gif;base64",
                         "data:image/webp;base64",
                     ].contains(header)
-                else { return false }
+                else { return nil }
                 let payload = destination[destination.index(after: comma)...]
                 // Bound embedded images and require valid base64; SVG and arbitrary data stay blocked.
-                guard !payload.isEmpty, payload.utf8.count <= 4 * 1024 * 1024 else { return false }
-                return Data(base64Encoded: String(payload)) != nil
+                guard !payload.isEmpty, payload.utf8.count <= 4 * 1024 * 1024 else { return nil }
+                return Data(base64Encoded: String(payload)) != nil ? .external : nil
             case "file":
-                guard let root = options.libraryRoot, root.isFileURL,
-                    let url = components.url, url.isFileURL,
+                guard let url = components.url, url.isFileURL,
                     components.host == nil || components.host == "" || components.host == "localhost"
-                else { return false }
-                return contained(url, root: root)
-            default: return false
+                else { return nil }
+                return .file(url)
+            default: return nil
             }
         }
         // Network-path references and encoded scheme/absolute-path lookalikes are not local assets.
         guard components.host == nil, !decoded.hasPrefix("/"),
             !decoded.hasPrefix("//"), !decoded.contains(":"),
             !(components.percentEncodedPath.removingPercentEncoding ?? "").contains("&")
-        else { return false }
-        if let root = options.libraryRoot, let document = options.documentURL {
-            guard root.isFileURL, document.isFileURL, contained(document, root: root),
-                let resolved = PreviewResource.resolve(destination, relativeTo: document)
-            else { return false }
-            return contained(resolved, root: root)
+        else { return nil }
+        return .relative(components)
+    }
+
+    static func allowed(_ destination: String, image: Bool, options: Options) -> Bool {
+        switch Self.destination(destination, image: image) {
+        case nil: return false
+        case .external: return true
+        case .file(let url):
+            guard let root = options.libraryRoot, root.isFileURL else { return false }
+            return contained(url, root: root)
+        case .relative(let components):
+            if let root = options.libraryRoot, let document = options.documentURL {
+                guard root.isFileURL, document.isFileURL, contained(document, root: root),
+                    let resolved = PreviewResource.resolve(destination, relativeTo: document)
+                else { return false }
+                return contained(resolved, root: root)
+            }
+            return !(components.percentEncodedPath.removingPercentEncoding ?? "").split(separator: "/").contains("..")
         }
-        return !(components.percentEncodedPath.removingPercentEncoding ?? "").split(separator: "/").contains("..")
     }
 
     /// Foundation may leave a symlink unresolved when the final component is missing.

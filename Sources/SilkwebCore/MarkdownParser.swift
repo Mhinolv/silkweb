@@ -5,7 +5,10 @@ import Foundation
 public enum MarkdownParser {
     public static let maximumNesting = 32
 
-    public static func parse(_ source: String) -> MarkdownDocument {
+    public static func parse(_ source: String) -> MarkdownDocument { parse(source, recorder: nil) }
+
+    /// With a recorder, also reports the source ranges of links, images and code (#176, `MarkdownLinks`).
+    static func parse(_ source: String, recorder: MarkdownLinkRecorder?) -> MarkdownDocument {
         // Keep original UTF-16 offsets even when source uses CRLF or CR newlines.
         let raw = source as NSString
         var lines: [SourceLine] = []
@@ -21,7 +24,7 @@ public enum MarkdownParser {
         }
         var ranges: [NSRange] = []
         var footnotes: [String: [MarkdownInline]] = [:]
-        let parsed = blocks(lines, depth: 0, ranges: &ranges, footnotes: &footnotes)
+        let parsed = blocks(lines, depth: 0, ranges: &ranges, footnotes: &footnotes, recorder: recorder)
         return MarkdownDocument(blocks: parsed, headingSourceRanges: ranges, footnotes: footnotes)
     }
 
@@ -29,6 +32,57 @@ public enum MarkdownParser {
         let text: String
         let range: NSRange
         func replacingText(_ text: String) -> SourceLine { SourceLine(text: text, range: range) }
+
+        /// Block prefixes are only ever removed from the front, and only leading whitespace may differ from the
+        /// source (expanded tabs), so `suffix` without its leading whitespace ends this source line.
+        func start(ofSuffix suffix: some StringProtocol) -> Int {
+            NSMaxRange(range) - suffix.utf16.count + MarkdownParser.leadingSpace(suffix)
+        }
+    }
+
+    /// UTF-16 length of leading `.whitespaces`, as `trimmingCharacters(in: .whitespaces)` removes it.
+    static func leadingSpace(_ text: some StringProtocol) -> Int {
+        var count = 0
+        for unit in text.utf16 {
+            guard let scalar = Unicode.Scalar(unit), CharacterSet.whitespaces.contains(scalar) else { break }
+            count += 1
+        }
+        return count
+    }
+
+    /// Source offsets of each character of `text` (and its end) when `text`, less its leading whitespace,
+    /// begins at `start`. Offsets inside that leading whitespace are never used for a range.
+    static func offsets(_ text: some StringProtocol, start: Int) -> [Int] {
+        var result: [Int] = []
+        result.reserveCapacity(text.count + 1)
+        var offset = start - leadingSpace(text)
+        for character in text {
+            result.append(offset)
+            offset += character.utf16.count
+        }
+        result.append(offset)
+        return result
+    }
+
+    /// Inline parsing with source offsets; without a recorder this is exactly `parseInline`.
+    private static func parseInline(
+        _ text: String, recorder: MarkdownLinkRecorder?, offsets: @autoclosure () -> [Int]
+    ) -> [MarkdownInline] {
+        guard let recorder else { return parseInline(text) }
+        let chars = Array(text)
+        var budget = chars.count * 16 + 256
+        let source = InlineSource(offsets: offsets(), recorder: recorder)
+        return inline(
+            chars, range: 0..<chars.count, depth: 0, allowLinks: true, budget: &budget,
+            source: source.offsets.count == chars.count + 1 ? source : nil)
+    }
+
+    private struct InlineSource {
+        let offsets: [Int]
+        let recorder: MarkdownLinkRecorder
+        func range(_ start: Int, _ end: Int) -> NSRange {
+            NSRange(location: offsets[start], length: offsets[end] - offsets[start])
+        }
     }
 
     private struct ListMarker {
@@ -128,7 +182,7 @@ public enum MarkdownParser {
 
     private static func blocks(
         _ sourceLines: [SourceLine], depth: Int, ranges: inout [NSRange],
-        footnotes: inout [String: [MarkdownInline]]
+        footnotes: inout [String: [MarkdownInline]], recorder: MarkdownLinkRecorder? = nil
     ) -> [MarkdownBlock] {
         let lines = sourceLines.map(\.text)
         guard depth < maximumNesting else {
@@ -141,13 +195,16 @@ public enum MarkdownParser {
             if line.trimmingCharacters(in: .whitespaces).isEmpty { index += 1; continue }
             if let definition = MarkdownExtensions.footnoteDefinition(line) {
                 var content = [definition.text]
+                var starts = [sourceLines[index].start(ofSuffix: line[line.range(of: "]:")!.upperBound...])]
                 index += 1
                 while index < lines.count, lines[index].hasPrefix("    ") {
-                    content.append(String(lines[index].dropFirst(4))); index += 1
+                    content.append(String(lines[index].dropFirst(4)))
+                    starts.append(sourceLines[index].start(ofSuffix: content.last!)); index += 1
                 }
                 if footnotes[definition.label] == nil {
                     footnotes[definition.label] = content.enumerated().flatMap { offset, text in
-                        parseInline(text) + (offset + 1 < content.count ? [.softBreak] : [])
+                        parseInline(text, recorder: recorder, offsets: offsets(text, start: starts[offset]))
+                            + (offset + 1 < content.count ? [.softBreak] : [])
                     }
                 }
             } else if line.trimmingCharacters(in: .whitespaces) == "[TOC]" {
@@ -157,19 +214,40 @@ public enum MarkdownParser {
                 let alignments = MarkdownExtensions.tableAlignments(lines[index + 1]),
                 header.count == alignments.count
             {
+                // Each cell's offsets come from the same split as its text.
+                func cells(_ row: Int, _ cells: [String]) -> [[MarkdownInline]] {
+                    guard let recorder else { return cells.map(parseInline) }
+                    let sources = MarkdownExtensions.tableCellOffsets(lines[row]) ?? []
+                    let start = sourceLines[row].start(ofSuffix: lines[row])
+                    return cells.enumerated().map { column, text in
+                        parseInline(
+                            text, recorder: recorder,
+                            offsets: column < sources.count ? sources[column].map { $0 + start } : [])
+                    }
+                }
+                let headerRow = index
                 index += 2
                 var rows: [[[MarkdownInline]]] = []
                 while index < lines.count, !beginsBlock(lines[index]),
-                    let cells = MarkdownExtensions.tableCells(lines[index])
+                    let cellTexts = MarkdownExtensions.tableCells(lines[index])
                 {
                     let padded = Array(
-                        (cells + Array(repeating: "", count: max(0, header.count - cells.count))).prefix(header.count))
-                    rows.append(padded.map(parseInline)); index += 1
+                        (cellTexts + Array(repeating: "", count: max(0, header.count - cellTexts.count))).prefix(
+                            header.count))
+                    rows.append(cells(index, padded)); index += 1
                 }
-                result.append(.table(header: header.map(parseInline), alignments: alignments, rows: rows))
+                result.append(.table(header: cells(headerRow, header), alignments: alignments, rows: rows))
             } else if unsupported(line) {
+                recorder?.definition(line, start: sourceLines[index].start(ofSuffix: line))
                 result.append(.paragraph([.text(line)])); index += 1
             } else if let opener = fence(line) {
+                let openerIndex = index
+                defer {
+                    recorder?.code.append(
+                        NSRange(
+                            location: sourceLines[openerIndex].range.location,
+                            length: NSMaxRange(sourceLines[index - 1].range) - sourceLines[openerIndex].range.location))
+                }
                 index += 1
                 var content: [String] = []
                 var closed = false
@@ -186,7 +264,13 @@ public enum MarkdownParser {
                 let text = content.isEmpty || (!closed && content.last == "") ? code : code + "\n"
                 result.append(.code(language: opener.info.isEmpty ? nil : opener.info, text: text))
             } else if let (level, content) = heading(line) {
-                result.append(.heading(level: level, content: parseInline(content)))
+                let rest = line.drop(while: { $0 == " " }).drop(while: { $0 == "#" })
+                result.append(
+                    .heading(
+                        level: level,
+                        content: parseInline(
+                            content, recorder: recorder,
+                            offsets: offsets(content, start: sourceLines[index].start(ofSuffix: rest)))))
                 ranges.append(sourceLines[index].range); index += 1
             } else if thematic(line) {
                 result.append(.thematicBreak); index += 1
@@ -195,7 +279,9 @@ public enum MarkdownParser {
                 while index < lines.count, let quoted = quoteContent(lines[index]) {
                     content.append(sourceLines[index].replacingText(quoted)); index += 1
                 }
-                result.append(.quote(blocks(content, depth: depth + 1, ranges: &ranges, footnotes: &footnotes)))
+                result.append(
+                    .quote(
+                        blocks(content, depth: depth + 1, ranges: &ranges, footnotes: &footnotes, recorder: recorder)))
             } else if let first = listMarker(line), first.indent <= 3 {
                 var items: [[MarkdownBlock]] = []
                 while index < lines.count, let marker = listMarker(lines[index]),
@@ -219,7 +305,8 @@ public enum MarkdownParser {
                             break
                         }
                     }
-                    let children = blocks(content, depth: depth + 1, ranges: &ranges, footnotes: &footnotes)
+                    let children = blocks(
+                        content, depth: depth + 1, ranges: &ranges, footnotes: &footnotes, recorder: recorder)
                     items.append(task.map { [.taskItem(checked: $0.checked, content: children)] } ?? children)
                 }
                 result.append(.list(start: first.start, items: items))
@@ -236,10 +323,13 @@ public enum MarkdownParser {
                     content.append(lines[index]); index += 1
                 }
                 var children: [MarkdownInline] = []
+                let first = index - content.count
                 for (offset, raw) in content.enumerated() {
                     let hard = raw.hasSuffix("  ") || raw.hasSuffix("\\")
                     let text = raw.hasSuffix("\\") ? String(raw.dropLast()) : raw.trimmingCharacters(in: .whitespaces)
-                    children += parseInline(text)
+                    children += parseInline(
+                        text, recorder: recorder,
+                        offsets: offsets(text, start: sourceLines[first + offset].start(ofSuffix: raw)))
                     if offset + 1 < content.count { children.append(hard ? .hardBreak : .softBreak) }
                 }
                 result.append(.paragraph(children))
@@ -256,7 +346,7 @@ public enum MarkdownParser {
 
     private static func inline(
         _ chars: [Character], range: Range<Int>, depth: Int,
-        allowLinks: Bool, budget: inout Int
+        allowLinks: Bool, budget: inout Int, source: InlineSource? = nil
     ) -> [MarkdownInline] {
         guard depth < maximumNesting else { return [.text(String(chars[range]))] }
         var result: [MarkdownInline] = []
@@ -297,6 +387,7 @@ public enum MarkdownParser {
                     if code.hasPrefix(" "), code.hasSuffix(" "), !code.allSatisfy({ $0 == " " }) {
                         code = String(code.dropFirst().dropLast())
                     }
+                    source?.recorder.code.append(source!.range(i, closing + count))
                     flush(); result.append(.code(code)); i = closing + count; continue
                 }
                 pending += String(chars[i..<end]); i = end; continue
@@ -354,7 +445,16 @@ public enum MarkdownParser {
                     let target = destination(chars, start: cursor + 2, limit: range.upperBound, budget: &budget)
                 {
                     let label = inline(
-                        chars, range: labelStart..<cursor, depth: depth + 1, allowLinks: false, budget: &budget)
+                        chars, range: labelStart..<cursor, depth: depth + 1, allowLinks: false, budget: &budget,
+                        source: source)
+                    if let source {
+                        source.recorder.links.append(
+                            MarkdownLink(
+                                kind: image ? .image : .link, range: source.range(i, target.end),
+                                destinationRange: source.range(target.written.lowerBound, target.written.upperBound),
+                                written: String(chars[target.written]), destination: target.url,
+                                isAngleBracketed: target.angled, title: target.title))
+                    }
                     flush()
                     result.append(
                         image
@@ -393,7 +493,7 @@ public enum MarkdownParser {
                     if let closing {
                         let children = inline(
                             chars, range: (i + count)..<closing, depth: depth + 1, allowLinks: allowLinks,
-                            budget: &budget)
+                            budget: &budget, source: source)
                         flush()
                         if c == "~" {
                             result.append(.strikethrough(children))
@@ -445,11 +545,13 @@ public enum MarkdownParser {
     private static func destination(
         _ chars: [Character], start: Int, limit: Int,
         budget: inout Int
-    ) -> (url: String, title: String?, end: Int)? {
+    ) -> (url: String, title: String?, end: Int, written: Range<Int>, angled: Bool)? {
         var i = start
         while i < limit, chars[i].isWhitespace { i += 1 }
+        let opening = i
+        let angled = i < limit && chars[i] == "<"
         var url = ""
-        if i < limit, chars[i] == "<" {
+        if angled {
             i += 1
             while i < limit, chars[i] != ">", budget > 0 { url.append(chars[i]); i += 1; budget -= 1 }
             guard i < limit, chars[i] == ">" else { return nil }
@@ -487,6 +589,8 @@ public enum MarkdownParser {
             while i < limit, chars[i].isWhitespace { i += 1 }
         }
         guard i < limit, chars[i] == ")" else { return nil }
-        return (url, title, i + 1)
+        // As written, inside any angle brackets: escapes and percent-encoding intact.
+        let written = angled ? (opening + 1)..<(separator - 1) : opening..<separator
+        return (url, title, i + 1, written, angled)
     }
 }
