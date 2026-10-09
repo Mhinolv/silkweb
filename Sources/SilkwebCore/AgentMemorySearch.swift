@@ -233,6 +233,7 @@ public final class AgentMemoryService: @unchecked Sendable {
     private let reviews: AgentMemoryReviewLookup
     private let lock = NSLock()
     private var index: AgentMemoryIndex?
+    private var knowledge: (graph: KnowledgeGraph, store: KnowledgeCacheStore, published: Int)?
 
     public init(
         session: AgentSession, cacheDirectory: URL, options: AgentMemoryIndexOptions = AgentMemoryIndexOptions(),
@@ -255,6 +256,66 @@ public final class AgentMemoryService: @unchecked Sendable {
 
     public var cacheURL: URL {
         cacheDirectory.appendingPathComponent(Self.grantID(project: session.project) + ".json")
+    }
+
+    /// `<grant-id>.knowledge/` beside the JSON cache: this grant's knowledge index checkpoints (#177), never
+    /// shared with the app's or another grant's.
+    public var knowledgeCacheURL: URL {
+        cacheDirectory.appendingPathComponent(Self.grantID(project: session.project) + ".knowledge", isDirectory: true)
+    }
+
+    /// The grant's knowledge index, fed from this helper's own scan (the same refresh and budget as `search`).
+    /// Scope first: only readable Documents are listed and links resolve against them alone, so an edge to an
+    /// out-of-scope Document is simply absent. Documents the scan hasn't read yet are `notReady`.
+    public func knowledgeGraph() throws -> KnowledgeGraph {
+        lock.lock()
+        defer { lock.unlock() }
+        let context = try authorize(.search)
+        let index = loadedIndex(for: context)
+        _ = index.refresh(context, options: options)
+        index.save()
+        let library = context.library.path + "\n" + session.project
+        var (graph, store, published) =
+            knowledge.flatMap { $0.store.library == library ? $0 : nil }
+            ?? {
+                let store = KnowledgeCacheStore(directory: knowledgeCacheURL, library: library)
+                if case .restored(_, let records) = store.load() {
+                    let graph = KnowledgeGraph(records: records)
+                    return (graph, store, graph.revision)
+                }
+                return (KnowledgeGraph(), store, -1)
+            }()
+        var folders = Set<String>()
+        let documents = index.live.map { document -> KnowledgeGraph.Listing.Document in
+            var parent = (document.path as NSString).deletingLastPathComponent
+            while !parent.isEmpty, folders.insert(parent).inserted {
+                parent = (parent as NSString).deletingLastPathComponent
+            }
+            // The revision names the content; a record not read since the file changed has no stamp yet.
+            let stamp = index.records[document.path].flatMap { record -> String? in
+                guard record.matches(document) else { return nil }
+                return record.skipped ? "skipped:\(record.identity)@\(record.modified):\(record.size)" : record.revision
+            }
+            return .init(path: document.path, stamp: stamp)
+        }
+        let listing = KnowledgeGraph.Listing(
+            documents: documents, folders: Array(folders), caseSensitive: context.scope.caseSensitive)
+        for entry in graph.apply(listing) {
+            guard entry.stamp != nil, let record = index.records[entry.path] else { continue }
+            let content =
+                record.skipped
+                ? KnowledgeContent.empty
+                : KnowledgeContent(
+                    body: record.body, memoryID: record.envelope?.memoryID,
+                    supersedes: record.envelope?.supersedes ?? [])
+            graph.install(entry, content: content)
+        }
+        if graph.revision != published {
+            // A failed write only costs a rebuild next time.
+            if (try? store.publish(Array(graph.records.values))) != nil { published = graph.revision }
+        }
+        knowledge = (graph, store, published)
+        return graph
     }
 
     public func search(_ request: AgentMemorySearchRequest) throws -> AgentMemorySearchResponse {
@@ -304,7 +365,9 @@ public final class AgentMemoryService: @unchecked Sendable {
             return try session.authorize(operation, path: path)
         } catch let error as AgentAccessError where ["grant_revoked", "no_grant"].contains(error.code) {
             index = nil
+            knowledge = nil
             try? FileManager.default.removeItem(at: cacheURL)
+            KnowledgeCacheStore(directory: knowledgeCacheURL, library: "").remove()
             throw error
         }
     }
@@ -444,6 +507,8 @@ final class AgentMemoryIndex {
     let library: String
     let project: String
     private(set) var records: [String: Record] = [:]
+    /// The in-scope documents the last refresh found, read or not.
+    private(set) var live: [AgentSecureFiles.Document] = []
     /// Per-process search form of each record: folded title, folded body bytes and its date.
     private var folded: [String: (title: String, body: [UInt8], date: Date)] = [:]
     private var building: AgentMemoryFreshness.Reason?
@@ -534,6 +599,7 @@ final class AgentMemoryIndex {
             }
         }
         let live = context.scope.readable(found.values, path: \.path)
+        self.live = live
         let livePaths = Set(live.map(\.path))
         let kept = records.filter { livePaths.contains($0.key) }
         if kept.count != records.count {
