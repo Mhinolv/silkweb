@@ -19,6 +19,7 @@ final class LibraryWorkspace {
     @ObservationIgnored var closingTabIDs: Set<UUID> = []
     @ObservationIgnored var recoveryDirectory: URL?
     let search = LibrarySearch()
+    @ObservationIgnored let knowledge = LibraryKnowledge()
     let toolbarMetrics = ToolbarMetrics()
     let preview: PreviewCoordinator
     let columnAutosaveName: String?
@@ -72,6 +73,7 @@ final class LibraryWorkspace {
         tagCounts = counts
         recentTags = TagEditor.recentTags(metadata: snapshot.metadata)
         search.install(snapshot)
+        knowledge.install(snapshot)
         itemPathsByID = Dictionary(uniqueKeysWithValues: snapshot.metadata.IDsByPath.map { ($0.value, $0.key) })
         documentCache = nil
         updateAgentEntries()
@@ -358,6 +360,7 @@ final class LibraryWorkspace {
             if let snapshot { await saveSessionNow(root: snapshot.rootURL) }
             await didCloseWindow()
             search.reset()
+            knowledge.reset()
             watcher?.stop()
             watcher = nil
             agentReloadTask?.cancel()

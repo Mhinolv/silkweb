@@ -536,6 +536,14 @@ then `envelope` (the envelope’s keys and values in written order, or `null`), 
 - The helper never reads or writes the app’s `.silkweb/search-index.json`. It only reads
   `.silkweb/index.json` for `documentId`, without repairing or creating anything (#131).
 - When the grant is turned off or removed, the next search or read deletes its cache.
+- The knowledge index (#177) keeps its own checkpoints beside it in `<grant-id>.knowledge/` (0700, files
+  0600), built from the grant's readable Documents only, and deleted with the JSON cache. The app keeps a
+  separate one per Library in `~/Library/Caches/Silkweb/knowledge/<Library name>-<hash>/`. Each folder
+  holds `manifest.json` (`version: 1`, `library`, `generation`, `checkpoint`), the immutable
+  `checkpoint-<generation>.json` it names, and `publish.lock` (`flock`). A publisher stages the
+  checkpoint, renames it into place, then replaces the manifest, so a crash leaves the previous
+  generation. A missing, corrupt, newer or foreign cache is rebuilt silently (logged only); nothing is
+  written into the Library.
 - Performance (AGENTS.md): with 10,000 documents in 1,000 Folders inside one grant, a search from a
   cached index answers in well under a second; a first build is bounded by the 2-second budget per search.
 

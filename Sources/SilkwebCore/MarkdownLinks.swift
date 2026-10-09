@@ -71,9 +71,12 @@ public enum MarkdownLinks {
     private static let delimiters = try! NSRegularExpression(pattern: #"\]\("#)
 
     /// Parses like the renderer, off the main thread for whole documents.
-    public static func scan(_ text: String) -> MarkdownLinkScan {
+    public static func scan(_ text: String) -> MarkdownLinkScan { scanDocument(text).scan }
+
+    /// The scan and the parsed document from one parse (the knowledge index needs both, #177).
+    static func scanDocument(_ text: String) -> (scan: MarkdownLinkScan, document: MarkdownDocument) {
         let recorder = MarkdownLinkRecorder()
-        _ = MarkdownParser.parse(text, recorder: recorder)
+        let document = MarkdownParser.parse(text, recorder: recorder)
         let source = text as NSString
         var links: [MarkdownLink] = []
         var unsupported: [MarkdownLinkScan.Unsupported] = []
@@ -135,7 +138,7 @@ public enum MarkdownLinks {
             }
             if stray { unsupported.append(.init(range: content, syntax: line)) }
         }
-        return MarkdownLinkScan(links: links, unsupported: unsupported)
+        return (MarkdownLinkScan(links: links, unsupported: unsupported), document)
     }
 }
 
@@ -312,13 +315,19 @@ public struct MarkdownLinkResolver: Sendable {
     public func linksTo(_ scan: MarkdownLinkScan, from source: String) -> [MarkdownLinkEdge] {
         var seen = Set<MarkdownLinkEdge>()
         return scan.links.compactMap { link in
-            guard link.kind == .link else { return nil }
-            let resolution = resolve(link, from: source)
-            guard resolution.status == .resolved, resolution.item == .document, let path = resolution.path,
-                !path.utf8.elementsEqual(source.utf8)
-            else { return nil }
-            let edge = MarkdownLinkEdge(target: path, section: resolution.fragment)
+            guard link.kind == .link, let edge = edge(link.destination, from: source).edge else { return nil }
             return seen.insert(edge).inserted ? edge : nil
         }
+    }
+
+    /// The `links_to` edge one inline link destination makes from `source`, if any, and its resolution.
+    public func edge(_ destination: String, from source: String) -> (
+        edge: MarkdownLinkEdge?, resolution: MarkdownLinkResolution
+    ) {
+        let resolution = resolve(destination, from: source)
+        guard resolution.status == .resolved, resolution.item == .document, let path = resolution.path,
+            !path.utf8.elementsEqual(source.utf8)
+        else { return (nil, resolution) }
+        return (MarkdownLinkEdge(target: path, section: resolution.fragment), resolution)
     }
 }
