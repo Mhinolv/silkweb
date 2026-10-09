@@ -53,3 +53,44 @@ Document-list snippets walk this AST, omit thematic breaks/fence markers, skip a
 matching leading title heading and retain the existing 512-byte grapheme limit.
 Row summaries also walk table/task nodes and remove paired literal task/strike delimiters
 for compatibility with existing list behavior.
+
+## Links: one grammar, one resolver (#176)
+
+`MarkdownLinks.scan` runs this parser and records every link and image it renders, with
+UTF-16 source ranges, plus reference definitions (`[label]: destination`, which render as
+text). Code spans, fenced code (including in lists and quotes) and escaped syntax produce
+nothing. Link-like text the parser leaves as text (wikilinks, HTML `href`/`src`, malformed
+or unbalanced links, stray `](`) is reported separately, outside code and escapes.
+The preview, the link index and the move/rename rewrite all read links from this scan.
+
+`MarkdownLinkResolver` resolves a destination as the preview does: the renderer's
+destination rules first, then the path relative to the linking Document's Folder, with
+percent-decoding (`%2F` is a separator), `.`/`..`, and query and `#fragment` removed. The
+status identifiers are fixed:
+
+| Status | When | `links_to` edge |
+| --- | --- | --- |
+| `resolved` | One library item: a byte-exact spelling; else the only Unicode-equivalent spelling; else, on a case-insensitive volume, the only case-folded spelling | Inline link to another Markdown Document only |
+| `anchor` | Empty path: `#fragment`, `?query` or nothing | No |
+| `missing` | Inside the library, no match (a single case alias on a case-sensitive volume) | No |
+| `ambiguous` | Several Unicode- or case-folded matches and no exact spelling, on either kind of volume | No |
+| `outsideLibrary` | `..` above the root, or a symbolic link on the path | No |
+| `external` | `http(s)` with a host, `mailto:`, allowed `data:` images | No |
+| `unsupported` | Reference definitions, folders, `file:` and absolute paths, blocked schemes, malformed encoding, paths with `&` | No |
+
+Images are never edges. Edges are de-duplicated per target and section (the decoded
+fragment). The preview opens a Document only for `resolved` (`LibrarySnapshot.document(linkedAt:)`
+applies the same spelling rule); `ambiguous` beeps like `missing`.
+
+The rename rewrite updates every link, image and reference definition the scan reports,
+keeps the author's form (angle brackets, title, query and fragment, relative paths; a path
+written readably stays readable, otherwise new names are percent-encoded) and keeps the
+author's Unicode normalisation for unchanged names. It lists, and leaves as written,
+destinations with backslash escapes or malformed encoding, paths above the root, ambiguous
+targets of a move, and the unsupported syntax above. Differences from the earlier rewrite
+grammar, now matching the renderer: balanced parentheses and Unicode spaces in bare
+destinations are rewritten (were listed); an escaped `!` before a link no longer hides the
+link; links on 4-space-indented "fence" lines outside lists are rewritten (no indented code);
+links in table cells (including after `\|`), headings, footnote definitions and quotes are
+rewritten; escaped `](` is no longer listed; Unicode names are no longer rewritten in
+decomposed form.

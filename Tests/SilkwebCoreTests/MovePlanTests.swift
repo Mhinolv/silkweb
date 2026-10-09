@@ -30,11 +30,11 @@ final class MovePlanTests: XCTestCase {
         let two = try text(root, "Two.md")
         let plan = try await engine.planMove(["A", "A/Child/One.md"], toFolder: "B")
         XCTAssertEqual(plan.changes.changes.count, 1)
-        XCTAssertEqual(plan.unsupportedLinks.count, 1)
+        // #176: `a(b).md` is a balanced destination the preview opens, so it is rewritten rather than listed.
+        XCTAssertEqual(plan.unsupportedLinks.count, 0)
         _ = try await engine.executeMove(plan)
         XCTAssertEqual(try text(root, "B/A/Child/One.md"), "[two](../../../Two.md#title)\n![image](../asset.png)\n")
-        XCTAssertEqual(
-            try text(root, "Two.md"), two.replacingOccurrences(of: "A/Child/One.md", with: "B/A/Child/One.md"))
+        XCTAssertEqual(try text(root, "Two.md"), two.replacingOccurrences(of: "A/Child/", with: "B/A/Child/"))
         let after = try await LibraryScanner.scan(root: root)
         XCTAssertEqual(before.metadata.IDsByPath["A/Child/One.md"], after.metadata.IDsByPath["B/A/Child/One.md"])
         XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("B/A/asset.png")), Data([0, 1, 255]))
@@ -486,17 +486,63 @@ final class MovePlanTests: XCTestCase {
         ] {
             XCTAssertEqual(MarkdownDestinations.rewrite(text, source: "Two.md", changes: changes).text, text)
         }
+        // #176: balanced parentheses are part of the destination the renderer opens, so both links move.
         let mixed = MarkdownDestinations.rewrite("[ok](A/One.md) [bad](A/a(b).md)", source: "Two.md", changes: changes)
-        XCTAssertEqual(mixed.text, "[ok](B/A/One.md) [bad](A/a(b).md)")
-        XCTAssertEqual(mixed.unsupported.count, 1)
+        XCTAssertEqual(mixed.text, "[ok](B/A/One.md) [bad](B/A/a(b).md)")
+        XCTAssertEqual(mixed.unsupported.count, 0)
+        let unbalanced = MarkdownDestinations.rewrite(
+            "[ok](A/One.md) [bad](A/a(b.md)", source: "Two.md", changes: changes)
+        XCTAssertEqual(unbalanced.text, "[ok](B/A/One.md) [bad](A/a(b.md)")
+        XCTAssertEqual(unbalanced.unsupported.count, 1)
         for text in [
-            "[[A/One.md]]", "[a](../outside.md)", "[a](A/a(b).md)", "[a](A/a\\ b.md)", "<img src=\"A/a.png\">",
+            "[[A/One.md]]", "[a](../outside.md)", "[a](A/a(b.md)", "[a](A/a\\ b.md)", "<img src=\"A/a.png\">",
         ] {
             let result = MarkdownDestinations.rewrite(text, source: "Two.md", changes: changes)
             XCTAssertEqual(result.text, text)
             XCTAssertFalse(result.unsupported.isEmpty)
         }
     }
+    /// #176: the rewrite reads links with the renderer's grammar. Whatever the preview would open is rewritten
+    /// (in the author's form), and escaped or code syntax is neither rewritten nor listed.
+    func testRewriteFollowsRendererGrammar() {
+        let changes = LibraryChangeSet(changes: [.init(id: UUID(), oldPath: "A", newPath: "B/A", isFolder: true)])
+        let rewritten = [
+            // An escaped `!` leaves an ordinary link; balanced parentheses and Unicode spaces are bare destinations.
+            ("\\![a](A/One.md)", "\\![a](B/A/One.md)"),
+            ("[x](A/a(b).md)", "[x](B/A/a(b).md)"),
+            ("[x](<A/a(b c).md>)", "[x](<B/A/a(b c).md>)"),
+            ("![s](A/Shot_9.41\u{202F}AM.png)", "![s](B/A/Shot_9.41\u{202F}AM.png)"),
+            // Four-space fences aren't fences (no indented code), so the preview renders this link.
+            ("    ```\n    [a](A/One.md)\n    ```", "    ```\n    [a](B/A/One.md)\n    ```"),
+            // Readable destinations stay readable; encoded ones stay encoded.
+            ("[c](<A/Café note.md>)", "[c](<B/A/Café note.md>)"),
+            ("[c](A/Café.md)", "[c](B/A/Café.md)"),
+            ("[c](A/Caf%C3%A9%20note.md)", "[c](B/A/Caf%C3%A9%20note.md)"),
+            // A link in a label-less quote or in a list item under a quote.
+            ("> - [q](A/One.md \"T\")", "> - [q](B/A/One.md \"T\")"),
+            // Table cells, headings and footnote definitions are rendered as links.
+            (
+                "| a | b |\n| --- | --- |\n| [t](A/One.md) | x \\| [u](A/Two.md) |",
+                "| a | b |\n| --- | --- |\n| [t](B/A/One.md) | x \\| [u](B/A/Two.md) |"
+            ),
+            ("## See [h](A/One.md#part) ##", "## See [h](B/A/One.md#part) ##"),
+            ("x[^1]\n\n[^1]: Note [f](A/One.md)", "x[^1]\n\n[^1]: Note [f](B/A/One.md)"),
+        ]
+        for (text, expected) in rewritten {
+            let result = MarkdownDestinations.rewrite(text, source: "Two.md", changes: changes)
+            XCTAssertEqual(result.text, expected, text)
+            XCTAssertEqual(result.unsupported, [], text)
+        }
+        for text in [
+            "\\[a](A/One.md)", "[a\\](A/One.md)", "``x` [a](A/One.md) ``", "> ```\n> [a](A/One.md)\n> ```",
+            "- x\n\n  ~~~\n  [a](A/One.md) ](\n  ~~~",
+        ] {
+            let result = MarkdownDestinations.rewrite(text, source: "Two.md", changes: changes)
+            XCTAssertEqual(result.text, text, text)
+            XCTAssertEqual(result.unsupported, [], text)
+        }
+    }
+
     /// silkweb-1.72: renames use the same link rewrite as moves; restoring the name restores the links.
     func testRenameRewritesIncomingLinksAndRestoreNameRevertsThem() async throws {
         let (root, engine) = try await fixture()
@@ -511,8 +557,11 @@ final class MovePlanTests: XCTestCase {
         _ = try await engine.restoreName("A/Child/Renamed.md", to: "One.md")
         XCTAssertEqual(try text(root, "Two.md"), two)
         _ = try await engine.rename("A", to: "Z Folder")
+        // #176: each destination keeps its form; an angle-bracketed path stays readable.
         XCTAssertEqual(
-            try text(root, "Two.md"), two.replacingOccurrences(of: "A/Child/One.md", with: "Z%20Folder/Child/One.md"))
+            try text(root, "Two.md"),
+            "[one](Z%20Folder/Child/One.md)\n[ref]: <Z Folder/Child/One.md> \"Title\"\n[bad](Z%20Folder/Child/a(b).md)\n"
+        )
         XCTAssertEqual(try text(root, "Z Folder/Child/One.md"), one)
         _ = try await engine.restoreName("Z Folder", to: "A")
         XCTAssertEqual(try text(root, "Two.md"), two)
@@ -531,7 +580,7 @@ final class MovePlanTests: XCTestCase {
             XCTAssertEqual(result.text, text.replacingOccurrences(of: "A/", with: "B/A/"), indent.debugDescription)
             XCTAssertTrue(result.unsupported.isEmpty)
             let unsupported = MarkdownDestinations.rewrite(
-                "- parent\n\(indent)- [bad](A/a(b).md)", source: "Two.md", changes: changes)
+                "- parent\n\(indent)- [bad](A/a\\ b.md)", source: "Two.md", changes: changes)
             XCTAssertEqual(unsupported.unsupported.count, 1, indent.debugDescription)
         }
         // Indented fences and inline code stay protected.

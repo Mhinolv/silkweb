@@ -1,10 +1,10 @@
 import AppKit
-import SilkwebCore
 import SwiftUI
 import WebKit
 import XCTest
 
 @testable import Silkweb
+@testable import SilkwebCore
 
 /// #109: preview attachment links and the shared missing-image label.
 @MainActor final class PreviewLinkTests: XCTestCase {
@@ -286,5 +286,52 @@ import XCTest
         await workspace.waitForNavigation()
         XCTAssertEqual(beeps, 1, "a missing note still beeps")
         XCTAssertTrue(workspace.editor === planTab.editor)
+    }
+
+    /// #176: a link that folds to several documents and spells none of them exactly is `ambiguous`. The preview
+    /// beeps, as for a missing note, instead of opening whichever document comes first; an exact spelling opens.
+    func testAmbiguousDocumentLinkBeepsAndExactSpellingOpens() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let note = root.appendingPathComponent("note.md")
+        try Data("[plan](plan.md)\n".utf8).write(to: note)
+        try Data("# Plan\n".utf8).write(to: root.appendingPathComponent("Plan.md"))
+        // A second spelling that differs only in case, as a case-sensitive volume can hold. It is listed first,
+        // so a first-match lookup would open it.
+        let scanned = try await LibraryScanner.scan(root: root)
+        let plan = try XCTUnwrap(scanned.documents.first { $0.relativePath == "Plan.md" })
+        let other = LibraryDocument(id: UUID(), folderID: plan.folderID, relativePath: "PLAN.md", name: "PLAN.md")
+        let documents = [other] + scanned.documents
+        let snapshot = LibrarySnapshot(
+            rootURL: scanned.rootURL, folders: scanned.folders, documents: documents,
+            presentation: LibraryPresentation(folders: scanned.folders, documents: documents),
+            metadata: scanned.metadata, recoveredMetadataURL: nil, isReadOnly: false)
+
+        let workspace = LibraryWorkspace(defaults: disposableDefaults("PreviewAmbiguous"))
+        workspace.canSaveWindowSession = false
+        workspace.root = root
+        workspace.recoveryDirectory = root.appendingPathComponent(".recovery")
+        workspace.install(snapshot)
+        workspace.navigate(folder: nil, documents: ["note.md"], pinned: true)
+        await workspace.waitForNavigation()
+        let preview = PreviewView.Coordinator(workspace: workspace)
+        preview.document = note
+        preview.page = URL(string: "silkweb-preview://page/ambiguous")!
+        var beeps = 0
+        preview.beep = { beeps += 1 }
+        preview.open = { XCTFail("opened \($0)") }
+
+        preview.activate(root.appendingPathComponent("plan.md"), revealing: false)
+        await workspace.waitForNavigation()
+        XCTAssertEqual(beeps, 1, "an ambiguous link beeps")
+        XCTAssertEqual(workspace.editor.url?.lastPathComponent, "note.md", "nothing was opened")
+        XCTAssertEqual(workspace.session.selectedDocuments, ["note.md"])
+
+        preview.activate(root.appendingPathComponent("Plan.md"), revealing: false)
+        await workspace.waitForNavigation()
+        XCTAssertEqual(beeps, 1, "the exact spelling opens without a beep")
+        XCTAssertEqual(workspace.editor.url?.lastPathComponent, "Plan.md")
+        XCTAssertEqual(workspace.session.selectedDocuments, ["Plan.md"])
     }
 }

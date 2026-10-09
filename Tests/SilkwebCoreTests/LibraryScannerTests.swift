@@ -381,4 +381,28 @@ final class LibraryScannerTests: XCTestCase {
             == false
         XCTAssertEqual(snapshot.document(linkedAt: "plan (final).md") != nil, volumeIgnoresCase)
     }
+
+    /// #176: several case-folded matches and no exact spelling is `ambiguous`, so the preview beeps instead of
+    /// opening whichever document happens to come first. An exact spelling still wins.
+    func testDocumentLinkedAtNeverGuessesBetweenAmbiguousMatches() {
+        let folder = UUID()
+        let documents = ["Plan.md", "PLAN.md", "Notes/Daily.md", "notes/Daily.md"].map {
+            LibraryDocument(id: UUID(), folderID: folder, relativePath: $0, name: $0)
+        }
+        for order in [documents, documents.reversed()] {
+            let snapshot = LibrarySnapshot(
+                rootURL: root, folders: [], documents: order,
+                presentation: LibraryPresentation(folders: [], documents: order),
+                metadata: LibraryMetadata(), recoveredMetadataURL: nil, isReadOnly: false)
+            for caseSensitive in [true, false] {
+                XCTAssertNil(snapshot.document(linkedAt: "plan.md", caseSensitive: caseSensitive))
+                XCTAssertNil(snapshot.document(linkedAt: "NOTES/daily.md", caseSensitive: caseSensitive))
+                XCTAssertEqual(
+                    snapshot.document(linkedAt: "PLAN.md", caseSensitive: caseSensitive)?.relativePath, "PLAN.md")
+                XCTAssertEqual(
+                    snapshot.document(linkedAt: "notes/Daily.md", caseSensitive: caseSensitive)?.relativePath,
+                    "notes/Daily.md")
+            }
+        }
+    }
 }

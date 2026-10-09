@@ -631,12 +631,10 @@ extension LibraryMutations {
         let caseSensitive =
             try root.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]).volumeSupportsCaseSensitiveNames
             == true
-        var canonicalPaths: [String: String] = [:]
-        if !caseSensitive {
-            for path in contents.linkTargets {
-                canonicalPaths[path.precomposedStringWithCanonicalMapping.lowercased()] = path
-            }
-        }
+        // Spellings only: which kind of item a moved link names doesn't change its rewrite.
+        let resolver = MarkdownLinkResolver(
+            items: Dictionary(contents.linkTargets.map { ($0, .file) }, uniquingKeysWith: { first, _ in first }),
+            caseSensitive: caseSensitive)
         var before: [String: Data] = [:]
         var after: [String: Data] = [:]
         var fingerprints: [String: Data] = [:]
@@ -675,8 +673,7 @@ extension LibraryMutations {
                         syntax: "This document isn’t UTF-8. Its links can’t be checked and will stay as written."))
                 continue
             }
-            let result = MarkdownDestinations.rewrite(
-                text, source: path, changes: changeSet, canonicalPaths: canonicalPaths)
+            let result = MarkdownDestinations.rewrite(text, source: path, changes: changeSet, resolver: resolver)
             if result.text != text {
                 before[path] = data
                 let rewritten = Data(result.text.utf8)
