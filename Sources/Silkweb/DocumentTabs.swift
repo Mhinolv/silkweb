@@ -231,14 +231,15 @@ extension LibraryWorkspace {
         return true
     }
 
-    func prepareToExit(_ reason: DocumentSession.ExitReason) async -> Bool {
+    /// `beforeAlert` runs right before an unsaved-changes alert, e.g. to bring this window to the front on Quit.
+    func prepareToExit(_ reason: DocumentSession.ExitReason, beforeAlert: (() -> Void)? = nil) async -> Bool {
         await waitForNavigation()
         guard !mutating else { return false }
         let editors = allEditors
         for editor in editors { editor.loading = true }
         defer { for editor in editors { editor.loading = false } }
         for editor in editors {
-            guard await editor.prepareToExit(reason) else {
+            guard await editor.prepareToExit(reason, beforeAlert: beforeAlert) else {
                 if let tab = tabs.first(where: { $0.editor === editor }) { activateTab(tab.id) }
                 return false
             }

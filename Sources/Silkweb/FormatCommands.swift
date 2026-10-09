@@ -11,10 +11,19 @@ import SwiftUI
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
     init() {
-        // Another window (Settings) becoming key does not resign the editor; resample then (#104).
+        // Another window (Settings) becoming key does not resign the editor; resample then (#104). A library
+        // window coming back keeps its editor first responder without a new `becomeFirstResponder`, so its
+        // editor becomes the target again (#194).
         observers = [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification].map { name in
-            NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refresh() }
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] notification in
+                MainActor.assumeIsolated {
+                    if notification.name == NSWindow.didBecomeKeyNotification,
+                        let editor = (notification.object as? NSWindow)?.firstResponder as? PlainMarkdownTextView
+                    {
+                        self?.editor = editor
+                    }
+                    self?.refresh()
+                }
             }
         }
     }

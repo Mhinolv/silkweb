@@ -4,30 +4,79 @@ import SwiftUI
 @main
 struct SilkwebApp: App {
     @NSApplicationDelegateAdaptor(EditorApplicationDelegate.self) private var appDelegate
-    @State private var workspace = LibraryWorkspace()
+    private let registry = LibraryWindowRegistry.shared
 
     var body: some Scene {
-        Window("Silkweb", id: "library") {
-            LibraryWorkspaceView(workspace: workspace)
-                .background(EditorWindowLifecycle(workspace: workspace))
-                .onAppear {
-                    appDelegate.workspace = workspace
-                    WritingSettings.shared.applyAppearance()
-                }
+        // One workspace per window (#194). `.newItem` is replaced below, so there is no File ▸ New Window.
+        WindowGroup("Silkweb", id: LibraryWindow.sceneID) {
+            LibraryWindow(registry: registry)
         }
         .defaultSize(width: 1200, height: 760)
         // One slim bar: toolbar items share the traffic-lights row (silkweb-1.65).
         .windowToolbarStyle(.unifiedCompact(showsTitle: false))
-        .commands { WorkspaceCommands(workspace: workspace) }
-        .commands { PrintCommands(workspace: workspace) }
+        // Registered once; every action resolves the key (or last-active) library window when it runs.
+        .commands { LibraryWindowCommands(registry: registry) }
         // Silkweb ▸ Settings… ⌘, (1.24).
-        Settings { SettingsView(settings: WritingSettings.shared, workspace: workspace) }
+        Settings { LibraryWindowSettings(registry: registry) }
+    }
+}
+
+/// A library window's content: the workspace it adopted from the registry, kept for the window's lifetime.
+struct LibraryWindow: View {
+    static let sceneID = "library"
+    let registry: LibraryWindowRegistry
+    @State private var holder = Holder()
+
+    /// Adopts on first use, outside any published state, so building the view never publishes.
+    @MainActor final class Holder {
+        private var workspace: LibraryWorkspace?
+        func workspace(from registry: LibraryWindowRegistry) -> LibraryWorkspace {
+            if let workspace { return workspace }
+            let adopted = registry.adopt()
+            workspace = adopted
+            return adopted
+        }
+    }
+
+    var body: some View {
+        let workspace = holder.workspace(from: registry)
+        LibraryWorkspaceView(workspace: workspace)
+            .background(EditorWindowLifecycle(workspace: workspace, registry: registry))
+            .onAppear { WritingSettings.shared.applyAppearance() }
+    }
+}
+
+/// App-level commands for whichever library window they target (#194, extends #104).
+struct LibraryWindowCommands: Commands {
+    let registry: LibraryWindowRegistry
+    @Environment(\.openWindow) private var openWindow
+    var body: some Commands {
+        let workspace = registry.target
+        WorkspaceCommands(workspace: workspace) {
+            // Open Folder in Place… / New Library… with every window closed: bring the Library's window back first.
+            if !registry.isOpen(workspace) { openWindow(id: LibraryWindow.sceneID) }
+        }
+        PrintCommands(workspace: workspace)
+    }
+}
+
+/// Settings ▸ Library shows and replaces the last-active library window's Library, live (#194).
+struct LibraryWindowSettings: View {
+    let registry: LibraryWindowRegistry
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        let workspace = registry.target
+        SettingsView(settings: WritingSettings.shared, workspace: workspace) {
+            if !registry.isOpen(workspace) { openWindow(id: LibraryWindow.sceneID) }
+        }
     }
 }
 
 /// Separate command observation from the window scene so idle activity can be tested offscreen.
 struct WorkspaceCommands: Commands {
     let workspace: LibraryWorkspace
+    /// Runs before Open Folder in Place… and New Library… so the chosen Library has a window to show in.
+    var showWindow: () -> Void = {}
     var body: some Commands {
         let state = workspace.menuState.value
         CommandGroup(replacing: .newItem) {
@@ -46,16 +95,20 @@ struct WorkspaceCommands: Commands {
             Divider()
             ExportMenu(workspace: workspace, state: state)
             Divider()
-            Button("Open Folder in Place…") { workspace.chooseFolder() }
-                .keyboardShortcut("o")
+            Button("Open Folder in Place…") {
+                showWindow(); workspace.chooseFolder()
+            }
+            .keyboardShortcut("o")
             Button("Open in New Tab") { workspace.openSelectionInNewTab() }
                 .keyboardShortcut("t").disabled(!state.canOpenTab)
             Button("Quick Open…") { workspace.search.toggleQuickOpen() }
                 .keyboardShortcut("o", modifiers: [.command, .shift]).disabled(!state.hasLibrary)
             Button("Import Folder Copy…") { workspace.chooseImportFolder() }
                 .keyboardShortcut("i", modifiers: [.command, .shift]).disabled(!state.canMutate)
-            Button("New Library…") { workspace.newLibrary() }
-                .keyboardShortcut("n", modifiers: [.command, .option])
+            Button("New Library…") {
+                showWindow(); workspace.newLibrary()
+            }
+            .keyboardShortcut("n", modifiers: [.command, .option])
         }
         TabCommands(workspace: workspace)
         CommandGroup(replacing: .undoRedo) {

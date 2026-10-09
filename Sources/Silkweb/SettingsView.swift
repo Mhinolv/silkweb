@@ -11,6 +11,8 @@ struct SettingsView: View {
     @Bindable var settings: WritingSettings
     let workspace: LibraryWorkspace
     @State var tab: SettingsTab = .editor
+    /// Runs before Choose Library… so the chosen Library has a window to show in (#194).
+    var showWindow: () -> Void = {}
 
     var body: some View {
         TabView(selection: $tab) {
@@ -20,7 +22,7 @@ struct SettingsView: View {
                 .tabItem { Label("Preview", systemImage: "eye") }.tag(SettingsTab.preview)
             AppearanceSettingsTab(settings: settings)
                 .tabItem { Label("Appearance", systemImage: "circle.lefthalf.filled") }.tag(SettingsTab.appearance)
-            LibrarySettingsTab(workspace: workspace)
+            LibrarySettingsTab(workspace: workspace, showWindow: showWindow)
                 .tabItem { Label("Library", systemImage: "books.vertical") }.tag(SettingsTab.library)
         }
         .frame(width: 520)
@@ -459,6 +461,7 @@ struct ColorPreviewCard: View {
 
 struct LibrarySettingsTab: View {
     let workspace: LibraryWorkspace
+    var showWindow: () -> Void = {}
 
     var body: some View {
         SettingsForm {
@@ -472,7 +475,9 @@ struct LibrarySettingsTab: View {
                         if let root = workspace.root { NSWorkspace.shared.activateFileViewerSelecting([root]) }
                     }
                     .disabled(workspace.root == nil)
-                    Button("Choose Library…") { workspace.chooseFolder() }
+                    Button("Choose Library…") {
+                        showWindow(); workspace.chooseFolder()
+                    }
                 }
             } header: {
                 Text("Library")
