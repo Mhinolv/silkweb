@@ -6,7 +6,8 @@ extension LibraryWorkspace {
         canMutate && rename == nil && libraryHasFocus && !movePaths.isEmpty
     }
     /// The library window, once its columns are installed.
-    var libraryWindow: NSWindow? { librarySplitController?.view.window }
+    /// The window this workspace was attached to (any screen, welcome included), else its columns' window.
+    var libraryWindow: NSWindow? { attachedWindow ?? librarySplitController?.view.window }
     /// Window- and tab-scoped commands (Close Tab, Save, Format, tab items) act only then (#104).
     var libraryIsKey: Bool { libraryWindow?.isKeyWindow == true }
     /// This workspace's sidebar outline or document list is first responder in the key window:

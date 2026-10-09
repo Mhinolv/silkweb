@@ -138,6 +138,10 @@ final class LibraryWorkspace {
     var tagsExpanded = true
     var libraryColumnCollapsed = false
     @ObservationIgnored weak var librarySplitController: LibrarySplitViewController?
+    /// Set by the window lifecycle (#194): this workspace's own window, whatever screen it shows.
+    @ObservationIgnored weak var attachedWindow: NSWindow?
+    /// Only one window restores the last-opened Library at launch (#194); see `LibraryWindowRegistry.adopt`.
+    @ObservationIgnored var restoresLastLibrary = true
     /// The two views whose focus enables Rename, Move To… and Move to Trash (#104).
     @ObservationIgnored weak var sidebarOutline: SidebarOutlineView?
     @ObservationIgnored weak var documentTable: DocumentTableView?
@@ -250,7 +254,7 @@ final class LibraryWorkspace {
     }
 
     func restore() {
-        guard root == nil, loadTask == nil else { return }
+        guard restoresLastLibrary, root == nil, loadTask == nil else { return }
         let location = defaults.data(forKey: "libraryLocation").flatMap {
             try? JSONDecoder().decode(LibraryLocation.self, from: $0)
         }

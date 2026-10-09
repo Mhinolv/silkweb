@@ -87,6 +87,10 @@ struct SnapshotScenario {
     /// selected), "filtered-empty", "info" (an edited agent Document in Info), "claimed-only" and "arrives".
     /// #139 "dirty-open": the owner's unsaved Document in Progress stays open while an agent row arrives there.
     var agentActivity: String? = nil
+    /// #194: a second library window on its own fixture copy (Vanlife) beside this one. This window is key with its
+    /// list focused; the second is in the background, so its list capsule is `SilkwebSelectionInactive`. The PNG
+    /// shows both windows side by side, the key one on the left.
+    var secondWindow = false
 
     static let deepFolder =
         "Field Notes/Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
@@ -318,6 +322,8 @@ struct SnapshotScenario {
             name: "status-bar-counts-narrow", document: writingModes, outline: true, visibleCaret: "The caret rests",
             focusMode: true,
             typewriterMode: true, selectText: "", narrowDetail: true),
+        // #194: two library windows on different Libraries; only the key one shows the active capsule.
+        .init(name: "two-library-windows", folder: "Coffee/Brewing Guides", document: pourOver, secondWindow: true),
     ]
     static let writingModes = "Snapshot Fixtures/Writing Modes.md"
 }
@@ -939,14 +945,25 @@ final class SnapshotHarness {
             ColorRevision.shared.bump()
         }
         // Native window chrome and production content, never entered into the window list.
-        let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        // The two-window scenario's first window reports key (never ordered on screen), as the front window would.
+        let window =
+            scenario.secondWindow
+            ? KeyedTestWindow(
+                contentRect: NSRect(origin: .zero, size: size),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            : NSWindow(
+                contentRect: NSRect(origin: .zero, size: size),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.appearance = appearance
         window.backgroundColor = .windowBackgroundColor
         var host: NSHostingController<AnyView>?
+        var second: (window: NSWindow, workspace: LibraryWorkspace)?
         defer {
+            if let second {
+                second.window.contentViewController = nil
+                second.window.close()
+            }
             window.contentViewController = nil
             window.close()
             NSApp.appearance = oldAppearance
@@ -1102,6 +1119,23 @@ final class SnapshotHarness {
                         try await Task.sleep(for: .milliseconds(50))
                     }
                 }
+            }
+            if scenario.secondWindow {
+                let background = try await makeSecondWindow(
+                    temporary: temporary, size: size, appearance: appearance, dark: dark, defaults: defaults)
+                second = background
+                // Both lists have focus in their own windows; only the key window draws the active capsule.
+                for (host, library) in [(window, workspace), (background.window, background.workspace)] {
+                    guard let list = Self.descendants(host.contentView!).compactMap({ $0 as? DocumentTableView }).first
+                    else { throw SnapshotFailure.error("Missing document list") }
+                    host.makeFirstResponder(list)
+                    library.focusColumn = 1
+                    // AppKit emphasizes rows only in a really key window; the reported-key window gets what it would.
+                    let key = host.isKeyWindow
+                    list.enumerateAvailableRowViews { row, _ in row.isEmphasized = key }
+                    host.contentView?.layoutSubtreeIfNeeded()
+                }
+                try await Task.sleep(for: .milliseconds(200))
             }
             if scenario.sidebarsHidden {
                 workspace.setSidebarsHidden(true)
@@ -1441,7 +1475,7 @@ final class SnapshotHarness {
                 guard !window.isVisible, activationIsSafe else {
                     throw SnapshotFailure.error("Offscreen invariant violated")
                 }
-                guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+                guard var bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
                     throw SnapshotFailure.error("Cannot allocate window bitmap")
                 }
                 appearance.performAsCurrentDrawingAppearance { view.cacheDisplay(in: view.bounds, to: bitmap) }
@@ -1502,6 +1536,9 @@ final class SnapshotHarness {
                     NSRect(origin: .zero, size: view.bounds.size).fill(using: .destinationOver)
                 }
                 NSGraphicsContext.restoreGraphicsState()
+                if let second {
+                    bitmap = try Self.sideBySide(bitmap, try Self.windowBitmap(second.window, appearance: appearance))
+                }
                 if scenario.mode != .editor, capture.status == "ok", let web = workspace.preview.webView {
                     do {
                         let content = try await bounded("preview DOM") {
@@ -1552,12 +1589,113 @@ final class SnapshotHarness {
             } catch { record(error, in: &capture) }
         }
         // Stop observation/save work before deleting the disposable library.
+        if let second {
+            second.window.contentViewController = nil
+            second.workspace.search.reset()
+            await second.workspace.didCloseWindow()
+        }
         window.contentViewController = nil
         host = nil
         workspace.search.reset()
         await workspace.saveSessionNow()
         await workspace.didCloseWindow()
         return capture
+    }
+
+    /// #194: the background library window of "two-library-windows", on its own copy of the fixture.
+    private func makeSecondWindow(
+        temporary: URL, size: NSSize, appearance: NSAppearance, dark: Bool, defaults: UserDefaults
+    ) async throws -> (window: NSWindow, workspace: LibraryWorkspace) {
+        let root = temporary.appendingPathComponent("Second Snapshot Library")
+        try makeFixture(at: root)
+        let workspace = LibraryWorkspace(defaults: defaults)
+        workspace.canSaveWindowSession = false
+        workspace.root = root
+        workspace.recoveryDirectory = root.appendingPathComponent("Snapshot Recovery")
+        workspace.install(try await bounded("second library scan") { try await LibraryScanner.scan(root: root) })
+        let background = SnapshotScenario(
+            name: "two-library-windows-background", folder: "Vanlife", document: "Vanlife/Settling In.md")
+        try await bounded("second window configuration") {
+            try await self.configure(background, workspace: workspace)
+        }
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.backgroundColor = .windowBackgroundColor
+        let controller = NSHostingController(
+            rootView: AnyView(
+                LibraryWorkspaceView(workspace: workspace).environment(\.colorScheme, dark ? .dark : .light)))
+        controller.sizingOptions = []
+        window.contentViewController = controller
+        window.setFrame(NSRect(origin: .zero, size: size), display: false)
+        controller.view.frame = window.contentView!.bounds
+        controller.view.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(200))
+        if let columns = Self.descendants(controller.view).compactMap({
+            ($0 as? NSSplitView)?.delegate as? LibrarySplitViewController
+        }).first {
+            columns.splitView.setPosition(
+                220 + columns.navigationController.splitView.dividerThickness + 300, ofDividerAt: 0)
+            controller.view.layoutSubtreeIfNeeded()
+            columns.navigationController.splitView.setPosition(220, ofDividerAt: 0)
+        }
+        try await wait("second window editor") {
+            Self.descendants(controller.view).compactMap { $0 as? PlainMarkdownTextView }.contains {
+                $0.string == workspace.editor.text && !$0.string.isEmpty
+            }
+        }
+        window.title = workspace.editor.name
+        return (window, workspace)
+    }
+
+    /// The window frame view on the semantic window background, as the main capture draws it.
+    private static func windowBitmap(_ window: NSWindow, appearance: NSAppearance) throws -> NSBitmapImageRep {
+        guard let view = window.contentView?.superview else {
+            throw SnapshotFailure.error("Window frame view is missing")
+        }
+        view.layoutSubtreeIfNeeded()
+        for editor in descendants(view).compactMap({ $0 as? PlainMarkdownTextView }) {
+            editor.insertionPointColor = .clear
+        }
+        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds),
+            let context = NSGraphicsContext(bitmapImageRep: bitmap)
+        else { throw SnapshotFailure.error("Cannot allocate window bitmap") }
+        appearance.performAsCurrentDrawingAppearance { view.cacheDisplay(in: view.bounds, to: bitmap) }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.cgContext.scaleBy(
+            x: CGFloat(bitmap.pixelsWide) / view.bounds.width, y: CGFloat(bitmap.pixelsHigh) / view.bounds.height)
+        appearance.performAsCurrentDrawingAppearance {
+            NSColor.windowBackgroundColor.setFill()
+            NSRect(origin: .zero, size: view.bounds.size).fill(using: .destinationOver)
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        return bitmap
+    }
+
+    /// `left` and `right` in one bitmap at the same backing scale, left first.
+    private static func sideBySide(_ left: NSBitmapImageRep, _ right: NSBitmapImageRep) throws -> NSBitmapImageRep {
+        let width = left.pixelsWide + right.pixelsWide
+        let height = max(left.pixelsHigh, right.pixelsHigh)
+        guard
+            let combined = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 32),
+            let context = NSGraphicsContext(bitmapImageRep: combined)
+        else { throw SnapshotFailure.error("Cannot compose window bitmaps") }
+        combined.size = NSSize(
+            width: left.size.width + right.size.width, height: max(left.size.height, right.size.height))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        for (rep, x) in [(left, 0), (right, left.pixelsWide)] {
+            guard let image = rep.cgImage else { throw SnapshotFailure.error("Cannot read window bitmap") }
+            context.cgContext.draw(
+                image, in: CGRect(x: x, y: height - rep.pixelsHigh, width: rep.pixelsWide, height: rep.pixelsHigh))
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        return combined
     }
 
     private func record(_ error: Error, in capture: inout SnapshotManifest.Capture) {
