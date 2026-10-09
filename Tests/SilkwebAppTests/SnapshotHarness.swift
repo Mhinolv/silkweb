@@ -95,6 +95,10 @@ struct SnapshotScenario {
     var sectionCollapsed = false
     /// #195: the welcome screen (no Library open) with three Recent Libraries, one of them missing.
     var welcomeRecents = false
+    /// #196 relaunch: a first session quits with this Library and “Writing” open (tabs in both, Writing collapsed),
+    /// then the window is built by `restoreSession`. "two-sections" restores both; "section-missing" deletes Writing
+    /// first and selects its Not Found row.
+    var restore: String? = nil
     /// #203 access requests: "waiting", "history" and "empty" host the Access Requests sheet; "requests-only" is
     /// the library window in Agent Activity with requests but no receipts; "widen-refused" is the refusal alert.
     var accessRequests: String? = nil
@@ -354,6 +358,10 @@ struct SnapshotScenario {
             name: "sidebar-section-collapsed", folder: "Coffee/Brewing Guides", document: pourOver,
             secondLibrary: true, sectionCollapsed: true),
         .init(name: "welcome-recents", welcomeRecents: true),
+        // #196: relaunch restores both sections (Writing collapsed) and the current Library's tabs.
+        .init(name: "restore-two-sections", restore: "two-sections"),
+        // #196: Writing went missing: its section stays, ⚠︎ header and Not Found row selected, the view beside it.
+        .init(name: "restore-section-missing", restore: "section-missing"),
     ]
     static let writingModes = "Snapshot Fixtures/Writing Modes.md"
 }
@@ -710,6 +718,64 @@ final class SnapshotHarness {
         // Exercise the app's real invalid-UTF8 read-only banner without permission tricks.
         try Data(Array("# Read Only\n\nThis fixture opens read-only.\n".utf8) + [0xFF]).write(
             to: fixtures.appendingPathComponent("Read Only.md"), options: .atomic)
+    }
+
+    /// #196: a first session quits with `root` and “Writing” open, then the library window is relaunched from the
+    /// saved app session with `launch` as its launch workspace.
+    private func restoredWindow(
+        _ state: String, root: URL, temporary: URL, defaults: UserDefaults,
+        launch: @escaping @MainActor () -> LibraryWorkspace
+    ) async throws -> LibraryWindowRegistry {
+        let writing = temporary.appendingPathComponent("Writing")
+        try makeFixture(at: writing)
+        let recovery = temporary.appendingPathComponent("Restore Recovery")
+        let make = { @MainActor () -> LibraryWorkspace in
+            let next = LibraryWorkspace(defaults: defaults)
+            next.recoveryDirectory = recovery
+            return next
+        }
+        let first = LibraryWindowRegistry(defaults: defaults, makeWorkspace: make)
+        first.restoreSession(reopensSession: true)
+        guard let library = await first.add(root), let second = await first.add(writing) else {
+            throw SnapshotFailure.error("The first session's Libraries did not open")
+        }
+        let tabs = [
+            (library, [SnapshotScenario.writingModes, SnapshotScenario.pourOver]),
+            (second, [SnapshotScenario.pourOver]),
+        ]
+        for (workspace, paths) in tabs {
+            workspace.session.expandedFolders = ["", "Coffee", "Coffee/Brewing Guides", "Snapshot Fixtures"]
+            for path in paths {
+                workspace.navigate(
+                    folder: (path as NSString).deletingLastPathComponent, documents: [path], pinned: true)
+                await workspace.waitForNavigation()
+            }
+        }
+        second.sectionCollapsed = true
+        first.focus(library)
+        guard await first.prepareToQuit() else { throw SnapshotFailure.error("The first session did not quit") }
+        for workspace in first.workspaces { await workspace.releaseLibrary() }
+        if state == "section-missing" { try FileManager.default.removeItem(at: writing) }
+
+        var adopted = false
+        let shell = LibraryWindowRegistry(defaults: defaults) {
+            if !adopted {
+                adopted = true
+                return launch()
+            }
+            return make()
+        }
+        await shell.restoreSession(reopensSession: true).value
+        guard shell.sections.count == 2, shell.current.tabs.count == 2 else {
+            throw SnapshotFailure.error("Relaunch did not restore both sections and the current Library's tabs")
+        }
+        if state == "section-missing" {
+            guard let missing = shell.sections.last, missing.error != nil else {
+                throw SnapshotFailure.error("The missing Library did not keep its section")
+            }
+            shell.focus(missing)
+        }
+        return shell
     }
 
     private func configure(_ scenario: SnapshotScenario, workspace: LibraryWorkspace) async throws {
@@ -1083,7 +1149,7 @@ final class SnapshotHarness {
                         [.creationDate: date, .modificationDate: date], ofItemAtPath: notes.path)
                 }
             }
-            if !scenario.welcomeRecents { workspace.root = root }
+            if !scenario.welcomeRecents && scenario.restore == nil { workspace.root = root }
             workspace.recoveryDirectory = root.appendingPathComponent("Snapshot Recovery")
             let metadataDirectory = root.appendingPathComponent(".silkweb")
             if let state = scenario.indexRecovery {
@@ -1102,7 +1168,7 @@ final class SnapshotHarness {
                 }
             }
             let snapshot: LibrarySnapshot?
-            if scenario.welcomeRecents {
+            if scenario.welcomeRecents || scenario.restore != nil {
                 snapshot = nil
             } else if scenario.indexRecovery == "newer-format" {
                 snapshot = nil
@@ -1187,6 +1253,14 @@ final class SnapshotHarness {
                     SettingsView(settings: settings, workspace: workspace, tab: tab)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                         .background(Color(nsColor: .windowBackgroundColor)))
+            } else if let restore = scenario.restore {
+                let shell = try await bounded("session restore") {
+                    try await self.restoredWindow(restore, root: root, temporary: temporary, defaults: defaults) {
+                        workspace
+                    }
+                }
+                registry = shell
+                content = AnyView(LibraryWorkspaceView(workspace: shell.current, registry: shell))
             } else {
                 // The library window as the app builds it (#195): this Library is the sidebar's first section.
                 var adopted = false
@@ -1264,6 +1338,20 @@ final class SnapshotHarness {
                 else { throw SnapshotFailure.error("The sidebar does not show two Library sections") }
                 if scenario.sectionCollapsed, outline.isItemExpanded(sections.headers[1]) {
                     throw SnapshotFailure.error("The second section is not collapsed")
+                }
+            }
+            if let restore = scenario.restore {
+                guard
+                    let outline = Self.descendants(controller.view).compactMap({ $0 as? SidebarOutlineView }).first,
+                    let sections = outline.delegate as? SidebarSections, sections.headers.count == 2
+                else { throw SnapshotFailure.error("The sidebar does not show both restored sections") }
+                if restore == "two-sections", outline.isItemExpanded(sections.headers[1]) {
+                    throw SnapshotFailure.error("Writing's section did not restore collapsed")
+                }
+                if restore == "section-missing",
+                    !(outline.item(atRow: outline.selectedRow) is SidebarSections.Unavailable)
+                {
+                    throw SnapshotFailure.error("The Not Found row is not selected")
                 }
             }
             if scenario.sidebarsHidden {

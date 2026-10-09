@@ -47,7 +47,7 @@ final class LibrarySplitViewController: NSSplitViewController {
         self.registry = registry
         sidebarHost = Self.host(LibrarySidebarPane(workspace: workspace, registry: registry))
         listHost = Self.host(Self.list(workspace, sectioned: registry != nil))
-        detailHost = Self.host(Self.detail(workspace))
+        detailHost = Self.host(Self.detail(workspace, registry: registry))
         lastSidebarToggleRequest = workspace.sidebarToggleRequest
         lastFocusRequest = workspace.focusRequest
         super.init(nibName: nil, bundle: nil)
@@ -113,8 +113,8 @@ final class LibrarySplitViewController: NSSplitViewController {
         AnyView(LibraryDocumentPane(workspace: workspace, sectioned: sectioned).id(ObjectIdentifier(workspace)))
     }
 
-    private static func detail(_ workspace: LibraryWorkspace) -> AnyView {
-        AnyView(DocumentDetail(workspace: workspace).id(ObjectIdentifier(workspace)))
+    private static func detail(_ workspace: LibraryWorkspace, registry: LibraryWindowRegistry?) -> AnyView {
+        AnyView(LibraryDetailPane(workspace: workspace, registry: registry).id(ObjectIdentifier(workspace)))
     }
 
     /// Another section became current (#195): the columns, their widths and the sidebar stay; the list and the
@@ -129,7 +129,7 @@ final class LibrarySplitViewController: NSSplitViewController {
         lastFocusRequest = next.focusRequest
         sidebarHost.rootView = LibrarySidebarPane(workspace: next, registry: registry)
         listHost.rootView = Self.list(next, sectioned: registry != nil)
-        detailHost.rootView = Self.detail(next)
+        detailHost.rootView = Self.detail(next, registry: registry)
         if navigationItem.isCollapsed != next.sidebarsHidden { applySidebars(animated: false) }
     }
 
@@ -256,7 +256,8 @@ struct LibrarySidebarPane: View {
 
     var body: some View {
         Group {
-            if let registry, registry.sections.contains(where: { $0.snapshot != nil }) {
+            // #196: a section that couldn't open still lists under its header.
+            if let registry, registry.sections.contains(where: { $0.snapshot != nil || $0.error != nil }) {
                 // #195: every open Library is a section under its own header; there is no `LIBRARY` caption.
                 VStack(alignment: .leading, spacing: 0) {
                     LibrarySectionsSidebar(registry: registry, current: workspace)
@@ -301,6 +302,9 @@ private struct LibraryDocumentPane: View {
         if sectioned, workspace.snapshot == nil, workspace.loading {
             DelayedLibraryProgress(count: workspace.loadingCount)
                 .background(Color.silkwebPaneBackground.ignoresSafeArea())
+        } else if sectioned, workspace.error != nil {
+            // #196: Library Not Found fills the editor column; there's no list to show.
+            Color.silkwebPaneBackground.ignoresSafeArea()
         } else {
             list
         }
@@ -320,5 +324,21 @@ private struct LibraryDocumentPane: View {
                 return .handled
             }
             .background(Color.silkwebPaneBackground.ignoresSafeArea())
+    }
+}
+
+/// The editor column; a section that can't open shows Library Not Found here (#196).
+private struct LibraryDetailPane: View {
+    let workspace: LibraryWorkspace
+    var registry: LibraryWindowRegistry? = nil
+
+    var body: some View {
+        if registry != nil, workspace.error != nil {
+            LibraryUnavailableView(workspace: workspace, registry: registry)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.silkwebPaneBackground.ignoresSafeArea())
+        } else {
+            DocumentDetail(workspace: workspace)
+        }
     }
 }
