@@ -548,6 +548,15 @@ Errors for search and read, in addition to the [refusals](#refusals):
 | `envelope_malformed`, `envelope_schema_newer` | Can’t Read Front Matter | See [Reading rules](#reading-rules). |
 | `stale_snapshot` | Library Changed | The library changed while this request ran. Try again. |
 
+### Knowledge graph retrieval
+
+Links, backlinks, ranked search and context bundles (#173) follow
+[`knowledge-graph-retrieval.md`](knowledge-graph-retrieval.md) (`retrieval_contract_version: 1`). It
+defines Documents and Sections as retrieval units, the relation kinds (`links_to`, `supersedes`,
+`mentions`, `similar`) and which of them are graph edges, the scope rules for the graph, budgets, and
+the golden evaluation set with the frozen baseline of the search above. The search described here
+stays the default: new retrieval behaviour is opt-in and never changes a default request.
+
 ## Create and receipts (#133)
 
 A create publishes exactly one new Document and never replaces anything (`AgentCreateService` in
