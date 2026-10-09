@@ -33,7 +33,8 @@ struct SnapshotScenario {
     var expanded: Set<String> = []
     var mediaMigration: String? = nil
     /// silkweb-1.70 recovery states: "pending" (Keep/Discard), "orphan" (draft for a deleted note), "unreadable" (strip);
-    /// #108 "two-orphans": a restored tab followed by two same-named deleted-note drafts.
+    /// #108 "two-orphans": a restored tab followed by two same-named deleted-note drafts;
+    /// #208 "pending-many-decoys": "pending" plus 3,000 valid drafts for notes outside the library.
     var recovery: String? = nil
     /// #107 index states: "backup" (corrupt index set aside), "no-copy" (unwritable `.silkweb`), "newer-format".
     var indexRecovery: String? = nil
@@ -137,6 +138,7 @@ struct SnapshotScenario {
         .init(name: "media-migration-failure", document: image, mediaMigration: "failure"),
         // silkweb-1.70: recovered text awaiting Keep/Discard; a draft whose note was deleted; a set-aside recovery file.
         .init(name: "recovery-pending", document: pourOver, recovery: "pending"),
+        .init(name: "recovery-pending-many-decoys", document: pourOver, recovery: "pending-many-decoys"),
         .init(name: "recovery-orphan-draft", folder: "Coffee", recovery: "orphan"),
         .init(name: "recovery-two-orphans", recovery: "two-orphans"),
         .init(name: "recovery-unreadable", document: pourOver, recovery: "unreadable"),
@@ -736,6 +738,15 @@ final class SnapshotHarness {
             }
             if recovery == "unreadable", let directory = workspace.recoveryDirectory {
                 workspace.unreadableRecoveryFile = directory.appendingPathComponent("Unreadable/draft.json")
+            }
+            if recovery == "pending-many-decoys", let directory = workspace.recoveryDirectory {
+                // Opening the note must read only its own draft (#208).
+                for index in 0..<3_000 {
+                    let note = directory.appendingPathComponent("Elsewhere/Decoy \(index).md")
+                    try JSONSerialization.data(withJSONObject: [
+                        "formatVersion": 1, "documentURL": note.absoluteString, "text": "Decoy \(index)\n",
+                    ]).write(to: directory.appendingPathComponent("decoy-\(index).json"))
+                }
             }
         }
         let paths =

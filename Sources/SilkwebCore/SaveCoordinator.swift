@@ -119,11 +119,19 @@ public actor SaveCoordinator {
         self.store = store
         self.busyRetryDelay = busyRetryDelay
         markers = store.gate.map { DocumentEditingMarker.Holder(root: $0.root) }
-        self.recoveryDirectory =
-            recoveryDirectory
-            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Silkweb/Recovery", isDirectory: true)
+        self.recoveryDirectory = recoveryDirectory ?? Self.defaultRecoveryDirectory
     }
+
+    /// Application Support, except under XCTest: test runs get a disposable folder of their own,
+    /// so they never read or write the user's real drafts (#208).
+    public static let defaultRecoveryDirectory: URL = {
+        if NSClassFromString("XCTestCase") != nil {
+            return FileManager.default.temporaryDirectory.appendingPathComponent(
+                "Silkweb Test Recovery \(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Silkweb/Recovery", isDirectory: true)
+    }()
 
     @discardableResult
     public func open(_ url: URL) throws -> LoadedDocument {
@@ -315,17 +323,48 @@ public actor SaveCoordinator {
         guard FileManager.default.fileExists(atPath: recoveryDirectory.path) else { return [] }
         return try FileManager.default.contentsOfDirectory(at: recoveryDirectory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }.sorted { $0.path < $1.path }
-            .compactMap { file in
-                let data = try? Data(contentsOf: file)
-                if let data, let draft = try? JSONDecoder().decode(RecoveryDraft.self, from: data) { return draft }
-                if let data, let version = try? JSONDecoder().decode(RecoveryVersion.self, from: data).formatVersion,
-                    version > RecoveryDraft.currentVersion
-                {
-                    return nil
-                }
-                quarantine(file)
-                return nil
+            .compactMap { decodeDraft(at: $0) }
+    }
+
+    /// The draft for one document, if any. Reads only the files its URL could be saved under, so
+    /// opening a note never costs more with more drafts (#208); an unreadable one is set aside as in
+    /// `pendingRecoveryDrafts()`. A draft found under another spelling of the URL moves to this one,
+    /// so Keep, Save and Discard clear it.
+    public func recoveryDraft(for url: URL) -> RecoveryDraft? {
+        let original = url
+        let url = url.standardizedFileURL
+        let canonical = recoveryURL(url)
+        let path = url.path
+        let other = URL(fileURLWithPath: path.hasPrefix("/private/") ? String(path.dropFirst(8)) : "/private" + path)
+        var files = [canonical]
+        for file in [original, other, other.standardizedFileURL].map(recoveryURL) where !files.contains(file) {
+            files.append(file)
+        }
+        for file in files where FileManager.default.fileExists(atPath: file.path) {
+            guard let draft = decodeDraft(at: file) else { continue }
+            guard file != canonical else { return draft }
+            let moved = RecoveryDraft(documentURL: url, text: draft.text, revision: draft.revision)
+            if !FileManager.default.fileExists(atPath: canonical.path),
+                (try? JSONEncoder().encode(moved).write(to: canonical, options: .atomic)) != nil
+            {
+                try? FileManager.default.removeItem(at: file)
             }
+            return moved
+        }
+        return nil
+    }
+
+    /// Drafts from a newer format stay in place for the build that wrote them; any other unreadable file is set aside.
+    private func decodeDraft(at file: URL) -> RecoveryDraft? {
+        let data = try? Data(contentsOf: file)
+        if let data, let draft = try? JSONDecoder().decode(RecoveryDraft.self, from: data) { return draft }
+        if let data, let version = try? JSONDecoder().decode(RecoveryVersion.self, from: data).formatVersion,
+            version > RecoveryDraft.currentVersion
+        {
+            return nil
+        }
+        quarantine(file)
+        return nil
     }
 
     /// Quarantined files since the last call, so the UI reports each one once.
