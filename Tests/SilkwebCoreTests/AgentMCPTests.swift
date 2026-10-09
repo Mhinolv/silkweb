@@ -246,6 +246,29 @@ final class AgentMCPTests: XCTestCase {
 
     // MARK: Calls
 
+    /// #206: `memory_create` with `folder: "agent-memories"` and `memory_search` with the agent folder as project.
+    func testAgentMemoriesCreateAndSearchOverMCP() throws {
+        var grant = grant()
+        grant.agentFolder = "Claude"
+        try writeGrants([grant])
+        _ = try initialize()
+        let capabilities = try structured(call(2, "memory_capabilities"))
+        XCTAssertEqual(capabilities["agent_create_root"] as? String, "Memory/Agents/Claude/Memories")
+
+        let created = try call(
+            3, "memory_create", ["folder": "agent-memories", "title": "Prefer tabs", "body": "Use quartz tabs.\n"])
+        XCTAssertEqual(try structured(created)["path"] as? String, "Memory/Agents/Claude/Memories/Prefer tabs.md")
+        XCTAssertTrue(
+            try text(created).hasPrefix("Created “Prefer tabs” in Memory › Agents › Claude › Memories.\n\n"))
+        let found = try structured(call(4, "memory_search", ["query": "quartz", "project": "Claude"]))
+        let rows = try XCTUnwrap(found["results"] as? [[String: Any]])
+        XCTAssertEqual(rows.compactMap { $0["project"] as? String }, ["Claude"])
+
+        let refused = try refusal(
+            call(5, "memory_create", ["folder": "agent-memories", "type": "progress", "title": "X", "body": "Y"]))
+        XCTAssertEqual(refused["code"] as? String, "invalid_argument")
+    }
+
     func testEveryToolSucceedsWithStructuredContentAndSummary() throws {
         _ = try initialize()
 
@@ -581,7 +604,8 @@ final class AgentMCPTests: XCTestCase {
             "Invalid arguments for memory_create: “body” is required.")
         XCTAssertEqual(
             try fault(11, "memory_create", ["folder": "Memories/X", "title": "T", "body": "B"]),
-            "Invalid arguments for memory_create: “folder” must be one of memories, progress, handoffs.")
+            "Invalid arguments for memory_create: “folder” must be one of memories, progress, handoffs, agent-memories."
+        )
         XCTAssertEqual(
             try fault(
                 12, "memory_create", ["folderPath": "Memory/Projects/Silkweb/Memories", "title": "T", "body": "B"]),

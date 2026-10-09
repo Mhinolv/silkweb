@@ -404,6 +404,14 @@ public struct AgentCreateService: Sendable {
         } catch let error as AgentScopeError {
             throw AgentAccessError.scope(error, in: scope)
         }
+        // #206: the agent folder holds only memories and decisions, and they belong to the agent folder's key.
+        var project = grantId
+        if scope.isAgentLevel(path), let agentFolder = scope.agentFolder {
+            guard entryFolder == AgentMemoryContract.agentMemoriesFolder else {
+                throw AgentAccessError.envelope(.invalidField("type"), name: request.title)
+            }
+            project = agentFolder
+        }
         // The helper writes the only envelope; a body that brings its own is refused, never merged.
         switch MemoryEnvelope.parse(request.body) {
         case .missing: break
@@ -412,7 +420,7 @@ public struct AgentCreateService: Sendable {
         }
         let memoryID = Self.memoryID()
         var envelope = MemoryEnvelope(
-            memoryID: memoryID, type: request.type, project: grantId, agent: request.agent, session: request.session,
+            memoryID: memoryID, type: request.type, project: project, agent: request.agent, session: request.session,
             createdAt: date)
         envelope["observed_at"] = request.observedAt.map(MemoryEnvelope.Value.string)
         envelope["status"] = request.status.map(MemoryEnvelope.Value.string)
