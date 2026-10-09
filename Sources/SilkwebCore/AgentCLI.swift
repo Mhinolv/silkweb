@@ -38,7 +38,7 @@ public enum AgentHelper {
           read <PATH> | --id ID         Read one page of a document
               [--cursor C] [--expected-revision R]
           create                        Create one document; never replaces anything
-              --folder memories|progress|handoffs|<PATH> --title T --body-file <FILE|->
+              --folder memories|progress|handoffs|agent-memories|<PATH> --title T --body-file <FILE|->
               --agent A --session S [--type T] [--idempotency-key K] [--status S]
               [--observed-at D] [--review-after D] [--supersedes MEMORY_ID]...
           create-folder <PATH>          Create a Folder inside a create folder
@@ -101,6 +101,8 @@ public enum AgentHelper {
 
     /// `--folder` keywords for the three entry folders, and the type each one creates by default.
     private static let folderKeywords = ["memories": "memory", "progress": "progress", "handoffs": "handoff"]
+    /// #206: the agent folder's `Memories`, for memory and decision documents only.
+    static let agentMemoriesKeyword = "agent-memories"
 
     static let defaultActivityLimit = 20
 
@@ -160,7 +162,8 @@ public enum AgentHelper {
         case "invalid_argument":
             return 64
         case "envelope_malformed", "envelope_schema_newer", "envelope_invalid_field", "too_large",
-            "idempotency_conflict", "not_found", "revision_changed", "request_not_found", "request_decided":
+            "idempotency_conflict", "not_found", "revision_changed", "request_not_found", "request_decided",
+            "invalid_agent_folder":
             return 65
         case "library_busy", "stale_snapshot", "rate_limited", "document_has_unsaved_changes", "too_many_requests":
             return 69
@@ -333,7 +336,14 @@ public enum AgentHelper {
         let descriptor = try? AgentSecureFiles.openFolder(library: context.library, path: root)
         if let descriptor { close(descriptor) }
         let limits = context.grant.limits
+        let scope = context.scope
+        // #206: `null` without an agent folder, or when MCP roots narrowed it away.
+        let agentReadRoot = scope.readRoots.first(where: scope.isAgentLevel)
+        let agentCreateRoot = scope.createRoots.first(where: scope.isAgentLevel)
         let fields: [String: Any] = [
+            "agent_folder": scope.agentFolder ?? NSNull(),
+            "agent_read_root": agentReadRoot ?? NSNull(),
+            "agent_create_root": agentCreateRoot ?? NSNull(),
             "contract_version": AgentMemoryContract.version,
             "helper_version": SilkwebCore.version,
             "schema": MemoryEnvelope.schemaV1,
@@ -365,7 +375,7 @@ public enum AgentHelper {
     static func create(_ context: AgentAuthorization, invocation: Invocation, standardInput: FileHandle) throws
         -> (AgentJSON, String?)
     {
-        let (type, folder) = try destination(invocation)
+        let (type, folder) = try destination(invocation, scope: context.scope)
         let body = try body(
             invocation, limit: context.grant.limits.maxCreateBytes, tooLarge: AgentAccessError.createTooLarge,
             standardInput: standardInput)
@@ -416,12 +426,20 @@ public enum AgentHelper {
     }
 
     /// The envelope type and the Library-relative Folder (`nil` for the type's entry folder) from
-    /// `--folder` and `--type`.
-    static func destination(_ invocation: Invocation) throws -> (type: String, folder: String?) {
+    /// `--folder` and `--type`. `agent-memories` (#206) is the grant's `Memory/Agents/<Key>/Memories`.
+    static func destination(_ invocation: Invocation, scope: AgentScope) throws -> (type: String, folder: String?) {
         var type = invocation.value("type")
         var folder: String?
         if let given = invocation.value("folder").map(nfc) {
-            if let keywordType = folderKeywords[given.lowercased()] {
+            if given.lowercased() == agentMemoriesKeyword {
+                guard let agentFolder = scope.agentFolder else { throw AgentAccessError.noAgentFolder }
+                if let type, AgentCreateService.entryFolder(for: type) != AgentMemoryContract.agentMemoriesFolder {
+                    throw AgentAccessError.invalidRequest(
+                        "The type “\(type)” can’t go in “\(given)”: only memory and decision can.")
+                }
+                type = type ?? "memory"
+                folder = AgentMemoryContract.agentMemoriesRoot(agentFolder)
+            } else if let keywordType = folderKeywords[given.lowercased()] {
                 if let type, let entry = AgentCreateService.entryFolder(for: type),
                     entry.lowercased() != given.lowercased()
                 {

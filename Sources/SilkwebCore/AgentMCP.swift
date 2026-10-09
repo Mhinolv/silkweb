@@ -499,8 +499,8 @@ public final class AgentMCPServer: @unchecked Sendable {
             invocation.options["agent"] = [agent ?? name ?? "mcp"]
             invocation.options["client"] = [client ?? name ?? "mcp"]
             if invocation.options["session"] == nil { invocation.options["session"] = [sessionID] }
-            let (type, folder) = try AgentHelper.destination(invocation)
             let context = try session.authorize(.create)
+            let (type, folder) = try AgentHelper.destination(invocation, scope: context.scope)
             let body = arguments["body"] as? String ?? ""
             let limit = context.grant.limits.maxCreateBytes
             guard body.utf8.count <= limit else { throw AgentAccessError.createTooLarge(limit: limit) }
@@ -704,7 +704,7 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                         "Words that must all appear in the title or body, ignoring case and diacritics. "
                             + "Empty matches every document that passes the filters.")
                 ),
-                ("project", S.string("Must be this grant’s project.")),
+                ("project", S.string("This grant’s project, or its agent_folder.")),
                 ("type", S.array(S.string("Front matter type.", oneOf: S.types), "Only documents of these types.")),
                 ("status", S.array(S.string("Front matter status."), "Only these statuses, ignoring case.")),
                 ("createdAfter", S.string("Inclusive. A date such as 2026-10-07 (midnight UTC) or an ISO 8601 time.")),
@@ -740,8 +740,9 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                     (
                         "folder",
                         S.string(
-                            "Entry folder. Also picks the default type: memory, progress or handoff.",
-                            oneOf: ["memories", "progress", "handoffs"])
+                            "Entry folder. Also picks the default type: memory, progress or handoff. agent-memories "
+                                + "is the agent folder’s Memories (agent_create_root), for memory and decision only.",
+                            oneOf: ["memories", "progress", "handoffs", AgentHelper.agentMemoriesKeyword])
                     ),
                     (
                         "type",
@@ -873,6 +874,9 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
         case .capabilities:
             properties = [
                 ("access", S.plain("string", oneOf: ["read", "read-create", "read-create-update"])),
+                ("agent_create_root", S.nullable("string")),
+                ("agent_folder", S.nullable("string")),
+                ("agent_read_root", S.nullable("string")),
                 ("contract_version", S.plain("integer")),
                 ("create_roots", S.list(S.plain("string"))),
                 ("filesystem", S.plain("string", oneOf: ["qualified", "unqualified"])),

@@ -17,8 +17,8 @@ public struct AgentMemorySearchRequest: Equatable, Sendable {
     /// Free text; empty lists every in-scope document that passes the filters.
     public var query: String
     public var mode: Mode
-    /// Must name the grant's own project. Keeps documents whose envelope `project` matches, and
-    /// documents without an envelope inside that project's Folder.
+    /// Must name the grant's own project or its agent folder (#206). Keeps documents whose envelope `project`
+    /// matches, and documents without an envelope inside that project's (or agent's) Folder.
     public var project: String?
     /// `memory`, `decision`, `progress` or `handoff`. Documents without an envelope drop out once set.
     public var types: [String]
@@ -732,9 +732,13 @@ final class AgentMemoryIndex {
     ) throws -> AgentMemorySearchResponse {
         let scope = context.scope
         let compare: String.CompareOptions = scope.caseSensitive ? [] : [.caseInsensitive]
-        if let project = request.project, project.compare(scope.project, options: compare) != .orderedSame {
+        let same = { (a: String, b: String?) in b.map { a.compare($0, options: compare) == .orderedSame } ?? false }
+        if let project = request.project, !same(project, scope.project), !same(project, scope.agentFolder) {
             throw AgentAccessError.outOfScope(scope.readRoots)
         }
+        // #206: `project` may name the agent folder; each key keeps its own envelopes and its own Folder.
+        let wantsProject = request.project.map { same($0, scope.project) } ?? false
+        let wantsAgent = request.project.map { same($0, scope.agentFolder) } ?? false
         let types = Set(request.types)
         guard types.isSubset(of: MemoryEnvelope.types) else { throw AgentAccessError.invalidArgument("type") }
         guard (1...).contains(request.limit) else { throw AgentAccessError.invalidArgument("limit") }
@@ -767,6 +771,8 @@ final class AgentMemoryIndex {
             let tier: Int
             let sinks: Bool
             let category: Int
+            /// #206: in the agent folder. Ranked after project documents that are otherwise equal.
+            let agentLevel: Bool
             let date: Date
             let documentID: UUID?
             let review: AgentMemoryReview
@@ -776,6 +782,7 @@ final class AgentMemoryIndex {
         }
         func hit(_ record: Record, tier: Int, date: Date) -> Hit {
             let (state, pinned) = review(record)
+            let agentLevel = scope.isAgentLevel(record.path)
             let sinks =
                 (record.envelope?.memoryID).flatMap { supersededBy[$0] }?.contains {
                     reviewByMemoryID[$0] == .reviewed
@@ -788,7 +795,7 @@ final class AgentMemoryIndex {
             default: category = state == .reviewed ? 1 : 2
             }
             return Hit(
-                record: record, tier: tier, sinks: sinks, category: category, date: date,
+                record: record, tier: tier, sinks: sinks, category: category, agentLevel: agentLevel, date: date,
                 documentID: ids[record.path], review: state, pinned: pinned)
         }
         let tags = ranking?.query.tags.isEmpty == false ? documentTags(context.library) : [:]
@@ -800,9 +807,11 @@ final class AgentMemoryIndex {
             if !statuses.isEmpty, !statuses.contains(envelope?.status?.lowercased() ?? "\u{0}") { continue }
             if request.project != nil {
                 if let owner = envelope?.project {
-                    guard owner.compare(scope.project, options: compare) == .orderedSame else { continue }
-                } else if !AgentScope.contains(projectRoot, record.path, caseSensitive: scope.caseSensitive) {
-                    continue
+                    guard wantsProject && same(owner, scope.project) || wantsAgent && same(owner, scope.agentFolder)
+                    else { continue }
+                } else {
+                    let inProject = AgentScope.contains(projectRoot, record.path, caseSensitive: scope.caseSensitive)
+                    guard wantsProject && inProject || wantsAgent && scope.isAgentLevel(record.path) else { continue }
                 }
             }
             let fold =
@@ -820,7 +829,7 @@ final class AgentMemoryIndex {
                 guard
                     query.admits(
                         type: envelope?.type, status: envelope?.status, project: envelope?.project, path: record.path,
-                        date: date, caseSensitive: scope.caseSensitive),
+                        date: date, caseSensitive: scope.caseSensitive, agentFolder: scope.agentFolder),
                     query.admits(tags: tags[record.path] ?? [])
                 else { continue }
                 // Text is matched once the filtered set's statistics are known.
@@ -855,21 +864,25 @@ final class AgentMemoryIndex {
                 ranked.title = query.matchesTitle(entry.title)
                 hits.append(ranked)
             }
-            // An exact title first, then score, newest first, then document ID and path.
+            // An exact title first, then score, project before agent folder (#206), newest first, then document
+            // ID and path.
             hits.sort { a, b in
                 if a.tier != b.tier { return a.tier < b.tier }
                 if a.score != b.score { return a.score > b.score }
+                if a.agentLevel != b.agentLevel { return !a.agentLevel }
                 if a.date != b.date { return a.date > b.date }
                 let left = a.documentID?.uuidString ?? "~", right = b.documentID?.uuidString ?? "~"
                 if left != right { return left < right }
                 return a.record.path < b.record.path
             }
         } else {
-            // Deterministic: tier, superseded last, kind, newest first, then document ID and path.
+            // Deterministic: tier, superseded last, kind, project before agent folder (#206), newest first, then
+            // document ID and path.
             hits.sort { a, b in
                 if a.tier != b.tier { return a.tier < b.tier }
                 if a.sinks != b.sinks { return !a.sinks }
                 if a.category != b.category { return a.category < b.category }
+                if a.agentLevel != b.agentLevel { return !a.agentLevel }
                 if a.date != b.date { return a.date > b.date }
                 let left = a.documentID?.uuidString ?? "~", right = b.documentID?.uuidString ?? "~"
                 if left != right { return left < right }

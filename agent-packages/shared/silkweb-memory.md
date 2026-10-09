@@ -58,6 +58,10 @@ Save a memory document (`folder: "memories"`, or `type: "decision"` for a decisi
 statement that stays true: a decision and its reason, a constraint, a preference the user stated, or a
 workaround you verified.
 
+If `memory_capabilities` shows an `agent_folder`, a memory about how you work in every project (not just
+this one) goes in `folder: "agent-memories"` instead. Every project shares that folder. Search finds it
+with the project's memories, or alone with `project` set to the `agent_folder`.
+
 ## Writing a checkpoint
 
 Give it a short sentence-case title without “:” or “/”, then use these headings:

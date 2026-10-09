@@ -20,6 +20,24 @@
               "read-create-update"
             ]
           },
+          "agent_create_root" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "agent_folder" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "agent_read_root" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "contract_version" : {
             "type" : "integer"
           },
@@ -138,7 +156,7 @@
           },
           "project" : {
             "type" : "string",
-            "description" : "Must be this grant’s project."
+            "description" : "This grant’s project, or its agent_folder."
           },
           "type" : {
             "type" : "array",
@@ -536,11 +554,12 @@
         "properties" : {
           "folder" : {
             "type" : "string",
-            "description" : "Entry folder. Also picks the default type: memory, progress or handoff.",
+            "description" : "Entry folder. Also picks the default type: memory, progress or handoff. agent-memories is the agent folder’s Memories (agent_create_root), for memory and decision only.",
             "enum" : [
               "memories",
               "progress",
-              "handoffs"
+              "handoffs",
+              "agent-memories"
             ]
           },
           "type" : {
