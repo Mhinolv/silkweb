@@ -74,7 +74,7 @@ struct SearchView<Content: View>: View {
                                 List(results, selection: $selected) { result in
                                     Button {
                                         selected = result.id
-                                        let query = search.text
+                                        let query = ParsedSearchQuery(search.text).findText
                                         Task { await workspace.openSearchResult(result, findText: query) }
                                     } label: {
                                         SearchResultRow(result: result, query: search.resultText)
@@ -146,6 +146,7 @@ struct SearchRequestIdentity: Hashable {
 /// Same metrics as `DocumentRow` (silkweb-1.64); the excerpt is the match context.
 struct SearchResultRow: View {
     let result: SearchResult
+    /// The Search Library text; only its words and phrases are highlighted.
     let query: String
     @Environment(\.locale) private var locale
 
@@ -153,7 +154,8 @@ struct SearchResultRow: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(
                 SearchPresentation.highlight(
-                    result.displayName, query: query, font: .system(size: 13, weight: .semibold))
+                    result.displayName, ranges: SearchNavigation.matchRanges(in: result.displayName, parsing: query),
+                    font: .system(size: 13, weight: .semibold))
             )
             .font(.system(size: 13, weight: .semibold)).lineLimit(1).frame(height: 17)
             HStack(spacing: 0) {

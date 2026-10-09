@@ -29,6 +29,7 @@ final class LibraryWorkspace {
         self.defaults = defaults
         self.columnAutosaveName = columnAutosaveName
         preview = PreviewCoordinator(defaults: defaults)
+        search.knowledge = knowledge
     }
     var tagCounts: [UUID: Int] = [:]
     var tags: [LibraryTag] = []

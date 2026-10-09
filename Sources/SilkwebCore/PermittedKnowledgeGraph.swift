@@ -223,6 +223,18 @@ public struct PermittedKnowledgeGraph: Sendable {
         return .ready((graph.postings[term] ?? [:]).filter { records[$0.key] != nil })
     }
 
+    /// BM25 inputs (#179) from permitted Documents only, whether or not others are still unread: a hidden
+    /// Document never adds a posting or a length.
+    public func termStatistics(for terms: [String]) -> KnowledgeTermStatistics {
+        var postings: [String: [String: KnowledgePosting]] = [:]
+        for term in terms {
+            let permitted = (graph.postings[term] ?? [:]).filter { records[$0.key] != nil }
+            if !permitted.isEmpty { postings[term] = permitted }
+        }
+        return KnowledgeTermStatistics(
+            postings: postings, lengths: graph.lengths.filter { records[$0.key] != nil })
+    }
+
     public var statistics: KnowledgeLookup<Statistics> {
         guard pending.isEmpty else { return .notReady }
         var total = KnowledgePosting()

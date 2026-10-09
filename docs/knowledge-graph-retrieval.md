@@ -168,6 +168,38 @@ tuned values. They change only through evaluation on the development split (see
 | Type and recency | Type prior per query intent; recency half-life 14 days for progress, 30 for handoffs, much weaker for decisions | Future-dated claims get no extra boost. |
 | Centrality | Capped log in-degree from distinct permitted sources | Small weight; removed if it biases toward popular Documents. |
 
+### Ranked search and query syntax (#179)
+
+Search Library (⇧⌘F) and `memory_search` with `mode: "ranked"` (CLI `--ranked`) share one parser
+(`ParsedSearchQuery`). Quick Open and the default `memory_search` don’t parse it: there, every word is literal.
+
+| Typed | Meaning |
+|---|---|
+| `word word` | Every word must appear in the title or body (headings are body), ignoring case and diacritics |
+| `"exact phrase"` | Its words adjacent, separated only by whitespace, after the same folding |
+| `tag:research` | The Document carries that Tag (the app’s Tags; name ignoring case) |
+| `type:decision` · `status:open` · `project:Silkweb` | Envelope fields, with the `memory_search` rules: no envelope drops out for `type`/`status`; `project` also keeps Documents without an envelope project inside `Memory/Projects/<Project>` |
+| `after:2026-10-01` · `before:2026-10-08` | `created_at`, else the modified date. `after` inclusive, `before` exclusive |
+
+- Keys ignore case. Values may be quoted (`project:"Side Work"`). A repeated key ORs its values (the earliest
+  `after`, the latest `before`); different keys AND. Typed `tag:` also ANDs with the Tag filter chips.
+- Nothing is an error: unknown keys (`folder:` until #32), empty values, bad dates and an unclosed quote are
+  literal words. Filters alone list every Document that passes them.
+- In ranked `memory_search`, query filters AND with the request parameters and never refuse (`project:Other`
+  simply matches nothing).
+- **Order:** an exact title match first, then BM25F (`ranking_version: bm25f-1`): per field, `tf / (1 − b + b ·
+  length / average length)`, weighted title 3, heading 2, body 1 and summed, then `idf · tf(k1 + 1) / (tf +
+  k1)` with `idf = ln(1 + (N − df + 0.5) / (df + 0.5))`, summed over the query’s tokens (`KnowledgeTokenizer`:
+  identifiers whole and in parts, no stemming). `N`, `df` and average lengths come from the permitted
+  Documents that passed every filter (scope-local). Ties: newest, then (app) name or (helper) `documentId`
+  and path. Search Library without a knowledge index yet keeps the title tiers.
+- **Ranked response:** each result ends with `score` (4 decimals); `matchKind` stays `title|body`; `total` and
+  `message` are unchanged; the response adds `mode`, `ranking_version` and `retrieval_contract_version`.
+  `memory_capabilities` reports `retrieval_contract_version` and `retrieval_modes`.
+- **Measured** (10,000 Documents / 1,000 Folders, test process, Mac16,5): Search Library warm p95 ≈ 65 ms for
+  50 results; helper statistics and BM25 ≈ 15 ms, but ranked `memory_search` end to end ≈ 0.8 s warm, of
+  which ≈ 0.6 s is the per-request refresh walk and permitted graph build (#177/#178), not ranking.
+
 Policy rules sit above any formula:
 
 - A direct lookup (exact title, path or `memory_id`) returns the requested Document, including a

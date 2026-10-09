@@ -6,6 +6,51 @@ import XCTest
 @testable import Silkweb
 
 final class LibrarySearchTests: XCTestCase {
+    /// #179: Search Library ranks with the window's knowledge index and reads typed `tag:` from its Tags.
+    @MainActor
+    func testSearchLibraryRanksWithKnowledgeAndFiltersTypedTags() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = [
+            ("Flock.md", "Unrelated."), ("Notes.md", "flock flock, twice."),
+            ("Long.md", "flock " + String(repeating: "filler words for a long body ", count: 40)),
+            ("Tagged.md", "a tagged flock note"),
+        ]
+        for (offset, (path, text)) in files.enumerated() {
+            let url = root.appendingPathComponent(path)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            // Long is the newest: without BM25 it would come before Notes.
+            let date = Date(timeIntervalSince1970: path == "Long.md" ? 9_000 : 1_000 + Double(offset))
+            try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
+        }
+        let workspace = LibraryWorkspace()
+        workspace.root = root
+        workspace.install(try await LibraryScanner.scan(root: root))
+        await workspace.search.waitForIndex()
+        await workspace.knowledge.waitForIndex()
+        workspace.search.text = "flock"
+        await workspace.search.query(quick: false)
+        let names = workspace.search.results.map(\.displayName)
+        XCTAssertEqual(names.first, "Flock", "an exact title stays first")
+        XCTAssertLessThan(try XCTUnwrap(names.firstIndex(of: "Notes")), try XCTUnwrap(names.firstIndex(of: "Long")))
+
+        // Typed `tag:` matches the sidebar's Tag; a Tag edit alone re-runs the query.
+        workspace.search.text = "flock tag:research"
+        await workspace.search.query(quick: false)
+        XCTAssertTrue(workspace.search.results.isEmpty)
+        let snapshot = try XCTUnwrap(workspace.snapshot)
+        let tagged = try XCTUnwrap(snapshot.documents.first { $0.name == "Tagged.md" })
+        _ = try await TagStore.update(root: root) { TagEditor.edit(["Research"], documents: [tagged.id], metadata: $0) }
+        let revision = workspace.search.revision
+        workspace.install(try await LibraryScanner.scan(root: root, previousSnapshot: snapshot))
+        XCTAssertEqual(workspace.search.revision, revision + 1)
+        await workspace.search.waitForIndex()
+        await workspace.search.query(quick: false)
+        XCTAssertEqual(workspace.search.results.map(\.displayName), ["Tagged"])
+        XCTAssertNil(ParsedSearchQuery("tag:research").findText, "a filter-only query selects nothing")
+    }
+
     @MainActor
     func testScopesTitleOnlyOpeningRecentsAndSaveRefresh() async throws {
         _ = NSApplication.shared
