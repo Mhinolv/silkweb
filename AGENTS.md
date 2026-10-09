@@ -114,6 +114,8 @@ Rules:
 - Integration branch is `main` (owner decision 2026-10-09; `team/roadmap` is retired). One issue = one branch
   `<n>-<slug>` cut from `main` = one PR into `main`. Never commit directly to `main`; the Orchestrator merges PRs into
   `main` without asking the owner once the gates below pass.
+- Every owner request or bug follows the flow: `needs-pm` → PM review → UX notes → Engineer on `<n>-<slug>` → draft
+  PR → QA PASS → pre-fix proof (bugs) → merge → close. Only a P0 bug with no visible change may skip UX.
 - Commits: `#<n>: <summary>`. Stage only the files changed for that issue. Never `git add -A`.
 - Every PR uses `.github/pull_request_template.md` (Issue / What changed / How it was tested / Screenshots);
   the `PR template` check fails otherwise. Its `## Issue` line uses `Refs #n` while the owner still has to check the
@@ -137,8 +139,9 @@ Rules:
 - `gh workflow run CI --ref <branch>` (`workflow_dispatch`) runs classify + build-format for manual diagnostics only;
   it is not attached to the PR and is **not** merge evidence.
 - The Engineer does not close issues or merge. QA does not modify source. Only the Orchestrator merges and closes.
-- For this epic, **QA PASS + Orchestrator approval replaces the manual user-test gate** (delegated by the product owner).
-  Product-owner decisions are recorded as issue comments and override the original acceptance wording.
+- **QA PASS + Orchestrator approval replaces the manual user-test gate** (delegated by the product owner), except for
+  visible UI / interaction feel: those merge with `Refs #n` and the issue stays open (`needs-owner-check`) until the
+  owner OKs it. Product-owner decisions are recorded as issue comments and override the original acceptance wording.
 - No agent may use browser/Chrome/computer-use/GUI automation tools, and no agent launches GUI apps (including MWeb or Silkweb).
 - History before the GitHub move used a local tracker; old commits say `silkweb-1.NN`. The mapping to issue
   numbers is in each migrated issue's body.

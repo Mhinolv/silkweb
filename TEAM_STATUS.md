@@ -8,8 +8,7 @@ Documents live in `Test_Library/Memory/Projects/Silkweb/{Handoffs,Progress,Memor
 short secondary snapshot.
 
 ## Access
-- Integration branch: **`main`** (owner decision 2026-10-09; `team/roadmap` retired). Every issue gets its own
-  `<n>-<slug>` branch and PR into `main`; the Orchestrator merges without asking once the gates pass.
+- Branches, PRs, merge gates and CI: see AGENTS.md › Team Roadmap Workflow (integration branch `main`).
 - Run `gh` with `GH_TOKEN=$(gh auth token -u Mhinolv)`; never switch the global gh account.
 - Repo-local Git identity: `Mark Hinojosa <73273673+Mhinolv@users.noreply.github.com>`. Never push `backup/pre-rewrite-*`.
 - Team config, logs and lane worktrees: `.team/` (local, ignored). Skill: `~/.claude/skills/product-team/`.
@@ -38,17 +37,15 @@ Backlog (`needs-pm`): final-review P2s #112–#119 and features #12–#48, #71, 
 - Knowledge-graph PM questions (centrality boost, 30-day archive, relation vocabulary, English-only eval, aliases
   later): needed before #180, #141, #183.
 
-## Binding rules
-- Every owner request or bug: `needs-pm` → PM review → UX notes → Engineer on `<n>-<slug>` → draft PR → QA PASS →
-  pre-fix proof for bugs → merge → close. Only a P0 bug with no visible change may skip UX (tell the owner).
+## Orchestrator rules (owner-specific; team-wide rules live in AGENTS.md)
 - Parallel by default: up to 2 heavy lanes on non-overlapping issues; PM/UX/research run alongside. Merge one at a time.
+- Tell the owner when a P0 bug skips UX.
 - Slack the owner when each PR is created and merged. Write a Silkweb progress checkpoint at every milestone.
 - At ~150k tokens of orchestrator context: write a Silkweb handoff with recovery steps and tell the owner to restart.
-- Visible UI merges with `--owner-check`; the issue stays open until the owner OKs it.
-- Agents never launch GUI apps. Clean-room: behaviour only, never MWeb code, CSS or assets.
+- Visible UI merges with `merge_pr.sh <n> --owner-check` (see AGENTS.md › Team Roadmap Workflow).
 
 ## Commands
 - Board `status.sh` · Ticket `lane.sh <n>` · Merge `merge_pr.sh <n> [--owner-check]` (resume:
   `--resume-integration`) · Pre-fix `verify_prefix.sh` · Owner OK `owner_decision.sh <n> "OK — …" --close`
 - Watcher: Monitor on `.team/agent_watch.sh` (re-arm every 30 min) · Lane logs: `.team/logs/tmux_lane-<n>.out`
-- Owner build: `test_latest.sh` · Snapshots: `./scripts/snapshot.sh <dir>`
+- Owner build: `test_latest.sh`
