@@ -156,9 +156,9 @@ Add the fragment to your user `CLAUDE.md` (replace `Silkweb` with your project k
 
 **Check it worked.** Start `claude` in any folder:
 
-1. Run `/mcp`. The `silkweb` server is connected and lists the seven tools: `memory_capabilities`,
-   `memory_search`, `memory_read`, `memory_create`, `memory_create_folder`, `memory_update` and
-   `memory_activity`.
+1. Run `/mcp`. The `silkweb` server is connected and lists the eight tools: `memory_capabilities`,
+   `memory_search`, `memory_read`, `memory_create`, `memory_create_folder`, `memory_update`,
+   `memory_activity` and `grant_request`.
 2. Ask “Call memory_capabilities.” The answer includes your grant label, “Silkweb project”.
 3. Ask “Which skills do you have?” The list includes `silkweb-memory`.
 

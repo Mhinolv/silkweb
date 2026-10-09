@@ -871,6 +871,102 @@
         "idempotentHint" : true,
         "openWorldHint" : false
       }
+    },
+    {
+      "name" : "grant_request",
+      "title" : "Silkweb: Request Access",
+      "description" : "Asks the owner for access to a Library: a project’s Memory folder, Read Only or Read and Create, and optionally extra read folders. Works without a grant. Never grants anything itself: the owner reviews the request in Silkweb or Terminal, and memory tools work once it’s approved. Asking again while a matching request waits returns it with duplicate: true.",
+      "inputSchema" : {
+        "type" : "object",
+        "properties" : {
+          "library" : {
+            "type" : "string",
+            "description" : "Absolute path of the Library folder, such as /Users/me/Writing."
+          },
+          "project" : {
+            "type" : "string",
+            "description" : "Project key: the Folder name under Memory/Projects, such as Silkweb."
+          },
+          "access" : {
+            "type" : "string",
+            "description" : "read (Read Only) or read-create (Read and Create).",
+            "enum" : [
+              "read",
+              "read-create"
+            ]
+          },
+          "readFolders" : {
+            "type" : "array",
+            "description" : "Extra folders to read, besides the project’s own. At most 10.",
+            "items" : {
+              "type" : "string",
+              "description" : "A Library-relative folder, such as Notes/Swift."
+            }
+          },
+          "message" : {
+            "type" : "string",
+            "description" : "One line for the owner saying why, at most 280 characters.",
+            "maxLength" : 280
+          },
+          "session" : {
+            "type" : "string",
+            "description" : "Session recorded with the request. Defaults to this server’s session."
+          }
+        },
+        "required" : [
+          "library",
+          "project",
+          "access"
+        ],
+        "additionalProperties" : false
+      },
+      "outputSchema" : {
+        "type" : "object",
+        "properties" : {
+          "duplicate" : {
+            "type" : "boolean"
+          },
+          "expiresAt" : {
+            "type" : "string"
+          },
+          "requestId" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [
+              "pending"
+            ]
+          },
+          "error" : {
+            "type" : "object",
+            "properties" : {
+              "code" : {
+                "type" : "string"
+              },
+              "message" : {
+                "type" : "string"
+              },
+              "retryAfter" : {
+                "type" : "integer"
+              },
+              "currentRevision" : {
+                "type" : "string"
+              },
+              "title" : {
+                "type" : "string"
+              }
+            }
+          }
+        }
+      },
+      "annotations" : {
+        "title" : "Silkweb: Request Access",
+        "readOnlyHint" : true,
+        "destructiveHint" : false,
+        "idempotentHint" : true,
+        "openWorldHint" : false
+      }
     }
   ]
 }

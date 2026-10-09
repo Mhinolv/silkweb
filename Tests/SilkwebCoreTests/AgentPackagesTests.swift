@@ -85,7 +85,7 @@ final class AgentPackagesTests: XCTestCase {
         let golden = try Data(contentsOf: Self.repository.appendingPathComponent("docs/agent-memory-mcp-tools.json"))
         let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: golden) as? [String: Any])
         let names = try XCTUnwrap(object["tools"] as? [[String: Any]]).compactMap { $0["name"] as? String }
-        XCTAssertEqual(names.count, 7)
+        XCTAssertEqual(names.count, 8)
         let shared = try text("shared/silkweb-memory.md")
         let readme = try text("README.md")
         for name in names {

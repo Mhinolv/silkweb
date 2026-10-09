@@ -198,7 +198,7 @@ final class AgentMCPTests: XCTestCase {
             tools.compactMap { $0["name"] as? String },
             [
                 "memory_capabilities", "memory_search", "memory_read", "memory_create", "memory_create_folder",
-                "memory_update", "memory_activity",
+                "memory_update", "memory_activity", "grant_request",
             ])
         let expected: [String: (title: String, readOnly: Bool)] = [
             "memory_capabilities": ("Silkweb: What This Grant Allows", true),
@@ -208,6 +208,8 @@ final class AgentMCPTests: XCTestCase {
             "memory_create_folder": ("Silkweb: Create Folder", false),
             "memory_update": ("Silkweb: Update Document", false),
             "memory_activity": ("Silkweb: Recent Agent Activity", true),
+            // #203: asking never changes a grant or the Library.
+            "grant_request": ("Silkweb: Request Access", true),
         ]
         for tool in tools {
             let name = try XCTUnwrap(tool["name"] as? String)
@@ -737,10 +739,14 @@ final class AgentMCPTests: XCTestCase {
         XCTAssertEqual(launch(["--grant", "Notes"]).0, 0)
         XCTAssertEqual(launch([], environment: ["SILKWEB_GRANT": "Silkweb"]).0, 0)
 
+        // #203: a grant that doesn't exist yet still serves, so the agent can ask for it with grant_request.
         let missing = launch(["--grant", "Other"])
-        XCTAssertEqual(missing.0, 77)
+        XCTAssertEqual(missing.0, 0)
+        XCTAssertEqual(missing.1, "", "stdout stays MCP-only")
         XCTAssertEqual(
-            missing.2, "silkweb: No agent access named “Other” exists. Ask the owner to create one in Silkweb.\n")
+            missing.2,
+            "silkweb: No agent access named “Other” exists. Ask the owner to create one in Silkweb. "
+                + "Until then, only grant_request works.\n")
 
         let unknown = launch(["--pretty"])
         XCTAssertEqual(unknown.0, 64)
@@ -752,6 +758,145 @@ final class AgentMCPTests: XCTestCase {
         let help = launch(["--help"])
         XCTAssertEqual(help.0, 0)
         XCTAssertEqual(help.1, AgentMCPServer.help)
+    }
+
+    // MARK: Access requests (#203)
+
+    /// `grant_request` and `silkweb grant request` validate, save and answer the same way, in the same store.
+    func testGrantRequestMatchesTheCLI() throws {
+        let requests = root.appendingPathComponent("requests.json")
+        let session = AgentSession(project: "Silkweb", store: AgentGrantStore(url: grantsURL))
+        server = AgentMCPServer(
+            session: session,
+            service: AgentMemoryService(session: session, cacheDirectory: root.appendingPathComponent("cache")),
+            agent: "claude-code", sessionID: "s1", requests: AgentAccessRequestStore(url: requests),
+            output: descriptor(outURL), errors: descriptor(errURL))
+        consumed = 0
+        _ = try initialize()
+        let grantsBefore = try Data(contentsOf: grantsURL)
+        let arguments: [String: Any] = [
+            "library": library.path, "project": "Notes", "access": "read", "readFolders": ["Notes/Private"],
+            "message": "Read the\nnotes",
+        ]
+        let first = try call(2, "grant_request", arguments)
+        XCTAssertEqual(first["isError"] as? Bool, false, "\(first)")
+        let fields = try structured(first)
+        let id = try XCTUnwrap(fields["requestId"] as? String)
+        XCTAssertEqual(fields["status"] as? String, "pending")
+        XCTAssertEqual(fields["duplicate"] as? Bool, false)
+        XCTAssertNotNil(fields["expiresAt"] as? String)
+        let summary = try text(first)
+        XCTAssertTrue(summary.hasPrefix(AgentAccessRequests.waitingNote(id)), summary)
+        XCTAssertEqual(try Data(contentsOf: grantsURL), grantsBefore, "a request never writes grants")
+        let saved = try XCTUnwrap(try AgentAccessRequestStore(url: requests).load().requests.first)
+        XCTAssertEqual([saved.agent, saved.session, saved.client], ["claude-code", "s1", "test-client"])
+        XCTAssertEqual(saved.message, "Read the notes")
+
+        // The CLI with the same fields finds the same pending request.
+        let console = AgentGrantInit.Console(isTerminal: false, readLine: { nil }, write: { _ in })
+        func grant(_ library: String, folders: [String]) -> AgentHelper.Output {
+            var flags = ["grant", "request", "--library", library, "--project", "Notes", "--access", "read"]
+            for folder in folders { flags += ["--folder", folder] }
+            return AgentGrantInit.run(
+                flags + ["--requests", requests.path], console: console, home: root, executable: nil)
+        }
+        let output = grant(library.path, folders: ["Notes/Private"])
+        XCTAssertEqual(try cliResult(output)["requestId"] as? String, id)
+        XCTAssertEqual(try cliResult(output)["duplicate"] as? Bool, true)
+        let again = try structured(try call(3, "grant_request", arguments))
+        XCTAssertEqual(again["requestId"] as? String, id)
+        XCTAssertEqual(again["duplicate"] as? Bool, true)
+
+        // Refusals carry the CLI's codes and copy.
+        let gone = root.appendingPathComponent("gone").path
+        for (path, folders, code) in [(library.path, ["../x"], "invalid_argument"), (gone, [], "library_not_found")] {
+            let bad: [String: Any] = ["library": path, "project": "Notes", "access": "read", "readFolders": folders]
+            let refused = try refusal(try call(4, "grant_request", bad))
+            XCTAssertEqual(refused["code"] as? String, code)
+            let mirrored = try cliError(grant(path, folders: folders))
+            XCTAssertEqual(mirrored["code"] as? String, code)
+            XCTAssertEqual(mirrored["message"] as? String, refused["message"] as? String)
+        }
+        let missing = try request(5, "tools/call", ["name": "grant_request", "arguments": ["library": "/"]])
+        XCTAssertEqual((missing["error"] as? [String: Any])?["code"] as? Int, -32602, "project and access are required")
+        var long = arguments
+        long["message"] = String(repeating: "a", count: 281)
+        let tooLong = try request(6, "tools/call", ["name": "grant_request", "arguments": long])
+        XCTAssertEqual((tooLong["error"] as? [String: Any])?["code"] as? Int, -32602)
+    }
+
+    /// A server launched before its grant exists: memory tools refuse as the CLI does, grant_request works, and
+    /// once the owner approves, the next memory call works without a restart.
+    func testServerWithoutAGrantServesRequestsAndBindsAfterApproval() throws {
+        try FileManager.default.removeItem(at: grantsURL)
+        let requests = root.appendingPathComponent("requests.json")
+        let input = Pipe()
+        let out = descriptor(outURL)
+        let err = descriptor(errURL)
+        let status = LockedStatus()
+        let finished = expectation(description: "serve returns")
+        let reading = input.fileHandleForReading.fileDescriptor
+        let grants = grantsURL.path
+        let home: URL = root
+        Thread.detachNewThread {
+            status.value = AgentMCPServer.main(
+                ["mcp", "--grant", "Silkweb", "--grants", grants, "--requests", requests.path], home: home,
+                environment: [:], input: reading, output: out, errors: err)
+            finished.fulfill()
+        }
+        func send(_ line: String) { input.fileHandleForWriting.write(Data((line + "\n").utf8)) }
+        func frame(_ id: Int) throws -> [String: Any] {
+            var found: [String: Any]?
+            let deadline = Date().addingTimeInterval(10)
+            while found == nil, Date() < deadline {
+                found = stdout.split(separator: "\n").compactMap {
+                    try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+                }.first { $0["id"] as? Int == id }
+                if found == nil { Thread.sleep(forTimeInterval: 0.01) }
+            }
+            return try XCTUnwrap(found?["result"] as? [String: Any], "no answer to \(id)")
+        }
+        func call(_ id: Int, _ tool: String, _ arguments: [String: Any]) throws -> [String: Any] {
+            let message: [String: Any] = [
+                "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": ["name": tool, "arguments": arguments],
+            ]
+            send(String(decoding: try JSONSerialization.data(withJSONObject: message), as: UTF8.self))
+            return try frame(id)
+        }
+        let initialize: [String: Any] = [
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": [
+                "protocolVersion": "2025-06-18", "capabilities": [String: Any](),
+                "clientInfo": ["name": "codex", "version": "1"],
+            ],
+        ]
+        send(String(decoding: try JSONSerialization.data(withJSONObject: initialize), as: UTF8.self))
+        let refused = try refusal(try call(2, "memory_capabilities", [:]))
+        XCTAssertEqual(refused["code"] as? String, "no_grants_file")
+        XCTAssertEqual(
+            try cliError(cli(["memory", "capabilities", "--grant", "Silkweb"]))["code"] as? String, "no_grants_file",
+            "the same refusal as the CLI")
+
+        let asked = try call(
+            3, "grant_request", ["library": library.path, "project": "Silkweb", "access": "read-create"])
+        let id = try XCTUnwrap(try structured(asked)["requestId"] as? String)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: grantsURL.path))
+
+        // The owner approves in Terminal.
+        let console = AgentGrantInit.Console(isTerminal: true, readLine: { "y" }, write: { _ in })
+        let approved = AgentGrantInit.run(
+            ["grant", "approve", id, "--requests", requests.path, "--grants", grantsURL.path], console: console,
+            home: root, executable: nil)
+        XCTAssertEqual(approved.status, 0, approved.stderr)
+
+        let capabilities = try call(4, "memory_capabilities", [:])
+        XCTAssertEqual(capabilities["isError"] as? Bool, false, "\(capabilities)")
+        XCTAssertEqual(try structured(capabilities)["access"] as? String, "read-create")
+        try input.fileHandleForWriting.close()
+        wait(for: [finished], timeout: 30)
+        XCTAssertEqual(status.value, 0)
+        XCTAssertTrue(stderr.hasPrefix("silkweb: There’s no grants file at"), stderr)
+        XCTAssertTrue(stderr.contains("Until then, only grant_request works.\n"), stderr)
     }
 
     /// The built `silkweb` binary as an agent launches it: every stdout line is an MCP frame.

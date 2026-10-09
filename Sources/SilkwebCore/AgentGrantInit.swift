@@ -42,21 +42,36 @@ public enum AgentGrantInit {
         USAGE
           silkweb grant init [--library <PATH>] [--project <KEY>]
                              [--access read|read-create|read-create-update] [--dry-run] [--grants <FILE>]
+          silkweb grant request --library <PATH> --project <KEY> --access read|read-create
+                             [--folder <PATH>]... [--message <TEXT>] [--agent <NAME>] [--session <ID>]
+          silkweb grant requests [--all]
+          silkweb grant approve <REQUEST-ID>
+          silkweb grant deny <REQUEST-ID> [--note <TEXT>]
 
-        Sets up agent access for one project in agent-grants.json. Asks for anything the options
+        init sets up agent access for one project in agent-grants.json. Asks for anything the options
         leave out. Never widens an existing grant and never writes inside the Library.
+
+        request asks the owner for access; agents may run it. It prints one JSON object and never
+        changes agent-grants.json. requests lists waiting requests (--all adds history). approve and
+        deny are the owner's: approve saves the grant with init's rules.
 
         OPTIONS
           --library <PATH>    The Library folder agents may use (~ is expanded)
           --project <KEY>     Project key, the Folder name under Memory/Projects
           --access <LEVEL>    read (Read Only), read-create (Read and Create) or
-                              read-create-update (Read, Create and Update)
+                              read-create-update (Read, Create and Update; init only)
+          --folder <PATH>     An extra Library-relative read folder to ask for (up to 10)
+          --message <TEXT>    One line for the owner, up to 280 characters
+          --note <TEXT>       A note for the agent when denying
           --dry-run           Show the grant and install commands without saving anything
           --grants <FILE>     Write another grants file, for testing
+          --requests <FILE>   Use another access requests file, for testing
           --help              Show this help
 
-        Saving to the real grants file needs a terminal, so an agent can't grant itself access.
-        Exit status: 0 ok, 1 cancelled, 64 usage, 74 I/O, 77 access.
+        Saving to the real grants file, approving and denying need a terminal, so an agent can't
+        grant itself access.
+        Exit status: 0 ok, 1 cancelled, 64 usage, 65 bad request, 69 too many requests, 74 I/O,
+        77 access.
 
         """
 
@@ -98,12 +113,27 @@ public enum AgentGrantInit {
         environment: [String: String] = ProcessInfo.processInfo.environment, executable: String?,
         currentDirectory: String = FileManager.default.currentDirectoryPath, now: Date = Date()
     ) -> AgentHelper.Output {
+        // #203: an agent's request answers in JSON, as `silkweb memory` does, whatever happens.
+        if arguments.dropFirst().first == "request" {
+            return AgentGrantRequests.request(arguments, home: home, currentDirectory: currentDirectory, now: now)
+        }
         do {
-            let invocation = try AgentHelper.parse(arguments, flags: flags)
+            let invocation = try AgentHelper.parse(arguments, flags: flags.union(AgentGrantRequests.flags))
             if invocation.flags.contains("help") { return AgentHelper.Output(status: 0, stdout: help, stderr: "") }
-            guard invocation.words.count >= 2 else { throw Failure.usage("Choose a grant command: init.") }
-            guard invocation.words[1] == "init" else { throw Failure.usage("That isn’t a grant command. Use init.") }
+            let names = "init, request, requests, approve or deny"
+            guard invocation.words.count >= 2 else { throw Failure.usage("Choose a grant command: \(names).") }
+            if ["requests", "approve", "deny"].contains(invocation.words[1]) {
+                return try AgentGrantRequests.owner(
+                    invocation, console: console, home: home, environment: environment, executable: executable,
+                    currentDirectory: currentDirectory, now: now)
+            }
+            guard invocation.words[1] == "init" else {
+                throw Failure.usage("That isn’t a grant command. Use \(names).")
+            }
             guard invocation.words.count == 2 else { throw Failure.usage("“grant init” takes no other arguments.") }
+            if let flag = invocation.flags.subtracting(flags).sorted().first {
+                throw Failure.usage("The option “--\(flag)” isn’t valid for “grant init”.")
+            }
             for (option, values) in invocation.options.sorted(by: { $0.key < $1.key }) {
                 guard options.contains(option) else {
                     throw Failure.usage("The option “--\(option)” isn’t valid for “grant init”.")
@@ -259,8 +289,12 @@ public enum AgentGrantInit {
     /// access, another Library, or turning a revoked grant back on — is refused, and the caller
     /// saves nothing. Labels, limits and extra read folders are never changed (the command has no
     /// way to set them), so they can't be widened either. Other grants are kept as they are.
+    ///
+    /// Approving an access request (#203, `approving`) uses the same rules. Its `readFolders` go into a new
+    /// grant; for an existing one, each must already be readable, or the approval is refused.
     static func merge(
-        _ file: AgentGrantFile, project: String, library: URL, access: AgentGrant.Access, now: Date
+        _ file: AgentGrantFile, project: String, library: URL, access: AgentGrant.Access, readFolders: [String] = [],
+        now: Date, approving: Bool = false
     ) throws -> (file: AgentGrantFile, grant: AgentGrant, outcome: Outcome) {
         var file = file
         file.version = AgentGrantFile.currentVersion
@@ -268,7 +302,8 @@ public enum AgentGrantInit {
             // Whole seconds, as the file stores them, so a dry run shows exactly what is saved.
             let created = Date(timeIntervalSince1970: now.timeIntervalSince1970.rounded(.down))
             let grant = AgentGrant(
-                project: project, library: LibraryLocation(path: library.path), access: access, createdAt: created)
+                project: project, library: LibraryLocation(path: library.path), access: access,
+                extraReadFolders: readFolders, createdAt: created)
             file.grants.append(grant)
             return (file, grant, .added)
         }
@@ -276,8 +311,10 @@ public enum AgentGrantInit {
         let refuse = { (reason: String) in
             Failure(
                 status: 77,
-                message: "The grant “\(project)” \(reason). grant init never widens access; edit agent-grants.json "
-                    + "to change it. Nothing was saved.")
+                message: "The grant “\(project)” \(reason). "
+                    + (approving
+                        ? "Approving never widens access; edit agent-grants.json to change it."
+                        : "grant init never widens access; edit agent-grants.json to change it. Nothing was saved."))
         }
         if grant.isRevoked { throw refuse("is turned off") }
         if !sameLibrary(grant.library, library) {
@@ -285,6 +322,14 @@ public enum AgentGrantInit {
         }
         if access.rank > grant.access.rank {
             throw refuse("already exists with \(grant.access.displayName) access")
+        }
+        let readable = [AgentMemoryContract.projectRoot(project)] + grant.extraReadFolders
+        let missing = readFolders.filter { folder in
+            !readable.contains { AgentScope.contains($0, folder, caseSensitive: true) }
+        }
+        if !missing.isEmpty {
+            let names = missing.map { "“\(AgentMemoryContract.displayPath($0))”" }.joined(separator: ", ")
+            throw refuse("doesn’t include the read \(missing.count == 1 ? "folder" : "folders") \(names)")
         }
         guard grant.access != access else { return (file, grant, .unchanged) }
         let previous = grant.access
