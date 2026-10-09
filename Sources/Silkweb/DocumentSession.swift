@@ -366,14 +366,16 @@ final class DocumentSession {
         return alert
     }
 
-    func prepareToExit(_ reason: ExitReason) async -> Bool {
+    func prepareToExit(_ reason: ExitReason, beforeAlert: (() -> Void)? = nil) async -> Bool {
         let wasLoading = loading
         loading = true
         defer { loading = wasLoading }
         if await flush() { return true }
         do { try await coordinator.preserveUnsavedDrafts() } catch {
+            beforeAlert?()
             self.error = "Recovery draft couldn’t be saved: \(error.localizedDescription)"; announce(); return false
         }
+        beforeAlert?()
         return Self.exitAlert(reason).runModal() == .alertSecondButtonReturn
     }
 

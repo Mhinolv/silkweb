@@ -2,21 +2,27 @@ import AppKit
 import SwiftUI
 
 @MainActor final class EditorApplicationDelegate: NSObject, NSApplicationDelegate {
-    weak var workspace: LibraryWorkspace?
+    var registry = LibraryWindowRegistry.shared
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Library windows never tab natively: no tab bar, Merge All Windows or clash with ⇧⌘[ / ⇧⌘] (#194).
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
+    /// Every open Library, window by window (#194); see `LibraryWindowRegistry.prepareToQuit`.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         WritingSettings.shared.flush()
-        guard let workspace else { return .terminateNow }
-        Task { sender.reply(toApplicationShouldTerminate: await workspace.prepareToExit(.quit)) }
+        Task { sender.reply(toApplicationShouldTerminate: await registry.prepareToQuit()) }
         return .terminateLater
     }
     func applicationDidResignActive(_ notification: Notification) {
-        Task { await workspace?.flushEditors() }
+        Task { await registry.flushEditors() }
     }
 }
 
 struct EditorWindowLifecycle: NSViewRepresentable {
     let workspace: LibraryWorkspace
-    func makeCoordinator() -> Coordinator { Coordinator(workspace: workspace) }
+    /// The app's registry; offscreen tests that host one workspace leave it out.
+    var registry: LibraryWindowRegistry? = nil
+    func makeCoordinator() -> Coordinator { Coordinator(workspace: workspace, registry: registry) }
     func makeNSView(context: Context) -> WindowProbe {
         let probe = WindowProbe()
         probe.attached = { [weak coordinator = context.coordinator] window in
@@ -65,13 +71,19 @@ struct EditorWindowLifecycle: NSViewRepresentable {
         }
         var allowingClose = false
         var checkingClose = false
-        init(workspace: LibraryWorkspace) { self.workspace = workspace }
+        let registry: LibraryWindowRegistry?
+        init(workspace: LibraryWorkspace, registry: LibraryWindowRegistry? = nil) {
+            self.workspace = workspace
+            self.registry = registry
+        }
         func attach(_ window: NSWindow) {
             window.tabbingMode = .disallowed
             if window.delegate !== self {
                 previousDelegate = window.delegate
                 window.delegate = self
             }
+            workspace.attachedWindow = window
+            registry?.register(workspace, window: window)
         }
         /// The compact bar stays visible in full screen (1.65); its leading items move into the freed space.
         func window(
@@ -85,6 +97,7 @@ struct EditorWindowLifecycle: NSViewRepresentable {
         }
         func windowWillClose(_ notification: Notification) {
             previousDelegate?.windowWillClose?(notification)
+            registry?.close(workspace)
             Task { await workspace.didCloseWindow() }
         }
         override func responds(to selector: Selector!) -> Bool {
