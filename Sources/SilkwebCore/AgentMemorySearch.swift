@@ -270,11 +270,26 @@ public final class AgentMemoryService: @unchecked Sendable {
     public func knowledgeGraph() throws -> KnowledgeGraph {
         lock.lock()
         defer { lock.unlock() }
+        return try refreshedKnowledge(authorize(.search))
+    }
+
+    /// The permitted graph view (#178) every helper graph retrieval goes through, for the effective scope of
+    /// this request.
+    public func permittedGraph() throws -> PermittedKnowledgeGraph {
+        lock.lock()
+        defer { lock.unlock() }
         let context = try authorize(.search)
+        return PermittedKnowledgeGraph(graph: refreshedKnowledge(context), scope: context.scope)
+    }
+
+    private func refreshedKnowledge(_ context: AgentAuthorization) -> KnowledgeGraph {
         let index = loadedIndex(for: context)
         _ = index.refresh(context, options: options)
         index.save()
-        let library = context.library.path + "\n" + session.project
+        // Keyed by the effective scope (#178): narrowed MCP roots or grant folders start from a fresh graph,
+        // never one listed or resolved against a wider set of Documents.
+        let library = context.library.path + "\n" + session.project + "\n" + context.scope.key
+        let ids = index.documentIDs(context.library)
         var (graph, store, published) =
             knowledge.flatMap { $0.store.library == library ? $0 : nil }
             ?? {
@@ -296,7 +311,7 @@ public final class AgentMemoryService: @unchecked Sendable {
                 guard record.matches(document) else { return nil }
                 return record.skipped ? "skipped:\(record.identity)@\(record.modified):\(record.size)" : record.revision
             }
-            return .init(path: document.path, stamp: stamp)
+            return .init(path: document.path, stamp: stamp, documentID: ids[document.path])
         }
         let listing = KnowledgeGraph.Listing(
             documents: documents, folders: Array(folders), caseSensitive: context.scope.caseSensitive)
@@ -837,7 +852,7 @@ final class AgentMemoryIndex {
 
     /// Native IDs from the app's `.silkweb/index.json`, decoded again only when that file changes.
     /// A read only: nothing is repaired or created (#131).
-    private func documentIDs(_ library: URL) -> [String: UUID] {
+    func documentIDs(_ library: URL) -> [String: UUID] {
         guard let file = try? LibraryMetadataStore.locations(root: library).file else { return [:] }
         var info = stat()
         guard lstat(file.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return [:] }

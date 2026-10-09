@@ -3,11 +3,11 @@ name: CI
 #   classify     (ubuntu) lists the PR's changed files and decides docs-only vs meaningful.
 #   build-format (macOS)  format lint + build; only for ready (non-draft), non-docs-only PRs.
 #   ci-gate      (ubuntu) the required merge check; passes only on the evidence above.
-# Every PR into team/roadmap runs classify + ci-gate (cheap); macOS runs on ready code PRs,
+# Every PR into main runs classify + ci-gate (cheap); macOS runs on ready code PRs,
 # including every push to them. workflow_dispatch is for manual diagnostics, not merge evidence.
 on:
   pull_request:
-    branches: [team/roadmap]
+    branches: [main]
     types: [opened, reopened, ready_for_review, synchronize]
   workflow_dispatch:
 permissions:
