@@ -1,12 +1,17 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 
 struct EditorTabBar: NSViewRepresentable {
     let workspace: LibraryWorkspace
-    func makeNSView(context: Context) -> EditorTabBarView { EditorTabBarView(workspace: workspace) }
+    /// The window's sections (#197): the strip lists every open Library's tabs.
+    var registry: LibraryWindowRegistry? = nil
+    func makeNSView(context: Context) -> EditorTabBarView { EditorTabBarView(workspace: workspace, registry: registry) }
     func updateNSView(_ view: EditorTabBarView, context: Context) {
         // Register observation of per-tab chrome, without observing document text.
-        for tab in workspace.tabs { _ = tab.isPreview; _ = tab.editor.state; _ = tab.editor.url }
+        for entry in view.entries {
+            _ = entry.tab.isPreview; _ = entry.tab.editor.state; _ = entry.tab.editor.url; _ = entry.workspace.root
+        }
         _ = workspace.activeTabID
         view.reload()
     }
@@ -14,17 +19,22 @@ struct EditorTabBar: NSViewRepresentable {
 
 /// Native accessibility and event tracking; drag frames never publish workspace state.
 final class EditorTabBarView: NSView {
+    /// The current Library: its active tab is the one the editor shows.
     let workspace: LibraryWorkspace
+    private weak var registry: LibraryWindowRegistry?
     let scroll = NSScrollView()
     let strip = TabStripView()
     let overflow = NSPopUpButton(frame: .zero, pullsDown: true)
     private(set) var buttons: [EditorTabButton] = []
     private var insertionGap: Int?
     private let indicator = NSView()
-    private var shownActiveID: UUID?
+    private var shownActiveKey: LibraryWindowRegistry.StripTab.Key?
+    /// Tabs from two or more Libraries: each names its Library (#197).
+    private(set) var spansLibraries = false
 
-    init(workspace: LibraryWorkspace) {
+    init(workspace: LibraryWorkspace, registry: LibraryWindowRegistry? = nil) {
         self.workspace = workspace
+        self.registry = registry
         super.init(frame: .zero)
         scroll.drawsBackground = false
         scroll.hasHorizontalScroller = true
@@ -47,12 +57,19 @@ final class EditorTabBarView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// Every open Library's tabs in strip order (#197); a lone workspace's own tabs.
+    var entries: [LibraryWindowRegistry.StripTab] {
+        registry?.stripTabs ?? workspace.tabs.map { LibraryWindowRegistry.StripTab(workspace: workspace, tab: $0) }
+    }
+
     func reload() {
+        let entries = entries
+        spansLibraries = LibraryWindowRegistry.spansLibraries(entries)
         // Tolerates a duplicate tab ID instead of trapping (silkweb-1.79).
-        let existing = Dictionary(buttons.map { ($0.tab.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let existing = Dictionary(buttons.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
         for button in buttons { button.removeFromSuperview() }
-        buttons = workspace.tabs.map { tab in
-            let button = existing[tab.id] ?? EditorTabButton(tab: tab, bar: self)
+        buttons = entries.map { entry in
+            let button = existing[entry.key] ?? EditorTabButton(entry: entry, bar: self)
             strip.addSubview(button)
             button.refresh()
             return button
@@ -60,14 +77,23 @@ final class EditorTabBarView: NSView {
         setAccessibilityChildren(buttons)
         let menu = NSMenu()
         menu.addItem(withTitle: "", action: nil, keyEquivalent: "")
-        for tab in workspace.tabs {
-            let item = NSMenuItem(title: tab.editor.name, action: #selector(choose(_:)), keyEquivalent: "")
-            item.target = self; item.representedObject = tab.id
-            item.state = tab.id == workspace.activeTabID ? .on : .off
+        for button in buttons {
+            let item = NSMenuItem(title: button.menuTitle, action: #selector(choose(_:)), keyEquivalent: "")
+            item.target = self; item.representedObject = button
+            item.state = button.isActive ? .on : .off
             menu.addItem(item)
         }
         overflow.menu = menu
         needsLayout = true
+    }
+
+    /// A click, Return or the All Document Tabs menu: another Library's tab makes that Library current (#197).
+    func activate(_ entry: LibraryWindowRegistry.StripTab) {
+        if let registry {
+            registry.activate(entry)
+        } else {
+            entry.workspace.activateTab(entry.tab.id)
+        }
     }
 
     /// Folder tabs are 28 pt, bottom-aligned under a 4 pt gap, so the active tab opens into the editor.
@@ -84,11 +110,11 @@ final class EditorTabBarView: NSView {
         for (index, button) in buttons.enumerated() {
             button.frame = NSRect(x: CGFloat(index) * width, y: 0, width: width, height: height)
         }
-        strip.activeFrame = buttons.first { $0.tab.id == workspace.activeTabID }?.frame
-        if shownActiveID != workspace.activeTabID {
-            shownActiveID = workspace.activeTabID
-            buttons.first { $0.tab.id == shownActiveID }?.scrollToVisible(
-                NSRect(x: 0, y: 0, width: width, height: height))
+        let active = buttons.first(where: \.isActive)
+        strip.activeFrame = active?.frame
+        if shownActiveKey != active?.key {
+            shownActiveKey = active?.key
+            active?.scrollToVisible(NSRect(x: 0, y: 0, width: width, height: height))
         }
     }
 
@@ -115,13 +141,17 @@ final class EditorTabBarView: NSView {
         indicator.isHidden = false
         strip.addSubview(indicator, positioned: .above, relativeTo: nil)
     }
-    func finishDrag(_ id: UUID, at point: NSPoint) {
+    func finishDrag(_ entry: LibraryWindowRegistry.StripTab, at point: NSPoint) {
         defer { insertionGap = nil; indicator.isHidden = true }
         guard bounds.contains(convert(point, from: nil)), let gap = insertionGap else { return }
-        workspace.reorderTab(id, to: gap)
+        if let registry {
+            registry.moveTab(entry, toGap: gap)
+        } else {
+            entry.workspace.reorderTab(entry.tab.id, to: gap)
+        }
     }
     @objc private func choose(_ sender: NSMenuItem) {
-        if let id = sender.representedObject as? UUID { workspace.activateTab(id) }
+        if let button = sender.representedObject as? EditorTabButton { activate(button.entry) }
     }
 }
 
@@ -137,22 +167,33 @@ final class TabStripView: NSView {
 }
 
 final class EditorTabButton: NSView {
-    let tab: DocumentTab
+    let entry: LibraryWindowRegistry.StripTab
+    var tab: DocumentTab { entry.tab }
+    /// The Library this tab belongs to (#197).
+    var owner: LibraryWorkspace { entry.workspace }
+    var key: LibraryWindowRegistry.StripTab.Key { entry.key }
     private weak var bar: EditorTabBarView?
     let close = NSButton()
     private let title = NSTextField(labelWithString: "")
+    /// “ · <Library>” while the strip spans Libraries (#197): 11 pt tertiary, truncating before the title.
+    let library = NSTextField(labelWithString: "")
     private var hovered = false
     private var tracking: NSTrackingArea?
     private var down: NSPoint?
     private var dragged = false
 
-    init(tab: DocumentTab, bar: EditorTabBarView) {
-        self.tab = tab; self.bar = bar
+    init(entry: LibraryWindowRegistry.StripTab, bar: EditorTabBarView) {
+        self.entry = entry; self.bar = bar
         super.init(frame: .zero)
         title.alignment = .center
         title.lineBreakMode = .byTruncatingMiddle
         title.setAccessibilityElement(false)
         addSubview(title)
+        library.font = .systemFont(ofSize: 11)
+        library.textColor = .tertiaryLabelColor
+        library.lineBreakMode = .byTruncatingTail
+        library.setAccessibilityElement(false)
+        addSubview(library)
         close.isBordered = false
         close.target = self; close.action = #selector(closeTab)
         addSubview(close)
@@ -164,9 +205,15 @@ final class EditorTabButton: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
-        return hit === title ? self : hit
+        return hit === title || hit === library ? self : hit
     }
-    var isActive: Bool { bar?.workspace.activeTabID == tab.id }
+    /// The current Library's active tab; another Library's active tab isn't shown in the editor.
+    var isActive: Bool { bar.map { $0.workspace === owner && $0.workspace.activeTabID == tab.id } ?? false }
+    /// Shown only while the strip spans Libraries.
+    var libraryName: String? {
+        bar?.spansLibraries == true ? owner.root?.lastPathComponent : nil
+    }
+    var menuTitle: String { tab.editor.name + (libraryName.map { " · " + $0 } ?? "") }
     /// The coral dot marks unsaved text only; it is state, not a control, so it stays on hover.
     var showsDirtyDot: Bool { tab.editor.state.isDirty }
 
@@ -184,15 +231,20 @@ final class EditorTabButton: NSView {
         // The library-relative path tells deleted-note drafts with the same name apart (#108).
         let deleted = tab.editor.externalDeleted
         let path = tab.editor.url.flatMap { url in
-            bar?.workspace.root.map { String(url.path.dropFirst($0.path.count + 1)) }
+            owner.root.map { String(url.path.dropFirst($0.path.count + 1)) }
         }
+        let name = libraryName
+        library.stringValue = name.map { " · " + $0 } ?? ""
+        library.isHidden = name == nil
+        let inLibrary = name.map { ", in " + $0 } ?? ""
         toolTip =
-            deleted
-            ? "\(path ?? tab.editor.name) — deleted note"
-            : tab.isPreview ? "Preview — edit or double-click to keep this tab open" : tab.editor.name
+            (deleted
+                ? "\(path ?? tab.editor.name) — deleted note"
+                : tab.isPreview ? "Preview — edit or double-click to keep this tab open" : tab.editor.name)
+            + inLibrary
         setAccessibilityLabel(
             tab.editor.name + (deleted ? ", deleted note" : tab.editor.state.isDirty ? ", edited" : "")
-                + (tab.isPreview ? ", preview" : ""))
+                + (tab.isPreview ? ", preview" : "") + inLibrary)
         setAccessibilityValue(active ? 1 : 0)
         setAccessibilityChildren([close])
         needsLayout = true
@@ -214,10 +266,16 @@ final class EditorTabButton: NSView {
         close.frame = NSRect(x: 6, y: (bounds.height - 16) / 2, width: 16, height: 16)
         let dot: CGFloat = showsDirtyDot ? 12 : 0
         let budget = max(0, bounds.width - 52 - dot)
-        let width = min(budget, ceil(title.cell?.cellSize.width ?? budget))
-        // Centre the title and its dot together within the slot between the close button and the trailing edge.
-        let x = max(26, (bounds.width - width - dot) / 2)
+        let suffix = library.isHidden ? 0 : ceil(library.cell?.cellSize.width ?? 0)
+        let widths = TabTitleWidths.fit(
+            budget: budget, title: ceil(title.cell?.cellSize.width ?? budget), suffix: suffix)
+        // A suffix with no room for “ · ” and a letter would only show an ellipsis: it hides instead.
+        let (width, suffixWidth) = (CGFloat(widths.title), widths.suffix < 24 ? 0 : CGFloat(widths.suffix))
+        // Centre the title, its dot and the Library suffix together within the slot between the close button and the
+        // trailing edge.
+        let x = max(26, (bounds.width - width - dot - suffixWidth) / 2)
         title.frame = NSRect(x: x, y: (bounds.height - 16) / 2, width: width, height: 16)
+        library.frame = NSRect(x: title.frame.maxX + dot, y: (bounds.height - 16) / 2, width: suffixWidth, height: 16)
     }
 
     /// Top, left and right edges with rounded top corners; the bottom stays open onto the editor.
@@ -265,34 +323,34 @@ final class EditorTabButton: NSView {
     override func mouseEntered(with event: NSEvent) { hovered = true; refresh() }
     override func mouseExited(with event: NSEvent) { hovered = false; refresh() }
     override func mouseDown(with event: NSEvent) {
-        guard let bar, !bar.workspace.mutating else { return }
+        guard let bar, !bar.workspace.mutating, !owner.mutating else { return }
         down = event.locationInWindow; dragged = false
-        bar.workspace.activateTab(tab.id)
-        if event.clickCount == 2 { bar.workspace.keepTab(tab.id) }
+        bar.activate(entry)
+        if event.clickCount == 2 { owner.keepTab(tab.id) }
     }
     override func mouseDragged(with event: NSEvent) {
         guard let down, hypot(event.locationInWindow.x - down.x, event.locationInWindow.y - down.y) >= 4 else { return }
         dragged = true; bar?.trackInsertion(at: event.locationInWindow)
     }
     override func mouseUp(with event: NSEvent) {
-        if dragged { bar?.finishDrag(tab.id, at: event.locationInWindow) }
+        if dragged { bar?.finishDrag(entry, at: event.locationInWindow) }
         down = nil; dragged = false
     }
     override func otherMouseUp(with event: NSEvent) { if event.buttonNumber == 2 { closeTab() } }
-    override func accessibilityPerformPress() -> Bool { bar?.workspace.activateTab(tab.id); return true }
+    override func accessibilityPerformPress() -> Bool { bar?.activate(entry); return true }
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 36 || event.keyCode == 49 {
-            bar?.workspace.activateTab(tab.id)
+            bar?.activate(entry)
         } else {
             super.keyDown(with: event)
         }
     }
     @objc private func closeTab() {
-        guard let workspace = bar?.workspace else { return }
-        Task { await workspace.closeTab(tab.id) }
+        let (workspace, id) = (owner, tab.id)
+        Task { await workspace.closeTab(id) }
     }
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard let workspace = bar?.workspace else { return nil }
+        let workspace = owner
         let menu = NSMenu()
         func add(_ title: String, _ action: Selector) {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
@@ -309,19 +367,23 @@ final class EditorTabButton: NSView {
         for item in menu.items where !item.isSeparatorItem { item.isEnabled = !workspace.mutating }
         return menu
     }
-    @objc private func closeOthers() {
-        guard let workspace = bar?.workspace else { return }
-        Task { await workspace.closeTabs(otherThan: tab.id) }
+    @objc private func closeOthers() { closeTabs(toRight: false) }
+    @objc private func closeRight() { closeTabs(toRight: true) }
+    /// Across the whole strip while it lists every Library's tabs (#197).
+    private func closeTabs(toRight: Bool) {
+        let entry = entry
+        if let registry = owner.shell {
+            Task { await registry.closeTabs(otherThan: entry, toRight: toRight) }
+        } else {
+            Task { await entry.workspace.closeTabs(otherThan: entry.tab.id, toRight: toRight) }
+        }
     }
-    @objc private func closeRight() {
-        guard let workspace = bar?.workspace else { return }
-        Task { await workspace.closeTabs(otherThan: tab.id, toRight: true) }
-    }
-    @objc private func keepOpen() { bar?.workspace.keepTab(tab.id) }
+    @objc private func keepOpen() { owner.keepTab(tab.id) }
     @objc private func revealInLibrary() {
-        guard let workspace = bar?.workspace else { return }
-        workspace.search.text = ""
-        workspace.activateTab(tab.id)
+        // Another Library's tab makes that Library current first (#197); the list then shows the document.
+        if owner !== bar?.workspace { owner.shell?.focus(owner) }
+        owner.search.text = ""
+        owner.activateTab(tab.id)
     }
     @objc private func revealInFinder() {
         if let url = tab.editor.url { NSWorkspace.shared.activateFileViewerSelecting([url]) }

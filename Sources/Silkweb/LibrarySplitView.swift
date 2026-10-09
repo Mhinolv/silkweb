@@ -338,7 +338,7 @@ private struct LibraryDetailPane: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.silkwebPaneBackground.ignoresSafeArea())
         } else {
-            DocumentDetail(workspace: workspace)
+            DocumentDetail(workspace: workspace, registry: registry)
         }
     }
 }

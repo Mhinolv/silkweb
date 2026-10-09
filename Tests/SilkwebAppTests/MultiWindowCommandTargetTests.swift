@@ -133,6 +133,51 @@ final class MultiLibraryCommandTargetTests: XCTestCase {
         XCTAssertEqual(markdownFiles(roots[0]), aAfter, "New Document with B current wrote into A")
     }
 
+    /// #197: a tab belonging to A, chosen in the one strip while B is current, makes A current: New Document, Move
+    /// To…, Move to Trash, Save and Format then act on A only, and the same for B's tab.
+    func testATabFromAnotherLibraryRetargetsTheCommands() async throws {
+        let (registry, window, roots) = try await twoLibraries()
+        let (a, b) = (registry.sections[0], registry.sections[1])
+        XCTAssertTrue(registry.current === b)
+        let strip = registry.stripTabs
+        XCTAssertEqual(strip.count, 2)
+        let aTab = try XCTUnwrap(strip.first { $0.workspace === a })
+        let bTab = try XCTUnwrap(strip.first { $0.workspace === b })
+
+        for (tab, library, other, root, otherRoot, name) in [
+            (aTab, a, b, roots[0], roots[1], "Alpha"), (bTab, b, a, roots[1], roots[0], "Beta"),
+        ] {
+            registry.activate(tab)
+            try await settle(window)
+            XCTAssertTrue(registry.target === library, "\(name)'s tab makes its Library current")
+            XCTAssertEqual(library.activeTabID, tab.tab.id)
+            XCTAssertEqual(library.breadcrumb.crumbs.first?.title, root.lastPathComponent, "status bar path root")
+            // Save and Format: the active tab's editor, in the right Library.
+            XCTAssertEqual(registry.target.editor.url?.lastPathComponent, "\(name).md")
+            let editor = try XCTUnwrap(library.preview.editor)
+            XCTAssertTrue(editor.workspace === library)
+            XCTAssertTrue(window.makeFirstResponder(editor))
+            let format = FormattingTarget.shared
+            format.editor = editor
+            format.refresh()
+            XCTAssertTrue(format.enabled)
+            XCTAssertFalse(other.libraryHasFocus)
+            format.editor = nil
+            format.refresh()
+            // Move To… and Move to Trash follow the list of the current Library only.
+            try focusList(window, library)
+            library.menuState.refresh()
+            XCTAssertEqual(library.menuState.value.trashTitle, "Move “\(name)” to Trash")
+            XCTAssertTrue(library.menuState.value.canMove)
+            XCTAssertFalse(other.canTrashSelection)
+            let (before, otherBefore) = (markdownFiles(root), markdownFiles(otherRoot))
+            registry.target.create(folder: false)
+            try await waitIdle(library)
+            XCTAssertEqual(markdownFiles(root).count, before.count + 1, "New Document lands in \(name)'s Library")
+            XCTAssertEqual(markdownFiles(otherRoot), otherBefore)
+        }
+    }
+
     /// ⌘W and the tab items act on the current Library's tabs only.
     func testTabCommandsFollowTheCurrentLibrary() async throws {
         let (registry, window, _) = try await twoLibraries()
