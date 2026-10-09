@@ -176,6 +176,8 @@ struct WorkspaceCommands: Commands {
             Divider()
             // #137: no shortcut; selects the sidebar row as a click does, and is disabled while it's hidden.
             Button("Agent Activity") { workspace.selectAgentActivity() }.disabled(!state.hasAgentActivity)
+            // #203: no shortcut; the sheet works for any open Library, with or without requests.
+            Button("Access Requests…") { workspace.showAccessRequests() }.disabled(!state.hasLibrary)
         }
     }
 }

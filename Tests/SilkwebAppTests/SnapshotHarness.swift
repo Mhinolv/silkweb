@@ -33,7 +33,8 @@ struct SnapshotScenario {
     var expanded: Set<String> = []
     var mediaMigration: String? = nil
     /// silkweb-1.70 recovery states: "pending" (Keep/Discard), "orphan" (draft for a deleted note), "unreadable" (strip);
-    /// #108 "two-orphans": a restored tab followed by two same-named deleted-note drafts.
+    /// #108 "two-orphans": a restored tab followed by two same-named deleted-note drafts;
+    /// #208 "pending-many-decoys": "pending" plus 3,000 valid drafts for notes outside the library.
     var recovery: String? = nil
     /// #107 index states: "backup" (corrupt index set aside), "no-copy" (unwritable `.silkweb`), "newer-format".
     var indexRecovery: String? = nil
@@ -94,6 +95,9 @@ struct SnapshotScenario {
     var sectionCollapsed = false
     /// #195: the welcome screen (no Library open) with three Recent Libraries, one of them missing.
     var welcomeRecents = false
+    /// #203 access requests: "waiting", "history" and "empty" host the Access Requests sheet; "requests-only" is
+    /// the library window in Agent Activity with requests but no receipts; "widen-refused" is the refusal alert.
+    var accessRequests: String? = nil
 
     static let deepFolder =
         "Field Notes/Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
@@ -140,6 +144,7 @@ struct SnapshotScenario {
         .init(name: "media-migration-failure", document: image, mediaMigration: "failure"),
         // silkweb-1.70: recovered text awaiting Keep/Discard; a draft whose note was deleted; a set-aside recovery file.
         .init(name: "recovery-pending", document: pourOver, recovery: "pending"),
+        .init(name: "recovery-pending-many-decoys", document: pourOver, recovery: "pending-many-decoys"),
         .init(name: "recovery-orphan-draft", folder: "Coffee", recovery: "orphan"),
         .init(name: "recovery-two-orphans", recovery: "two-orphans"),
         .init(name: "recovery-unreadable", document: pourOver, recovery: "unreadable"),
@@ -278,6 +283,13 @@ struct SnapshotScenario {
         .init(name: "agent-provenance-proposals-only", agentActivity: "proposals-only"),
         .init(name: "agent-activity-updated-row", agentActivity: "updated-row"),
         .init(name: "agent-update-open-clean", agentActivity: "update-open"),
+        // #203: the Access Requests sheet (two waiting, one with a message and folders; history; empty), Agent
+        // Activity with requests only (sidebar hand.raised, strip button, empty list) and the widen refusal.
+        .init(name: "access-requests-waiting", accessRequests: "waiting"),
+        .init(name: "access-requests-history", accessRequests: "history"),
+        .init(name: "access-requests-empty", accessRequests: "empty"),
+        .init(name: "agent-activity-requests-only", accessRequests: "requests-only"),
+        .init(name: "access-request-widen-refused", accessRequests: "widen-refused"),
         .init(name: "new-document", folder: "", document: "Snapshot Fixtures/Empty Document.md", createDocument: true),
         .init(
             name: "new-document-in-folder", folder: "Snapshot Fixtures/Empty Folder",
@@ -744,6 +756,15 @@ final class SnapshotHarness {
             if recovery == "unreadable", let directory = workspace.recoveryDirectory {
                 workspace.unreadableRecoveryFile = directory.appendingPathComponent("Unreadable/draft.json")
             }
+            if recovery == "pending-many-decoys", let directory = workspace.recoveryDirectory {
+                // Opening the note must read only its own draft (#208).
+                for index in 0..<3_000 {
+                    let note = directory.appendingPathComponent("Elsewhere/Decoy \(index).md")
+                    try JSONSerialization.data(withJSONObject: [
+                        "formatVersion": 1, "documentURL": note.absoluteString, "text": "Decoy \(index)\n",
+                    ]).write(to: directory.appendingPathComponent("decoy-\(index).json"))
+                }
+            }
         }
         let paths =
             scenario.switchFrom.map { [$0] }
@@ -840,6 +861,15 @@ final class SnapshotHarness {
         }
         if let query = scenario.quickQuery { workspace.search.toggleQuickOpen(); workspace.search.quickText = query }
         if let query = scenario.searchQuery { workspace.search.text = query }
+        if let state = scenario.accessRequests {
+            workspace.accessRequestClock = { SnapshotScenario.requestsNow }
+            workspace.accessRequests = SnapshotScenario.accessRequests(state, library: snapshot.rootURL.path)
+            if state == "requests-only" {
+                workspace.navigate(folder: nil, documents: [], changesScope: true, agents: true)
+                await workspace.waitForNavigation()
+                guard workspace.agentScope else { throw SnapshotFailure.error("Agent Activity did not open") }
+            }
+        }
         if let state = scenario.agentActivity {
             await workspace.reloadAgentActivity()
             guard workspace.hasAgentActivity, workspace.agentEntries.count == 3 else {
@@ -1117,6 +1147,18 @@ final class SnapshotHarness {
                 content = AnyView(
                     ExportAlertSnapshot(
                         alert: ExportCommands.missingImageAlert(result, printing: scenario.printWarning)))
+            } else if scenario.accessRequests == "widen-refused" {
+                let refusal = AgentAccessError(
+                    code: "approve_would_widen", title: "Can’t Approve This Request",
+                    message: "The grant “Silkweb” already exists with Read Only access. Approving never widens "
+                        + "access; edit agent-grants.json to change it.")
+                content = AnyView(ExportAlertSnapshot(alert: AccessRequestAlerts.refusal(refusal)))
+            } else if let state = scenario.accessRequests, state != "requests-only" {
+                // Host the production sheet itself; never present or order a sheet window.
+                content = AnyView(
+                    AccessRequestsSheet(workspace: workspace)
+                        .background(Color(nsColor: .windowBackgroundColor))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity))
             } else if scenario.pdfProgress {
                 // Host the production progress sheet itself; never present or order a sheet window.
                 content = AnyView(
@@ -1740,4 +1782,49 @@ final class SnapshotHarness {
         return container
     }
     func updateNSView(_ view: NSView, context: Context) {}
+}
+
+extension SnapshotScenario {
+    /// 2026-10-09 18:30:00 UTC.
+    static let requestsNow = Date(timeIntervalSince1970: 1_791_570_600)
+
+    /// #203 fixtures, written as `agent-access-requests.json` records for this Library.
+    static func accessRequests(_ state: String, library: String) -> [AgentAccessRequest] {
+        let day: TimeInterval = 86_400
+        func request(
+            _ id: String, agent: String, project: String, profile: AgentGrant.Access, folders: [String] = [],
+            message: String = "", askedDaysAgo: Double, status: AgentAccessRequest.Status = .pending,
+            decidedDaysAgo: Double? = nil, via: AgentAccessRequest.Via? = nil, note: String = ""
+        ) -> AgentAccessRequest {
+            let asked = requestsNow.addingTimeInterval(-askedDaysAgo * day)
+            return AgentAccessRequest(
+                requestId: id, libraryRoot: library, project: project, profile: profile, readFolders: folders,
+                message: message, agent: agent, session: "2026-10-09-a", client: "cli", requestedAt: asked,
+                expiresAt: asked.addingTimeInterval(AgentAccessRequests.timeToLive), status: status,
+                decidedAt: decidedDaysAgo.map { requestsNow.addingTimeInterval(-$0 * day) }, decidedVia: via,
+                ownerNote: note)
+        }
+        let waiting = [
+            request(
+                "req_3f9a1c2b4d5e", agent: "claude-code", project: "Silkweb", profile: .readCreate,
+                folders: ["Notes/Swift", "Specs"], message: "Need to save handoffs for the Silkweb repo.",
+                askedDaysAgo: 0.2),
+            request("req_8b21d0e4c7aa", agent: "codex", project: "Coffee", profile: .read, askedDaysAgo: 3),
+        ]
+        let history = [
+            request(
+                "req_1a2b3c4d5e6f", agent: "claude-code", project: "Silkweb", profile: .readCreate, askedDaysAgo: 2,
+                status: .approved, decidedDaysAgo: 1, via: .app),
+            request(
+                "req_6f5e4d3c2b1a", agent: "gemini-cli", project: "Travel", profile: .read, folders: ["Journal"],
+                askedDaysAgo: 5, status: .denied, decidedDaysAgo: 4, via: .terminal, note: "Not this Library"),
+            request("req_0c0ffee00000", agent: "codex", project: "Coffee", profile: .read, askedDaysAgo: 40),
+        ]
+        switch state {
+        case "waiting": return waiting
+        case "history": return history
+        case "requests-only": return [waiting[0]] + history
+        default: return []
+        }
+    }
 }

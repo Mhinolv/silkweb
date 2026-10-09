@@ -100,6 +100,7 @@ struct FolderSidebar: NSViewRepresentable {
         if coordinator.rootURL != snapshot.rootURL || coordinator.revision != workspace.revision
             || coordinator.agentVisible != workspace.hasAgentActivity
             || coordinator.agentCount != workspace.agentEntries.count
+            || coordinator.waitingRequests != workspace.pendingAccessRequestCount
         {
             coordinator.revision = workspace.revision
             if coordinator.configure(snapshot) { coordinator.restore() } else { coordinator.updateVisibleCounts() }
@@ -142,6 +143,8 @@ struct FolderSidebar: NSViewRepresentable {
         /// The Agent Activity row is shown, and its `(n)`.
         private(set) var agentVisible = false
         private(set) var agentCount = 0
+        /// Waiting access requests (#203), shown as `hand.raised` on the Agent Activity row.
+        private(set) var waitingRequests = 0
         /// Whether the selected row last followed the Agent Activity scope.
         var agentScope = false
         var itemsByTag: [UUID: Item] = [:]
@@ -193,6 +196,7 @@ struct FolderSidebar: NSViewRepresentable {
             totalCount = snapshot.documents.count
             tagCounts = workspace.tagCounts
             agentCount = workspace.agentEntries.count
+            waitingRequests = workspace.pendingAccessRequestCount
             let agentVisible = workspace.hasAgentActivity
             guard
                 rootURL != snapshot.rootURL || folders != snapshot.folders || tags != workspace.tags
@@ -259,10 +263,15 @@ struct FolderSidebar: NSViewRepresentable {
             if item.isAgentActivity {
                 cell.countBadge.stringValue =
                     FolderDocumentCount(direct: agentCount, recursive: agentCount).inlineSuffix
-                cell.setAccessibilityValue(CountPresentation.label(agentCount, unit: .document) + currentSuffix(item))
-                cell.toolTip = nil
+                let waiting = workspace.accessRequestsWaitingLabel
+                cell.setAccessibilityValue(
+                    CountPresentation.label(agentCount, unit: .document) + (waiting.map { ", " + $0 } ?? "")
+                        + currentSuffix(item))
+                cell.toolTip = waiting
+                cell.showsRequests(waiting != nil)
                 return
             }
+            cell.showsRequests(false)
             if item.isTagsGroup || item.tag != nil {
                 let count = item.tag.map { tagCounts[$0.id] ?? 0 } ?? tags.count
                 cell.countBadge.stringValue = FolderDocumentCount(direct: count, recursive: count).inlineSuffix
@@ -432,6 +441,13 @@ struct FolderSidebar: NSViewRepresentable {
                 badge.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: nil)
                 badge.contentTintColor = .secondaryLabelColor
                 badge.setAccessibilityElement(false)
+                // #203: after the Agent Activity count while access requests wait. Quiet: no colour, no badge.
+                let hand = cell.requestBadge
+                hand.image = NSImage(systemSymbolName: "hand.raised", accessibilityDescription: nil)?
+                    .withSymbolConfiguration(.init(pointSize: 10, weight: .regular))
+                hand.contentTintColor = .secondaryLabelColor
+                hand.setAccessibilityElement(false)
+                hand.translatesAutoresizingMaskIntoConstraints = false
                 text.translatesAutoresizingMaskIntoConstraints = false
                 image.translatesAutoresizingMaskIntoConstraints = false
                 badge.translatesAutoresizingMaskIntoConstraints = false
@@ -439,11 +455,14 @@ struct FolderSidebar: NSViewRepresentable {
                 cell.addSubview(text)
                 cell.addSubview(badge)
                 cell.addSubview(count)
+                cell.addSubview(hand)
                 cell.textField = text
                 cell.imageView = image
                 cell.titleToLock = text.trailingAnchor.constraint(equalTo: badge.leadingAnchor)
                 cell.lockToCount = badge.trailingAnchor.constraint(equalTo: count.leadingAnchor)
                 cell.lockWidth = badge.widthAnchor.constraint(equalToConstant: 0)
+                cell.countToRequest = hand.leadingAnchor.constraint(equalTo: count.trailingAnchor)
+                cell.requestWidth = hand.widthAnchor.constraint(equalToConstant: 0)
                 NSLayoutConstraint.activate([
                     image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
                     image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
@@ -453,7 +472,9 @@ struct FolderSidebar: NSViewRepresentable {
                     cell.titleToLock!,
                     text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                     cell.lockToCount!,
-                    count.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
+                    cell.countToRequest!, cell.requestWidth!,
+                    hand.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
+                    hand.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                     count.firstBaselineAnchor.constraint(equalTo: text.firstBaselineAnchor),
                     badge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                     cell.lockWidth!, badge.heightAnchor.constraint(equalToConstant: 12),
@@ -774,10 +795,20 @@ struct FolderSidebar: NSViewRepresentable {
 final class SidebarFolderCell: NSTableCellView, CapsuleAccessories {
     let lockBadge = NSImageView()
     let countBadge = NSTextField(labelWithString: "")
+    /// #203: `hand.raised` after the Agent Activity count while access requests wait.
+    let requestBadge = NSImageView()
     var renameField: RenameNameField?
     var titleToLock: NSLayoutConstraint?
     var lockToCount: NSLayoutConstraint?
     var lockWidth: NSLayoutConstraint?
+    var countToRequest: NSLayoutConstraint?
+    var requestWidth: NSLayoutConstraint?
+
+    func showsRequests(_ shown: Bool) {
+        requestBadge.isHidden = !shown
+        requestWidth?.constant = shown ? 12 : 0
+        countToRequest?.constant = shown ? 4 : 0
+    }
 
     func configureCluster(unreadable: Bool, renaming: Bool) {
         countBadge.isHidden = renaming
@@ -807,6 +838,7 @@ final class SidebarFolderCell: NSTableCellView, CapsuleAccessories {
                 : .secondaryLabelColor
         countBadge.textColor = color
         lockBadge.contentTintColor = color
+        requestBadge.contentTintColor = color
         imageView?.contentTintColor = color
     }
 }

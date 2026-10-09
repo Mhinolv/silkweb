@@ -93,6 +93,23 @@ final class LibraryWorkspace {
     /// The All Agents ▾ choice, kept for this window session only.
     var agentFilter: String? { didSet { documentCache = nil } }
     @ObservationIgnored var agentReloadTask: Task<Void, Never>?
+    /// #203: this Library's access requests, waiting and decided, from Application Support. Assigned only on change.
+    var accessRequests: [AgentAccessRequest] = [] {
+        didSet { if agentScope && !hasAgentActivity { agentScope = false } }
+    }
+    /// The Access Requests sheet is shown.
+    var showsAccessRequests = false
+    /// The request a Deny… or Approve… is working on; its row's buttons are disabled meanwhile.
+    var decidingRequestID: String?
+    @ObservationIgnored var accessRequestStore = AgentAccessRequestStore.standard
+    @ObservationIgnored var agentGrantsURL = AgentGrantFile.defaultURL()
+    @ObservationIgnored var accessRequestWatcher: AccessRequestWatcher?
+    @ObservationIgnored var accessRequestReloadTask: Task<Void, Never>?
+    /// Owner decision 2026-10-09: approving in the app needs Touch ID or the account password. Tests replace it.
+    @ObservationIgnored var authenticateOwner: @MainActor (String) async -> Bool =
+        LibraryWorkspace.authenticateWithLocalAuthentication
+    /// Expiry is computed on read; snapshots pin the time.
+    @ObservationIgnored var accessRequestClock: @MainActor () -> Date = { Date() }
 
     private func updateAgentEntries() {
         let entries = snapshot.map { agentActivity.entries(in: $0) } ?? []
@@ -102,7 +119,7 @@ final class LibraryWorkspace {
             entries.map { ($0.document.relativePath, $0) }, uniquingKeysWith: { first, _ in first })
         documentCache = nil
         // Receipts were removed: the hidden row can't stay the list's scope.
-        if agentScope && !agentActivity.hasPublished { agentScope = false }
+        if agentScope && !hasAgentActivity { agentScope = false }
     }
     private var watcher: LibraryWatcher?
     private var reconciling = false
@@ -415,6 +432,11 @@ final class LibraryWorkspace {
             agentScope = false
             agentFilter = nil
             agentActivity = AgentActivity()
+            accessRequestWatcher?.stop()
+            accessRequestWatcher = nil
+            accessRequestReloadTask?.cancel()
+            showsAccessRequests = false
+            accessRequests = []
             await editor.configure(root: url)
             // Let any previous scan finish cancellation before releasing its access.
             scope?.stopAccessingSecurityScopedResource()
@@ -494,6 +516,11 @@ final class LibraryWorkspace {
                 }
                 // A receipt written between the first read and the watcher's start is picked up here.
                 await reloadAgentActivity()
+                // #203: requests live outside the Library; Terminal and helpers change them while the app runs.
+                accessRequestWatcher = AccessRequestWatcher(file: accessRequestStore.url) { [weak self] in
+                    await self?.reloadAccessRequests()
+                }
+                await reloadAccessRequests()
                 let location = await Task.detached(priority: .utility) { LibraryLocation.saving(url) }.value
                 guard !Task.isCancelled else { return }
                 persistLocation(location)
@@ -911,6 +938,7 @@ struct LibraryWorkspaceView: View {
         .sheet(item: $workspace.importRequest) { request in ImportSheet(workspace: workspace, request: request) }
         .sheet(item: $workspace.moveRequest) { request in MovePicker(workspace: workspace, request: request) }
         .sheet(item: $workspace.pdfProgress) { progress in PDFProgressSheet(progress: progress) }
+        .sheet(isPresented: $workspace.showsAccessRequests) { AccessRequestsSheet(workspace: workspace) }
         .task {
             workspace.restore(); await workspace.resumeEditor()
         }

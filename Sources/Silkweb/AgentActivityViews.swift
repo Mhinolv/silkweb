@@ -5,9 +5,6 @@ import SwiftUI
 /// #137: quiet agent provenance. Receipts reload off the main thread and only update what changed; nothing here
 /// moves focus, selection, scroll or tabs, and nothing is announced.
 extension LibraryWorkspace {
-    /// The Agent Activity row (and Go ▸ Agent Activity) exists once a receipt published a Document.
-    var hasAgentActivity: Bool { agentActivity.hasPublished }
-
     nonisolated static func loadAgentActivity(root: URL) async -> AgentActivity {
         await Task.detached(priority: .utility) { AgentActivity.load(root: root) }.value
     }
@@ -37,16 +34,23 @@ extension LibraryWorkspace {
     }
 }
 
-/// The pinned strip in Agent Activity scope: “Agent activity · 14 documents” and the All Agents ▾ pull-down.
+/// The pinned strip in Agent Activity scope: “Agent activity · 14 documents”, Access Requests (#203) and the
+/// All Agents ▾ pull-down.
 struct AgentActivityStrip: View {
     let workspace: LibraryWorkspace
 
     var body: some View {
         let agents = AgentActivity.agents(in: workspace.agentEntries)
+        let waiting = workspace.pendingAccessRequestCount
         HStack {
             Text("Agent activity · \(CountPresentation.label(workspace.documents.count, unit: .document))")
                 .lineLimit(1)
             Spacer(minLength: Spacing.small)
+            Button(waiting > 0 ? "Access Requests (\(waiting))" : "Access Requests") {
+                workspace.showAccessRequests()
+            }
+            .buttonStyle(.borderless).fixedSize()
+            .accessibilityValue(workspace.accessRequestsWaitingLabel ?? "")
             Menu {
                 Button("All Agents") { workspace.agentFilter = nil }
                 Divider()

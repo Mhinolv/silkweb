@@ -26,6 +26,7 @@ public enum AgentHelper {
           silkweb mcp [--grant G] [--agent A] [--session S] [--client C]
                                         Stdio MCP server for agents (stdout is MCP only)
           silkweb grant init [...]      Set up agent access for one project (owner only)
+          silkweb grant request [...]   Ask the owner for access; see “silkweb grant --help”
 
         COMMANDS
           capabilities                  This grant’s scope, limits and commands
@@ -159,15 +160,16 @@ public enum AgentHelper {
         case "invalid_argument":
             return 64
         case "envelope_malformed", "envelope_schema_newer", "envelope_invalid_field", "too_large",
-            "idempotency_conflict", "not_found", "revision_changed":
+            "idempotency_conflict", "not_found", "revision_changed", "request_not_found", "request_decided":
             return 65
-        case "library_busy", "stale_snapshot", "rate_limited", "document_has_unsaved_changes":
+        case "library_busy", "stale_snapshot", "rate_limited", "document_has_unsaved_changes", "too_many_requests":
             return 69
         case "library_not_found", "library_unreadable", "unreadable", "write_failed", "disk_full", "permission_denied":
             return 74
         case "grant_required", "grant_not_found", "grant_revoked", "no_grant", "no_grants_file",
             "invalid_grants_file", "unsupported_grants_version", "invalid_grant", "out_of_scope",
-            "create_not_allowed", "invalid_path", "excluded_name", "update_not_allowed", "update_requires_proposal":
+            "create_not_allowed", "invalid_path", "excluded_name", "update_not_allowed", "update_requires_proposal",
+            "invalid_requests_file", "unsupported_requests_version", "approve_would_widen":
             return 77
         default:
             return 70

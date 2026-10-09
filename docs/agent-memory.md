@@ -229,7 +229,8 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
   but naming a project never grants access by itself. Access comes only from this file.
 - `library` is the same versioned `LibraryLocation` the app saves (a `path`, plus an optional
   `bookmark`). The helper resolves it the same way the app does. The memory commands and the MCP
-  server never write the file; only the owner's [`silkweb grant init`](#setting-up-a-grant-186) does.
+  server never write the file; only the owner's [`silkweb grant init`](#setting-up-a-grant-186) and
+  [`grant approve`](#access-requests-203) (or Approve… in the app) do.
 - `access` is `read`, `read-create` or `read-create-update` (#204). An unknown value is treated as
   `read`, so a build that doesn’t know a profile falls back to the narrowest.
 - **Default template:**
@@ -286,6 +287,114 @@ silkweb grant init [--library <PATH>] [--project <KEY>] [--access read|read-crea
   dry run that would be refused exits with the refusal's status.
 - Exit statuses: 0 ok, 1 cancelled, 64 usage, 74 Library folder missing or file not saved, 77 access
   (owner only, widening, unreadable or newer grants file).
+
+### Access requests (#203)
+
+An agent without a grant (or with too narrow a grant) can **ask** for one; only the owner turns a request
+into a grant. Agents still can't grant themselves anything.
+
+```text
+silkweb grant request --library <PATH> --project <KEY> --access read|read-create
+                      [--folder <PATH>]... [--message <TEXT>] [--agent <NAME>] [--session <ID>] [--client <NAME>]
+silkweb grant requests [--all]
+silkweb grant approve <REQUEST-ID>
+silkweb grant deny <REQUEST-ID> [--note <TEXT>]
+```
+
+**Storage.** One file holds pending requests and their history, outside every Library:
+
+```text
+~/Library/Application Support/Silkweb/agent-access-requests.json
+```
+
+```json
+{
+  "requests" : [
+    {
+      "agent" : "claude-code",
+      "client" : "cli",
+      "expiresAt" : "2026-11-08T14:14:00Z",
+      "libraryRoot" : "/Users/me/Writing",
+      "message" : "Need to save handoffs for the Silkweb repo.",
+      "ownerNote" : "",
+      "profile" : "read-create",
+      "project" : "Silkweb",
+      "readFolders" : ["Notes/Swift", "Specs"],
+      "requestId" : "req_3f9a1c2b4d5e",
+      "requestedAt" : "2026-10-09T14:14:00Z",
+      "session" : "2026-10-09-a",
+      "status" : "pending"
+    }
+  ],
+  "version" : 1
+}
+```
+
+- `status` is `pending`, `approved`, `denied` or `expired`; decided records add `decidedAt`,
+  `decidedVia` (`app` or `terminal`) and, for a denial, the owner's `ownerNote`. There's no second log:
+  this file is the audit trail.
+- **Expiry is computed on read.** A pending request whose `expiresAt` (30 days after `requestedAt`) has
+  passed reads as `expired`, can't be approved, and stays in history with that status.
+- `version: 1`; missing keys decode to defaults, an unknown `status` reads as `expired` and an unknown
+  `profile` as `read`, so nothing unknown is ever approvable or wider than asked. A broken or newer file
+  (`invalid_requests_file`, `unsupported_requests_version`, exit 77) is reported and never overwritten.
+- Every change takes an exclusive `flock` on `agent-access-requests.json.lock`, rereads the file and
+  replaces it atomically (sorted keys), so helpers, Terminal and the app never lose each other's records.
+  Decided and expired records beyond the newest 200 are dropped on the next write; pending ones never are.
+- `--requests <FILE>` (CLI and `silkweb mcp`) uses another file, for testing.
+
+**Asking (agents).** `grant request` and the MCP tool [`grant_request`](#tools) need no grant and no
+terminal. They never touch `agent-grants.json` or the Library.
+
+- `--library` is resolved like `grant init` (`~`, relative paths and links) and must be a readable
+  folder (`library_not_found`, 74). `--project` is one valid Folder name. `--access` is `read` (or
+  `read-only`) or `read-create`; Read, Create and Update can only be set up by the owner with
+  `grant init`.
+- `--folder` (MCP `readFolders`) asks for extra **read folders**, Library-relative and validated like
+  grant paths (no `..`, hidden names or control characters). Repeats, folders inside another and folders
+  inside the project's own Folder count once; at most 10.
+- `--message` is one line for the owner, at most 280 characters: line breaks and other control
+  characters become spaces. `--agent`, `--session` and `--client` (default `cli`) are claims, kept to one
+  line of at most 100 characters.
+- **Idempotent.** While a pending request with the same Library, project, profile and folder set exists,
+  asking again returns it with `"duplicate": true` (the message and claims don't count).
+- **Limits.** At most 5 pending requests per Library and 50 in all: `too_many_requests` (exit 69),
+  “There are already 5 access requests waiting for this Library. Ask the owner to review them.”
+- **Output.** stdout is the usual envelope, `{"ok":true,"result":{"duplicate":false,"expiresAt":"…",
+  "requestId":"req_…","status":"pending"},"version":1}`; refusals use the error envelope and the exit
+  statuses [below](#exit-statuses-and-error-codes). stderr: “silkweb: Access request req_… is waiting for
+  the owner. They can review it in Silkweb (Agent Activity ▸ Access Requests) or Terminal.”
+
+**Deciding (owner).**
+
+- `grant requests` lists waiting requests, oldest first, as plain text, and needs no terminal:
+  `req_3f9a1c2b4d5e  pending  claude-code  Silkweb  Read and Create  ~/Writing + 2 read folders  expires Nov 8`.
+  `--all` adds history (`approved Oct 9 in Terminal`, `denied Oct 9 in Silkweb — note`, `expired Sep 8`).
+- `grant approve <ID>` and `grant deny <ID>` **need a terminal** whenever the real requests file or the
+  real grants file is involved (exit 77, “Only the owner can approve or deny access. Run this in
+  Terminal.”). They print the request on stderr (agent, profile, Library, folders, message, “Agent and
+  session are claimed, not verified.”) and ask `Approve this request? [y/N]` or `Deny this request?
+  [y/N]`; anything but `y`/`yes` saves nothing, end of input exits 1.
+- **Approve uses `grant init`'s merge** ([Setting up a grant](#setting-up-a-grant-186)). A new project gets
+  a grant with the requested profile and read folders (`extra_read_folders`). An existing grant that
+  already allows everything asked for (folders inside its read folders count) is left byte-identical and
+  the request is marked approved. Anything wider — more access, another Library, a revoked grant, a read
+  folder the grant doesn't include — is refused (exit 77) before the question, and the request stays
+  pending: “The grant “Silkweb” already exists with Read Only access. Approving never widens access; edit
+  agent-grants.json to change it.” A narrower profile narrows the grant, as `grant init` does. On success
+  it prints #186's saved summary and install block.
+- `grant deny <ID> [--note …]` records the note (one line, 280 characters) and never touches the grants.
+- Deciding an unknown, decided or expired request exits 65: “There’s no access request “req_…”.”,
+  “This request was already approved in Terminal.”, “This request expired on Sep 8.”
+- In the app, **Approve…** also requires owner authentication (Touch ID, falling back to the account
+  password) before anything is saved (owner decision 2026-10-09). See [In the app](#in-the-app-137).
+
+**MCP without a grant.** `silkweb mcp --grant <KEY>` starts even when that grant (or the grants file)
+doesn't exist yet, with one stderr line: “silkweb: No agent access named “Silkweb” exists. Ask the owner
+to create one in Silkweb. Until then, only grant_request works.” `memory_*` calls return the same
+`grant_not_found` / `no_grants_file` refusal as the CLI until the owner approves; the next call after an
+approval works without restarting the server. `grant_required` (several grants, none chosen) still exits
+77 before `initialize`.
 
 ### Profiles, limits and revocation (#130)
 
@@ -785,7 +894,9 @@ grants, scope checks, limits, idempotency and receipts. Every command works with
 The binary is the helper from [Helper distribution](#helper-distribution) (`build/helper/silkweb`,
 linked to `~/.local/bin/silkweb`); nothing installs itself. `silkweb --help` prints the summary below
 in a `USAGE` / `COMMANDS` / `OPTIONS` layout. The owner's setup command, `silkweb grant init`, prints
-plain text rather than the JSON envelope; see [Setting up a grant](#setting-up-a-grant-186).
+plain text rather than the JSON envelope; see [Setting up a grant](#setting-up-a-grant-186). An agent
+asks for access with `silkweb grant request`, which answers in the JSON envelope; see
+[Access requests](#access-requests-203).
 
 ### Commands
 
@@ -857,11 +968,11 @@ and `--supersedes` (create).
 |---|---|---|
 | 0 | Success, including a replayed create | — |
 | 64 | Usage or bad argument | `invalid_argument` |
-| 65 | Bad input data | `envelope_malformed`, `envelope_schema_newer`, `envelope_invalid_field`, `too_large`, `idempotency_conflict`, `not_found`, `revision_changed` |
-| 69 | Busy; try again | `library_busy`, `stale_snapshot`, `rate_limited`, `document_has_unsaved_changes` |
+| 65 | Bad input data | `envelope_malformed`, `envelope_schema_newer`, `envelope_invalid_field`, `too_large`, `idempotency_conflict`, `not_found`, `revision_changed`, `request_not_found`, `request_decided` |
+| 69 | Busy; try again | `library_busy`, `stale_snapshot`, `rate_limited`, `document_has_unsaved_changes`, `too_many_requests` |
 | 70 | Unexpected helper failure | `internal_error` |
 | 74 | Library I/O | `library_not_found`, `library_unreadable`, `unreadable`, `write_failed`, `disk_full`, `permission_denied` |
-| 77 | Access | `grant_required`, `grant_not_found`, `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `no_grant`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `invalid_path`, `excluded_name`, `update_not_allowed`, `update_requires_proposal` |
+| 77 | Access | `grant_required`, `grant_not_found`, `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `no_grant`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `invalid_path`, `excluded_name`, `update_not_allowed`, `update_requires_proposal`, `invalid_requests_file`, `unsupported_requests_version`, `approve_would_widen` |
 
 - **One bad-input code.** `invalid_argument` covers usage mistakes (unknown command or option, a
   repeated or missing option, `--body` text), bad values (`--limit`, `--type`, dates, `--id`, `--cursor`)
@@ -895,6 +1006,10 @@ receipts. Fields and `error.code` values pass through unchanged.
 ```sh
 silkweb mcp [--grant <GRANT>] [--agent <NAME>] [--session <ID>] [--client <NAME>]
 ```
+
+- **No grant yet (#203).** When the chosen grant or the grants file doesn't exist, the server still starts:
+  `grant_request` works, `memory_*` calls refuse as the CLI does, and the next call after the owner
+  approves works. See [Access requests](#access-requests-203).
 
 - One grant per server process, chosen like the CLI: `--grant`, then `SILKWEB_GRANT`, then the only
   grant. With several grants and no choice, the server exits **before `initialize`** with the
@@ -969,6 +1084,7 @@ In `tools/list` order. The full definitions, with input and output schemas, are 
 | `memory_create_folder` | Silkweb: Create Folder | false | false | true | false | `create-folder` |
 | `memory_update` | Silkweb: Update Document | false | true | true (with `idempotencyKey`) | false | `update` |
 | `memory_activity` | Silkweb: Recent Agent Activity | true | false | true | false | `activity` |
+| `grant_request` | Silkweb: Request Access | true | false | true (a matching pending request is returned) | false | `grant request` |
 
 `memory_create` is `destructiveHint: false` because it never replaces anything. `memory_update` is
 `destructiveHint: true` because it replaces existing text (kept as an earlier version), so clients may
@@ -982,6 +1098,7 @@ ask before running it. `memory list` stays CLI-only. Arguments are camelCase ver
 | `memory_create_folder` | `path` (required) |
 | `memory_update` | `expectedRevision` and `body` (required); `path` or `documentId` (exactly one); `idempotencyKey` (1–200 characters), `session` |
 | `memory_activity` | `limit` (≥ 1, capped by `max_results`), `since` |
+| `grant_request` | `library`, `project` and `access` (`read`, `read-create`) required; `readFolders` (list, at most 10), `message` (at most 280 characters), `session`. The agent and client claims come from `--agent`/`--client` or `clientInfo.name`. Works without a grant and never changes one; `readOnlyHint: true` because it writes nothing in the Library or the grants file, only a request the owner reviews. |
 
 - The document size limit is in bytes and set per grant, so it's stated in the `memory_create`
   description rather than as a schema `maxLength`. An oversized body is the CLI's `too_large`.
@@ -1058,6 +1175,32 @@ or tabs. It never opens anything, and it never posts an announcement, sound, bad
   - Earlier versions (#204): “2 saved · Show in Finder”, only when saved versions still exist. The link
     (“Show earlier versions in Finder” for VoiceOver) reveals the newest one.
   - Review: “Not reviewed”, display only until #140.
+- **Access Requests (#203).** The Agent Activity row also appears when this Library has any access request
+  record (pending or decided). While requests wait, a 10 pt `hand.raised` symbol in secondary colour follows
+  the `(n)` count; its help text and the row's accessibility value say “2 access requests waiting”. No
+  colour, badge, sound or notification. In that scope with no agent Documents yet, the list says “No
+  Agent Documents · Agents haven’t created documents in this Library yet.”
+  - **Open it** with **Access Requests (2)** (or **Access Requests**) in the Agent Activity strip, before
+    **All Agents ▾**, or **Go ▸ Access Requests…** (no shortcut; enabled whenever a Library is open).
+  - **The sheet** (560×440) lists this Library's requests only: **Waiting**, oldest first, then
+    **History**, newest first, at most 50. A waiting row reads “claude-code wants Read and Create for
+    “Silkweb””, the folders (“Memory › Projects › Silkweb + 2 read folders: Notes › Swift, Specs”), the
+    agent's message (“Message from the agent: “…””), and “Oct 9, 2:14 PM · expires in 30 days · agent and
+    session are claimed, not verified”, with **Deny…** and **Approve…**. History rows end with “Approved ·
+    Oct 9 · in Silkweb”, “Denied · Oct 9 · in Terminal — note” or “Expired · Sep 8”. Each row is one
+    VoiceOver element with Approve and Deny actions. Empty: “No Access Requests”. Footer: “Requests for
+    other Libraries: run “silkweb grant requests” in Terminal.” **Done** (Return or Escape) closes it.
+  - **Approve…** first checks the request with the same rules as `grant approve`: a widening shows
+    **Can’t Approve This Request** with the refusal and the request stays pending; a request decided
+    elsewhere shows “This request was already approved in Terminal.” Otherwise it asks **Give
+    “claude-code” Read and Create access to “Silkweb”?** (the folders, then “Agents can add documents
+    there. They never edit or delete yours.”), then **owner authentication** (Touch ID, falling back to
+    the account password, via LocalAuthentication). Only then is `agent-grants.json` written, with
+    `decidedVia: app`.
+  - **Deny…** asks for an optional “Note for the agent” and records it.
+  - The app watches the folder holding `agent-access-requests.json` and `agent-grants.json` and reloads
+    rows in place, so Terminal and app decisions stay consistent. Nothing can be undone here; the owner
+    revokes access in `agent-grants.json`.
 - **Refresh:** the watcher ignores `.silkweb/`, except that changes under `.silkweb/agent-events/` and
   `.silkweb/agent-history/` reload the receipts on their own debounce. That reload never rescans the Library and never writes anything,
   so it can't feed back into the index, search or autosave. The new Document itself arrives through the
