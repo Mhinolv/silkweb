@@ -462,9 +462,20 @@ struct ColorPreviewCard: View {
 struct LibrarySettingsTab: View {
     let workspace: LibraryWorkspace
     var showWindow: () -> Void = {}
+    var access = AgentAccessModel.shared
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         SettingsForm {
+            // #229: “Agent access  3 grants · 1 request waiting”, managed in the Agent Access window.
+            Section {
+                LabeledContent("Agent access") {
+                    HStack {
+                        Text(access.summary).foregroundStyle(.secondary)
+                        Button("Manage…") { openWindow(id: AgentAccessModel.sceneID) }
+                    }
+                }
+            }
             Section {
                 LabeledContent("Location") {
                     LibraryPathControl(url: workspace.root)

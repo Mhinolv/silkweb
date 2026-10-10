@@ -396,8 +396,9 @@ public enum AgentGrantInit {
                 status: 77,
                 message: "The grant “\(project)” \(reason). "
                     + (approving
-                        ? "Approving never widens access; edit agent-grants.json to change it."
-                        : "grant init never widens access; edit agent-grants.json to change it. Nothing was saved."))
+                        ? "Approving never widens access. " + changeInAgentAccess
+                        : "grant init never widens access. Change the grant in Silkweb’s Agent Access window. "
+                            + "Nothing was saved."))
         }
         if grant.isRevoked { throw refuse("is turned off") }
         if !sameLibrary(grant.library, library) {
@@ -437,6 +438,9 @@ public enum AgentGrantInit {
         }
         return (file, grant, .narrowed(from: previous))
     }
+
+    /// #229: the refused approval's hint. The owner widens in the app (`AgentGrantOwner`), then approves.
+    public static let changeInAgentAccess = "Change the grant in Agent Access first, then approve."
 
     /// The stored location names `library`: by its path, or by where its bookmark or path resolves.
     static func sameLibrary(_ location: LibraryLocation, _ library: URL) -> Bool {

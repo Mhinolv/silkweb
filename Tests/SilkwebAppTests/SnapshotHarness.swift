@@ -111,9 +111,13 @@ struct SnapshotScenario {
     /// then the window is built by `restoreSession`. "two-sections" restores both; "section-missing" deletes Writing
     /// first and selects its Not Found row.
     var restore: String? = nil
-    /// #203 access requests: "waiting", "history" and "empty" host the Access Requests sheet; "requests-only" is
-    /// the library window in Agent Activity with requests but no receipts; "widen-refused" is the refusal alert.
+    /// #203 access requests: "requests-only" is the library window in Agent Activity with requests but no receipts.
     var accessRequests: String? = nil
+    /// #229 the Agent Access window (780×520) on two Libraries, three grants (Coffee paused) and requests from both:
+    /// "grants" (Silkweb selected), "detail-edited" (unsaved widening edits), "paused" (Coffee selected), "requests"
+    /// (Access Requests selected), "new-grant" (the New Grant sheet), "empty" (no grants, no requests) and
+    /// "widen-refused" (the approval refusal alert with Show Grant).
+    var agentAccess: String? = nil
     /// #230 Library changes outside Silkweb, in Agent Activity: "only" (one direct write, no receipts), "mixed" (the
     /// #137 receipts with “Helper spike” changed outside Silkweb), "info" (Document Info on the direct write) and
     /// "filter" (All Agents ▾ ▸ Outside Silkweb on the #137 fixture: the changed envelope and the unkept claim).
@@ -305,18 +309,22 @@ struct SnapshotScenario {
         .init(name: "agent-provenance-proposals-only", agentActivity: "proposals-only"),
         .init(name: "agent-activity-updated-row", agentActivity: "updated-row"),
         .init(name: "agent-update-open-clean", agentActivity: "update-open"),
-        // #203: the Access Requests sheet (two waiting, one with a message and folders; history; empty), Agent
-        // Activity with requests only (sidebar hand.raised, strip button, empty list) and the widen refusal.
-        .init(name: "access-requests-waiting", accessRequests: "waiting"),
-        .init(name: "access-requests-history", accessRequests: "history"),
-        .init(name: "access-requests-empty", accessRequests: "empty"),
+        // #203: Agent Activity with requests only (sidebar hand.raised, strip button, empty list).
         .init(name: "agent-activity-requests-only", accessRequests: "requests-only"),
+        // #229: the Agent Access window (grants for two Libraries, one paused; an edited grant; the paused grant;
+        // every Library's requests; New Grant; no grants) and the widen refusal with Show Grant.
+        .init(name: "agent-access-grants", agentAccess: "grants"),
+        .init(name: "agent-access-detail-edited", agentAccess: "detail-edited"),
+        .init(name: "agent-access-paused", agentAccess: "paused"),
+        .init(name: "agent-access-requests", agentAccess: "requests"),
+        .init(name: "agent-access-new-grant", agentAccess: "new-grant"),
+        .init(name: "agent-access-empty", agentAccess: "empty"),
+        .init(name: "agent-access-widen-refused", agentAccess: "widen-refused"),
         // #230: changes outside Silkweb in Agent Activity (text only), Document Info's block, and the filter.
         .init(name: "agent-activity-outside-only", outsideChanges: "only"),
         .init(name: "agent-activity-mixed", outsideChanges: "mixed"),
         .init(name: "agent-outside-info", outsideChanges: "info"),
         .init(name: "agent-activity-outside-filter", outsideChanges: "filter"),
-        .init(name: "access-request-widen-refused", accessRequests: "widen-refused"),
         .init(name: "new-document", folder: "", document: "Snapshot Fixtures/Empty Document.md", createDocument: true),
         .init(
             name: "new-document-in-folder", folder: "Snapshot Fixtures/Empty Folder",
@@ -1155,6 +1163,63 @@ final class SnapshotHarness {
             [.creationDate: date, .modificationDate: date], ofItemAtPath: claimed.path)
     }
 
+    /// #229: an Agent Access model on disposable grants and requests files beside the Library, never the owner's.
+    /// Authentication and alerts are refused, so nothing a capture triggers can save.
+    func agentAccessModel(_ state: String, root: URL, temporary: URL) async throws -> AgentAccessModel {
+        let support = temporary.appendingPathComponent("Support")
+        let library = root.resolvingSymlinksInPath()
+        let writing = temporary.appendingPathComponent("Writing").resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: writing, withIntermediateDirectories: true)
+        let model = AgentAccessModel()
+        model.grantsURL = support.appendingPathComponent("agent-grants.json")
+        model.requestStore = AgentAccessRequestStore(url: support.appendingPathComponent("agent-access-requests.json"))
+        model.clock = { SnapshotScenario.requestsNow }
+        model.authenticate = { _ in false }
+        model.present = { _, _ in .abort }
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        if state != "empty" {
+            let created = SnapshotScenario.requestsNow.addingTimeInterval(-9 * 86_400)
+            try AgentGrantFile(grants: [
+                AgentGrant(
+                    project: "Silkweb", library: LibraryLocation(path: library.path), access: .readCreate,
+                    extraReadFolders: ["Coffee/Brewing Guides"], createdAt: created, agentFolder: "Claude"),
+                AgentGrant(
+                    project: "Coffee", library: LibraryLocation(path: library.path), access: .read,
+                    label: "Coffee notes", createdAt: created,
+                    revokedAt: SnapshotScenario.requestsNow.addingTimeInterval(-86_400)),
+                AgentGrant(
+                    project: "Novel", library: LibraryLocation(path: writing.path), access: .readCreateUpdate,
+                    createdAt: created),
+            ]).write(to: model.grantsURL)
+            var requests =
+                SnapshotScenario.accessRequests("waiting", library: library.path)
+                + SnapshotScenario.accessRequests("history", library: library.path)
+            // One waiting request comes from the other Library.
+            requests[1].libraryRoot = writing.path
+            requests[1].project = "Novel"
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(AgentAccessRequestFile(requests: requests)).write(to: model.requestStore.url)
+        }
+        await model.reload()
+        switch state {
+        case "grants": await model.select(.grant("Silkweb"))
+        case "detail-edited":
+            await model.select(.grant("Silkweb"))
+            model.draft?.label = "Silkweb repo"
+            model.draft?.access = .readCreateUpdate
+            model.addReadFolder("Travel/Japan")
+        case "paused": await model.select(.grant("Coffee"))
+        case "requests": await model.select(.requests)
+        case "new-grant":
+            model.beginNewGrant()
+            model.newGrant?.library = library.path
+            model.newGrant?.project = "Silkweb"
+        default: break
+        }
+        return model
+    }
+
     private func render(_ scenario: SnapshotScenario, dark: Bool, output: URL) async -> SnapshotManifest.Capture {
         let size = scenario.windowWidth.map { NSSize(width: $0, height: self.size.height) } ?? self.size
         var capture = SnapshotManifest.Capture(
@@ -1222,6 +1287,10 @@ final class SnapshotHarness {
                 if let state = scenario.agentActivity {
                     try makeAgentFixture(at: root)
                     try makeAgentUpdateFixture(state, at: root)
+                }
+                // #229: receipts for the Silkweb grant's last activity.
+                if let state = scenario.agentAccess, !["empty", "widen-refused"].contains(state) {
+                    try makeAgentFixture(at: root)
                 }
                 if let state = scenario.outsideChanges {
                     if ["mixed", "filter"].contains(state) { try makeAgentFixture(at: root) }
@@ -1311,18 +1380,24 @@ final class SnapshotHarness {
                 content = AnyView(
                     ExportAlertSnapshot(
                         alert: ExportCommands.missingImageAlert(result, printing: scenario.printWarning)))
-            } else if scenario.accessRequests == "widen-refused" {
+            } else if scenario.agentAccess == "widen-refused" {
                 let refusal = AgentAccessError(
                     code: "approve_would_widen", title: "Can’t Approve This Request",
                     message: "The grant “Silkweb” already exists with Read Only access. Approving never widens "
-                        + "access; edit agent-grants.json to change it.")
-                content = AnyView(ExportAlertSnapshot(alert: AccessRequestAlerts.refusal(refusal)))
-            } else if let state = scenario.accessRequests, state != "requests-only" {
-                // Host the production sheet itself; never present or order a sheet window.
+                        + "access. Change the grant in Agent Access first, then approve.")
+                content = AnyView(ExportAlertSnapshot(alert: AccessRequestAlerts.refusal(refusal, showGrant: true)))
+            } else if let state = scenario.agentAccess {
+                let model = try await bounded("agent access") {
+                    try await self.agentAccessModel(state, root: root, temporary: temporary)
+                }
+                // Host the production window content (and sheet) at the window's default size; never order either.
+                let view: AnyView =
+                    state == "new-grant" && model.newGrant != nil
+                    ? AnyView(NewGrantSheet(model: model, form: model.newGrant!))
+                    : AnyView(AgentAccessView(model: model).frame(width: 780, height: 520))
                 content = AnyView(
-                    AccessRequestsSheet(workspace: workspace)
-                        .background(Color(nsColor: .windowBackgroundColor))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity))
+                    view.frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(nsColor: .windowBackgroundColor)))
             } else if scenario.pdfProgress {
                 // Host the production progress sheet itself; never present or order a sheet window.
                 content = AnyView(

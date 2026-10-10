@@ -128,7 +128,17 @@ public struct AgentActivity: Equatable, Sendable {
         }
     }
 
-    static func displayName(_ agent: String) -> String {
+    /// #229: the grants (receipt `grantId`, the project key) behind the latest writes, with Document counts, in
+    /// natural order. Receipts without a grant are left out.
+    public static func grants(in entries: [AgentActivityEntry]) -> [(id: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for entry in entries where !entry.receipt.grantId.isEmpty { counts[entry.receipt.grantId, default: 0] += 1 }
+        return counts.sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }.map {
+            (id: $0.key, count: $0.value)
+        }
+    }
+
+    public static func displayName(_ agent: String) -> String {
         let trimmed = agent.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Unknown agent" : trimmed
     }

@@ -71,7 +71,8 @@ Or give every answer as an option, so it asks nothing:
   may also update documents an agent created) or `read` (Read Only).
 - It keeps the other grants in the file, and running it again with the same answers changes nothing.
   It never widens an existing grant: more access, another Library, or turning a grant back on. To do
-  that, edit the file as shown below. Going from Read and Create to Read Only is allowed.
+  that, use Silkweb's **Go ▸ Agent Access…** window (it asks for Touch ID or your password), or edit the
+  file as shown below. Going from Read and Create to Read Only is allowed.
 - It never creates anything in the Library. If the Library isn't on a local APFS or HFS+ disk, the
   grant is still saved, with a warning: agents can read it, but creating stays off.
 - `--dry-run` shows the grant and the commands without saving anything.
