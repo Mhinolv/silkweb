@@ -57,8 +57,7 @@ struct FolderSidebar: NSViewRepresentable {
     }
 
     /// The source-list outline both sidebars share: one Library's, and the window's sections (#195).
-    static func makeOutline() -> (NSScrollView, SidebarOutlineView) {
-        let scroll = NSScrollView()
+    static func makeOutline(in scroll: NSScrollView = NSScrollView()) -> (NSScrollView, SidebarOutlineView) {
         scroll.hasVerticalScroller = true
         // With legacy scroll bars (a mouse attached) a short folder list shows no empty track (1.81).
         scroll.autohidesScrollers = true

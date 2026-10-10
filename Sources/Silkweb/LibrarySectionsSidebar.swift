@@ -78,7 +78,8 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
 
     func makeScrollView() -> NSScrollView {
         // A source list doesn't indent rows under group rows: every Library's rows sit where a lone Library's do.
-        let (scroll, outline) = FolderSidebar.makeOutline()
+        let scroll = SectionsScrollView()
+        let outline = FolderSidebar.makeOutline(in: scroll).1
         outline.floatsGroupRows = false
         outline.delegate = self
         outline.dataSource = self
@@ -105,9 +106,46 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
             for header in self?.headers ?? [] { header.coordinator?.finishDrag(accepted: false) }
         }
         outline.setAccessibilityLabel("Libraries")
+        let toggle = scroll.toggle
+        toggle.target = self
+        toggle.action = #selector(toggleAll(_:))
         self.outline = outline
         self.scroll = scroll
         return scroll
+    }
+
+    /// #225 (owner decision): the sidebar's top-right toggle, with two or more sections only. It collapses every
+    /// section while any is expanded, else expands them all; its symbol, tooltip and AX label name what it does.
+    var toggleButton: NSButton? { (scroll as? SectionsScrollView)?.toggle }
+
+    private func updateToggle() {
+        guard let scroll = scroll as? SectionsScrollView else { return }
+        let shown = registry.sections.count > 1
+        let collapses = registry.canCollapseAllSections
+        let title = collapses ? "Collapse All Libraries" : "Expand All Libraries"
+        let toggle = scroll.toggle
+        if toggle.toolTip != title {
+            toggle.image = NSImage(
+                systemSymbolName: collapses ? "rectangle.compress.vertical" : "rectangle.expand.vertical",
+                accessibilityDescription: nil)
+            toggle.toolTip = title
+            toggle.setAccessibilityLabel(title)
+        }
+        toggle.isHidden = !shown
+        toggle.isEnabled = collapses || registry.canExpandAllSections
+        // The first header's title stops short of the button.
+        if let outline, let first = headers.first, outline.row(forItem: first) >= 0,
+            let cell = outline.view(atColumn: 0, row: outline.row(forItem: first), makeIfNecessary: false)
+                as? SectionHeaderCell
+        {
+            configure(cell, header: first)
+        }
+        scroll.tile()
+    }
+
+    @objc private func toggleAll(_ sender: NSButton) {
+        registry.setAllSectionsCollapsed(registry.canCollapseAllSections)
+        updateToggle()
     }
 
     // MARK: Updates
@@ -168,6 +206,7 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
         }
         restoringDepth -= 1
         if rebuilt || currentChanged { applyCurrent() }
+        updateToggle()
         let id = ObjectIdentifier(current)
         if revealRequests[id] != current.sectionRevealRequest {
             revealRequests[id] = current.sectionRevealRequest
@@ -347,6 +386,7 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
         // #196: a Library that couldn't open stays secondary, with a trailing warning.
         cell.textField?.textColor = isCurrent && !unavailable ? .labelColor : .secondaryLabelColor
         cell.showsWarning = unavailable
+        cell.reservesToggle = header === headers.first && toggleButton?.isHidden == false
         cell.setAccessibilityLabel("\(header.title) library")
         let value = [isCurrent ? "current" : nil, header.unavailable?.title.lowercased()].compactMap { $0 }
         cell.setAccessibilityValue(value.isEmpty ? nil : value.joined(separator: ", "))
@@ -419,6 +459,7 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
             guard !restoring else { return }
             // The Show/Hide chevron: a collapsed section keeps its selection and its Library stays open.
             header.workspace.sectionCollapsed = !expanded
+            updateToggle()
             guard expanded else { return }
             // After AppKit has inserted the section's rows: inside this notification they can't be selected yet.
             DispatchQueue.main.async { [weak self] in
@@ -508,6 +549,12 @@ final class SectionHeaderCell: NSTableCellView {
     /// #196: an 11 pt orange warning after the name while the Library can't open.
     let warning = NSImageView()
     private lazy var warningHidden = warning.widthAnchor.constraint(equalToConstant: 0)
+    private var trailing: NSLayoutConstraint!
+
+    /// #225: the first header's title stops short of the sidebar's Collapse / Expand All toggle.
+    var reservesToggle = false {
+        didSet { trailing.constant = reservesToggle ? -SectionsScrollView.toggleReserve : -4 }
+    }
 
     var showsWarning: Bool {
         get { !warning.isHidden }
@@ -534,11 +581,12 @@ final class SectionHeaderCell: NSTableCellView {
         warning.setAccessibilityElement(false)
         warning.translatesAutoresizingMaskIntoConstraints = false
         addSubview(warning)
+        trailing = warning.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -4)
         NSLayoutConstraint.activate([
             text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
             text.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.sidebarRowHeight / 2),
             warning.leadingAnchor.constraint(equalTo: text.trailingAnchor, constant: 4),
-            warning.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -4),
+            trailing,
             warning.centerYAnchor.constraint(equalTo: text.centerYAnchor),
         ])
         showsWarning = false
@@ -547,6 +595,46 @@ final class SectionHeaderCell: NSTableCellView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+
+/// The sections' scroll view: it holds the Collapse / Expand All toggle (#225) at its top right, centred on the
+/// first header's title while the list is at the top; it doesn't scroll with the rows.
+final class SectionsScrollView: NSScrollView {
+    /// Room the first header's title leaves for the toggle.
+    static let toggleReserve: CGFloat = 28
+    static let toggleSize: CGFloat = 20
+    static let toggleInset: CGFloat = 6
+
+    let toggle: NSButton = {
+        let button = NSButton()
+        button.title = ""
+        button.isBordered = false
+        button.bezelStyle = .regularSquare
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyDown
+        button.contentTintColor = .secondaryLabelColor
+        button.symbolConfiguration = .init(pointSize: 12, weight: .regular)
+        button.isHidden = true
+        return button
+    }()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        addSubview(toggle)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func tile() {
+        super.tile()
+        let outline = documentView as? NSOutlineView
+        let firstRow = outline.map { $0.numberOfRows > 0 ? $0.rect(ofRow: 0).midY : nil } ?? nil
+        let midY = contentView.contentInsets.top + (firstRow ?? Spacing.sidebarRowHeight / 2)
+        let size = Self.toggleSize
+        toggle.frame = NSRect(
+            x: bounds.maxX - Self.toggleInset - size,
+            y: isFlipped ? midY - size / 2 : bounds.maxY - midY - size / 2, width: size, height: size)
+    }
 }
 
 /// No capsule and no thread guide on a section header.

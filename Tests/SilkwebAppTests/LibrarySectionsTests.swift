@@ -681,6 +681,109 @@ final class LibrarySectionsTests: XCTestCase {
         XCTAssertTrue(registry.canExpandAllSections)
     }
 
+    /// #225 (owner decision): the sidebar's top-right toggle, two or more sections only. It collapses every section
+    /// while any is expanded, else expands them all; symbol, tooltip and AX label follow. It stays put on resize.
+    func testSidebarToggleCollapsesAndExpandsAllLibraries() async throws {
+        let registry = makeRegistry()
+        let alpha = try await added(registry, try library("Alpha", document: "Alpha"))
+        let (window, sidebar) = try hostWindow(registry)
+        try await settle(window)
+        let sections = try XCTUnwrap(sidebar())
+        let outline = try XCTUnwrap(sections.outline)
+        let toggle = try XCTUnwrap(sections.toggleButton)
+        XCTAssertTrue(toggle.isHidden, "one section: no toggle")
+        var header = try XCTUnwrap(outline.view(atColumn: 0, row: 0, makeIfNecessary: true) as? SectionHeaderCell)
+        XCTAssertFalse(header.reservesToggle)
+
+        let beta = try await added(registry, try library("Beta", document: "Beta"))
+        registry.focus(alpha)
+        try await settle(window)
+        XCTAssertFalse(toggle.isHidden)
+        XCTAssertTrue(toggle.isEnabled)
+        XCTAssertFalse(toggle.isBordered)
+        XCTAssertEqual(toggle.title, "", "icon only")
+        XCTAssertTrue(toggle.keyEquivalent.isEmpty, "no shortcut")
+        XCTAssertEqual(toggle.contentTintColor, .secondaryLabelColor)
+
+        func assertState(_ title: String, _ symbol: String, line: UInt = #line) {
+            XCTAssertEqual(toggle.toolTip, title, line: line)
+            XCTAssertEqual(toggle.accessibilityLabel(), title, line: line)
+            XCTAssertEqual(
+                toggle.image?.tiffRepresentation,
+                NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.tiffRepresentation, line: line)
+            XCTAssertNotNil(toggle.image, line: line)
+        }
+
+        /// Top right of the sidebar, centred on the first header's title, which stops short of it.
+        func assertPlacement(line: UInt = #line) throws {
+            let scroll = try XCTUnwrap(toggle.superview, line: line)
+            let frame = toggle.convert(toggle.bounds, to: nil)
+            let scrollFrame = scroll.convert(scroll.bounds, to: nil)
+            XCTAssertEqual(scrollFrame.maxX - frame.maxX, SectionsScrollView.toggleInset, accuracy: 0.5, line: line)
+            header = try XCTUnwrap(
+                outline.view(atColumn: 0, row: 0, makeIfNecessary: true) as? SectionHeaderCell, line: line)
+            header.layoutSubtreeIfNeeded()
+            let title = try XCTUnwrap(header.textField, line: line)
+            let titleFrame = title.convert(title.bounds, to: nil)
+            XCTAssertEqual(frame.midY, titleFrame.midY, accuracy: 1, "on the first header's line", line: line)
+            XCTAssertLessThan(titleFrame.maxX, frame.minX, line: line)
+            XCTAssertTrue(header.reservesToggle, line: line)
+            XCTAssertTrue(scrollFrame.contains(frame), line: line)
+        }
+
+        assertState("Collapse All Libraries", "rectangle.compress.vertical")
+        try assertPlacement()
+
+        // A click collapses every section, the current one included.
+        toggle.performClick(nil)
+        try await settle(window)
+        XCTAssertEqual(rows(outline), ["# Alpha", "# Beta"])
+        XCTAssertEqual([alpha, beta].map(\.sectionCollapsed), [true, true])
+        XCTAssertTrue(registry.current === alpha)
+        assertState("Expand All Libraries", "rectangle.expand.vertical")
+        try assertPlacement()
+
+        // One chevron expanding a section: any expanded means the toggle collapses again.
+        outline.expandItem(outline.item(atRow: 1))
+        try await settle(window)
+        assertState("Collapse All Libraries", "rectangle.compress.vertical")
+        toggle.performClick(nil)
+        try await settle(window)
+        XCTAssertEqual(rows(outline), ["# Alpha", "# Beta"])
+
+        // The View menu's command flips it too; then a click expands everything with Alpha's scope selected.
+        registry.setAllSectionsCollapsed(false)
+        try await settle(window)
+        assertState("Collapse All Libraries", "rectangle.compress.vertical")
+        registry.setAllSectionsCollapsed(true)
+        try await settle(window)
+        assertState("Expand All Libraries", "rectangle.expand.vertical")
+        toggle.performClick(nil)
+        try await settle(window)
+        XCTAssertEqual(
+            rows(outline),
+            ["# Alpha", "All Documents", "Alpha", "Notes", "Tags", "# Beta", "All Documents", "Beta", "Notes", "Tags"])
+        XCTAssertEqual(outline.selectedRow, 2, "Alpha's remembered scope, its root")
+        assertState("Collapse All Libraries", "rectangle.compress.vertical")
+
+        // Resize sweep: it stays at the top right.
+        for size in [
+            NSSize(width: 900, height: 600), NSSize(width: 1800, height: 1100), NSSize(width: 1400, height: 900),
+        ] {
+            window.setContentSize(size)
+            try await settle(window, 1)
+            try assertPlacement()
+        }
+
+        // Back to one section: hidden, and the header's title has its full width again.
+        let closed = await registry.closeLibrary(beta)
+        XCTAssertTrue(closed)
+        try await settle(window)
+        XCTAssertTrue(toggle.isHidden)
+        header = try XCTUnwrap(outline.view(atColumn: 0, row: 0, makeIfNecessary: true) as? SectionHeaderCell)
+        XCTAssertFalse(header.reservesToggle)
+    }
+
     func testHeaderMenuAndFileMenuCloseLibrary() async throws {
         let registry = makeRegistry()
         let (window, sidebar) = try hostWindow(registry)
