@@ -468,7 +468,7 @@ final class LibrarySectionsTests: XCTestCase {
         XCTAssertTrue(outline.delegate?.outlineView?(outline, isGroupItem: outline.item(atRow: 0)!) == true)
         XCTAssertFalse(outline.delegate?.outlineView?(outline, shouldSelectItem: outline.item(atRow: 0)!) ?? true)
         XCTAssertEqual(outline.rect(ofRow: 0).height, Spacing.sidebarRowHeight, "no space above the first header")
-        XCTAssertEqual(outline.rect(ofRow: 5).height, Spacing.sidebarRowHeight + 12, "12 pt above the others")
+        XCTAssertEqual(outline.rect(ofRow: 5).height, SidebarSections.laterHeaderHeight, "a shorter row for the others")
         // Every Library's rows sit where a lone Library's do: the header level adds no indentation.
         XCTAssertEqual(outline.frameOfCell(atColumn: 0, row: 1).minX, outline.frameOfCell(atColumn: 0, row: 6).minX)
         XCTAssertEqual(outline.level(forRow: 1), 1)
@@ -518,6 +518,46 @@ final class LibrarySectionsTests: XCTestCase {
             try await settle(window, 1)
             XCTAssertEqual(outline.numberOfRows, 10)
         }
+    }
+
+    /// #224: a later Library's header sits close under the previous section, measured on the real outline (a source
+    /// list adds its own space above a group row, so the delegate's row height alone doesn't show the gap).
+    func testLaterSectionHeaderSitsCloseUnderThePreviousSection() async throws {
+        let registry = makeRegistry()
+        let (window, sidebar) = try hostWindow(registry)
+        let alpha = try await added(registry, try library("Alpha", document: "Alpha"))
+        _ = try await added(registry, try library("Beta", document: "Beta"))
+        try await settle(window)
+        let outline = try XCTUnwrap(sidebar()?.outline)
+        XCTAssertEqual(rows(outline)[4], "Tags")
+        XCTAssertEqual(rows(outline)[5], "# Beta")
+
+        /// From the bottom of the row above a header to the middle of the header's title.
+        func gap(above row: Int) throws -> CGFloat {
+            outline.layoutSubtreeIfNeeded()
+            let cell = try XCTUnwrap(outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? SectionHeaderCell)
+            cell.layoutSubtreeIfNeeded()
+            let label = try XCTUnwrap(cell.textField)
+            let frame = outline.convert(label.bounds, from: label)
+            XCTAssertTrue(outline.rect(ofRow: row).contains(frame), "the title isn't clipped by its row")
+            return frame.midY - outline.rect(ofRow: row - 1).maxY
+        }
+        XCTAssertLessThanOrEqual(try gap(above: 5), 20, "Alpha's last row to Beta's header label midline")
+        XCTAssertEqual(outline.rect(ofRow: 0).height, Spacing.sidebarRowHeight, "the first header: a lone row's height")
+
+        // Resizing doesn't move it.
+        for size in [NSSize(width: 900, height: 560), NSSize(width: 1600, height: 1000)] {
+            window.setContentSize(size)
+            try await settle(window, 1)
+            XCTAssertLessThanOrEqual(try gap(above: 5), 20, "at \(size)")
+        }
+
+        // With Alpha collapsed, Beta's header sits as close under Alpha's.
+        outline.collapseItem(outline.item(atRow: 0))
+        XCTAssertTrue(alpha.sectionCollapsed)
+        try await settle(window, 1)
+        XCTAssertEqual(rows(outline)[1], "# Beta")
+        XCTAssertLessThanOrEqual(try gap(above: 1), 20, "Alpha's header to Beta's header label midline")
     }
 
     func testCollapsedSectionHidesItsRowsAndKeepsItsSelection() async throws {
