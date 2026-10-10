@@ -23,6 +23,8 @@ public struct AgentAccessRequest: Codable, Equatable, Sendable, Identifiable {
     public var profile: AgentGrant.Access
     /// Extra read folders, Library-relative POSIX paths.
     public var readFolders: [String]
+    /// #228: create folders (`create_folders`), Library-relative POSIX paths. Only with a create profile.
+    public var createFolders: [String]
     /// One line from the agent, at most 280 characters. Shown to the owner as the agent's words.
     public var message: String
     /// Claims, not verified.
@@ -43,13 +45,14 @@ public struct AgentAccessRequest: Codable, Equatable, Sendable, Identifiable {
         requestId: String, libraryRoot: String, project: String, profile: AgentGrant.Access,
         readFolders: [String] = [], message: String = "", agent: String = "", session: String = "",
         client: String = "", requestedAt: Date, expiresAt: Date, status: Status = .pending, decidedAt: Date? = nil,
-        decidedVia: Via? = nil, ownerNote: String = ""
+        decidedVia: Via? = nil, ownerNote: String = "", createFolders: [String] = []
     ) {
         self.requestId = requestId
         self.libraryRoot = libraryRoot
         self.project = project
         self.profile = profile
         self.readFolders = readFolders
+        self.createFolders = createFolders
         self.message = message
         self.agent = agent
         self.session = session
@@ -81,12 +84,20 @@ public struct AgentAccessRequest: Codable, Equatable, Sendable, Identifiable {
     /// The claimed agent, or “Unknown agent”.
     public var agentName: String { AgentActivity.displayName(agent) }
 
-    /// “Memory › Projects › Silkweb + 2 read folders: Notes › Swift, Specs”.
+    /// “Memory › Projects › Silkweb + 2 read folders: Notes › Swift, Specs · Create in: Memory › Projects › Silkweb”.
     public var folderSummary: String {
-        let root = AgentMemoryContract.displayPath(AgentMemoryContract.projectRoot(project))
-        guard !readFolders.isEmpty else { return root }
-        let count = readFolders.count == 1 ? "1 read folder" : "\(readFolders.count) read folders"
-        return root + " + \(count): " + readFolders.map(AgentMemoryContract.displayPath).joined(separator: ", ")
+        var summary = AgentMemoryContract.displayPath(AgentMemoryContract.projectRoot(project))
+        if !readFolders.isEmpty {
+            let count = readFolders.count == 1 ? "1 read folder" : "\(readFolders.count) read folders"
+            summary += " + \(count): " + readFolders.map(AgentMemoryContract.displayPath).joined(separator: ", ")
+        }
+        if !createFolders.isEmpty { summary += " · " + createSummary }
+        return summary
+    }
+
+    /// #228: “Create in: Memory › Projects › Silkweb, Notes › Swift”.
+    public var createSummary: String {
+        "Create in: " + createFolders.map(AgentMemoryContract.displayPath).joined(separator: ", ")
     }
 
     /// “claude-code wants Read and Create for “Silkweb””.
@@ -120,15 +131,18 @@ public struct AgentAccessRequest: Codable, Equatable, Sendable, Identifiable {
     /// One VoiceOver element per row: “claude-code wants Read and Create for Silkweb, 3 folders, expires in 30 days”.
     public func accessibilityLabel(_ now: Date) -> String {
         let folders = readFolders.count + 1
-        let summary =
+        var summary =
             "\(agentName) wants \(profile.displayName) for \(project), \(folders) \(folders == 1 ? "folder" : "folders")"
+        if !createFolders.isEmpty {
+            summary += ", \(createFolders.count) create \(createFolders.count == 1 ? "folder" : "folders")"
+        }
         return summary + ", " + (isPending(at: now) ? expiryLabel(now) : historyLabel(now))
     }
 
     // MARK: Coding
 
     private enum CodingKeys: String, CodingKey {
-        case requestId, libraryRoot, project, profile, readFolders, message, agent, session, client
+        case requestId, libraryRoot, project, profile, readFolders, createFolders, message, agent, session, client
         case requestedAt, expiresAt, status, decidedAt, decidedVia, ownerNote
     }
 
@@ -143,6 +157,7 @@ public struct AgentAccessRequest: Codable, Equatable, Sendable, Identifiable {
         project = text(.project) ?? ""
         profile = (try? values.decodeIfPresent(AgentGrant.Access.self, forKey: .profile)).flatMap { $0 } ?? .read
         readFolders = (try? values.decodeIfPresent([String].self, forKey: .readFolders)).flatMap { $0 } ?? []
+        createFolders = (try? values.decodeIfPresent([String].self, forKey: .createFolders)).flatMap { $0 } ?? []
         message = text(.message) ?? ""
         agent = text(.agent) ?? ""
         session = text(.session) ?? ""
@@ -162,6 +177,7 @@ public struct AgentAccessRequest: Codable, Equatable, Sendable, Identifiable {
         try values.encode(project, forKey: .project)
         try values.encode(profile, forKey: .profile)
         try values.encode(readFolders, forKey: .readFolders)
+        if !createFolders.isEmpty { try values.encode(createFolders, forKey: .createFolders) }
         try values.encode(message, forKey: .message)
         try values.encode(agent, forKey: .agent)
         try values.encode(session, forKey: .session)
@@ -212,15 +228,17 @@ public struct AgentAccessRequestDraft: Equatable, Sendable {
     public var project: String
     public var profile: AgentGrant.Access
     public var readFolders: [String]
+    /// #228: create folders, validated like `grant init --create-folder`.
+    public var createFolders: [String] = []
     public var message: String
     public var agent: String
     public var session: String
     public var client: String
 
-    /// The same request: Library, project, profile and folder set. Message and claims don't count.
+    /// The same request: Library, project, profile and folder sets. Message and claims don't count.
     func matches(_ request: AgentAccessRequest) -> Bool {
         request.libraryRoot == libraryRoot && request.project == project && request.profile == profile
-            && Set(request.readFolders) == Set(readFolders)
+            && Set(request.readFolders) == Set(readFolders) && Set(request.createFolders) == Set(createFolders)
     }
 }
 
@@ -262,8 +280,9 @@ public enum AgentAccessRequests {
     /// be a readable folder. Folders are Library-relative and validated like grant paths; the message and claims are
     /// kept on one line with control characters removed.
     public static func draft(
-        library: String, project: String, access: String, readFolders: [String], message: String?, agent: String?,
-        session: String?, client: String?, currentDirectory: String = FileManager.default.currentDirectoryPath
+        library: String, project: String, access: String, readFolders: [String], createFolders: [String] = [],
+        message: String?, agent: String?, session: String?, client: String?,
+        currentDirectory: String = FileManager.default.currentDirectoryPath
     ) throws -> AgentAccessRequestDraft {
         let resolved: AgentGrantInit.Library
         do {
@@ -297,14 +316,19 @@ public enum AgentAccessRequests {
         guard folders.count <= maxReadFolders else {
             throw AgentAccessError.invalidRequest("Ask for at most \(maxReadFolders) read folders.")
         }
+        // #228: create folders follow `grant init --create-folder`'s rules and need a create profile.
+        let creates = try AgentGrantInit.validCreateFolders(createFolders) { AgentAccessError.invalidRequest($0) }
+        if !creates.isEmpty, !profile.allowsCreate {
+            throw AgentAccessError.invalidRequest("Create folders need read-create access.")
+        }
         let line = oneLine(message ?? "")
         guard line.count <= maxMessageLength else {
             throw AgentAccessError.invalidRequest("The message can be at most \(maxMessageLength) characters.")
         }
         let claim = { (text: String?) in String(oneLine(text ?? "").prefix(maxClaimLength)) }
         return AgentAccessRequestDraft(
-            libraryRoot: resolved.url.path, project: key, profile: profile, readFolders: folders, message: line,
-            agent: claim(agent), session: claim(session), client: claim(client))
+            libraryRoot: resolved.url.path, project: key, profile: profile, readFolders: folders,
+            createFolders: creates, message: line, agent: claim(agent), session: claim(session), client: claim(client))
     }
 
     /// Control characters (line breaks, tabs, bidi overrides) become spaces; runs of spaces collapse.
@@ -448,7 +472,7 @@ public struct AgentAccessRequestStore: Sendable {
                 requestId: id, libraryRoot: draft.libraryRoot, project: draft.project, profile: draft.profile,
                 readFolders: draft.readFolders, message: draft.message, agent: draft.agent, session: draft.session,
                 client: draft.client, requestedAt: start,
-                expiresAt: start.addingTimeInterval(AgentAccessRequests.timeToLive))
+                expiresAt: start.addingTimeInterval(AgentAccessRequests.timeToLive), createFolders: draft.createFolders)
             file.requests.append(request)
             prune(&file, now: now)
             return (request, false)
@@ -485,8 +509,9 @@ public struct AgentAccessRequestStore: Sendable {
     }
 
     /// Approves or denies one pending request. Approval merges into `grantsURL` with `grant init`'s rules: a new
-    /// grant is added with the requested read folders; an identical one is left as it is; anything that would widen
-    /// a grant is refused and the request stays pending. Callers are the owner's: the Terminal command after its
+    /// grant is added with the requested read and create folders; an identical one is left as it is; create folders
+    /// (#228) are added to an existing grant, which the owner's Approve confirms; anything else that would widen a
+    /// grant is refused and the request stays pending. Callers are the owner's: the Terminal command after its
     /// terminal check, or the app after owner authentication. Agents have no path here.
     public func decide(
         _ id: String, approve: Bool, note: String = "", via: AgentAccessRequest.Via, grantsURL: URL, now: Date = Date()
@@ -541,7 +566,7 @@ public struct AgentAccessRequestStore: Sendable {
             }
             let merged = try AgentGrantInit.merge(
                 grants, project: request.project, library: library.url, access: request.profile,
-                readFolders: request.readFolders, now: now, approving: true)
+                readFolders: request.readFolders, createFolders: request.createFolders, now: now, approving: true)
             return (merged, library.filesystem)
         } catch let failure as AgentGrantInit.Failure {
             if failure == .folderMissing || failure == .folderUnreadable {

@@ -191,7 +191,8 @@ final class AgentCLITests: XCTestCase {
         XCTAssertEqual(ambiguous.status, 77)
         XCTAssertEqual(try error(ambiguous)["code"] as? String, "grant_required")
         XCTAssertEqual(
-            ambiguous.stderr, "silkweb: Choose a grant with --grant. Available: “Silkweb project”, “Notes”.\n")
+            ambiguous.stderr,
+            "silkweb: Choose a grant with --grant (one per project). Available: “Silkweb project”, “Notes”.\n")
         XCTAssertFalse(ambiguous.stdout.contains(library.path), "labels only, never Library paths")
 
         XCTAssertEqual(try result(run(["memory", "capabilities", "--grant", "Notes"]))["project"] as? String, "Notes")

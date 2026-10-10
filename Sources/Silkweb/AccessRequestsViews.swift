@@ -126,8 +126,12 @@ extension LibraryWorkspace {
             "Give “\(request.agentName)” \(request.profile.displayName) access to “\(request.project)”?"
         let folders = ([AgentMemoryContract.projectRoot(request.project)] + request.readFolders)
             .map(AgentMemoryContract.displayPath).joined(separator: "\n")
+        // #228: the create folders the approval adds, read and create, everything inside them included.
+        let creates =
+            request.createFolders.isEmpty
+            ? "" : "\n\n" + request.createSummary + "\nAgents can read and create in these, and in any folder inside."
         alert.informativeText =
-            folders + "\n\n"
+            folders + creates + "\n\n"
             + (request.profile.allowsCreate
                 ? "Agents can add documents there. They never edit or delete yours."
                 : "Agents can search and read there. They never change anything.")

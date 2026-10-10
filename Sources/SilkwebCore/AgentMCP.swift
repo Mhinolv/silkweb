@@ -595,6 +595,7 @@ public final class AgentMCPServer: @unchecked Sendable {
         let draft = try AgentAccessRequests.draft(
             library: arguments["library"] as? String ?? "", project: arguments["project"] as? String ?? "",
             access: arguments["access"] as? String ?? "", readFolders: arguments["readFolders"] as? [String] ?? [],
+            createFolders: arguments["createFolders"] as? [String] ?? [],
             message: arguments["message"] as? String, agent: agent ?? name ?? "mcp",
             session: arguments["session"] as? String ?? sessionID, client: client ?? name ?? "mcp")
         let submitted = try requests.submit(draft)
@@ -751,8 +752,9 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                     (
                         "folderPath",
                         S.string(
-                            "Instead of folder: a Library-relative folder inside a create folder, such as "
-                                + "Memory/Projects/Silkweb/Progress/Sprint 1. Needs type.")
+                            "Instead of folder: a Library-relative folder inside a create folder (create_roots), such "
+                                + "as Memory/Projects/Silkweb/Progress/Sprint 1. Needs type. progress goes only in "
+                                + "the project’s Progress and handoff only in its Handoffs.")
                     ),
                     ("title", S.string("Sentence case, without “:” or “/”. Becomes the file name.")),
                     (
@@ -836,6 +838,13 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                         S.array(
                             S.string("A Library-relative folder, such as Notes/Swift."),
                             "Extra folders to read, besides the project’s own. At most 10.")
+                    ),
+                    (
+                        "createFolders",
+                        S.array(
+                            S.string("A Library-relative folder, such as Memory/Projects/Silkweb."),
+                            "Folders to read and create in, with every folder inside, for read-create only. "
+                                + "Memory/Projects/<project> is the project’s top level. At most 10.")
                     ),
                     (
                         "message",
