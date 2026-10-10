@@ -574,7 +574,7 @@
           },
           "folderPath" : {
             "type" : "string",
-            "description" : "Instead of folder: a Library-relative folder inside a create folder, such as Memory/Projects/Silkweb/Progress/Sprint 1. Needs type."
+            "description" : "Instead of folder: a Library-relative folder inside a create folder (create_roots), such as Memory/Projects/Silkweb/Progress/Sprint 1. Needs type. progress goes only in a project’s Progress and handoff only in its Handoffs."
           },
           "title" : {
             "type" : "string",
@@ -920,6 +920,14 @@
             "items" : {
               "type" : "string",
               "description" : "A Library-relative folder, such as Notes/Swift."
+            }
+          },
+          "createFolders" : {
+            "type" : "array",
+            "description" : "Folders to read and create in, with every folder inside, for read-create only. Memory/Projects/<project> is the project’s top level. At most 10.",
+            "items" : {
+              "type" : "string",
+              "description" : "A Library-relative folder, such as Memory/Projects/Silkweb."
             }
           },
           "message" : {

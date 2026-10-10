@@ -217,7 +217,8 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
       "library": { "version": 1, "path": "/Users/me/Writing" },
       "access": "read-create",
       "extra_read_folders": ["Reference/Silkweb"],
-      "agent_folder": "Claude"
+      "agent_folder": "Claude",
+      "create_folders": ["Memory/Projects/Silkweb"]
     }
   ]
 }
@@ -241,6 +242,21 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
   fails that grant closed: every operation exits 65 with `invalid_agent_folder` (“The agent folder isn’t a
   valid folder name.”); other grants keep working. `null` or a missing key means no agent folder. The file
   stays `version: 1`: older helpers ignore the key, which only narrows them.
+- `create_folders` (#228, optional) is a list of owner-chosen Library-relative Folders where agents may
+  create, recursively: the Folder itself and every Folder inside it. Each one is also a read folder. Without
+  the key (or with `null` or `[]`) the scope is exactly the default template below. `Memory/Projects/<Project>`
+  lets agents create at the project's top level (an overview, a `Research` Folder the owner names) as well as
+  in the entry folders it holds; `Memory/Agents/<Key>/Notes` adds more of an agent folder; any other Folder,
+  such as `Reference/Shared`, works too. `Memory/Projects` (owner decision, 2026-10-10) gives every project,
+  each one's top level included, for reading, creating and (with `read-create-update`) updating. The Library
+  root, `Memory`, `Memory/Agents` and paths through a reserved Folder (`Proposals`) are refused (compared
+  ignoring case), as are paths that aren't inside the Library. Like `agent_folder`, an invalid entry (or a
+  value that isn't a list of strings) fails that grant closed: every operation exits 65 with
+  `invalid_create_folder` (““Memory” can’t be a create folder: choose a Folder inside the Library, not the
+  Library itself, “Memory” or “Memory › Agents”.”); other grants keep working. The key is written only when
+  the list isn't empty, and the file stays `version: 1`: older helpers ignore it, which only narrows them.
+  There is still one grant per project; a create folder in another project's Folder gives this grant's
+  agents that Folder, and documents created there carry that project as their envelope `project`.
 - **Default template:**
   - Read folders: `Memory/Projects/<Project>/`, the whole `Memory/Agents/<Key>/` when the grant has an
     `agent_folder` (so documents the owner placed at its top level are found), plus any
@@ -252,6 +268,17 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
     too. The agent folder takes only `memory` and `decision` documents (anything else is
     `envelope_invalid_field`), and their envelope `project` is the agent folder key, not the grant's
     project. Receipts still belong to the grant.
+  - `create_folders` (#228) are added to these for create profiles on a qualified filesystem; one that
+    holds a default create folder replaces it in `create_roots`, so `["Memory/Projects/Silkweb"]` gives
+    `create_roots: ["Memory/Projects/Silkweb"]`.
+- **Where each type goes (#228).** `progress` documents go only in a project's
+  `Memory/Projects/<Project>/Progress` and `handoff` documents only in its `…/Handoffs` (or Folders inside
+  them): the grant's own project, or any other project a create folder such as `Memory/Projects` holds.
+  Every other create folder, including a project's top level and any agent folder, takes only `memory` and
+  `decision`; `memory` and `decision` may also go in `Progress` and `Handoffs`. A type in the wrong place is
+  `envelope_invalid_field` (exit 65) and nothing is written. A document created anywhere in
+  `Memory/Agents/<Key>/` has the envelope `project` `<Key>`, one in another project's
+  `Memory/Projects/<Other>/` has `<Other>`; everywhere else it's the grant's project.
 - Containment is checked per path component and compared like APFS: Unicode normalization never
   matters, and case is ignored unless the Library’s volume is case-sensitive.
   `Memory/Projects/Silkweb2` isn’t inside `Memory/Projects/Silkweb`. Symbolic links and hidden items
@@ -265,15 +292,17 @@ With several Libraries open, each needs its own grant: see [Personal Library ›
 The owner adds a grant with `silkweb grant init`, run in Terminal, instead of editing JSON:
 
 ```text
-silkweb grant init [--library <PATH>] [--project <KEY>] [--access read|read-create|read-create-update] [--agent-folder <KEY>] [--yes] [--dry-run] [--grants <FILE>]
+silkweb grant init [--library <PATH>] [--project <KEY>] [--access read|read-create|read-create-update] [--agent-folder <KEY>] [--create-folder <PATH>]... [--yes] [--dry-run] [--grants <FILE>]
 ```
 
 - **Modes.** With `--library`, `--project` and `--access` it asks nothing. Otherwise it prompts on
   stderr for the missing ones: the Library folder (`~` expanded, links resolved, must be a readable
   folder, reported as local disk or not), the project key (one valid Folder name, NFC) and the
   profile (Read Only, Read and Create, or Read, Create and Update), then the optional agent folder
-  (“Agent folder under Memory/Agents (optional, Return to skip): ”, same rules as the project key), then
-  asks “Save to …? [y/N]”. Without a terminal on stdin
+  (“Agent folder under Memory/Agents (optional, Return to skip): ”, same rules as the project key), then,
+  for create profiles without `--create-folder`, one question about the project's top level (“Let agents
+  create anywhere in Memory/Projects/Silkweb, including its top level? [y/N] ”; yes saves
+  `create_folders: ["Memory/Projects/Silkweb"]`), then asks “Save to …? [y/N]”. Without a terminal on stdin
   and with an option missing, it exits 64 (`“grant init” needs --library.`) instead of waiting.
   `--access read-only` means `read`. End of input exits 1 and saves nothing.
 - **Owner only.** Saving to the real grants file needs stdin to be a terminal, even with every option,
@@ -300,6 +329,17 @@ silkweb grant init [--library <PATH>] [--project <KEY>] [--access read|read-crea
   Nothing was saved.”). The summary says “Added agent folder: Memory/Agents/Claude.” A different key than
   the grant's own exits 77 like any other widening; leaving `--agent-folder` out keeps the grant's key. An
   invalid key exits 64.
+- **Create folders (#228).** `--create-folder <PATH>` (repeatable, at most 10) saves `create_folders`.
+  Values are NFC, validated as above (invalid ones exit 64 with the `invalid_create_folder` sentence), and
+  repeats or Folders inside another count once. They need a create profile: with `--access read` it exits
+  64 (“Create folders need read-create or read-create-update access.”). On an existing grant, Folders its
+  `create_folders` already hold change nothing; new ones widen it and use the agent folder's confirmation:
+  init prints “This adds a create folder to the grant “Silkweb”. Agents can read and create in it, and in
+  any folder inside:” with a `Create` line each, asks “Add the create folder to “Silkweb”? [y/N]”, takes
+  `--yes`, and without a terminal exits 77 (“Adding a create folder widens the grant “Silkweb”. …”). With
+  `--agent-folder` too it's one question (“Add the agent folder and create folders to …”). A new Folder
+  replaces saved ones inside it. The summary says “Added create folder: Memory/Projects/Silkweb.” and lists
+  each saved one as `Create`. `create_folders` is otherwise only changed by editing the file.
 - **Unqualified Library:** `read-create` is still saved, with “Agents can read; creating stays off
   until the Library is on a local APFS or HFS+ disk.” The interactive default becomes Read Only.
 - **Nothing in the Library.** It only reads the folder's volume details.
@@ -320,7 +360,8 @@ into a grant. Agents still can't grant themselves anything.
 
 ```text
 silkweb grant request --library <PATH> --project <KEY> --access read|read-create
-                      [--folder <PATH>]... [--message <TEXT>] [--agent <NAME>] [--session <ID>] [--client <NAME>]
+                      [--folder <PATH>]... [--create-folder <PATH>]... [--message <TEXT>] [--agent <NAME>]
+                      [--session <ID>] [--client <NAME>]
 silkweb grant requests [--all]
 silkweb grant approve <REQUEST-ID>
 silkweb grant deny <REQUEST-ID> [--note <TEXT>]
@@ -378,10 +419,14 @@ terminal. They never touch `agent-grants.json` or the Library.
 - `--folder` (MCP `readFolders`) asks for extra **read folders**, Library-relative and validated like
   grant paths (no `..`, hidden names or control characters). Repeats, folders inside another and folders
   inside the project's own Folder count once; at most 10.
+- `--create-folder` (MCP `createFolders`, #228) asks for **create folders**, validated like `grant init
+  --create-folder` (at most 10) and only with `--access read-create` (otherwise `invalid_argument`, “Create
+  folders need read-create access.”). The record stores them as `createFolders` (written only when there
+  are some; earlier records load with none).
 - `--message` is one line for the owner, at most 280 characters: line breaks and other control
   characters become spaces. `--agent`, `--session` and `--client` (default `cli`) are claims, kept to one
   line of at most 100 characters.
-- **Idempotent.** While a pending request with the same Library, project, profile and folder set exists,
+- **Idempotent.** While a pending request with the same Library, project, profile and folder sets exists,
   asking again returns it with `"duplicate": true` (the message and claims don't count).
 - **Limits.** At most 5 pending requests per Library and 50 in all: `too_many_requests` (exit 69),
   “There are already 5 access requests waiting for this Library. Ask the owner to review them.”
@@ -393,11 +438,11 @@ terminal. They never touch `agent-grants.json` or the Library.
 **Deciding (owner).**
 
 - `grant requests` lists waiting requests, oldest first, as plain text, and needs no terminal:
-  `req_3f9a1c2b4d5e  pending  claude-code  Silkweb  Read and Create  ~/Writing + 2 read folders  expires Nov 8`.
+  `req_3f9a1c2b4d5e  pending  claude-code  Silkweb  Read and Create  ~/Writing + 2 read folders + 1 create folder  expires Nov 8`.
   `--all` adds history (`approved Oct 9 in Terminal`, `denied Oct 9 in Silkweb — note`, `expired Sep 8`).
 - `grant approve <ID>` and `grant deny <ID>` **need a terminal** whenever the real requests file or the
   real grants file is involved (exit 77, “Only the owner can approve or deny access. Run this in
-  Terminal.”). They print the request on stderr (agent, profile, Library, folders, message, “Agent and
+  Terminal.”). They print the request on stderr (agent, profile, Library, folders, `Create` folders, message, “Agent and
   session are claimed, not verified.”) and ask `Approve this request? [y/N]` or `Deny this request?
   [y/N]`; anything but `y`/`yes` saves nothing, end of input exits 1.
 - **Approve uses `grant init`'s merge** ([Setting up a grant](#setting-up-a-grant-186)). A new project gets
@@ -408,6 +453,10 @@ terminal. They never touch `agent-grants.json` or the Library.
   pending: “The grant “Silkweb” already exists with Read Only access. Approving never widens access; edit
   agent-grants.json to change it.” A narrower profile narrows the grant, as `grant init` does. On success
   it prints #186's saved summary and install block.
+- **Create folders (#228)** go into a new grant's `create_folders`. On an existing grant, the ones it doesn't
+  already hold are added: the approval itself is the owner's confirmation (the question here, or Approve… and
+  owner authentication in the app), so it's the one widening approval allows, as `--create-folder` is for
+  `grant init`. The summary says “Added create folder: …”.
 - `grant deny <ID> [--note …]` records the note (one line, 280 characters) and never touches the grants.
 - Deciding an unknown, decided or expired request exits 65: “There’s no access request “req_…”.”,
   “This request was already approved in Terminal.”, “This request expired on Sep 8.”
@@ -999,7 +1048,7 @@ and `--supersedes` (create).
 |---|---|---|
 | 0 | Success, including a replayed create | — |
 | 64 | Usage or bad argument | `invalid_argument` |
-| 65 | Bad input data | `envelope_malformed`, `envelope_schema_newer`, `envelope_invalid_field`, `too_large`, `idempotency_conflict`, `not_found`, `revision_changed`, `request_not_found`, `request_decided`, `invalid_agent_folder` |
+| 65 | Bad input data | `envelope_malformed`, `envelope_schema_newer`, `envelope_invalid_field`, `too_large`, `idempotency_conflict`, `not_found`, `revision_changed`, `request_not_found`, `request_decided`, `invalid_agent_folder`, `invalid_create_folder` |
 | 69 | Busy; try again | `library_busy`, `stale_snapshot`, `rate_limited`, `document_has_unsaved_changes`, `too_many_requests` |
 | 70 | Unexpected helper failure | `internal_error` |
 | 74 | Library I/O | `library_not_found`, `library_unreadable`, `unreadable`, `write_failed`, `disk_full`, `permission_denied` |
@@ -1014,7 +1063,7 @@ and `--supersedes` (create).
 
   | Code | Message |
   |---|---|
-  | `grant_required` | Choose a grant with --grant. Available: “Silkweb project”, “Notes”. (Labels only.) |
+  | `grant_required` | Choose a grant with --grant (one per project). Available: “Silkweb project”, “Notes”. (Labels only.) |
   | `grant_not_found` | No agent access named “x” exists. Ask the owner to create one in Silkweb. (With no grants at all: No agent access exists yet. Ask the owner to create one in Silkweb.) |
   | `internal_error` | Silkweb’s helper ran into an unexpected problem. Try again. |
 
@@ -1215,7 +1264,8 @@ or tabs. It never opens anything, and it never posts an announcement, sound, bad
     **All Agents ▾**, or **Go ▸ Access Requests…** (no shortcut; enabled whenever a Library is open).
   - **The sheet** (560×440) lists this Library's requests only: **Waiting**, oldest first, then
     **History**, newest first, at most 50. A waiting row reads “claude-code wants Read and Create for
-    “Silkweb””, the folders (“Memory › Projects › Silkweb + 2 read folders: Notes › Swift, Specs”), the
+    “Silkweb””, the folders (“Memory › Projects › Silkweb + 2 read folders: Notes › Swift, Specs”, then
+    “ · Create in: Memory › Projects › Silkweb” when it asks for create folders, #228), the
     agent's message (“Message from the agent: “…””), and “Oct 9, 2:14 PM · expires in 30 days · agent and
     session are claimed, not verified”, with **Deny…** and **Approve…**. History rows end with “Approved ·
     Oct 9 · in Silkweb”, “Denied · Oct 9 · in Terminal — note” or “Expired · Sep 8”. Each row is one
@@ -1224,7 +1274,8 @@ or tabs. It never opens anything, and it never posts an announcement, sound, bad
   - **Approve…** first checks the request with the same rules as `grant approve`: a widening shows
     **Can’t Approve This Request** with the refusal and the request stays pending; a request decided
     elsewhere shows “This request was already approved in Terminal.” Otherwise it asks **Give
-    “claude-code” Read and Create access to “Silkweb”?** (the folders, then “Agents can add documents
+    “claude-code” Read and Create access to “Silkweb”?** (the folders; any create folders as “Create in:
+    …” and “Agents can read and create in these, and in any folder inside.”; then “Agents can add documents
     there. They never edit or delete yours.”), then **owner authentication** (Touch ID, falling back to
     the account password, via LocalAuthentication). Only then is `agent-grants.json` written, with
     `decidedVia: app`.

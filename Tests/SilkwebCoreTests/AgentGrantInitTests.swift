@@ -139,7 +139,7 @@ final class AgentGrantInitTests: XCTestCase {
         XCTAssertEqual(run(flags(), grants: flagGrants).output.status, 0)
 
         // A relative path is taken from the current directory.
-        let (output, prompts) = run([], answers: ["Writing Library 日本語", "Silkweb", "", "", "y"], terminal: true)
+        let (output, prompts) = run([], answers: ["Writing Library 日本語", "Silkweb", "", "", "", "y"], terminal: true)
         XCTAssertEqual(output.status, 0, output.stderr)
         XCTAssertEqual(output.stderr, "")
         XCTAssertEqual(try Data(contentsOf: grantsURL), try Data(contentsOf: flagGrants))
@@ -156,6 +156,7 @@ final class AgentGrantInitTests: XCTestCase {
                                   change yours or delete anything; earlier versions are kept.
 
             """ + "Choose 1, 2 or 3 [2]: Agent folder under Memory/Agents (optional, Return to skip): "
+                + "Let agents create anywhere in Memory/Projects/Silkweb, including its top level? [y/N] "
                 + "Save to \(grantsURL.path)? [y/N] ")
         XCTAssertTrue(output.stdout.hasPrefix("Saved agent access for “Silkweb” (Read and Create).\n"))
         XCTAssertTrue(output.stdout.hasSuffix(installBlock()))
@@ -181,17 +182,17 @@ final class AgentGrantInitTests: XCTestCase {
     }
 
     func testAnsweringNoOrEndOfInputSavesNothing() throws {
-        let declined = run([], answers: [library.path, "Silkweb", "2", "", "n"], terminal: true)
+        let declined = run([], answers: [library.path, "Silkweb", "2", "", "", "n"], terminal: true)
         XCTAssertEqual(declined.output.status, 0)
         XCTAssertEqual(declined.output.stdout, "Nothing was saved.\n")
         XCTAssertFalse(FileManager.default.fileExists(atPath: grantsURL.path))
 
-        let defaulted = run([], answers: [library.path, "Silkweb", "2", "", ""], terminal: true)
+        let defaulted = run([], answers: [library.path, "Silkweb", "2", "", "", ""], terminal: true)
         XCTAssertEqual(defaulted.output.stdout, "Nothing was saved.\n", "the default answer is No")
 
         for answers in [
             [], [library.path], [library.path, "Silkweb"], [library.path, "Silkweb", "2"],
-            [library.path, "Silkweb", "2", ""],
+            [library.path, "Silkweb", "2", ""], [library.path, "Silkweb", "2", "", ""],
         ] {
             let ended = run([], answers: answers, terminal: true)
             XCTAssertEqual(ended.output.status, 1, "\(answers)")
@@ -229,7 +230,7 @@ final class AgentGrantInitTests: XCTestCase {
             XCTAssertTrue(output.stdout.hasSuffix(installBlock()))
         }
         // Interactive re-runs don't ask to save when nothing would change.
-        let interactive = run([], answers: [library.path, "Silkweb", "", ""], terminal: true)
+        let interactive = run([], answers: [library.path, "Silkweb", "", "", ""], terminal: true)
         XCTAssertEqual(interactive.output.status, 0, interactive.output.stderr)
         XCTAssertFalse(interactive.prompts.contains("Save to"))
         XCTAssertEqual(try Data(contentsOf: grantsURL), saved)
@@ -347,7 +348,7 @@ final class AgentGrantInitTests: XCTestCase {
             run(flags() + ["--agent-folder", "Claude"]).output.stdout.hasPrefix(
                 "Agent access for “Silkweb” is already set up.\n"))
         // Interactively it's an optional question.
-        let asked = run([], answers: [library.path, "Asked", "2", "a/b", "Codex", "y"], terminal: true)
+        let asked = run([], answers: [library.path, "Asked", "2", "a/b", "Codex", "", "y"], terminal: true)
         XCTAssertEqual(asked.output.status, 0, asked.output.stderr)
         XCTAssertTrue(asked.prompts.contains("  The agent folder isn’t a valid folder name.\n"))
         XCTAssertEqual(try load().grant(for: "Asked")?.agentFolder, "Codex")
@@ -504,7 +505,7 @@ final class AgentGrantInitTests: XCTestCase {
             ), interactive.prompts)
         XCTAssertTrue(interactive.prompts.contains("Choose 1, 2 or 3 [1]: "))
         XCTAssertEqual(try load().grant(for: "Asked")?.access, .read)
-        let chosen = run([], answers: [synced.path, "Chosen", "2", "", "y"], terminal: true)
+        let chosen = run([], answers: [synced.path, "Chosen", "2", "", "", "y"], terminal: true)
         XCTAssertTrue(chosen.output.stdout.contains("  ! Agents can read;"))
         XCTAssertEqual(try load().grant(for: "Chosen")?.access, .readCreate)
     }

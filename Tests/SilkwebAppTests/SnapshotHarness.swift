@@ -1908,7 +1908,8 @@ extension SnapshotScenario {
         func request(
             _ id: String, agent: String, project: String, profile: AgentGrant.Access, folders: [String] = [],
             message: String = "", askedDaysAgo: Double, status: AgentAccessRequest.Status = .pending,
-            decidedDaysAgo: Double? = nil, via: AgentAccessRequest.Via? = nil, note: String = ""
+            decidedDaysAgo: Double? = nil, via: AgentAccessRequest.Via? = nil, note: String = "",
+            createFolders: [String] = []
         ) -> AgentAccessRequest {
             let asked = requestsNow.addingTimeInterval(-askedDaysAgo * day)
             return AgentAccessRequest(
@@ -1916,13 +1917,13 @@ extension SnapshotScenario {
                 message: message, agent: agent, session: "2026-10-09-a", client: "cli", requestedAt: asked,
                 expiresAt: asked.addingTimeInterval(AgentAccessRequests.timeToLive), status: status,
                 decidedAt: decidedDaysAgo.map { requestsNow.addingTimeInterval(-$0 * day) }, decidedVia: via,
-                ownerNote: note)
+                ownerNote: note, createFolders: createFolders)
         }
         let waiting = [
             request(
                 "req_3f9a1c2b4d5e", agent: "claude-code", project: "Silkweb", profile: .readCreate,
                 folders: ["Notes/Swift", "Specs"], message: "Need to save handoffs for the Silkweb repo.",
-                askedDaysAgo: 0.2),
+                askedDaysAgo: 0.2, createFolders: ["Memory/Projects/Silkweb"]),
             request("req_8b21d0e4c7aa", agent: "codex", project: "Coffee", profile: .read, askedDaysAgo: 3),
         ]
         let history = [
