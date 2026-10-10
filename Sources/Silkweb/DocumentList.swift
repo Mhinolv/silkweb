@@ -229,10 +229,15 @@ private struct DocumentSummaryIdentity: Hashable {
 
 struct DocumentDetail: View {
     let workspace: LibraryWorkspace
+    /// The window's sections (#197): the tab strip lists every open Library's tabs.
+    var registry: LibraryWindowRegistry? = nil
     @State private var isNarrow = true
     var body: some View {
         VStack(spacing: 0) {
-            if !workspace.tabs.isEmpty { EditorTabBar(workspace: workspace).frame(height: Spacing.tabBarHeight) }
+            // The strip can show while this Library has no tab of its own (#197).
+            if !(registry?.stripTabs.isEmpty ?? workspace.tabs.isEmpty) {
+                EditorTabBar(workspace: workspace, registry: registry).frame(height: Spacing.tabBarHeight)
+            }
             MediaMigrationBanner(workspace: workspace)
             UnreadableRecoveryBanner(workspace: workspace)
             IndexRecoveryBanner(workspace: workspace)

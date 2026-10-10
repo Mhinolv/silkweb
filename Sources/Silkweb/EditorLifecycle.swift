@@ -61,9 +61,16 @@ struct EditorWindowLifecycle: NSViewRepresentable {
         }
         func handleTabKey(_ event: NSEvent) -> Bool {
             let modifiers = event.modifierFlags.intersection([.control, .command, .option, .shift])
-            if event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift], !workspace.tabs.isEmpty {
-                workspace.cycleTab(modifiers.contains(.shift) ? -1 : 1)
-                return true
+            if event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift] {
+                // #197: through the window's whole strip, across Libraries.
+                if let registry, !registry.stripTabs.isEmpty {
+                    registry.cycleTab(modifiers.contains(.shift) ? -1 : 1)
+                    return true
+                }
+                if registry == nil, !workspace.tabs.isEmpty {
+                    workspace.cycleTab(modifiers.contains(.shift) ? -1 : 1)
+                    return true
+                }
             }
             // Handle before the standard window Close command or text view sees the key.
             if event.charactersIgnoringModifiers == "w", modifiers == .command, let id = workspace.activeTabID {

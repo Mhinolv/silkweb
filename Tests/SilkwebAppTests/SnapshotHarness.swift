@@ -93,6 +93,10 @@ struct SnapshotScenario {
     var secondLibrary = false
     /// #195: the second section collapsed with its header's Show/Hide chevron.
     var sectionCollapsed = false
+    /// #197: opens this document in the second Library's tab, so the one strip spans both Libraries.
+    var secondLibraryTab: String? = nil
+    /// #197: Search Library's All Libraries segment, or Quick Open's All Libraries toggle, is on.
+    var allLibraries = false
     /// #195: the welcome screen (no Library open) with three Recent Libraries, one of them missing.
     var welcomeRecents = false
     /// #196 relaunch: a first session quits with this Library and “Writing” open (tabs in both, Writing collapsed),
@@ -357,6 +361,15 @@ struct SnapshotScenario {
         .init(
             name: "sidebar-section-collapsed", folder: "Coffee/Brewing Guides", document: pourOver,
             secondLibrary: true, sectionCollapsed: true),
+        // #197: tabs from two Libraries in one strip, each with its “ · <Library>” suffix; the active one is edited.
+        .init(
+            name: "tabs-two-libraries", folder: "Coffee/Brewing Guides", document: pourOver,
+            tabs: [pourOver, "Travel/Japan/Ten Days in Kyoto.md"], dirtyActive: true, secondLibrary: true,
+            secondLibraryTab: "Drafts/Untitled Idea.md"),
+        // #197: Search Library's All Libraries segment: both Libraries' rows, each location led by its Library.
+        .init(name: "search-all-libraries-scope", searchQuery: "coffee", secondLibrary: true, allLibraries: true),
+        // #197: Quick Open with All Libraries on.
+        .init(name: "quick-open-multi-library", quickQuery: "brew", secondLibrary: true, allLibraries: true),
         .init(name: "welcome-recents", welcomeRecents: true),
         // #196: relaunch restores both sections (Writing collapsed) and the current Library's tabs.
         .init(name: "restore-two-sections", restore: "two-sections"),
@@ -1283,7 +1296,13 @@ final class SnapshotHarness {
                     }
                     try await bounded("second library configuration") {
                         try await self.configure(
-                            SnapshotScenario(name: "second-library", folder: "Vanlife"), workspace: second)
+                            SnapshotScenario(
+                                name: "second-library", folder: "Vanlife",
+                                tabs: scenario.secondLibraryTab.map { [$0] } ?? []),
+                            workspace: second)
+                    }
+                    if scenario.allLibraries {
+                        try await bounded("second library search index") { await second.search.waitForIndex() }
                     }
                     second.sectionCollapsed = scenario.sectionCollapsed
                     shell.focus(workspace)
@@ -1453,6 +1472,13 @@ final class SnapshotHarness {
                 // Search Library's BM25 order comes from the knowledge index (#179).
                 if scenario.searchQuery != nil {
                     try await bounded("knowledge index") { await workspace.knowledge.waitForIndex() }
+                }
+                if scenario.allLibraries {
+                    workspace.search.allLibraries = scenario.searchQuery != nil
+                    workspace.search.quickAllLibraries = scenario.quickQuery != nil
+                    for other in registry?.sections ?? [] where other !== workspace {
+                        try await bounded("other knowledge index") { await other.knowledge.waitForIndex() }
+                    }
                 }
                 try await bounded("search query") { await workspace.search.query(quick: scenario.quickQuery != nil) }
                 if let error = workspace.search.error { throw SnapshotFailure.error(error) }

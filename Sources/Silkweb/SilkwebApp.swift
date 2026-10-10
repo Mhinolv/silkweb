@@ -211,25 +211,29 @@ struct TabCommands: Commands {
     var body: some Commands {
         // Tab-scoped items and Save act only while the library window is key (#104).
         let key = workspace.menuState.libraryKey
+        // #197: with sections, the items work on the window's one strip, across Libraries; the active tab is the
+        // current Library's.
+        let strip = registry?.stripTabs ?? workspace.tabs.map { .init(workspace: workspace, tab: $0) }
+        let active = strip.firstIndex { $0.workspace === workspace && $0.tab.id == workspace.activeTabID }
         CommandGroup(after: .windowArrangement) {
-            Button("Show Next Tab") { workspace.cycleTab(1) }
-                .keyboardShortcut("]", modifiers: [.command, .shift]).disabled(!key || workspace.tabs.isEmpty)
-            Button("Show Previous Tab") { workspace.cycleTab(-1) }
-                .keyboardShortcut("[", modifiers: [.command, .shift]).disabled(!key || workspace.tabs.isEmpty)
+            Button("Show Next Tab") { cycleTab(1) }
+                .keyboardShortcut("]", modifiers: [.command, .shift]).disabled(!key || strip.isEmpty)
+            Button("Show Previous Tab") { cycleTab(-1) }
+                .keyboardShortcut("[", modifiers: [.command, .shift]).disabled(!key || strip.isEmpty)
             Button("Keep Open") {
                 if let id = workspace.activeTabID { workspace.keepTab(id) }
             }.disabled(!key || workspace.tabs.first { $0.id == workspace.activeTabID }?.isPreview != true)
             Button("Reveal in Library") {
                 if let id = workspace.activeTabID { workspace.search.text = ""; workspace.activateTab(id) }
-            }.disabled(!key || workspace.tabs.isEmpty)
-            Button("Move Tab Left") { workspace.moveActiveTab(-1) }.disabled(!key || workspace.tabs.count < 2)
-            Button("Move Tab Right") { workspace.moveActiveTab(1) }.disabled(!key || workspace.tabs.count < 2)
+            }.disabled(!key || workspace.activeTabID == nil)
+            Button("Move Tab Left") { moveActiveTab(-1) }.disabled(!key || active == nil || strip.count < 2)
+            Button("Move Tab Right") { moveActiveTab(1) }.disabled(!key || active == nil || strip.count < 2)
             Button("Close Other Tabs") {
-                if let id = workspace.activeTabID { Task { await workspace.closeTabs(otherThan: id) } }
-            }.keyboardShortcut("w", modifiers: [.command, .option]).disabled(!key || workspace.tabs.count < 2)
+                if let active { closeTabs(otherThan: strip[active], toRight: false) }
+            }.keyboardShortcut("w", modifiers: [.command, .option]).disabled(!key || active == nil || strip.count < 2)
             Button("Close Tabs to the Right") {
-                if let id = workspace.activeTabID { Task { await workspace.closeTabs(otherThan: id, toRight: true) } }
-            }.disabled(!key || workspace.tabs.last?.id == workspace.activeTabID)
+                if let active { closeTabs(otherThan: strip[active], toRight: true) }
+            }.disabled(!key || active == nil || active == strip.count - 1)
         }
         CommandGroup(replacing: .saveItem) {
             Button(key && !workspace.tabs.isEmpty ? "Close Tab" : "Close Window") {
@@ -245,6 +249,22 @@ struct TabCommands: Commands {
             Divider()
             Button("Save") { Task { await workspace.editor.save() } }
                 .keyboardShortcut("s").disabled(!key || workspace.editor.url == nil || workspace.editor.readOnly)
+        }
+    }
+
+    private func cycleTab(_ delta: Int) {
+        if let registry { registry.cycleTab(delta) } else { workspace.cycleTab(delta) }
+    }
+
+    private func moveActiveTab(_ delta: Int) {
+        if let registry { registry.moveActiveTab(delta) } else { workspace.moveActiveTab(delta) }
+    }
+
+    private func closeTabs(otherThan entry: LibraryWindowRegistry.StripTab, toRight: Bool) {
+        if let registry {
+            Task { await registry.closeTabs(otherThan: entry, toRight: toRight) }
+        } else {
+            Task { await workspace.closeTabs(otherThan: entry.tab.id, toRight: toRight) }
         }
     }
 }

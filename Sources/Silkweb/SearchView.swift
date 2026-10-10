@@ -46,10 +46,15 @@ struct SearchView<Content: View>: View {
                 if !search.text.isEmpty {
                     PinnedColumn {
                         TagFilterBar(workspace: workspace)
-                        Picker("Search Scope", selection: $search.folderScope) {
-                            Text("All Documents").tag(nil as UUID?)
+                        Picker("Search Scope", selection: scopeChoice) {
+                            // #197: only while another Library is open; All Documents stays this Library.
+                            if hasOtherLibraries {
+                                Text("All Libraries").tag(SearchScopeChoice.allLibraries)
+                                    .accessibilityLabel("All Libraries")
+                            }
+                            Text("All Documents").tag(SearchScopeChoice.library)
                             if let folder = workspace.selectedFolder {
-                                Text("“\(folder.name)”").tag(Optional(folder.id))
+                                Text("“\(folder.name)”").tag(SearchScopeChoice.folder(folder.id))
                             }
                         }.pickerStyle(.segmented).padding(.horizontal, 8).padding(.bottom, 8)
                         HStack(spacing: 4) {
@@ -65,8 +70,10 @@ struct SearchView<Content: View>: View {
                                 ColumnEmptyState {
                                     VStack(spacing: 8) {
                                         ContentUnavailableView.search(text: search.text)
-                                        if search.folderScope != nil {
+                                        if search.searchScope != nil {
                                             Button("Search All Documents") { search.folderScope = nil }
+                                        } else if !search.allLibraries, hasOtherLibraries {
+                                            Button("Search All Libraries") { search.allLibraries = true }
                                         }
                                     }
                                 }
@@ -117,17 +124,27 @@ struct SearchView<Content: View>: View {
         }
         .onChange(of: search.focusRequest) { fieldFocused = true }
         .onChange(of: search.text) { old, new in
-            if old.isEmpty, !new.isEmpty { search.folderScope = workspace.selectedFolder?.id }
+            if old.isEmpty, !new.isEmpty {
+                search.folderScope = workspace.selectedFolder?.id
+                search.allLibraries = false
+            }
             selected = nil
             if new.isEmpty { search.results = [] }
         }
-        .onChange(of: workspace.session.selectedFolder) { search.folderScope = workspace.selectedFolder?.id }
+        .onChange(of: workspace.session.selectedFolder) {
+            search.folderScope = workspace.selectedFolder?.id
+            search.allLibraries = false
+        }
         .onChange(of: results) { selected = SearchNavigation.selection(selected, in: results) }
         .onChange(of: search.resultText) { selected = results.first?.id }
         .onExitCommand {
             search.text = ""; search.results = []
         }
-        .task(id: SearchRequestIdentity(text: search.text, scope: search.folderScope, revision: search.revision)) {
+        .task(
+            id: SearchRequestIdentity(
+                text: search.text, scope: search.searchScope, allLibraries: search.searchesAllLibraries,
+                revision: search.revision)
+        ) {
             if !search.text.isEmpty { await search.query(quick: false) }
         }
     }
@@ -135,11 +152,42 @@ struct SearchView<Content: View>: View {
     private func openSelected() {
         Task { [selected] in await workspace.openSearchSelection(selected, quick: false) }
     }
+
+    private var hasOtherLibraries: Bool { !search.otherLibraries().isEmpty }
+
+    /// All Libraries | All Documents | “Folder” (#197).
+    private var scopeChoice: Binding<SearchScopeChoice> {
+        Binding(
+            get: {
+                if search.allLibraries && hasOtherLibraries { return .allLibraries }
+                return search.folderScope.map(SearchScopeChoice.folder) ?? .library
+            },
+            set: { choice in
+                switch choice {
+                case .allLibraries:
+                    search.folderScope = nil
+                    search.allLibraries = true
+                case .library:
+                    search.folderScope = nil
+                    search.allLibraries = false
+                case .folder(let id):
+                    search.folderScope = id
+                    search.allLibraries = false
+                }
+            })
+    }
+}
+
+enum SearchScopeChoice: Hashable {
+    case allLibraries, library
+    case folder(UUID)
 }
 
 struct SearchRequestIdentity: Hashable {
     let text: String
     var scope: UUID? = nil
+    /// #197: every open Library.
+    var allLibraries = false
     let revision: Int
 }
 

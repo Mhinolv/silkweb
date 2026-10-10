@@ -9,6 +9,11 @@ final class LibrarySearch {
         didSet { if text.isEmpty { completed = nil } }
     }
     var folderScope: UUID?
+    /// Search Library's All Libraries segment (#197): every open Library, not only this one. A new search starts
+    /// with this Library.
+    var allLibraries = false
+    /// Quick Open's All Libraries toggle (#197, owner decision): off each time Quick Open opens.
+    var quickAllLibraries = false
     var results: [SearchResult] = []
     var isSearching = false
     var isQuickSearching = false
@@ -22,8 +27,16 @@ final class LibrarySearch {
         @ObservationIgnored private(set) var queryCount = 0
         @ObservationIgnored var resultsBodyCount = 0
     #endif
-    var hasPendingQuery: Bool { completed?.text != text || completed?.scope != folderScope }
-    var quickHasPendingQuery: Bool { quickCompleted?.text != quickText }
+    var hasPendingQuery: Bool {
+        completed?.text != text || completed?.scope != searchScope || completed?.allLibraries != searchesAllLibraries
+    }
+    var quickHasPendingQuery: Bool {
+        quickCompleted?.text != quickText || quickCompleted?.allLibraries != quickSearchesAllLibraries
+    }
+    /// The folder Search Library is scoped to; All Libraries has none.
+    var searchScope: UUID? { searchesAllLibraries ? nil : folderScope }
+    var searchesAllLibraries: Bool { allLibraries && !otherLibraries().isEmpty }
+    var quickSearchesAllLibraries: Bool { quickAllLibraries && !otherLibraries().isEmpty }
     var quickText = ""
     var quickResults: [SearchResult] = []
     var showsQuickOpen = false
@@ -41,6 +54,29 @@ final class LibrarySearch {
     @ObservationIgnored private var stateTask: Task<Void, Never>?
     @ObservationIgnored private weak var previousResponder: NSResponder?
     @ObservationIgnored private weak var previousWindow: NSWindow?
+
+    /// Another open Library in the window, for All Libraries (#197).
+    struct Peer {
+        let name: String
+        let root: URL
+        let search: LibrarySearch
+    }
+    /// The window's other loaded Libraries, in sidebar order. Set by the registry; a lone workspace has none.
+    @ObservationIgnored var otherLibraries: @MainActor () -> [Peer] = { [] }
+    /// The id each other Library's document shows under, kept for the session so a selected row stays selected.
+    @ObservationIgnored private var foreignIDs: [ForeignKey: UUID] = [:]
+    /// The rows of the last All Libraries results that belong to another Library: their Library and real result.
+    @ObservationIgnored private var foreignResults: [UUID: (root: URL, result: SearchResult)] = [:]
+    @ObservationIgnored private var quickForeignResults: [UUID: (root: URL, result: SearchResult)] = [:]
+    private struct ForeignKey: Hashable {
+        let root: URL
+        let id: UUID
+    }
+
+    /// A row from another Library: where it lives and the result to open there.
+    func foreignResult(_ id: UUID) -> (root: URL, result: SearchResult)? {
+        foreignResults[id] ?? quickForeignResults[id]
+    }
 
     deinit {
         buildTask?.cancel()
@@ -66,6 +102,8 @@ final class LibrarySearch {
         metadata = nil
         text = ""; quickText = ""; results = []; quickResults = []
         folderScope = nil
+        allLibraries = false; quickAllLibraries = false
+        foreignResults = [:]; quickForeignResults = [:]
         error = nil
         dismissQuickOpen(restoreFocus: false)
     }
@@ -122,8 +160,10 @@ final class LibrarySearch {
     func query(quick: Bool, debounce: Bool = true) async {
         guard !Task.isCancelled, let index else { return }
         let queryText = quick ? quickText : text
-        let scope = quick ? nil : folderScope
-        let identity = SearchRequestIdentity(text: queryText, scope: scope, revision: revision)
+        let scope = quick ? nil : searchScope
+        let everywhere = quick ? quickSearchesAllLibraries : searchesAllLibraries
+        let identity = SearchRequestIdentity(
+            text: queryText, scope: scope, allLibraries: everywhere, revision: revision)
         guard identity != (quick ? quickCompleted : completed) else { return }
         let token = UUID()
         if quick { quickRequest = token } else { request = token }
@@ -148,30 +188,45 @@ final class LibrarySearch {
             #if DEBUG
                 queryCount += 1
             #endif
-            var ranking: KnowledgeTermStatistics?
-            if !quick, let knowledge = knowledge?.index, knowledge.root == root?.standardizedFileURL {
-                ranking = await knowledge.termStatistics(for: ParsedSearchQuery(queryText).rankingTerms)
+            var hits = try await Self.hits(
+                queryText, quick: quick, scope: scope, index: index, root: root, knowledge: knowledge,
+                metadata: metadata)
+            var foreign: [UUID: (root: URL, result: SearchResult)] = [:]
+            if everywhere, let root {
+                // #197: this Library's rows first, then each other Library's in sidebar order; every row's location
+                // leads with its Library. Quick Open takes the best of each Library in turn, 12 rows in all.
+                var groups = [hits.map { $0.inLibrary(root.lastPathComponent, id: $0.id) }]
+                for peer in otherLibraries() {
+                    guard let peerIndex = peer.search.index else { continue }
+                    let peerHits = try await Self.hits(
+                        queryText, quick: quick, scope: nil, index: peerIndex, root: peer.search.root,
+                        knowledge: peer.search.knowledge, metadata: peer.search.metadata)
+                    groups.append(
+                        peerHits.map { hit in
+                            let key = ForeignKey(root: peer.root, id: hit.id)
+                            let id = foreignIDs[key] ?? UUID()
+                            foreignIDs[key] = id
+                            foreign[id] = (peer.root, hit)
+                            return hit.inLibrary(peer.name, id: id)
+                        })
+                }
+                hits = quick ? Self.interleave(groups, limit: 12) : groups.flatMap { $0 }
             }
-            let hits =
-                quick && queryText.isEmpty
-                ? try await index.recentResults()
-                : try await index.query(
-                    SearchQuery(
-                        queryText,
-                        scope: scope.map { .folder($0, includeSubfolders: true) } ?? .library,
-                        mode: quick ? .quickOpen : .library, limit: quick ? 12 : Int.max, ranking: ranking,
-                        metadata: quick ? nil : metadata))
             try Task.checkCancellation()
             guard self.index === index, queryText == (quick ? quickText : text),
-                quick || scope == folderScope, identity.revision == revision
+                quick || scope == searchScope,
+                everywhere == (quick ? quickSearchesAllLibraries : searchesAllLibraries),
+                identity.revision == revision
             else { return }
             let previous = quick ? quickCompleted : completed
             let countChanged = hits.count != (quick ? quickResults.count : results.count)
             if quick {
+                quickForeignResults = foreign
                 if quickResults != hits { quickResults = hits }
                 if quickResultText != queryText { quickResultText = queryText }
                 quickCompleted = identity
             } else {
+                foreignResults = foreign
                 if results != hits { results = hits }
                 if resultText != queryText { resultText = queryText }
                 completed = identity
@@ -189,6 +244,35 @@ final class LibrarySearch {
         }
     }
 
+    /// One Library's rows for a query: Quick Open's recents for empty text.
+    private static func hits(
+        _ text: String, quick: Bool, scope: UUID?, index: SearchIndex, root: URL?, knowledge: LibraryKnowledge?,
+        metadata: LibraryMetadata?
+    ) async throws -> [SearchResult] {
+        if quick && text.isEmpty { return try await index.recentResults() }
+        var ranking: KnowledgeTermStatistics?
+        if !quick, let knowledge = knowledge?.index, knowledge.root == root?.standardizedFileURL {
+            ranking = await knowledge.termStatistics(for: ParsedSearchQuery(text).rankingTerms)
+        }
+        return try await index.query(
+            SearchQuery(
+                text,
+                scope: scope.map { .folder($0, includeSubfolders: true) } ?? .library,
+                mode: quick ? .quickOpen : .library, limit: quick ? 12 : Int.max, ranking: ranking,
+                metadata: quick ? nil : metadata))
+    }
+
+    /// Each list's first row in turn, then each second row, and so on: the first list wins ties.
+    static func interleave<Element>(_ lists: [[Element]], limit: Int) -> [Element] {
+        var result: [Element] = []
+        var rank = 0
+        while result.count < limit, lists.contains(where: { $0.count > rank }) {
+            for list in lists where list.count > rank && result.count < limit { result.append(list[rank]) }
+            rank += 1
+        }
+        return result
+    }
+
     static func resultCount(_ count: Int) -> String {
         CountPresentation.label(count, unit: .result)
     }
@@ -200,6 +284,7 @@ final class LibrarySearch {
         quickCompleted = nil
         quickText = ""
         quickResults = []
+        quickAllLibraries = false
         showsQuickOpen = true
     }
 
@@ -227,6 +312,16 @@ extension LibraryWorkspace {
     }
 
     func openSearchResult(_ result: SearchResult, findText: String? = nil, pinned: Bool = false) async {
+        if let foreign = search.foreignResult(result.id) {
+            // #197: another Library's row makes that Library current and opens the document there, as its own
+            // search would; this Library's search ends as an open does.
+            guard let shell, let other = shell.workspace(for: foreign.root), other !== self else { return }
+            search.dismissQuickOpen(restoreFocus: false)
+            search.text = ""
+            shell.focus(other)
+            await other.openSearchResult(foreign.result, findText: findText, pinned: pinned)
+            return
+        }
         guard let snapshot, let document = snapshot.documents.first(where: { $0.id == result.id }) else { return }
         let url = snapshot.rootURL.appendingPathComponent(document.relativePath)
         let folder = snapshot.folders.first { $0.id == document.folderID }?.relativePath

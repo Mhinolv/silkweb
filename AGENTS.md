@@ -61,7 +61,7 @@ Do **not** open or read the product owner's personal MWeb library/notes content 
 | App (SwiftUI scenes, views, AppKit bridges, menus/commands) | `Sources/Silkweb/` |
 | Unit tests for core | `Tests/SilkwebCoreTests/` |
 | Build / bundling scripts, Info.plist | `scripts/` |
-| Owner's manual-test library (sample blog). **Agents: do not modify**; unit tests use their own temp fixtures | `Test_Library/` |
+| Owner's manual-test library (sample blog). **Agents: do not modify**; unit tests use their own temp fixtures. Using it beside a personal Library: `docs/personal-library.md` | `Test_Library/` |
 | Design system: naming, look, **keyboard shortcut map** (source of truth — check before adding any shortcut) | `docs/design-system.md` |
 | Agent memory contract (grants, layout, guarantees) and the headless `silkweb` helper (`build/helper/silkweb`) | `docs/agent-memory.md`, `Sources/SilkwebHelper/` |
 | Agent memory skills and install docs for Claude Code, Codex, Gemini CLI. Edit only `shared/silkweb-memory.md`, then run `scripts/agent_packages.sh` | `agent-packages/` |
