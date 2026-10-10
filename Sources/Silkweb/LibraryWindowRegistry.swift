@@ -546,6 +546,9 @@ import SilkwebCore
         }
     }
 
+    /// #229: Show in Agent Activity brings the library window forward.
+    func orderFront() { window?.makeKeyAndOrderFront(nil) }
+
     /// The window closed: every section keeps its Library; its tabs reopen when the window comes back.
     func windowClosed() async {
         hasWindow = false

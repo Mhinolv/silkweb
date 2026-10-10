@@ -69,8 +69,8 @@ Rules for every operation:
 - No generic `write_file`, no shell tool, and no automatic deletion or expiry.
 - No HTTP or other network transport, and no accounts.
 - No `Proposals` Folder. Reviewed edits and organization proposals come after the MVP.
-- No Settings UI in this ticket. Settings ▸ Library ▸ Agent Access (#130) will only edit the grants
-  file below, using the existing `LibraryPathControl` and **Choose…** pattern. Until then the owner runs
+- No Settings UI in this ticket. Since #229 the owner manages grants in the app's
+  [Agent Access window](#agent-access-window-229) (Settings ▸ Library ▸ Agent access ▸ **Manage…**), or runs
   [`silkweb grant init`](#setting-up-a-grant-186).
 - No Mac App Store or sandboxed build (see [Deferred: App Store sandbox](#deferred-app-store-sandbox)).
 
@@ -317,8 +317,9 @@ silkweb grant init [--library <PATH>] [--project <KEY>] [--access read|read-crea
   written (byte-identical).
 - **Never widens.** More access (`read` → `read-create` → `read-create-update`), another Library, or a
   revoked grant exits 77
-  with “The grant “Silkweb” already exists with Read Only access. grant init never widens access; edit
-  agent-grants.json to change it. Nothing was saved.” (the reason varies). There's no override.
+  with “The grant “Silkweb” already exists with Read Only access. grant init never widens access. Change
+  the grant in Silkweb’s Agent Access window. Nothing was saved.” (the reason varies). There's no override
+  and no `--widen` flag (#229): widening happens only in the app, after owner authentication.
   `read-create` → `read` is allowed and reported as “Changed access: Read and Create → Read Only.”
   Labels, limits and extra read folders are never changed, so they can't be widened either.
 - **Adding an agent folder (#206)** is the one widening init allows. `--agent-folder <Key>` on an existing
@@ -450,8 +451,8 @@ terminal. They never touch `agent-grants.json` or the Library.
   already allows everything asked for (folders inside its read folders count) is left byte-identical and
   the request is marked approved. Anything wider — more access, another Library, a revoked grant, a read
   folder the grant doesn't include — is refused (exit 77) before the question, and the request stays
-  pending: “The grant “Silkweb” already exists with Read Only access. Approving never widens access; edit
-  agent-grants.json to change it.” A narrower profile narrows the grant, as `grant init` does. On success
+  pending: “The grant “Silkweb” already exists with Read Only access. Approving never widens access.
+  Change the grant in Agent Access first, then approve.” A narrower profile narrows the grant, as `grant init` does. On success
   it prints #186's saved summary and install block.
 - **Create folders (#228)** go into a new grant's `create_folders`. On an existing grant, the ones it doesn't
   already hold are added: the approval itself is the owner's confirmation (the question here, or Approve… and
@@ -536,9 +537,41 @@ document text or the requested target.
 | `not_found` | There’s no document at that location. (Only for targets inside the scope, and for any ID that is unknown or outside it.) |
 | `update_not_allowed` | This grant can’t update documents. Ask the owner to switch it to Read, Create and Update. (On an unqualified filesystem: This Library isn’t on a local disk, so agents can only read it.) |
 
-The Settings ▸ Library ▸ Agent Access section comes later and only edits this file. Until then the
-owner writes it by hand (see [Spike](#spike-app-closed-access-in-terminal-macos-15) step 3); the CLI
-(#135) never writes it.
+The owner changes this file in the [Agent Access window](#agent-access-window-229) (#229) or with
+`silkweb grant init`; hand edits still work and the window picks them up. The CLI (#135) and MCP never
+write it.
+
+### Agent Access window (#229)
+
+**Go ▸ Agent Access…** (no shortcut, always enabled), **Manage…** in Settings ▸ Library (“Agent access
+3 grants · 1 request waiting”) and the Agent Activity strip's **Access Requests** button (which selects
+Access Requests) open one window, 780×520 (minimum 680×440). It is the primary owner path for creating,
+widening, pausing and removing grants; `grant init` stays for proactive setup, narrowing and automation.
+
+- **Sidebar.** **Access Requests (n)** first, then one section per Library (the current Library first,
+  then by name; the path as caption, or “Not found”). Rows: the label over “Read and Create · active
+  Oct 9”; a paused grant is secondary with a trailing “Paused”. Each row is one VoiceOver element
+  (“Silkweb project, Read and Create, paused, last active Oct 9”) with Pause/Resume Access and Remove
+  Grant actions, also in its context menu. **+** is New Grant…, **−** Remove Grant….
+- **Detail.** Label, project key (read-only), Library with Show in Finder, Access (the three profiles),
+  Read folders (the project's Folder, extra folders with remove buttons, **Add Folder…** rooted at the
+  Library; a folder outside it is refused with `grant init`'s copy), Create folders (read-only, as the
+  helper computes them; editing #228 create folders is out of scope), Agent folder, **Allow access**
+  (“Paused since Oct 9” when off), Last activity (the newest published receipt for the grant, with
+  **Show in Agent Activity**, which opens that Library filtered by All Agents ▾ ▸ Grants) and a collapsed
+  **Client setup** with the install block and **Copy**. **Revert** and **Save** are enabled once edited.
+- **Authentication.** Save classifies the change with `AgentGrantOwner`: a new grant, higher access, an
+  added read folder, an added or changed agent folder, create folders, another Library, other limits or
+  Allow access turned back on need Touch ID or the account password first (as #203 approval); a
+  cancelled prompt writes nothing and keeps the edits. Narrowing, label edits, Pause and Remove don't.
+  Remove Grant… asks “Remove access for “Silkweb project”?” and deletes the row; Pause is reversible.
+- **Files.** Every change rereads `agent-grants.json`, refuses if the grant changed since it was loaded
+  (“This grant was changed outside Silkweb.” with **Reload**), and replaces the file atomically; running
+  helpers fail closed on their next operation after Pause, Remove or a narrowing. The window watches
+  the file, so Terminal `grant init` and hand edits show without a restart.
+- **Access Requests** lists every Library's requests (the Library name leads line 2) with #203's
+  Approve…/Deny…. A widening approval is still refused, now with “Change the grant in Agent Access
+  first, then approve.” and **Show Grant**, which selects the grant to widen there.
 
 ### Enforcement (#230)
 
@@ -1284,8 +1317,10 @@ or tabs. It never opens anything, and it never posts an announcement, sound, bad
   colour, badge, sound or notification. In that scope with no agent Documents yet, the list says “No
   Agent Documents · Agents haven’t created documents in this Library yet.”
   - **Open it** with **Access Requests (2)** (or **Access Requests**) in the Agent Activity strip, before
-    **All Agents ▾**, or **Go ▸ Access Requests…** (no shortcut; enabled whenever a Library is open).
-  - **The sheet** (560×440) lists this Library's requests only: **Waiting**, oldest first, then
+    **All Agents ▾**, or **Go ▸ Agent Access…** (#229; the sheet below became the
+    [Agent Access window](#agent-access-window-229)'s Access Requests, for every Library, without the footer
+    or Done).
+  - **The sheet** (560×440, until #229) listed this Library's requests only: **Waiting**, oldest first, then
     **History**, newest first, at most 50. A waiting row reads “claude-code wants Read and Create for
     “Silkweb””, the folders (“Memory › Projects › Silkweb + 2 read folders: Notes › Swift, Specs”, then
     “ · Create in: Memory › Projects › Silkweb” when it asks for create folders, #228), the

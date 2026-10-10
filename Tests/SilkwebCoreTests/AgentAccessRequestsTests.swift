@@ -310,7 +310,7 @@ final class AgentAccessRequestsTests: XCTestCase {
             XCTAssertEqual(
                 output.stderr,
                 "silkweb: " + start.dropLast()
-                    + ". Approving never widens access; edit agent-grants.json to change it.\n")
+                    + ". Approving never widens access. Change the grant in Agent Access first, then approve.\n")
             XCTAssertEqual(prompts, "", "refused before asking")
             XCTAssertEqual(try Data(contentsOf: grantsURL), before)
             XCTAssertEqual(try stored().first { $0.requestId == id }?.status, .pending, "stays pending")

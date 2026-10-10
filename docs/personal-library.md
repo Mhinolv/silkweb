@@ -63,8 +63,8 @@ it travels with the folder. The one tab strip can mix Libraries; while it does, 
 
 Agent grants point at one Library path, so each Library needs its own grant (see
 [Setting up a grant](agent-memory.md#setting-up-a-grant-186)). `silkweb grant init` refuses to repoint an
-existing grant to another Library: use a new project key (`--project`) for the other Library, or edit
-`~/Library/Application Support/Silkweb/agent-grants.json` by hand. Copying a `Memory/` folder from one
+existing grant to another Library: use a new project key (`--project`) for the other Library, or create
+one in Silkweb's **Go ▸ Agent Access…** window. Copying a `Memory/` folder from one
 Library to the other is optional and manual.
 
 ## Moving a Library later

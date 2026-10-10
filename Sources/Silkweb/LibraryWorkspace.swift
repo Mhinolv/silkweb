@@ -98,15 +98,31 @@ final class LibraryWorkspace {
     var agentFilter: String? {
         didSet {
             documentCache = nil
-            if agentFilter != nil { outsideFilter = false }
+            if agentFilter != nil {
+                outsideFilter = false
+                grantFilter = nil
+            }
+        }
+    }
+    /// #229: All Agents ▾ ▸ Grants, by project key (a receipt's `grantId`). Show in Agent Activity sets it.
+    var grantFilter: String? {
+        didSet {
+            documentCache = nil
+            if grantFilter != nil {
+                agentFilter = nil
+                outsideFilter = false
+            }
         }
     }
     @ObservationIgnored var agentReloadTask: Task<Void, Never>?
-    /// #230: All Agents ▾ ▸ Outside Silkweb. Exclusive with `agentFilter`.
+    /// #230: All Agents ▾ ▸ Outside Silkweb. Exclusive with `agentFilter` and `grantFilter`.
     var outsideFilter = false {
         didSet {
             documentCache = nil
-            if outsideFilter { agentFilter = nil }
+            if outsideFilter {
+                agentFilter = nil
+                grantFilter = nil
+            }
         }
     }
     /// #230: Documents changed outside Silkweb, in Library order. Assigned only when it changes.
@@ -133,20 +149,13 @@ final class LibraryWorkspace {
     /// Bumped by every snapshot or receipt change; a detection for an older one is dropped.
     @ObservationIgnored var outsideGeneration = 0
     /// #203: this Library's access requests, waiting and decided, from Application Support. Assigned only on change.
+    /// The sidebar row and the strip count them; the owner decides in the Agent Access window (#229).
     var accessRequests: [AgentAccessRequest] = [] {
         didSet { if agentScope && !hasAgentActivity { agentScope = false } }
     }
-    /// The Access Requests sheet is shown.
-    var showsAccessRequests = false
-    /// The request a Deny… or Approve… is working on; its row's buttons are disabled meanwhile.
-    var decidingRequestID: String?
     @ObservationIgnored var accessRequestStore = AgentAccessRequestStore.standard
-    @ObservationIgnored var agentGrantsURL = AgentGrantFile.defaultURL()
     @ObservationIgnored var accessRequestWatcher: AccessRequestWatcher?
     @ObservationIgnored var accessRequestReloadTask: Task<Void, Never>?
-    /// Owner decision 2026-10-09: approving in the app needs Touch ID or the account password. Tests replace it.
-    @ObservationIgnored var authenticateOwner: @MainActor (String) async -> Bool =
-        LibraryWorkspace.authenticateWithLocalAuthentication
     /// Expiry is computed on read; snapshots pin the time.
     @ObservationIgnored var accessRequestClock: @MainActor () -> Date = { Date() }
 
@@ -514,11 +523,11 @@ final class LibraryWorkspace {
             resetOutsideChanges()
             agentScope = false
             agentFilter = nil
+            grantFilter = nil
             agentActivity = AgentActivity()
             accessRequestWatcher?.stop()
             accessRequestWatcher = nil
             accessRequestReloadTask?.cancel()
-            showsAccessRequests = false
             accessRequests = []
             await editor.configure(root: url)
             // Let any previous scan finish cancellation before releasing its access.
@@ -1094,7 +1103,6 @@ struct LibraryWorkspaceView: View {
         .sheet(item: $workspace.importRequest) { request in ImportSheet(workspace: workspace, request: request) }
         .sheet(item: $workspace.moveRequest) { request in MovePicker(workspace: workspace, request: request) }
         .sheet(item: $workspace.pdfProgress) { progress in PDFProgressSheet(progress: progress) }
-        .sheet(isPresented: $workspace.showsAccessRequests) { AccessRequestsSheet(workspace: workspace) }
         .task {
             // #196: the app restores every saved section; a lone workspace its last Library.
             if let registry { registry.restoreSession() } else { workspace.restore() }

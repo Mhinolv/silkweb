@@ -31,11 +31,13 @@ extension LibraryWorkspace {
     }
 
     /// Agent Activity's list: with All Agents, receipts and outside changes, newest first and each Document once;
-    /// with one agent, its receipts only; with Outside Silkweb, the outside changes only.
+    /// with one agent or one grant (#229), its receipts only; with Outside Silkweb, the outside changes only.
     var agentActivityDocuments: [LibraryDocument] {
         if outsideFilter { return Self.newestFirst(outsideChanges.map { ($0.document, $0.document.modified) }) }
-        let entries = agentEntries.filter { agentFilter == nil || $0.agent == agentFilter }
-        guard agentFilter == nil, !outsideChanges.isEmpty else { return entries.map(\.document) }
+        let entries = agentEntries.filter {
+            (agentFilter == nil || $0.agent == agentFilter) && (grantFilter == nil || $0.receipt.grantId == grantFilter)
+        }
+        guard agentFilter == nil, grantFilter == nil, !outsideChanges.isEmpty else { return entries.map(\.document) }
         let outside = Set(outsideChanges.map(\.document.id))
         // A Document changed after its receipt sorts by the change.
         let receipts = entries.filter { !outside.contains($0.document.id) }.map {
