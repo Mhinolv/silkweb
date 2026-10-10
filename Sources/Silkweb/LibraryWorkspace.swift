@@ -30,6 +30,7 @@ final class LibraryWorkspace {
         self.columnAutosaveName = columnAutosaveName
         preview = PreviewCoordinator(defaults: defaults)
         search.knowledge = knowledge
+        search.window = { [weak self] in self?.libraryWindow }
     }
     var tagCounts: [UUID: Int] = [:]
     var tags: [LibraryTag] = []
