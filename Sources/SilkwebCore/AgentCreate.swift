@@ -404,14 +404,12 @@ public struct AgentCreateService: Sendable {
         } catch let error as AgentScopeError {
             throw AgentAccessError.scope(error, in: scope)
         }
-        // #206: the agent folder holds only memories and decisions, and they belong to the agent folder's key.
-        var project = grantId
-        if scope.isAgentLevel(path), let agentFolder = scope.agentFolder {
-            guard entryFolder == AgentMemoryContract.agentMemoriesFolder else {
-                throw AgentAccessError.envelope(.invalidField("type"), name: request.title)
-            }
-            project = agentFolder
+        // #228: progress and handoffs only in their entry folders, so an agent folder (#206) or an owner-chosen create
+        // folder holds memories and decisions. Documents in an agent folder belong to its key.
+        guard scope.allows(type: request.type, at: path) else {
+            throw AgentAccessError.envelope(.invalidField("type"), name: request.title)
         }
+        let project = scope.envelopeProject(for: path) ?? grantId
         // The helper writes the only envelope; a body that brings its own is refused, never merged.
         switch MemoryEnvelope.parse(request.body) {
         case .missing: break

@@ -163,7 +163,7 @@ public enum AgentHelper {
             return 64
         case "envelope_malformed", "envelope_schema_newer", "envelope_invalid_field", "too_large",
             "idempotency_conflict", "not_found", "revision_changed", "request_not_found", "request_decided",
-            "invalid_agent_folder":
+            "invalid_agent_folder", "invalid_create_folder":
             return 65
         case "library_busy", "stale_snapshot", "rate_limited", "document_has_unsaved_changes", "too_many_requests":
             return 69

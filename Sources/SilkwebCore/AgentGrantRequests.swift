@@ -8,7 +8,8 @@ import Foundation
 enum AgentGrantRequests {
     static let flags: Set<String> = ["all", "pretty"]
     private static let requestOptions: Set<String> = [
-        "library", "project", "access", "folder", "message", "agent", "session", "client", "requests",
+        "library", "project", "access", "folder", "create-folder", "message", "agent", "session", "client",
+        "requests",
     ]
 
     // MARK: Agent
@@ -27,7 +28,7 @@ enum AgentGrantRequests {
                 guard requestOptions.contains(option) else {
                     throw usage("The option “--\(option)” isn’t valid for “grant request”.")
                 }
-                guard values.count == 1 || option == "folder" else {
+                guard values.count == 1 || option == "folder" || option == "create-folder" else {
                     throw usage("The option “--\(option)” can only be given once.")
                 }
             }
@@ -37,7 +38,8 @@ enum AgentGrantRequests {
             let draft = try AgentAccessRequests.draft(
                 library: invocation.value("library") ?? "", project: invocation.value("project") ?? "",
                 access: invocation.value("access") ?? "", readFolders: invocation.options["folder"] ?? [],
-                message: invocation.value("message"), agent: invocation.value("agent"),
+                createFolders: invocation.options["create-folder"] ?? [], message: invocation.value("message"),
+                agent: invocation.value("agent"),
                 session: invocation.value("session"), client: invocation.value("client") ?? "cli",
                 currentDirectory: currentDirectory)
             let store = requestStore(invocation, home: home, currentDirectory: currentDirectory)
@@ -160,6 +162,10 @@ enum AgentGrantRequests {
                 + ([AgentMemoryContract.projectRoot(request.project)] + request.readFolders)
                 .map(AgentMemoryContract.displayPath).joined(separator: ", "),
         ]
+        if !request.createFolders.isEmpty {
+            lines.append(
+                "  Create   " + request.createFolders.map(AgentMemoryContract.displayPath).joined(separator: ", "))
+        }
         if !request.message.isEmpty { lines.append("  Message  “\(request.message)”") }
         lines.append(
             "  Asked    \(AgentAccessRequests.shortDate(request.requestedAt)) · \(request.expiryLabel(now))")
@@ -179,7 +185,10 @@ enum AgentGrantRequests {
                 AgentGrantInit.displayPath(URL(fileURLWithPath: request.libraryRoot), home: home)
                     + (request.readFolders.isEmpty
                         ? ""
-                        : " + \(request.readFolders.count) read folder\(request.readFolders.count == 1 ? "" : "s")"),
+                        : " + \(request.readFolders.count) read folder\(request.readFolders.count == 1 ? "" : "s")")
+                    + (request.createFolders.isEmpty
+                        ? ""
+                        : " + \(request.createFolders.count) create folder\(request.createFolders.count == 1 ? "" : "s")"),
             ]
             switch status {
             case .pending: columns.append("expires " + AgentAccessRequests.shortDate(request.expiresAt))

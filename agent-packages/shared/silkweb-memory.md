@@ -104,7 +104,8 @@ personal data the user didn't ask you to keep, or long pasted output.
   original result (`"replayed": true`) instead of a second document. Never reuse a key for different
   content.
 - Create only in the `create_roots` from `memory_capabilities`. If `profile` is Read Only, don't
-  create anything.
+  create anything. A create root the owner chose, such as the project folder itself, takes memories and
+  decisions (`folderPath` with `type`); progress goes only in `Progress` and handoffs only in `Handoffs`.
 - Never fall back to overwriting anything: no shell redirection, file-writing tool or editor on files in
   the Library. If Silkweb can't save it, it isn't saved.
 
@@ -123,7 +124,8 @@ Replace `<code>` with the `error.code` from the result, for example `create_not_
   it already says what the owner can do.
 - **No access yet** (`grant_not_found`, `no_grants_file`), or the grant is too narrow for the task: ask
   once with `grant_request` (or `silkweb grant request` from the command line). Give the Library folder,
-  the project key, `access` (`read` or `read-create`), any extra `readFolders` you really need, and a
+  the project key, `access` (`read` or `read-create`), any extra `readFolders` (or `createFolders`, such as
+  the project folder for an overview) you really need, and a
   one-line `message` saying why. Then tell the user a request is waiting for them in Silkweb (Agent
   Activity ▸ Access Requests) or Terminal, and keep working without memory. Asking again returns the
   same request (`duplicate: true`); `too_many_requests` means the owner has enough to review already.

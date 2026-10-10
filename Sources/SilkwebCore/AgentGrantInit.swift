@@ -36,25 +36,26 @@ public enum AgentGrantInit {
         case added
         case unchanged
         case narrowed(from: AgentGrant.Access)
-        /// #206: `--agent-folder` added an agent folder to an existing grant, the one widening init allows (after
-        /// the owner confirms). `narrowedFrom` is set when the access was narrowed too.
-        case agentFolderAdded(String, narrowedFrom: AgentGrant.Access?)
+        /// #206, #228: an agent folder or create folders were added to an existing grant, the one widening init and
+        /// approval allow (after the owner confirms). `narrowedFrom` is set when the access was narrowed too.
+        case widened(agentFolder: String?, createFolders: [String], narrowedFrom: AgentGrant.Access?)
     }
 
     public static let help = """
         USAGE
           silkweb grant init [--library <PATH>] [--project <KEY>]
                              [--access read|read-create|read-create-update] [--agent-folder <KEY>]
-                             [--yes] [--dry-run] [--grants <FILE>]
+                             [--create-folder <PATH>]... [--yes] [--dry-run] [--grants <FILE>]
           silkweb grant request --library <PATH> --project <KEY> --access read|read-create
-                             [--folder <PATH>]... [--message <TEXT>] [--agent <NAME>] [--session <ID>]
+                             [--folder <PATH>]... [--create-folder <PATH>]... [--message <TEXT>]
+                             [--agent <NAME>] [--session <ID>]
           silkweb grant requests [--all]
           silkweb grant approve <REQUEST-ID>
           silkweb grant deny <REQUEST-ID> [--note <TEXT>]
 
         init sets up agent access for one project in agent-grants.json. Asks for anything the options
-        leave out. Never widens an existing grant, except to add an agent folder after you confirm, and
-        never writes inside the Library.
+        leave out. Never widens an existing grant, except to add an agent folder or create folders after
+        you confirm, and never writes inside the Library.
 
         request asks the owner for access; agents may run it. It prints one JSON object and never
         changes agent-grants.json. requests lists waiting requests (--all adds history). approve and
@@ -68,7 +69,11 @@ public enum AgentGrantInit {
           --agent-folder <KEY>
                               Agent folder under Memory/Agents, shared by grants with the same key:
                               agents read all of it and create memories in its Memories (init only)
-          --yes               Add --agent-folder to an existing grant without asking
+          --create-folder <PATH>
+                              A Library-relative folder agents may read and create in, with every
+                              folder inside it, such as Memory/Projects/<KEY> for the project's top
+                              level (create profiles only; repeatable, up to 10)
+          --yes               Add --agent-folder or --create-folder to an existing grant without asking
           --folder <PATH>     An extra Library-relative read folder to ask for (up to 10)
           --message <TEXT>    One line for the owner, up to 280 characters
           --note <TEXT>       A note for the agent when denying
@@ -88,7 +93,12 @@ public enum AgentGrantInit {
     static let notLocalWarning =
         "Agents can read; creating stays off until the Library is on a local APFS or HFS+ disk."
 
-    private static let options: Set<String> = ["library", "project", "access", "agent-folder", "grants"]
+    private static let options: Set<String> = [
+        "library", "project", "access", "agent-folder", "create-folder", "grants",
+    ]
+    /// #228: options that may be given more than once.
+    private static let repeatable: Set<String> = ["create-folder"]
+    public static let maxCreateFolders = 10
     private static let flags: Set<String> = ["dry-run", "help", "yes"]
 
     /// A failure with its exit status and the one line shown on stderr.
@@ -106,11 +116,11 @@ public enum AgentGrantInit {
         static let folderMissing = Failure(status: 74, message: "That folder doesn’t exist.")
         static let folderUnreadable = Failure(status: 74, message: "Silkweb can’t read that folder.")
 
-        /// #206: adding an agent folder widens a grant, so it needs the owner's yes.
-        static func agentFolderNeedsConfirmation(_ project: String) -> Failure {
+        /// #206, #228: adding an agent folder or create folders widens a grant, so it needs the owner's yes.
+        static func wideningNeedsConfirmation(_ project: String, adding what: String) -> Failure {
             Failure(
                 status: 77,
-                message: "Adding an agent folder widens the grant “\(project)”. Run this in Terminal to confirm, "
+                message: "Adding \(what) widens the grant “\(project)”. Run this in Terminal to confirm, "
                     + "or add --yes. Nothing was saved.")
         }
     }
@@ -155,7 +165,9 @@ public enum AgentGrantInit {
                 guard options.contains(option) else {
                     throw Failure.usage("The option “--\(option)” isn’t valid for “grant init”.")
                 }
-                guard values.count == 1 else { throw Failure.usage("The option “--\(option)” can only be given once.") }
+                guard values.count == 1 || repeatable.contains(option) else {
+                    throw Failure.usage("The option “--\(option)” can only be given once.")
+                }
             }
             let stdout = try initialize(
                 invocation, console: console, home: home, environment: environment, executable: executable,
@@ -291,8 +303,21 @@ public enum AgentGrantInit {
             }
         }
 
+        // #228: owner-chosen create folders, which are read folders too. Interactively, one question offers the
+        // project's top level.
+        var createFolders = try validCreateFolders(invocation.options["create-folder"] ?? [])
+        if !createFolders.isEmpty, !access.allowsCreate {
+            throw Failure(status: 64, message: "Create folders need read-create or read-create-update access.")
+        }
+        if interactive, createFolders.isEmpty, access.allowsCreate {
+            let top = AgentMemoryContract.projectRoot(project)
+            let answer = try ask("Let agents create anywhere in \(top), including its top level? [y/N] ")
+            if ["y", "yes"].contains(answer.lowercased()) { createFolders = [top] }
+        }
+
         let merged = try merge(
-            file, project: project, library: library.url, access: access, agentFolder: agentFolder, now: now)
+            file, project: project, library: library.url, access: access, agentFolder: agentFolder,
+            createFolders: createFolders, now: now)
         let helper = helperPath(executable, environment: environment, currentDirectory: currentDirectory)
         let install = installBlock(helper: helper, project: project)
         if dryRun {
@@ -303,12 +328,16 @@ public enum AgentGrantInit {
         }
         let fileName = displayPath(grantsURL, home: home)
         var confirmed = false
-        if case .agentFolderAdded(let key, _) = merged.outcome {
+        if case .widened(let key, let added, _) = merged.outcome {
             // The one widening init allows: say what it adds, then ask (or take --yes).
-            console.write(agentFolderAdditions(key, grant: merged.grant))
+            console.write(additions(agentFolder: key, createFolders: added, grant: merged.grant))
             if !invocation.flags.contains("yes") {
-                guard console.isTerminal else { throw Failure.agentFolderNeedsConfirmation(project) }
-                let answer = try ask("Add the agent folder to “\(project)”? [y/N] ").lowercased()
+                guard console.isTerminal else {
+                    throw Failure.wideningNeedsConfirmation(
+                        project, adding: additionsName(agentFolder: key, createFolders: added, definite: false))
+                }
+                let what = additionsName(agentFolder: key, createFolders: added, definite: true)
+                let answer = try ask("Add \(what) to “\(project)”? [y/N] ").lowercased()
                 guard answer == "y" || answer == "yes" else { return "Nothing was saved.\n" }
             }
             confirmed = true
@@ -340,10 +369,13 @@ public enum AgentGrantInit {
     /// grant; for an existing one, each must already be readable, or the approval is refused.
     ///
     /// `agentFolder` (#206) goes into a new grant as is. On an existing grant without one it's added
-    /// (`agentFolderAdded`, which the caller confirms with the owner); a different key is refused.
+    /// (`widened`, which the caller confirms with the owner); a different key is refused.
+    ///
+    /// `createFolders` (#228, validated) go into a new grant as they are. On an existing grant, the ones its create
+    /// folders don't already hold are added (`widened` too, for init and approval alike); the rest change nothing.
     static func merge(
         _ file: AgentGrantFile, project: String, library: URL, access: AgentGrant.Access, readFolders: [String] = [],
-        agentFolder: String? = nil, now: Date, approving: Bool = false
+        agentFolder: String? = nil, createFolders: [String] = [], now: Date, approving: Bool = false
     ) throws -> (file: AgentGrantFile, grant: AgentGrant, outcome: Outcome) {
         var file = file
         file.version = AgentGrantFile.currentVersion
@@ -352,7 +384,8 @@ public enum AgentGrantInit {
             let created = Date(timeIntervalSince1970: now.timeIntervalSince1970.rounded(.down))
             let grant = AgentGrant(
                 project: project, library: LibraryLocation(path: library.path), access: access,
-                extraReadFolders: readFolders, createdAt: created, agentFolder: agentFolder)
+                extraReadFolders: readFolders, createdAt: created, agentFolder: agentFolder,
+                createFolders: createFolders)
             file.grants.append(grant)
             return (file, grant, .added)
         }
@@ -372,7 +405,7 @@ public enum AgentGrantInit {
         if access.rank > grant.access.rank {
             throw refuse("already exists with \(grant.access.displayName) access")
         }
-        let readable = [AgentMemoryContract.projectRoot(project)] + grant.extraReadFolders
+        let readable = [AgentMemoryContract.projectRoot(project)] + grant.extraReadFolders + grant.createFolders
         let missing = readFolders.filter { folder in
             !readable.contains { AgentScope.contains($0, folder, caseSensitive: true) }
         }
@@ -385,13 +418,21 @@ public enum AgentGrantInit {
             if let existing = grant.agentFolder { throw refuse("already uses the agent folder “\(existing)”") }
             adding = agentFolder
         }
-        guard grant.access != access || adding != nil else { return (file, grant, .unchanged) }
+        let held = { (folder: String) in
+            grant.createFolders.contains { AgentScope.contains($0, folder, caseSensitive: true) }
+        }
+        let added = createFolders.filter { !held($0) }
+        guard grant.access != access || adding != nil || !added.isEmpty else { return (file, grant, .unchanged) }
         let previous = grant.access
         grant.access = access
         if let adding { grant.agentFolder = adding }
+        // A new create folder replaces the saved ones inside it.
+        grant.createFolders.removeAll { old in added.contains { AgentScope.contains($0, old, caseSensitive: true) } }
+        grant.createFolders += added
         file.grants[index] = grant
-        if let adding {
-            return (file, grant, .agentFolderAdded(adding, narrowedFrom: previous == access ? nil : previous))
+        if adding != nil || !added.isEmpty {
+            let narrowed = previous == access ? nil : previous
+            return (file, grant, .widened(agentFolder: adding, createFolders: added, narrowedFrom: narrowed))
         }
         return (file, grant, .narrowed(from: previous))
     }
@@ -423,6 +464,29 @@ public enum AgentGrantInit {
 
     static let invalidProjectMessage = AgentScopeError.invalidProject.message
     static let invalidAgentFolderMessage = AgentScopeError.invalidAgentFolder.message
+
+    /// #228: create folders in NFC and validated, with repeats and folders inside another counted once. `refuse` turns
+    /// the first problem into the caller's error.
+    static func validCreateFolders(_ given: [String], refuse: (String) -> Error = { Failure(status: 64, message: $0) })
+        throws -> [String]
+    {
+        var folders: [String] = []
+        for text in given {
+            let folder: String
+            do {
+                folder = try AgentScope.validateCreateFolder(AgentHelper.nfc(text))
+            } catch let error as AgentScopeError {
+                throw refuse(error.message)
+            }
+            if folders.contains(where: { AgentScope.contains($0, folder, caseSensitive: true) }) { continue }
+            folders.removeAll { AgentScope.contains(folder, $0, caseSensitive: true) }
+            folders.append(folder)
+        }
+        guard folders.count <= maxCreateFolders else {
+            throw refuse("Give at most \(maxCreateFolders) create folders.")
+        }
+        return folders
+    }
 
     /// A project key is one valid Folder name, compared in NFC like Library paths.
     static func validProject(_ text: String) -> String? {
@@ -488,26 +552,54 @@ public enum AgentGrantInit {
                 "Saved agent access for “\(grant.project)” (\(grant.access.displayName)).",
                 "Changed access: \(previous.displayName) → \(grant.access.displayName).",
             ]
-        case .agentFolderAdded(let key, let previous):
+        case .widened(let key, let added, let previous):
             lines = ["Saved agent access for “\(grant.project)” (\(grant.access.displayName))."]
             if let previous { lines.append("Changed access: \(previous.displayName) → \(grant.access.displayName).") }
-            lines.append("Added agent folder: \(AgentMemoryContract.agentRoot(key)).")
+            if let key { lines.append("Added agent folder: \(AgentMemoryContract.agentRoot(key)).") }
+            if !added.isEmpty {
+                let noun = added.count == 1 ? "folder" : "folders"
+                lines.append("Added create \(noun): \(added.joined(separator: ", ")).")
+            }
         }
         let disk = filesystem == .qualified ? "local disk" : "not a local disk"
         lines.append("  Library  \(grant.library.path ?? "") — \(disk)")
         if filesystem == .unqualified, grant.access.allowsCreate { lines.append("  ! " + notLocalWarning) }
         lines.append("  Folder   " + AgentMemoryContract.projectRoot(grant.project))
         if let key = grant.agentFolder { lines.append("  Agent    " + AgentMemoryContract.agentRoot(key)) }
+        for folder in grant.createFolders { lines.append("  Create   " + folder) }
         lines.append("  File     " + fileName)
         return lines.joined(separator: "\n") + "\n"
     }
 
-    /// What adding agent folder `key` to `grant` gives agents (#206): the folders, before the owner confirms.
-    static func agentFolderAdditions(_ key: String, grant: AgentGrant) -> String {
-        var lines = ["This adds the agent folder “\(key)” to the grant “\(grant.project)”:"]
-        lines.append("  Read     " + AgentMemoryContract.agentRoot(key))
-        if grant.access.allowsCreate { lines.append("  Create   " + AgentMemoryContract.agentMemoriesRoot(key)) }
+    /// What adding agent folder `key` (#206) and create folders (#228) to `grant` gives agents: the folders, before
+    /// the owner confirms.
+    static func additions(agentFolder key: String?, createFolders: [String], grant: AgentGrant) -> String {
+        var lines: [String] = []
+        if let key {
+            lines.append("This adds the agent folder “\(key)” to the grant “\(grant.project)”:")
+            lines.append("  Read     " + AgentMemoryContract.agentRoot(key))
+            if grant.access.allowsCreate { lines.append("  Create   " + AgentMemoryContract.agentMemoriesRoot(key)) }
+        }
+        if !createFolders.isEmpty {
+            let noun = createFolders.count == 1 ? "a create folder" : "create folders"
+            lines.append(
+                "This adds \(noun) to the grant “\(grant.project)”. Agents can read and create in "
+                    + (createFolders.count == 1 ? "it" : "them") + ", and in any folder inside:")
+            for folder in createFolders { lines.append("  Create   " + folder) }
+        }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// “an agent folder”, “create folders” or both (“the …” for the question).
+    static func additionsName(agentFolder: String?, createFolders: [String], definite: Bool) -> String {
+        let agent = agentFolder == nil ? nil : definite ? "the agent folder" : "an agent folder"
+        let folders =
+            createFolders.isEmpty
+            ? nil
+            : createFolders.count == 1
+                ? (definite ? "the create folder" : "a create folder")
+                : (definite ? "the create folders" : "create folders")
+        return [agent, folders].compactMap { $0 }.joined(separator: " and ")
     }
 
     /// The `agent-packages/README.md` › Install commands, byte for byte, with the helper path and

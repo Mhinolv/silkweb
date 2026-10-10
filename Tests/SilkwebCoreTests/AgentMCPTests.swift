@@ -759,7 +759,9 @@ final class AgentMCPTests: XCTestCase {
         let ambiguous = launch([])
         XCTAssertEqual(ambiguous.0, 77)
         XCTAssertEqual(ambiguous.1, "", "stdout stays MCP-only")
-        XCTAssertEqual(ambiguous.2, "silkweb: Choose a grant with --grant. Available: “Silkweb project”, “Notes”.\n")
+        XCTAssertEqual(
+            ambiguous.2,
+            "silkweb: Choose a grant with --grant (one per project). Available: “Silkweb project”, “Notes”.\n")
         XCTAssertEqual(launch(["--grant", "Notes"]).0, 0)
         XCTAssertEqual(launch([], environment: ["SILKWEB_GRANT": "Silkweb"]).0, 0)
 
@@ -988,7 +990,8 @@ final class AgentMCPTests: XCTestCase {
         XCTAssertEqual(ambiguous.status, 77)
         XCTAssertEqual(ambiguous.stdout, "")
         XCTAssertEqual(
-            ambiguous.stderr, "silkweb: Choose a grant with --grant. Available: “Silkweb project”, “Notes”.\n")
+            ambiguous.stderr,
+            "silkweb: Choose a grant with --grant (one per project). Available: “Silkweb project”, “Notes”.\n")
     }
 }
 

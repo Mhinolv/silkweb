@@ -180,7 +180,8 @@ public struct AgentAccessError: Error, Equatable, Sendable {
     public static func grantRequired(_ labels: [String]) -> Self {
         Self(
             code: "grant_required", title: noAccess,
-            message: "Choose a grant with --grant. Available: " + labels.map { "“\($0)”" }.joined(separator: ", ")
+            message: "Choose a grant with --grant (one per project). Available: "
+                + labels.map { "“\($0)”" }.joined(separator: ", ")
                 + ".")
     }
 
@@ -271,7 +272,7 @@ public struct AgentAccessError: Error, Equatable, Sendable {
 
     static func scope(_ error: AgentScopeError, in scope: AgentScope) -> Self {
         switch error {
-        case .invalidProject, .invalidAgentFolder, .invalidPath: return .invalidPath
+        case .invalidProject, .invalidAgentFolder, .invalidCreateFolder, .invalidPath: return .invalidPath
         case .outsideRead: return .outOfScope(scope.readRoots)
         case .outsideCreate: return .outOfScope(scope.createRoots, kind: "create")
         case .excluded: return .excluded
@@ -461,10 +462,15 @@ public final class AgentSession: @unchecked Sendable {
         do {
             scope = try AgentScope(grant: grant, createAllowed: filesystem == .qualified, caseSensitive: caseSensitive)
         } catch let error as AgentScopeError {
-            // #206: an invalid agent folder is bad input in the grants file (exit 65), never silently ignored.
-            throw AgentAccessError(
-                code: error == .invalidAgentFolder ? "invalid_agent_folder" : "invalid_grant",
-                title: AgentAccessError.noAccess, message: error.message)
+            // #206, #228: an invalid agent folder or create folder is bad input in the grants file (exit 65), never
+            // silently ignored.
+            let code: String
+            switch error {
+            case .invalidAgentFolder: code = "invalid_agent_folder"
+            case .invalidCreateFolder: code = "invalid_create_folder"
+            default: code = "invalid_grant"
+            }
+            throw AgentAccessError(code: code, title: AgentAccessError.noAccess, message: error.message)
         }
         if let clientRoots { scope = scope.narrowed(to: clientRoots) }
         resolved = (grant, library, filesystem, scope)
