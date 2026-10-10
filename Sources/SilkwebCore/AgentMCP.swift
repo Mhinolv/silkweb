@@ -754,7 +754,7 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                         S.string(
                             "Instead of folder: a Library-relative folder inside a create folder (create_roots), such "
                                 + "as Memory/Projects/Silkweb/Progress/Sprint 1. Needs type. progress goes only in "
-                                + "the project’s Progress and handoff only in its Handoffs.")
+                                + "a project’s Progress and handoff only in its Handoffs.")
                     ),
                     ("title", S.string("Sentence case, without “:” or “/”. Becomes the file name.")),
                     (

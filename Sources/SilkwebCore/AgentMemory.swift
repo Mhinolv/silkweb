@@ -29,7 +29,8 @@ public enum AgentMemoryContract {
     }
 
     /// #228: too wide to be a `create_folders` entry (the Library root never normalizes). Compared ignoring case.
-    public static let refusedCreateFolders = ["Memory", projectsFolder, agentsFolder]
+    /// `Memory/Projects` is allowed: the owner grants every project with it.
+    public static let refusedCreateFolders = ["Memory", agentsFolder]
 
     /// “Memory › Projects › Silkweb” for anything a human reads; JSON keeps POSIX paths.
     public static func displayPath(_ path: String) -> String {
@@ -255,7 +256,7 @@ public enum AgentScopeError: Error, Equatable {
         case .invalidAgentFolder: return "The agent folder isn’t a valid folder name."
         case .invalidCreateFolder(let path):
             return "\(display(path)) can’t be a create folder: choose a Folder inside the Library, not the Library "
-                + "itself, “Memory”, “Memory › Projects” or “Memory › Agents”."
+                + "itself, “Memory” or “Memory › Agents”."
         case .invalidPath(let path): return "\(display(path)) isn’t a path inside the Library."
         case .outsideRead(let path): return "\(display(path)) is outside this grant’s read folders."
         case .outsideCreate(let path): return "\(display(path)) is outside this grant’s create folders."
@@ -314,8 +315,8 @@ public struct AgentScope: Equatable, Sendable {
         createRoots = creates
     }
 
-    /// #228: a `create_folders` entry, normalized. The Library root, `Memory`, `Memory/Projects`, `Memory/Agents` and
-    /// paths through reserved Folders are refused, ignoring case on every volume.
+    /// #228: a `create_folders` entry, normalized. The Library root, `Memory`, `Memory/Agents` and paths through
+    /// reserved Folders are refused, ignoring case on every volume.
     public static func validateCreateFolder(_ path: String) throws -> String {
         guard let normalized = try? normalize(path) else { throw AgentScopeError.invalidCreateFolder(path) }
         let wide = AgentMemoryContract.refusedCreateFolders.contains {
@@ -369,23 +370,34 @@ public struct AgentScope: Equatable, Sendable {
         return contains(AgentMemoryContract.agentRoot(agentFolder), path)
     }
 
-    /// #228: progress documents go only in the project's `Progress` and handoffs only in its `Handoffs`; memories and
-    /// decisions go in any create folder.
+    /// #228: progress documents go only in a project's `Progress` and handoffs only in its `Handoffs` (the grant's own
+    /// project, or another one a create folder such as `Memory/Projects` holds); memories and decisions go in any
+    /// create folder.
     public func allows(type: String, at path: String) -> Bool {
-        let root = AgentMemoryContract.projectRoot(project)
+        let entry: String
         switch type {
-        case "progress": return contains(root + "/Progress", path)
-        case "handoff": return contains(root + "/Handoffs", path)
+        case "progress": entry = "Progress"
+        case "handoff": entry = "Handoffs"
         default: return true
         }
+        guard let folder = folderKey(in: AgentMemoryContract.projectsFolder, path) else { return false }
+        return contains(AgentMemoryContract.projectRoot(folder) + "/" + entry, path)
     }
 
     /// The envelope `project` for a document created at `path`: the key of the agent folder it's in
-    /// (`Memory/Agents/<Key>/…`, #206 and #228), or nil for the grant's own project.
+    /// (`Memory/Agents/<Key>/…`, #206 and #228), the other project it's in (`Memory/Projects/<Other>/…`, #228), or nil
+    /// for the grant's own project.
     public func envelopeProject(for path: String) -> String? {
         if isAgentLevel(path) { return agentFolder }
+        if contains(AgentMemoryContract.projectRoot(project), path) { return nil }
+        return folderKey(in: AgentMemoryContract.agentsFolder, path)
+            ?? folderKey(in: AgentMemoryContract.projectsFolder, path)
+    }
+
+    /// The Folder name right under `parent` (`Memory/Projects` or `Memory/Agents`) for a document inside one of them.
+    private func folderKey(in parent: String, _ path: String) -> String? {
         let parts = path.split(separator: "/").map(String.init)
-        guard parts.count > 3, contains(AgentMemoryContract.agentsFolder, path) else { return nil }
+        guard parts.count > 3, contains(parent, path) else { return nil }
         return parts[2]
     }
 

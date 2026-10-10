@@ -247,15 +247,16 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
   the key (or with `null` or `[]`) the scope is exactly the default template below. `Memory/Projects/<Project>`
   lets agents create at the project's top level (an overview, a `Research` Folder the owner names) as well as
   in the entry folders it holds; `Memory/Agents/<Key>/Notes` adds more of an agent folder; any other Folder,
-  such as `Reference/Shared`, works too. The Library root, `Memory`, `Memory/Projects`, `Memory/Agents` and paths
-  through a reserved Folder (`Proposals`) are refused (compared ignoring case), as are paths that aren't inside
-  the Library. Like `agent_folder`, an invalid entry (or a value that isn't a list of strings) fails that
-  grant closed: every operation exits 65 with `invalid_create_folder` (““Memory › Projects” can’t be a create
-  folder: choose a Folder inside the Library, not the Library itself, “Memory”, “Memory › Projects” or
-  “Memory › Agents”.”); other grants keep working. The key is written only when the list isn't empty, and
-  the file stays `version: 1`: older helpers ignore it, which only narrows them. There is still one grant
-  per project; a create folder in another project's Folder gives this grant's agents that Folder, under this
-  grant's project key.
+  such as `Reference/Shared`, works too. `Memory/Projects` (owner decision, 2026-10-10) gives every project,
+  each one's top level included, for reading, creating and (with `read-create-update`) updating. The Library
+  root, `Memory`, `Memory/Agents` and paths through a reserved Folder (`Proposals`) are refused (compared
+  ignoring case), as are paths that aren't inside the Library. Like `agent_folder`, an invalid entry (or a
+  value that isn't a list of strings) fails that grant closed: every operation exits 65 with
+  `invalid_create_folder` (““Memory” can’t be a create folder: choose a Folder inside the Library, not the
+  Library itself, “Memory” or “Memory › Agents”.”); other grants keep working. The key is written only when
+  the list isn't empty, and the file stays `version: 1`: older helpers ignore it, which only narrows them.
+  There is still one grant per project; a create folder in another project's Folder gives this grant's
+  agents that Folder, and documents created there carry that project as their envelope `project`.
 - **Default template:**
   - Read folders: `Memory/Projects/<Project>/`, the whole `Memory/Agents/<Key>/` when the grant has an
     `agent_folder` (so documents the owner placed at its top level are found), plus any
@@ -270,12 +271,14 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
   - `create_folders` (#228) are added to these for create profiles on a qualified filesystem; one that
     holds a default create folder replaces it in `create_roots`, so `["Memory/Projects/Silkweb"]` gives
     `create_roots: ["Memory/Projects/Silkweb"]`.
-- **Where each type goes (#228).** `progress` documents go only in `Memory/Projects/<Project>/Progress` and
-  `handoff` documents only in `…/Handoffs` (or Folders inside them). Every other create folder, including
-  the project's top level and any agent folder, takes only `memory` and `decision`; `memory` and `decision`
-  may also go in `Progress` and `Handoffs`. A type in the wrong place is `envelope_invalid_field` (exit 65)
-  and nothing is written. A document created anywhere in `Memory/Agents/<Key>/` has the envelope `project`
-  `<Key>`; everywhere else it's the grant's project.
+- **Where each type goes (#228).** `progress` documents go only in a project's
+  `Memory/Projects/<Project>/Progress` and `handoff` documents only in its `…/Handoffs` (or Folders inside
+  them): the grant's own project, or any other project a create folder such as `Memory/Projects` holds.
+  Every other create folder, including a project's top level and any agent folder, takes only `memory` and
+  `decision`; `memory` and `decision` may also go in `Progress` and `Handoffs`. A type in the wrong place is
+  `envelope_invalid_field` (exit 65) and nothing is written. A document created anywhere in
+  `Memory/Agents/<Key>/` has the envelope `project` `<Key>`, one in another project's
+  `Memory/Projects/<Other>/` has `<Other>`; everywhere else it's the grant's project.
 - Containment is checked per path component and compared like APFS: Unicode normalization never
   matters, and case is ignored unless the Library’s volume is case-sensitive.
   `Memory/Projects/Silkweb2` isn’t inside `Memory/Projects/Silkweb`. Symbolic links and hidden items

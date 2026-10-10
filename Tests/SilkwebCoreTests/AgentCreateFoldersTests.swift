@@ -239,14 +239,83 @@ final class AgentCreateFoldersTests: XCTestCase {
         XCTAssertEqual(create("Top", folder: agent).status, 77)
     }
 
+    /// The owner decision (2026-10-10): `Memory/Projects` gives every project, top levels included, for reading,
+    /// creating and updating, with progress and handoffs in each project's own entry folders.
+    func testMemoryProjectsCoversEveryProjectForCreateAndUpdate() throws {
+        try writeGrants([grant(access: .readCreateUpdate, createFolders: ["Memory/Projects"])])
+        try write("# Plan\n\nThe owner's plan for Other.\n", "Memory/Projects/Other/Plan.md")
+        let scope = try result(run(["memory", "capabilities"]))
+        XCTAssertEqual(scope["create_roots"] as? [String], ["Memory/Projects"])
+        XCTAssertNotNil(try result(run(["memory", "read", "Memory/Projects/Other/Plan.md"]))["body"])
+
+        let top = try XCTUnwrap(
+            try result(create("Other overview", folder: "Memory/Projects/Other", type: "decision"))["path"] as? String)
+        XCTAssertEqual(top, "Memory/Projects/Other/Other overview.md")
+        XCTAssertEqual(try envelope(top).string("project"), "Other", "the project it's in")
+        let own = try XCTUnwrap(try result(create("Own overview", folder: project))["path"] as? String)
+        XCTAssertEqual(try envelope(own).string("project"), "Silkweb")
+        let progress = try XCTUnwrap(
+            try result(create("Spike", folder: "Memory/Projects/Other/Progress", type: "progress"))["path"] as? String)
+        XCTAssertEqual(try envelope(progress).string("project"), "Other")
+        XCTAssertEqual(create("Next", folder: "Memory/Projects/Other/Handoffs/Week 1", type: "handoff").status, 0)
+        XCTAssertEqual(create("Next", folder: "\(project)/Handoffs", type: "handoff").status, 0)
+
+        // Progress and handoffs still go only in a project's entry folders; reserved Folders stay off.
+        let before = try documents()
+        for (type, folder) in [
+            ("progress", "Memory/Projects/Other"), ("handoff", "Memory/Projects/Other/Progress"),
+            ("progress", "Memory/Projects"), ("handoff", "Memory/Projects/Other/Notes/Handoffs"),
+        ] {
+            let refused = create("Wrong place", folder: folder, type: type)
+            XCTAssertEqual(try code(refused), "envelope_invalid_field", "\(type) in \(folder)")
+        }
+        XCTAssertEqual(create("Idea", folder: "Memory/Projects/Other/Proposals").status, 77)
+        XCTAssertEqual(try documents(), before, "nothing was created")
+
+        // Updates work inside the create folder for what an agent created; owner files need a proposal.
+        let update = { (path: String) -> AgentHelper.Output in
+            let revision = (try? self.result(self.run(["memory", "read", path])))?["revision"] as? String ?? ""
+            return self.run(
+                [
+                    "memory", "update", path, "--expected-revision", revision, "--body-file", "-", "--agent",
+                    "claude-code", "--session", "s2",
+                ], stdin: "# Revised\n\nRevised.\n")
+        }
+        XCTAssertEqual(try result(update(top))["outcome"] as? String, "updated")
+        XCTAssertTrue(
+            try String(contentsOf: library.appendingPathComponent(top), encoding: .utf8).hasSuffix("\nRevised.\n"))
+        XCTAssertEqual(try envelope(top).string("project"), "Other")
+        XCTAssertEqual(try code(update("Memory/Projects/Other/Plan.md")), "update_requires_proposal")
+        XCTAssertEqual(
+            try String(contentsOf: library.appendingPathComponent("Memory/Projects/Other/Plan.md"), encoding: .utf8),
+            "# Plan\n\nThe owner's plan for Other.\n")
+    }
+
+    /// QA (#228): an update inside an owner-chosen create folder with a Read, Create and Update grant.
+    func testUpdateInsideACreateFolder() throws {
+        try writeGrants([grant(access: .readCreateUpdate, createFolders: ["Reference/Shared"])])
+        let path = try XCTUnwrap(try result(create("Shared fact", folder: "Reference/Shared"))["path"] as? String)
+        let revision = try XCTUnwrap(try result(run(["memory", "read", path]))["revision"] as? String)
+        let updated = try result(
+            run(
+                [
+                    "memory", "update", path, "--expected-revision", revision, "--body-file", "-", "--agent",
+                    "claude-code", "--session", "s2",
+                ], stdin: "# Shared fact\n\nRevised.\n"))
+        XCTAssertEqual(updated["outcome"] as? String, "updated")
+        XCTAssertEqual(updated["path"] as? String, path)
+        XCTAssertTrue(
+            try String(contentsOf: library.appendingPathComponent(path), encoding: .utf8).hasSuffix("\nRevised.\n"))
+    }
+
     // MARK: Invalid entries
 
     func testInvalidCreateFoldersFailThatGrantClosed() throws {
         let valid = #"{"project":"Other","library":{"path":"\#(library.path)"},"access":"read-create"}"#
         for value in [
-            #"[""]"#, #"["/"]"#, #"["Memory"]"#, #"["memory/projects"]"#, #"["Memory/Agents/"]"#, #"["../x"]"#,
+            #"[""]"#, #"["/"]"#, #"["Memory"]"#, #"["memory/agents"]"#, #"["Memory/Agents/"]"#, #"["../x"]"#,
             #"["Memory/Projects/Silkweb/../Other"]"#, #"["Memory/Projects/Silkweb/Proposals"]"#, #"[".silkweb"]"#,
-            #"["Memory/Projects/Silkweb", "Memory/Projects"]"#, "42", #""Memory/Projects/Silkweb""#, "[42]",
+            #"["Memory/Projects/Silkweb", "MEMORY"]"#, "42", #""Memory/Projects/Silkweb""#, "[42]",
         ] {
             let invalid =
                 #"{"project":"Silkweb","library":{"path":"\#(library.path)"},"access":"read-create","create_folders":\#(value)}"#
@@ -290,7 +359,8 @@ final class AgentCreateFoldersTests: XCTestCase {
         XCTAssertEqual(try AgentScope(grant: grant(), createAllowed: false).createRoots, [])
 
         XCTAssertEqual(try AgentScope.validateCreateFolder("Notes//Swift"), "Notes/Swift")
-        for refused in ["", "/", "Memory", "MEMORY/projects", "Memory/Agents", "a/../b", "Notes/proposals/x"] {
+        XCTAssertEqual(try AgentScope.validateCreateFolder("Memory/Projects/"), "Memory/Projects")
+        for refused in ["", "/", "Memory", "memory/AGENTS", "Memory/Agents", "a/../b", "Notes/proposals/x"] {
             XCTAssertThrowsError(try AgentScope.validateCreateFolder(refused), refused) {
                 guard case .invalidCreateFolder = $0 as? AgentScopeError else {
                     return XCTFail("\(refused): \($0)")
@@ -316,7 +386,7 @@ final class AgentCreateFoldersTests: XCTestCase {
         let readOnly = grantCommand(initFlags("Plain", access: "read") + ["--create-folder", "Notes"]).output
         XCTAssertEqual(readOnly.status, 64)
         XCTAssertEqual(readOnly.stderr, "silkweb: Create folders need read-create or read-create-update access.\n")
-        for invalid in ["Memory/Projects", "", "../x"] {
+        for invalid in ["Memory", "Memory/Agents", "", "../x"] {
             let refused = grantCommand(initFlags("New") + ["--create-folder", invalid]).output
             XCTAssertEqual(refused.status, 64, invalid)
             XCTAssertTrue(refused.stderr.contains("can’t be a create folder"), refused.stderr)
@@ -325,6 +395,12 @@ final class AgentCreateFoldersTests: XCTestCase {
         XCTAssertEqual(
             grantCommand(initFlags("New") + many).output.stderr, "silkweb: Give at most 10 create folders.\n")
         XCTAssertEqual(try Data(contentsOf: grantsURL), saved)
+
+        // The owner's choice for every project (2026-10-10).
+        let flags = initFlags("Claude", access: "read-create-update") + ["--create-folder", "Memory/Projects"]
+        let everyProject = grantCommand(flags).output
+        XCTAssertEqual(everyProject.status, 0, everyProject.stderr)
+        XCTAssertEqual(try load().grants.map(\.createFolders), [[project, "Reference/Shared"], ["Memory/Projects"]])
     }
 
     func testGrantInitAsksOneQuestionForTheProjectTopLevel() throws {
@@ -409,7 +485,7 @@ final class AgentCreateFoldersTests: XCTestCase {
         XCTAssertEqual(readOnly.status, 64)
         XCTAssertEqual(try code(readOnly), "invalid_argument")
         XCTAssertTrue(readOnly.stderr.contains("Create folders need read-create access."), readOnly.stderr)
-        let wide = grantCommand(base + ["--access", "read-create", "--create-folder", "Memory/Projects"]).output
+        let wide = grantCommand(base + ["--access", "read-create", "--create-folder", "Memory/Agents"]).output
         XCTAssertEqual(try code(wide), "invalid_argument")
 
         let arguments =

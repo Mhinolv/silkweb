@@ -574,7 +574,7 @@
           },
           "folderPath" : {
             "type" : "string",
-            "description" : "Instead of folder: a Library-relative folder inside a create folder (create_roots), such as Memory/Projects/Silkweb/Progress/Sprint 1. Needs type. progress goes only in the project’s Progress and handoff only in its Handoffs."
+            "description" : "Instead of folder: a Library-relative folder inside a create folder (create_roots), such as Memory/Projects/Silkweb/Progress/Sprint 1. Needs type. progress goes only in a project’s Progress and handoff only in its Handoffs."
           },
           "title" : {
             "type" : "string",
