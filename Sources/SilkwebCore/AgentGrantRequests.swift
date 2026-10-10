@@ -83,7 +83,8 @@ enum AgentGrantRequests {
     /// `grant requests [--all]`, `grant approve <ID>`, `grant deny <ID> [--note …]`.
     static func owner(
         _ invocation: AgentHelper.Invocation, console: AgentGrantInit.Console, home: URL,
-        environment: [String: String], executable: String?, currentDirectory: String, now: Date
+        environment: [String: String], executable: String?, currentDirectory: String, now: Date,
+        verifier: any AgentGrantVerifier = AgentGrantKeys.verifier, signer: (any AgentGrantSigner)? = nil
     ) throws -> AgentHelper.Output {
         let command = invocation.words[1]
         let usage = { (message: String) in
@@ -124,7 +125,7 @@ enum AgentGrantRequests {
         let approve = command == "approve"
         // Refusals (unknown, decided, would widen) come before the question, so the owner isn't asked in vain.
         let request = try store.pending(id, now: now)
-        if approve { _ = try store.previewApproval(id, grantsURL: grantsURL, now: now) }
+        if approve { _ = try store.previewApproval(id, grantsURL: grantsURL, now: now, keys: verifier) }
         if console.isTerminal {
             console.write(describe(request, home: home, now: now))
             console.write(approve ? "Approve this request? [y/N] " : "Deny this request? [y/N] ")
@@ -138,7 +139,8 @@ enum AgentGrantRequests {
             }
         }
         let decision = try store.decide(
-            id, approve: approve, note: invocation.value("note") ?? "", via: .terminal, grantsURL: grantsURL, now: now)
+            id, approve: approve, note: invocation.value("note") ?? "", via: .terminal, grantsURL: grantsURL, now: now,
+            signer: signer, keys: verifier)
         guard approve, let grant = decision.grant, let outcome = decision.outcome else {
             return AgentHelper.Output(
                 status: 0, stdout: "Denied the request from “\(request.agentName)” for “\(request.project)”.\n",

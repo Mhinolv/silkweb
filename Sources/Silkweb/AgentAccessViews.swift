@@ -45,14 +45,18 @@ struct AgentAccessView: View {
     @Bindable var model: AgentAccessModel
 
     var body: some View {
-        HStack(spacing: 0) {
-            AgentAccessSidebar(model: model).frame(width: 240)
-            Divider()
-            detail.frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 0) {
+            if let strip = model.protectionStrip { ProtectionStrip(model: model, strip: strip) }
+            HStack(spacing: 0) {
+                AgentAccessSidebar(model: model).frame(width: 240)
+                Divider()
+                detail.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .frame(minWidth: 680, minHeight: 440)
         .background(Color.silkwebPaneBackground)
         .sheet(item: $model.newGrant) { form in NewGrantSheet(model: model, form: form) }
+        .sheet(item: $model.review) { review in GrantReviewSheet(model: model, review: review) }
     }
 
     @ViewBuilder private var detail: some View {
@@ -85,6 +89,105 @@ struct AgentAccessView: View {
                     description: Text("Choose a grant to see and change what agents may do."))
             }
         }
+    }
+}
+
+// MARK: Protection (#205)
+
+/// “Agent grants aren’t protected yet.” with Protect Grants…, or the changed-outside / key-missing copy with Review
+/// Grants…: 32 pt, callout, text only, across the whole window. One VoiceOver element plus its labelled button.
+struct ProtectionStrip: View {
+    let model: AgentAccessModel
+    let strip: (icon: String, text: String, button: String)
+
+    var body: some View {
+        HStack(spacing: Spacing.xSmall) {
+            HStack(spacing: Spacing.xSmall) {
+                Image(systemName: strip.icon).accessibilityHidden(true)
+                Text(strip.text).lineLimit(1).truncationMode(.tail)
+            }
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: Spacing.xSmall)
+            Button(strip.button) { model.beginReview() }
+                .accessibilityLabel(strip.button.replacingOccurrences(of: "…", with: ""))
+        }
+        .font(.callout).padding(.horizontal, Spacing.small).frame(height: 32)
+        .paneStrip(hairline: .bottom)
+    }
+}
+
+/// Protect Agent Grants / Review Agent Grants (480 pt): every grant on disk with a keep checkbox, then Sign Grants
+/// after owner authentication. Unchecked grants are removed.
+struct GrantReviewSheet: View {
+    let model: AgentAccessModel
+    @Bindable var review: GrantReview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.small) {
+            Text(review.title).font(.headline)
+            Text(
+                review.protecting
+                    ? "Silkweb signs the grants you keep with a key in your keychain. Agents then can’t use a grant "
+                        + "changed outside Silkweb."
+                    : "Keep only the grants you recognise. Silkweb signs them again, and agents can use them once more."
+            )
+            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if !review.knowsPrevious {
+                Text("Silkweb doesn’t have the previous version. Uncheck any grant you don’t recognise.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.small) {
+                    ForEach(review.file.grants, id: \.project) { grant in row(grant) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(Spacing.small)
+            }
+            .frame(maxHeight: 280)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
+            HStack {
+                Spacer()
+                Button("Cancel") { model.review = nil }.keyboardShortcut(.cancelAction)
+                Button("Sign Grants") { Task { await model.signGrants() } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(review.signing)
+            }
+        }
+        .padding(Spacing.large)
+        .frame(width: 480)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(Color.silkwebPaneBackground)
+    }
+
+    private func row(_ grant: AgentGrant) -> some View {
+        Toggle(
+            isOn: Binding(
+                get: { review.kept.contains(grant.project) },
+                set: { keep in
+                    if keep { review.kept.insert(grant.project) } else { review.kept.remove(grant.project) }
+                })
+        ) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(grant.displayLabel)
+                Text(Self.detail(grant)).font(.caption).foregroundStyle(.secondary)
+                if let change = review.changes[grant.project] {
+                    Text(change).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .toggleStyle(.checkbox)
+        .accessibilityLabel("Keep “\(grant.displayLabel)”")
+    }
+
+    /// “Silkweb Library · Read and Create · Paused”.
+    static func detail(_ grant: AgentGrant) -> String {
+        var parts = [
+            grant.library.path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "No Library",
+            grant.access.displayName,
+        ]
+        if grant.isRevoked { parts.append("Paused") }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -130,13 +233,14 @@ struct AgentAccessSidebar: View {
                     Image(systemName: "plus").frame(width: 24, height: 20)
                 }
                 .help("New Grant…").accessibilityLabel("New Grant…")
+                .disabled(model.isReadOnly)
                 Button {
                     if case .grant(let project) = model.selection { Task { await model.remove(project: project) } }
                 } label: {
                     Image(systemName: "minus").frame(width: 24, height: 20)
                 }
                 .help("Remove Grant…").accessibilityLabel("Remove Grant…")
-                .disabled(!model.selectsGrant)
+                .disabled(!model.selectsGrant || model.isReadOnly)
                 Spacer()
             }
             .buttonStyle(.borderless)
@@ -165,9 +269,10 @@ struct GrantRow: View {
         .accessibilityAction(named: grant.isRevoked ? "Resume Access" : "Pause Access") { togglePause() }
         .accessibilityAction(named: "Remove Grant") { Task { await model.remove(project: grant.project) } }
         .contextMenu {
-            Button(grant.isRevoked ? "Resume Access" : "Pause Access") { togglePause() }
+            // #205: nothing changes while grants need review.
+            Button(grant.isRevoked ? "Resume Access" : "Pause Access") { togglePause() }.disabled(model.isReadOnly)
             Divider()
-            Button("Remove Grant…") { Task { await model.remove(project: grant.project) } }
+            Button("Remove Grant…") { Task { await model.remove(project: grant.project) } }.disabled(model.isReadOnly)
         }
     }
 
@@ -198,12 +303,16 @@ struct GrantDetail: View {
                     .paneStrip(hairline: .bottom)
                 }
                 Form {
-                    identity(grant)
-                    access(grant)
-                    readFolders(grant)
-                    createFolders(grant)
-                    agentFolder(grant)
-                    status(grant)
+                    // #205: read-only while grants need review; Client setup stays usable.
+                    Group {
+                        identity(grant)
+                        access(grant)
+                        readFolders(grant)
+                        createFolders(grant)
+                        agentFolder(grant)
+                        status(grant)
+                    }
+                    .disabled(model.isReadOnly)
                     Section {
                         DisclosureGroup("Client setup") {
                             let block = AgentGrantOwner.installBlock(
@@ -222,15 +331,17 @@ struct GrantDetail: View {
                 }
                 .formStyle(.grouped)
                 .scrollContentBackground(.hidden)
-                Divider()
-                HStack {
-                    Spacer()
-                    Button("Revert") { model.revert() }.disabled(!model.isEdited)
-                    Button("Save") { Task { await model.save() } }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(!model.isEdited || model.saving)
+                if !model.isReadOnly {
+                    Divider()
+                    HStack {
+                        Spacer()
+                        Button("Revert") { model.revert() }.disabled(!model.isEdited)
+                        Button("Save") { Task { await model.save() } }
+                            .keyboardShortcut(.defaultAction)
+                            .disabled(!model.isEdited || model.saving)
+                    }
+                    .padding(Spacing.small)
                 }
-                .padding(Spacing.small)
             }
         }
     }

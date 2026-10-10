@@ -565,6 +565,9 @@ import SilkwebCore
     /// #229: Show in Agent Activity brings the library window forward.
     func orderFront() { window?.makeKeyAndOrderFront(nil) }
 
+    /// The library window, for sheets that belong on it (#205's Protect agent grants?).
+    var libraryWindow: NSWindow? { window }
+
     /// The window closed: every section keeps its Library; its tabs reopen when the window comes back.
     func windowClosed() async {
         hasWindow = false

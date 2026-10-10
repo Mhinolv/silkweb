@@ -501,9 +501,11 @@ public struct AgentAccessRequestStore: Sendable {
     }
 
     /// What approving would save, without saving anything: refuses exactly as the approval would (#186 rules).
-    public func previewApproval(_ id: String, grantsURL: URL, now: Date = Date()) throws -> AgentAccessDecision {
+    public func previewApproval(
+        _ id: String, grantsURL: URL, now: Date = Date(), keys: (any AgentGrantVerifier)? = nil
+    ) throws -> AgentAccessDecision {
         let request = try pending(id, now: now)
-        let plan = try Self.approval(request, grantsURL: grantsURL, now: now)
+        let plan = try Self.approval(request, grantsURL: grantsURL, now: now, keys: keys)
         return AgentAccessDecision(
             request: request, grant: plan.merged.grant, outcome: plan.merged.outcome, filesystem: plan.filesystem)
     }
@@ -513,8 +515,13 @@ public struct AgentAccessRequestStore: Sendable {
     /// (#228) are added to an existing grant, which the owner's Approve confirms; anything else that would widen a
     /// grant is refused and the request stays pending. Callers are the owner's: the Terminal command after its
     /// terminal check, or the app after owner authentication. Agents have no path here.
+    ///
+    /// #205: protected grants are re-signed with `signer` (the Terminal command passes one only with a terminal on
+    /// stdin, the app after authentication); without one, approving into protected grants is refused. Unprotected
+    /// grants stay unsigned: approval never protects them on its own.
     public func decide(
-        _ id: String, approve: Bool, note: String = "", via: AgentAccessRequest.Via, grantsURL: URL, now: Date = Date()
+        _ id: String, approve: Bool, note: String = "", via: AgentAccessRequest.Via, grantsURL: URL, now: Date = Date(),
+        signer: (any AgentGrantSigner)? = nil, keys: (any AgentGrantVerifier)? = nil
     ) throws -> AgentAccessDecision {
         try update { file in
             guard let index = file.requests.firstIndex(where: { $0.requestId == id }) else {
@@ -524,10 +531,13 @@ public struct AgentAccessRequestStore: Sendable {
             guard request.isPending(at: now) else { throw AgentAccessRequests.alreadyDecided(request, now: now) }
             var decision = AgentAccessDecision(request: request, grant: nil, outcome: nil, filesystem: nil)
             if approve {
-                let plan = try Self.approval(request, grantsURL: grantsURL, now: now)
+                let plan = try Self.approval(request, grantsURL: grantsURL, now: now, keys: keys ?? signer)
                 if plan.merged.outcome != .unchanged {
                     do {
-                        try plan.merged.file.write(to: grantsURL)
+                        try AgentGrantSigning.save(
+                            plan.merged.file, to: grantsURL, current: plan.current, signer: signer, authenticated: true)
+                    } catch let error as AgentAccessError {
+                        throw error
                     } catch {
                         throw AgentAccessError(
                             code: "write_failed", title: "Can’t Approve This Request",
@@ -550,24 +560,29 @@ public struct AgentAccessRequestStore: Sendable {
         }
     }
 
-    private static func approval(_ request: AgentAccessRequest, grantsURL: URL, now: Date) throws -> (
-        merged: (file: AgentGrantFile, grant: AgentGrant, outcome: AgentGrantInit.Outcome), filesystem: AgentFilesystem
+    /// `keys` verifies the grants (the process's verifier when nil); grants that need review refuse the approval.
+    private static func approval(
+        _ request: AgentAccessRequest, grantsURL: URL, now: Date, keys: (any AgentGrantVerifier)?
+    ) throws -> (
+        merged: (file: AgentGrantFile, grant: AgentGrant, outcome: AgentGrantInit.Outcome),
+        filesystem: AgentFilesystem, current: AgentGrantInspection
     ) {
         let refused = { (message: String) in
             AgentAccessError(code: "approve_would_widen", title: "Can’t Approve This Request", message: message)
         }
         do {
             let library = try AgentGrantInit.resolveLibrary(request.libraryRoot, from: "/")
-            var grants: AgentGrantFile
-            do {
-                grants = try AgentGrantStore(url: grantsURL).load()
-            } catch let error as AgentAccessError where error.code == "no_grants_file" {
-                grants = AgentGrantFile()
+            let current = try AgentGrantSigning.inspect(grantsURL, keys: keys ?? AgentGrantKeys.verifier)
+            switch current.protection {
+            case .changedOutside: throw AgentAccessError.grantsChangedOutside
+            case .keyMissing: throw AgentAccessError.grantsKeyMissing
+            case .keyUnreadable: throw AgentAccessError.grantsKeyUnreadable
+            case .protected, .unprotected: break
             }
             let merged = try AgentGrantInit.merge(
-                grants, project: request.project, library: library.url, access: request.profile,
+                current.file, project: request.project, library: library.url, access: request.profile,
                 readFolders: request.readFolders, createFolders: request.createFolders, now: now, approving: true)
-            return (merged, library.filesystem)
+            return (merged, library.filesystem, current)
         } catch let failure as AgentGrantInit.Failure {
             if failure == .folderMissing || failure == .folderUnreadable {
                 throw refused("The Library “\(request.libraryRoot)” can’t be found or read.")

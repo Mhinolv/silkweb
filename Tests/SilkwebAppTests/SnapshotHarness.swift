@@ -116,7 +116,9 @@ struct SnapshotScenario {
     /// #229 the Agent Access window (780×520) on two Libraries, three grants (Coffee paused) and requests from both:
     /// "grants" (Silkweb selected), "detail-edited" (unsaved widening edits), "paused" (Coffee selected), "requests"
     /// (Access Requests selected), "new-grant" (the New Grant sheet), "empty" (no grants, no requests) and
-    /// "widen-refused" (the approval refusal alert with Show Grant).
+    /// "widen-refused" (the approval refusal alert with Show Grant). #205 protection: "unprotected" (the strip),
+    /// "protect-sheet" (Protect Agent Grants), "tampered" (changed outside Silkweb: strip and read-only detail),
+    /// "review-changed" (Review Agent Grants with a Changed line) and "key-missing".
     var agentAccess: String? = nil
     /// #230 Library changes outside Silkweb, in Agent Activity: "only" (one direct write, no receipts), "mixed" (the
     /// #137 receipts with “Helper spike” changed outside Silkweb), "info" (Document Info on the direct write) and
@@ -320,6 +322,12 @@ struct SnapshotScenario {
         .init(name: "agent-access-new-grant", agentAccess: "new-grant"),
         .init(name: "agent-access-empty", agentAccess: "empty"),
         .init(name: "agent-access-widen-refused", agentAccess: "widen-refused"),
+        // #205: grant protection (the strip in each state, the protect and review sheets, the read-only detail).
+        .init(name: "agent-access-unprotected", agentAccess: "unprotected"),
+        .init(name: "agent-access-protect-sheet", agentAccess: "protect-sheet"),
+        .init(name: "agent-access-tampered", agentAccess: "tampered"),
+        .init(name: "agent-access-review-changed", agentAccess: "review-changed"),
+        .init(name: "agent-access-key-missing", agentAccess: "key-missing"),
         // #230: changes outside Silkweb in Agent Activity (text only), Document Info's block, and the filter.
         .init(name: "agent-activity-outside-only", outsideChanges: "only"),
         .init(name: "agent-activity-mixed", outsideChanges: "mixed"),
@@ -1176,6 +1184,10 @@ final class SnapshotHarness {
         model.clock = { SnapshotScenario.requestsNow }
         model.authenticate = { _ in false }
         model.present = { _, _ in .abort }
+        // #205: protection states sign with keys in memory, never the keychain.
+        let protectionStates = ["unprotected", "protect-sheet", "tampered", "review-changed", "key-missing"]
+        let keys = AgentGrantMemoryKeys()
+        if protectionStates.contains(state) { model.keys = keys }
         try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
         if state != "empty" {
             let created = SnapshotScenario.requestsNow.addingTimeInterval(-9 * 86_400)
@@ -1201,9 +1213,23 @@ final class SnapshotHarness {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(AgentAccessRequestFile(requests: requests)).write(to: model.requestStore.url)
         }
+        if ["tampered", "review-changed", "key-missing"].contains(state) {
+            let signed = try AgentGrantSigning.signed(try AgentGrantOwner.load(model.grantsURL), with: keys)
+            try signed.write(to: model.grantsURL)
+            await model.reload()
+            if state == "key-missing" {
+                keys.removeKey()
+            } else {
+                // The hand edit outside Silkweb, after the window last verified the grants.
+                var widened = signed
+                widened.grants[0].access = .readCreateUpdate
+                try widened.write(to: model.grantsURL)
+            }
+        }
         await model.reload()
         switch state {
-        case "grants": await model.select(.grant("Silkweb"))
+        case "grants", "unprotected", "tampered", "key-missing": await model.select(.grant("Silkweb"))
+        case "protect-sheet", "review-changed": model.beginReview()
         case "detail-edited":
             await model.select(.grant("Silkweb"))
             model.draft?.label = "Silkweb repo"
@@ -1391,10 +1417,14 @@ final class SnapshotHarness {
                     try await self.agentAccessModel(state, root: root, temporary: temporary)
                 }
                 // Host the production window content (and sheet) at the window's default size; never order either.
-                let view: AnyView =
-                    state == "new-grant" && model.newGrant != nil
-                    ? AnyView(NewGrantSheet(model: model, form: model.newGrant!))
-                    : AnyView(AgentAccessView(model: model).frame(width: 780, height: 520))
+                let view: AnyView
+                if state == "new-grant", let form = model.newGrant {
+                    view = AnyView(NewGrantSheet(model: model, form: form))
+                } else if let review = model.review {
+                    view = AnyView(GrantReviewSheet(model: model, review: review))
+                } else {
+                    view = AnyView(AgentAccessView(model: model).frame(width: 780, height: 520))
+                }
                 content = AnyView(
                     view.frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Color(nsColor: .windowBackgroundColor)))

@@ -187,14 +187,24 @@ public struct AgentGrantFile: Codable, Equatable, Sendable {
 
     public var version = currentVersion
     public var grants: [AgentGrant]
+    /// #205: present once the owner protected their grants (`AgentGrantSigning`). The file stays `version: 1`: older
+    /// builds ignore the key.
+    public var signature: AgentGrantSignature?
 
     public init(grants: [AgentGrant] = []) { self.grants = grants }
 
-    private enum CodingKeys: String, CodingKey { case version, grants }
+    private enum CodingKeys: String, CodingKey { case version, grants, signature }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         version = try values.decodeIfPresent(Int.self, forKey: .version) ?? 1
         grants = try values.decodeIfPresent([AgentGrant].self, forKey: .grants) ?? []
+        // A `signature` that isn't an object still counts as signed, so it fails verification instead of reading as
+        // an unsigned file.
+        if values.contains(.signature), try !values.decodeNil(forKey: .signature) {
+            signature = (try? values.decode(AgentGrantSignature.self, forKey: .signature)) ?? .unreadable
+        } else {
+            signature = nil
+        }
     }
 
     public static func defaultURL(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
@@ -229,7 +239,8 @@ public struct AgentGrantFile: Codable, Equatable, Sendable {
     }
 
     /// Atomic replace with sorted keys, so the owner can diff it and running helpers see one
-    /// complete file (a new inode) on their next operation.
+    /// complete file (a new inode) on their next operation. Writes `signature` as it is: owner paths save through
+    /// `AgentGrantSigning.save`, which signs once grants are protected.
     public func write(to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()

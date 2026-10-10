@@ -136,11 +136,19 @@ public enum AgentGrantInit {
 
     /// `arguments` starts with `grant`. `executable` is the helper's `argv[0]`, used for the install
     /// lines; `currentDirectory` resolves relative paths.
+    ///
+    /// #205: `signer` (the keychain, from the helper's `main`) signs saved grants, and only while stdin is a terminal:
+    /// `init`, and `approve` into protected grants. Without a terminal nothing is signed, so a write to protected grants
+    /// is refused.
     public static func run(
         _ arguments: [String], console: Console, home: URL = FileManager.default.homeDirectoryForCurrentUser,
         environment: [String: String] = ProcessInfo.processInfo.environment, executable: String?,
-        currentDirectory: String = FileManager.default.currentDirectoryPath, now: Date = Date()
+        currentDirectory: String = FileManager.default.currentDirectoryPath, now: Date = Date(),
+        signer: (any AgentGrantSigner)? = nil
     ) -> AgentHelper.Output {
+        // Only the owner at a terminal may sign; the same keys still verify without one.
+        let verifier = signer ?? AgentGrantKeys.verifier
+        let signer = console.isTerminal ? signer : nil
         // #203: an agent's request answers in JSON, as `silkweb memory` does, whatever happens.
         if arguments.dropFirst().first == "request" {
             return AgentGrantRequests.request(arguments, home: home, currentDirectory: currentDirectory, now: now)
@@ -153,7 +161,7 @@ public enum AgentGrantInit {
             if ["requests", "approve", "deny"].contains(invocation.words[1]) {
                 return try AgentGrantRequests.owner(
                     invocation, console: console, home: home, environment: environment, executable: executable,
-                    currentDirectory: currentDirectory, now: now)
+                    currentDirectory: currentDirectory, now: now, verifier: verifier, signer: signer)
             }
             guard invocation.words[1] == "init" else {
                 throw Failure.usage("That isn’t a grant command. Use \(names).")
@@ -172,23 +180,39 @@ public enum AgentGrantInit {
             }
             let stdout = try initialize(
                 invocation, console: console, home: home, environment: environment, executable: executable,
-                currentDirectory: currentDirectory, now: now)
+                currentDirectory: currentDirectory, now: now, verifier: verifier, signer: signer)
             return AgentHelper.Output(status: 0, stdout: stdout, stderr: "")
         } catch let failure as Failure {
             return AgentHelper.Output(status: failure.status, stdout: "", stderr: "silkweb: " + failure.message + "\n")
         } catch let failure as AgentAccessError {
             return AgentHelper.Output(
                 status: AgentHelper.exitStatus(for: failure.code), stdout: "",
-                stderr: "silkweb: " + failure.message + "\n")
+                stderr: "silkweb: " + (ownerMessage(failure) ?? failure.message) + "\n")
         } catch {
             return AgentHelper.Output(
                 status: 70, stdout: "", stderr: "silkweb: " + AgentAccessError.internalError.message + "\n")
         }
     }
 
+    /// #205: the owner's copy for grants that can't be changed here (the agents' copy asks them to ask the owner).
+    static func ownerMessage(_ error: AgentAccessError) -> String? {
+        switch error.code {
+        case "invalid_grants_signature":
+            return "Agent grants were changed outside Silkweb. Review them in Silkweb’s Agent Access window. Nothing "
+                + "was saved."
+        case "grants_key_missing":
+            return "Silkweb can’t find the key that protects agent grants on this Mac. Review them in Silkweb’s Agent "
+                + "Access window. Nothing was saved."
+        case "grants_signing_required":
+            return "Agent grants are protected, so saving them needs Terminal. Nothing was saved."
+        default: return nil
+        }
+    }
+
     private static func initialize(
         _ invocation: AgentHelper.Invocation, console: Console, home: URL, environment: [String: String],
-        executable: String?, currentDirectory: String, now: Date
+        executable: String?, currentDirectory: String, now: Date, verifier: any AgentGrantVerifier,
+        signer: (any AgentGrantSigner)?
     ) throws -> String {
         let dryRun = invocation.flags.contains("dry-run")
         var access = try invocation.value("access").map { text -> AgentGrant.Access in
@@ -209,14 +233,16 @@ public enum AgentGrantInit {
         // An agent's shell has no terminal, so it can't save access for itself, even with every flag.
         if !dryRun, !console.isTerminal, isSameFile(grantsURL, realURL) { throw Failure.ownerOnly }
 
-        // Read the file first, so a broken or newer one is reported before any questions.
-        let store = AgentGrantStore(url: grantsURL)
-        var file: AgentGrantFile
-        do {
-            file = try store.load()
-        } catch let error as AgentAccessError where error.code == "no_grants_file" {
-            file = AgentGrantFile()
+        // Read the file first, so a broken or newer one, or one that needs review (#205), is reported before any
+        // questions.
+        let current = try AgentGrantSigning.inspect(grantsURL, keys: verifier)
+        switch current.protection {
+        case .changedOutside: throw AgentAccessError.grantsChangedOutside
+        case .keyMissing: throw AgentAccessError.grantsKeyMissing
+        case .keyUnreadable: throw AgentAccessError.grantsKeyUnreadable
+        case .protected, .unprotected: break
         }
+        let file = current.file
 
         let ask = { (prompt: String) throws -> String in
             console.write(prompt)
@@ -347,17 +373,44 @@ public enum AgentGrantInit {
             let answer = try ask("Save to \(fileName)? [y/N] ").lowercased()
             guard answer == "y" || answer == "yes" else { return "Nothing was saved.\n" }
         }
+        var protecting = false
         if merged.outcome != .unchanged {
+            // #205: the first grant is protected from the start; existing unsigned grants only after the owner says so.
+            // Only the real file: making the key protects it, so a `--grants` scratch file never does.
+            if current.protection == .unprotected, signer != nil, isSameFile(grantsURL, realURL) {
+                if file.grants.isEmpty {
+                    protecting = true
+                } else {
+                    console.write(protectionQuestion(file.grants))
+                    let answer = try ask("Protect them? [y/N] ").lowercased()
+                    protecting = answer == "y" || answer == "yes"
+                }
+            }
             do {
-                try merged.file.write(to: grantsURL)
+                try AgentGrantSigning.save(
+                    merged.file, to: grantsURL, current: current, signer: signer, authenticated: true,
+                    adopt: protecting)
+            } catch let error as AgentAccessError {
+                throw error
             } catch {
                 throw Failure(status: 74, message: "Silkweb couldn’t save “\(fileName)”. Nothing was saved.")
             }
         }
         return summary(
             merged.grant, outcome: merged.outcome, filesystem: library.filesystem, fileName: fileName) + "\n"
-            + install
+            + (protecting ? protectedNote + "\n" : "") + install
     }
+
+    /// #205: shown before “Protect them? [y/N]” when saving to unsigned grants for the first time.
+    static func protectionQuestion(_ grants: [AgentGrant]) -> String {
+        let noun = grants.count == 1 ? "grant" : "grants"
+        return "Silkweb can sign your grants with a key in your keychain. Agents then can’t use a grant changed "
+            + "outside Silkweb.\nThis also protects \(grants.count) existing \(noun):\n"
+            + grants.map { "  \($0.displayLabel)  \($0.access.displayName)  \($0.library.path ?? "")\n" }.joined()
+    }
+
+    static let protectedNote =
+        "Agent grants are protected: agents can’t use a grant changed outside Silkweb or grant init."
 
     // MARK: Merging
 
