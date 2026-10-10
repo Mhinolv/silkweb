@@ -321,6 +321,62 @@ final class SessionRestoreTests: XCTestCase {
         XCTAssertTrue(welcome.sections.isEmpty)
     }
 
+    /// #225: Collapse / Expand All Libraries save the session once per batch, and relaunch keeps the result.
+    func testCollapseAllLibrariesSavesOnceAndRestores() async throws {
+        let registry = await relaunch()
+        let alpha = try await added(registry, try library("Alpha"))
+        _ = try await added(registry, try library("Beta"))
+        _ = try await added(registry, try library("Gamma"))
+        registry.focus(alpha)
+        let writes = SessionWrites(defaults)
+        defer { writes.stop() }
+
+        registry.setAllSectionsCollapsed(true)
+        XCTAssertEqual(writes.count, 1, "one save for three sections")
+        XCTAssertEqual(saved?.sections.map(\.collapsed), [true, true, true])
+        XCTAssertEqual(saved?.currentPath, alpha.root?.path)
+        registry.setAllSectionsCollapsed(true)
+        XCTAssertEqual(writes.count, 1, "nothing to change: no save")
+        registry.setAllSectionsCollapsed(false)
+        XCTAssertEqual(writes.count, 2)
+        XCTAssertEqual(saved?.sections.map(\.collapsed), [false, false, false])
+
+        registry.setAllSectionsCollapsed(true)
+        await quit(registry)
+        let next = await relaunch()
+        XCTAssertEqual(roots(next), ["Alpha", "Beta", "Gamma"])
+        XCTAssertEqual(next.sections.map(\.sectionCollapsed), [true, true, true])
+        XCTAssertEqual(next.current.root?.lastPathComponent, "Alpha")
+    }
+
+    /// Counts writes of the app session key.
+    private final class SessionWrites: NSObject {
+        private let defaults: UserDefaults
+        private let key: String
+        private(set) var count = 0
+        private var observing = true
+
+        @MainActor init(_ defaults: UserDefaults) {
+            self.defaults = defaults
+            key = LibraryWindowRegistry.sessionKey
+            super.init()
+            defaults.addObserver(self, forKeyPath: key, options: [.new], context: nil)
+        }
+
+        func stop() {
+            guard observing else { return }
+            observing = false
+            defaults.removeObserver(self, forKeyPath: key)
+        }
+
+        override func observeValue(
+            forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?,
+            context: UnsafeMutableRawPointer?
+        ) {
+            count += 1
+        }
+    }
+
     func testClosingTheWindowKeepsTheSavedSections() async throws {
         let registry = await relaunch()
         let alpha = try await added(registry, try library("Alpha"))

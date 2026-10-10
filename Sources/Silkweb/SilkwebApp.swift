@@ -111,6 +111,8 @@ struct WorkspaceCommands: Commands {
                 .keyboardShortcut(.delete, modifiers: .command).disabled(!state.canTrash)
             Button("Reveal in Finder") { workspace.reveal() }
                 .keyboardShortcut("r", modifiers: [.command, .option]).disabled(!state.hasLibrary)
+            Button("Copy Path") { workspace.copyPaths() }
+                .keyboardShortcut("c", modifiers: [.command, .option]).disabled(!state.hasLibrary)
             Divider()
             ExportMenu(workspace: workspace, state: state)
             Divider()
@@ -157,6 +159,13 @@ struct WorkspaceCommands: Commands {
             Button(state.sidebarsTitle) { workspace.toggleSidebars() }
                 .keyboardShortcut("s", modifiers: [.control, .command])
                 .disabled(!state.canToggleSidebars)
+            if let registry {
+                // #225: every Library section's header at once; no shortcut.
+                Button("Collapse All Libraries") { registry.setAllSectionsCollapsed(true) }
+                    .disabled(!registry.canCollapseAllSections)
+                Button("Expand All Libraries") { registry.setAllSectionsCollapsed(false) }
+                    .disabled(!registry.canExpandAllSections)
+            }
         }
         CommandGroup(after: .sidebar) {
             Button(state.previewMode == .preview ? "Show Editor" : "Show Preview") { workspace.preview.togglePreview() }

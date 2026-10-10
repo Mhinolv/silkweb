@@ -252,6 +252,8 @@ final class LibraryWorkspace {
     private var saveTask: Task<Void, Never>?
     private var canSaveSession = true
     @ObservationIgnored var itemPathsByID: [UUID: String] = [:]
+    /// #227: where Copy Path writes; tests use a private pasteboard.
+    @ObservationIgnored var pathPasteboard = NSPasteboard.general
     @ObservationIgnored private var presentationRevision = 0
     @ObservationIgnored private var documentCache:
         (

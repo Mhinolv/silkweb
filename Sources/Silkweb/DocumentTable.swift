@@ -202,6 +202,7 @@ struct DocumentTable: NSViewRepresentable {
             add("Rename…", #selector(rename(_:)), enabled: workspace.canMutate)
             add("Move To…", #selector(move(_:)), enabled: workspace.canMutate)
             add("Reveal in Finder", #selector(reveal(_:)))
+            menu.addCopyPathItems(target: self, action: #selector(copyPath(_:)), object: path, offersRelative: true)
             // #230: next to Reveal for a Document changed outside Silkweb (or a selection holding some).
             if !workspace.outsidePaths(path).isEmpty {
                 add("Keep", #selector(keepOutside(_:)), enabled: workspace.canKeepOutsideChanges)
@@ -273,6 +274,10 @@ struct DocumentTable: NSViewRepresentable {
             workspace.exportPDF(path: path)
         }
         @objc private func reveal(_ sender: NSMenuItem) { workspace.reveal(sender.representedObject as? String) }
+        @objc func copyPath(_ sender: NSMenuItem) {
+            guard let path = sender.representedObject as? String else { return }
+            workspace.copyPaths(workspace.documentCopyPaths(path), relative: sender.isAlternate)
+        }
         @objc private func keepOutside(_ sender: NSMenuItem) {
             guard let path = sender.representedObject as? String else { return }
             let paths = workspace.outsidePaths(path)

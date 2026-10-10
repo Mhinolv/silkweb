@@ -344,11 +344,11 @@ final class OutsideChangesWorkspaceTests: XCTestCase {
         XCTAssertEqual(row.outsideChange?.label, "Added outside Silkweb")
         XCTAssertTrue(
             row.accessibilityValue.hasSuffix(", added outside Silkweb, no Silkweb receipt"), row.accessibilityValue)
-        // The row's context menu: Keep right after Reveal in Finder; Move to Trash stays the last item.
+        // The row's context menu: Keep right after Reveal in Finder and Copy Path (#227); Move to Trash stays last.
         let menu = try XCTUnwrap(table?.coordinator?.menu(path: Self.overview))
         let titles = menu.items.map(\.title)
         let reveal = try XCTUnwrap(titles.firstIndex(of: "Reveal in Finder"))
-        XCTAssertEqual(titles[reveal + 1], "Keep")
+        XCTAssertEqual(titles[(reveal + 1)...(reveal + 3)], ["Copy Path", "Copy Relative Path", "Keep"])
         XCTAssertEqual(titles.last, "Move to Trash")
         XCTAssertFalse(
             table?.coordinator?.menu(path: "Notes/Human.md").items.map(\.title).contains("Keep") ?? true)

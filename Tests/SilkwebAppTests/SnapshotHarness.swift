@@ -93,6 +93,12 @@ struct SnapshotScenario {
     var secondLibrary = false
     /// #195: the second section collapsed with its header's Show/Hide chevron.
     var sectionCollapsed = false
+    /// #225: View ▸ Collapse All Libraries once the window is up, the current section included.
+    var allSectionsCollapsed = false
+    /// #225: clicks the sidebar's Collapse / Expand All toggle once the window is up.
+    var clicksSidebarToggle = false
+    /// #225: the toggle must be shown with this tooltip before capture.
+    var sidebarToggle: String? = nil
     /// #197: opens this document in the second Library's tab, so the one strip spans both Libraries.
     var secondLibraryTab: String? = nil
     /// #197: Search Library's All Libraries segment, or Quick Open's All Libraries toggle, is on.
@@ -390,6 +396,18 @@ struct SnapshotScenario {
         .init(
             name: "sidebar-section-collapsed", folder: "Coffee/Brewing Guides", document: pourOver,
             secondLibrary: true, sectionCollapsed: true),
+        // #225: Collapse All Libraries: only the two headers, the current one still in labelColor; list and editor stay.
+        .init(
+            name: "sidebar-all-collapsed", folder: "Coffee/Brewing Guides", document: pourOver,
+            secondLibrary: true, allSectionsCollapsed: true),
+        // #225 (owner decision): the sidebar's top-right toggle. Both sections expanded: it offers Collapse All.
+        .init(
+            name: "sidebar-toggle-collapse-all", folder: "Coffee/Brewing Guides", document: pourOver,
+            secondLibrary: true, sidebarToggle: "Collapse All Libraries"),
+        // … clicked: every section collapsed, it offers Expand All.
+        .init(
+            name: "sidebar-toggle-expand-all", folder: "Coffee/Brewing Guides", document: pourOver,
+            secondLibrary: true, clicksSidebarToggle: true, sidebarToggle: "Expand All Libraries"),
         // #197: tabs from two Libraries in one strip, each with its “ · <Library>” suffix; the active one is edited.
         .init(
             name: "tabs-two-libraries", folder: "Coffee/Brewing Guides", document: pourOver,
@@ -1529,6 +1547,23 @@ final class SnapshotHarness {
                 else { throw SnapshotFailure.error("The sidebar does not show two Library sections") }
                 if scenario.sectionCollapsed, outline.isItemExpanded(sections.headers[1]) {
                     throw SnapshotFailure.error("The second section is not collapsed")
+                }
+                if scenario.allSectionsCollapsed {
+                    registry?.setAllSectionsCollapsed(true)
+                    try await wait("every section collapses") {
+                        controller.view.layoutSubtreeIfNeeded()
+                        return sections.headers.allSatisfy { !outline.isItemExpanded($0) } && outline.numberOfRows == 2
+                    }
+                }
+                if let title = scenario.sidebarToggle {
+                    guard let toggle = sections.toggleButton, !toggle.isHidden else {
+                        throw SnapshotFailure.error("The sidebar toggle is not shown")
+                    }
+                    if scenario.clicksSidebarToggle { toggle.performClick(nil) }
+                    try await wait("the sidebar toggle reads “\(title)”") {
+                        controller.view.layoutSubtreeIfNeeded()
+                        return toggle.toolTip == title && toggle.accessibilityLabel() == title
+                    }
                 }
             }
             if let restore = scenario.restore {
