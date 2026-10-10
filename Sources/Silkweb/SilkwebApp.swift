@@ -19,6 +19,12 @@ struct SilkwebApp: App {
         .commands { LibraryWindowCommands(registry: registry) }
         // Silkweb ▸ Settings… ⌘, (1.24).
         Settings { LibraryWindowSettings(registry: registry) }
+        // #229: Go ▸ Agent Access…: every grant and access request, for every Library.
+        Window("Agent Access", id: AgentAccessModel.sceneID) {
+            AgentAccessWindow(model: .shared, registry: registry)
+        }
+        .defaultSize(width: 780, height: 520)
+        .windowResizability(.contentMinSize)
     }
 }
 
@@ -30,7 +36,12 @@ struct LibraryWindow: View {
     var body: some View {
         LibraryWorkspaceView(workspace: registry.current, registry: registry)
             .background(EditorWindowLifecycle(workspace: registry.current, registry: registry))
-            .onAppear { WritingSettings.shared.applyAppearance() }
+            .onAppear {
+                WritingSettings.shared.applyAppearance()
+                // #229: grant labels for the Agent Activity pull-down and the Settings ▸ Library summary.
+                AgentAccessModel.shared.registry = registry
+                AgentAccessModel.shared.start()
+            }
     }
 }
 
@@ -43,6 +54,8 @@ struct LibraryWindowCommands: Commands {
         WorkspaceCommands(workspace: workspace, registry: registry) {
             // Open Folder in Place… / New Library… with the window closed: bring it back first.
             if !registry.hasWindow { openWindow(id: LibraryWindow.sceneID) }
+        } showAgentAccess: {
+            openWindow(id: AgentAccessModel.sceneID)
         }
         PrintCommands(workspace: workspace)
     }
@@ -67,6 +80,8 @@ struct WorkspaceCommands: Commands {
     var registry: LibraryWindowRegistry? = nil
     /// Runs before Open Folder in Place… and New Library… so the chosen Library has a window to show in.
     var showWindow: () -> Void = {}
+    /// #229: Go ▸ Agent Access… opens (or focuses) the Agent Access window.
+    var showAgentAccess: () -> Void = {}
     var body: some Commands {
         let state = workspace.menuState.value
         CommandGroup(replacing: .newItem) {
@@ -176,8 +191,8 @@ struct WorkspaceCommands: Commands {
             Divider()
             // #137: no shortcut; selects the sidebar row as a click does, and is disabled while it's hidden.
             Button("Agent Activity") { workspace.selectAgentActivity() }.disabled(!state.hasAgentActivity)
-            // #203: no shortcut; the sheet works for any open Library, with or without requests.
-            Button("Access Requests…") { workspace.showAccessRequests() }.disabled(!state.hasLibrary)
+            // #229 (was #203's Access Requests…): no shortcut; always enabled, grants aren't tied to the open Library.
+            Button("Agent Access…") { showAgentAccess() }
         }
     }
 }

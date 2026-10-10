@@ -281,7 +281,8 @@ final class AgentGrantInitTests: XCTestCase {
                 XCTAssertEqual(
                     output.stderr,
                     "silkweb: " + start.dropLast()
-                        + ". grant init never widens access; edit agent-grants.json to change it. Nothing was saved.\n")
+                        + ". grant init never widens access. Change the grant in Silkweb’s Agent Access window. "
+                        + "Nothing was saved.\n")
                 XCTAssertEqual(try Data(contentsOf: grantsURL), before)
             }
         }
@@ -442,8 +443,8 @@ final class AgentGrantInitTests: XCTestCase {
             XCTAssertEqual(output.status, 77, "\(extra)")
             XCTAssertEqual(
                 output.stderr,
-                "silkweb: The grant “Silkweb” already uses the agent folder “Claude”. grant init never widens access; "
-                    + "edit agent-grants.json to change it. Nothing was saved.\n")
+                "silkweb: The grant “Silkweb” already uses the agent folder “Claude”. grant init never widens access. "
+                    + "Change the grant in Silkweb’s Agent Access window. Nothing was saved.\n")
             XCTAssertEqual(try Data(contentsOf: grantsURL), before)
         }
         // Leaving it out keeps the agent folder.

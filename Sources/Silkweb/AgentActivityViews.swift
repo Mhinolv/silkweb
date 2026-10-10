@@ -35,31 +35,46 @@ extension LibraryWorkspace {
     }
 }
 
-/// The pinned strip in Agent Activity scope: “Agent activity · 14 documents”, Access Requests (#203) and the
-/// All Agents ▾ pull-down.
+/// The pinned strip in Agent Activity scope: “Agent activity · 14 documents”, Access Requests (#203, opening the
+/// Agent Access window since #229) and the All Agents ▾ pull-down.
 struct AgentActivityStrip: View {
     let workspace: LibraryWorkspace
+    var access = AgentAccessModel.shared
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         let agents = AgentActivity.agents(in: workspace.agentEntries)
+        let grants = AgentActivity.grants(in: workspace.agentEntries)
         let waiting = workspace.pendingAccessRequestCount
         HStack {
             Text("Agent activity · \(CountPresentation.label(workspace.documents.count, unit: .document))")
                 .lineLimit(1)
             Spacer(minLength: Spacing.small)
             Button(waiting > 0 ? "Access Requests (\(waiting))" : "Access Requests") {
-                workspace.showAccessRequests()
+                openWindow(id: AgentAccessModel.sceneID)
+                Task { await access.select(.requests) }
             }
             .buttonStyle(.borderless).fixedSize()
             .accessibilityValue(workspace.accessRequestsWaitingLabel ?? "")
             Menu {
                 Button("All Agents") {
                     workspace.agentFilter = nil
+                    workspace.grantFilter = nil
                     workspace.outsideFilter = false
                 }
                 Divider()
                 ForEach(agents, id: \.name) { agent in
                     Button("\(agent.name) (\(agent.count))") { workspace.agentFilter = agent.name }
+                }
+                // #229: the grant behind each write; Show in Agent Activity picks one.
+                if !grants.isEmpty {
+                    Section("Grants") {
+                        ForEach(grants, id: \.id) { grant in
+                            Button("\(access.label(for: grant.id)) (\(grant.count))") {
+                                workspace.grantFilter = grant.id
+                            }
+                        }
+                    }
                 }
                 // #230: changes no receipt accounts for, after the claimed agents.
                 if !workspace.outsideChanges.isEmpty {
@@ -80,7 +95,9 @@ struct AgentActivityStrip: View {
     }
 
     private var filterTitle: String {
-        workspace.outsideFilter ? "Outside Silkweb" : workspace.agentFilter ?? "All Agents"
+        if workspace.outsideFilter { return "Outside Silkweb" }
+        if let grant = workspace.grantFilter { return access.label(for: grant) }
+        return workspace.agentFilter ?? "All Agents"
     }
 }
 
