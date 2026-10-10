@@ -103,6 +103,10 @@ struct SnapshotScenario {
     var secondLibraryTab: String? = nil
     /// #197: Search Library's All Libraries segment, or Quick Open's All Libraries toggle, is on.
     var allLibraries = false
+    /// #238: the second Library is current first, then this Library becomes current from it: "tab" clicks this
+    /// Library's tab in the strip; "loading" opens `pourOver` in this Library while it is still loading (the click
+    /// waits in the #209 queue).
+    var crossLibraryOpen: String? = nil
     /// #222: Search Library is scoped to the selected folder, as a search typed there starts.
     var searchFolderScope = false
     /// #195: the welcome screen (no Library open) with three Recent Libraries, one of them missing.
@@ -417,6 +421,16 @@ struct SnapshotScenario {
             searchQuery: "coffee", listWidth: 480, secondLibrary: true, searchFolderScope: true),
         // #197: Quick Open with All Libraries on.
         .init(name: "quick-open-multi-library", quickQuery: "brew", secondLibrary: true, allLibraries: true),
+        // #238: Writing was current; this Library's tab in the strip makes it current again. The bar matches
+        // `tabs-two-libraries` (every control placed, the view group at the trailing edge).
+        .init(
+            name: "cross-library-tab-active", folder: "Coffee/Brewing Guides", document: pourOver,
+            tabs: [pourOver, "Travel/Japan/Ten Days in Kyoto.md"], secondLibrary: true,
+            secondLibraryTab: "Drafts/Untitled Idea.md", crossLibraryOpen: "tab"),
+        // #238: a document opened from Writing while this Library still loads: Loading library… in the editor column.
+        .init(
+            name: "cross-library-target-loading", folder: "Coffee/Brewing Guides", secondLibrary: true,
+            crossLibraryOpen: "loading"),
         .init(name: "welcome-recents", welcomeRecents: true),
         // #196: relaunch restores both sections (Writing collapsed) and the current Library's tabs.
         .init(name: "restore-two-sections", restore: "two-sections"),
@@ -1465,9 +1479,13 @@ final class SnapshotHarness {
                         try await bounded("second library search index") { await second.search.waitForIndex() }
                     }
                     second.sectionCollapsed = scenario.sectionCollapsed
-                    shell.focus(workspace)
+                    shell.focus(scenario.crossLibraryOpen == nil ? workspace : second)
                 }
-                content = AnyView(LibraryWorkspaceView(workspace: workspace, registry: shell))
+                // #238: the window follows the current Library, as `LibraryWindow` does.
+                content =
+                    scenario.crossLibraryOpen == nil
+                    ? AnyView(LibraryWorkspaceView(workspace: workspace, registry: shell))
+                    : AnyView(CurrentLibraryContent(registry: shell))
             }
             let themed = content.environment(\.colorScheme, dark ? .dark : .light)
             let controller = NSHostingController(
@@ -1535,6 +1553,30 @@ final class SnapshotHarness {
                         return toggle.toolTip == title && toggle.accessibilityLabel() == title
                     }
                 }
+            }
+            if let open = scenario.crossLibraryOpen, let registry {
+                if open == "tab" {
+                    guard
+                        let entry = registry.stripTabs.first(where: {
+                            $0.workspace === workspace && $0.tab.id == workspace.activeTabID
+                        })
+                    else { throw SnapshotFailure.error("This Library has no tab in the strip") }
+                    registry.activate(entry)
+                } else {
+                    workspace.loading = true
+                    registry.focus(workspace)
+                    workspace.selectDocuments([SnapshotScenario.pourOver])
+                    guard workspace.pendingSelection != nil else {
+                        throw SnapshotFailure.error("The open was not queued while the Library loads")
+                    }
+                }
+                try await wait("this Library is current") {
+                    controller.view.layoutSubtreeIfNeeded()
+                    return registry.current === workspace
+                }
+                // The editor column's delayed progress (300 ms) shows, and the bar settles.
+                try await Task.sleep(for: .milliseconds(450))
+                controller.view.layoutSubtreeIfNeeded()
             }
             if let restore = scenario.restore {
                 guard
@@ -2127,4 +2169,10 @@ extension SnapshotScenario {
         default: return []
         }
     }
+}
+
+/// #238: the library window's content follows the current Library, as `LibraryWindow` does, without its app setup.
+private struct CurrentLibraryContent: View {
+    let registry: LibraryWindowRegistry
+    var body: some View { LibraryWorkspaceView(workspace: registry.current, registry: registry) }
 }
