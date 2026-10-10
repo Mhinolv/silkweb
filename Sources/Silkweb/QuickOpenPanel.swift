@@ -104,7 +104,8 @@ struct QuickOpenPanel: View {
             }
         }
         .padding(.bottom, 8)
-        .defaultFocus($fieldFocused, true)
+        // `.defaultFocus` never moves focus off an AppKit first responder such as the editor (#226).
+        .onAppear { fieldFocused = true }
     }
 
     private func move(_ delta: Int) {
