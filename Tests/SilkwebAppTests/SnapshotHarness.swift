@@ -97,6 +97,8 @@ struct SnapshotScenario {
     var secondLibraryTab: String? = nil
     /// #197: Search Library's All Libraries segment, or Quick Open's All Libraries toggle, is on.
     var allLibraries = false
+    /// #222: Search Library is scoped to the selected folder, as a search typed there starts.
+    var searchFolderScope = false
     /// #195: the welcome screen (no Library open) with three Recent Libraries, one of them missing.
     var welcomeRecents = false
     /// #196 relaunch: a first session quits with this Library and “Writing” open (tabs in both, Writing collapsed),
@@ -379,6 +381,14 @@ struct SnapshotScenario {
             secondLibraryTab: "Drafts/Untitled Idea.md"),
         // #197: Search Library's All Libraries segment: both Libraries' rows, each location led by its Library.
         .init(name: "search-all-libraries-scope", searchQuery: "coffee", secondLibrary: true, allLibraries: true),
+        // #222: the scope pop-up middle-truncates a long folder name before the fixed count, at the list's minimum
+        // and maximum widths (All Libraries is in its menu).
+        .init(
+            name: "search-scope-narrow-long-folder", folder: "A very long folder name that truncates before its count",
+            searchQuery: "coffee", listWidth: 240, secondLibrary: true, searchFolderScope: true),
+        .init(
+            name: "search-scope-wide-long-folder", folder: "A very long folder name that truncates before its count",
+            searchQuery: "coffee", listWidth: 480, secondLibrary: true, searchFolderScope: true),
         // #197: Quick Open with All Libraries on.
         .init(name: "quick-open-multi-library", quickQuery: "brew", secondLibrary: true, allLibraries: true),
         .init(name: "welcome-recents", welcomeRecents: true),
@@ -1538,6 +1548,12 @@ final class SnapshotHarness {
                     for other in registry?.sections ?? [] where other !== workspace {
                         try await bounded("other knowledge index") { await other.knowledge.waitForIndex() }
                     }
+                }
+                if scenario.searchFolderScope {
+                    guard let folder = workspace.selectedFolder?.id else {
+                        throw SnapshotFailure.error("No folder to scope the search to")
+                    }
+                    workspace.search.folderScope = folder
                 }
                 try await bounded("search query") { await workspace.search.query(quick: scenario.quickQuery != nil) }
                 if let error = workspace.search.error { throw SnapshotFailure.error(error) }
