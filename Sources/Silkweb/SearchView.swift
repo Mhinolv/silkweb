@@ -46,24 +46,17 @@ struct SearchView<Content: View>: View {
                 if !search.text.isEmpty {
                     PinnedColumn {
                         TagFilterBar(workspace: workspace)
-                        Picker("Search Scope", selection: scopeChoice) {
-                            // #197: only while another Library is open; All Documents stays this Library.
-                            if hasOtherLibraries {
-                                Text("All Libraries").tag(SearchScopeChoice.allLibraries)
-                                    .accessibilityLabel("All Libraries")
+                        // #222: one pop-up at every width; only its title truncates, the count keeps its size.
+                        HStack(spacing: 8) {
+                            scopeMenu
+                            Spacer(minLength: 0)
+                            HStack(spacing: 4) {
+                                if search.isSearching { ProgressView().controlSize(.small) }
+                                Text(LibrarySearch.resultCount(results.count))
                             }
-                            Text("All Documents").tag(SearchScopeChoice.library)
-                            if let folder = workspace.selectedFolder {
-                                Text("“\(folder.name)”").tag(SearchScopeChoice.folder(folder.id))
-                            }
-                        }.pickerStyle(.segmented).padding(.horizontal, 8).padding(.bottom, 8)
-                        HStack(spacing: 4) {
-                            if search.isSearching { ProgressView().controlSize(.small) }
-                            Text(LibrarySearch.resultCount(results.count))
-                        }
-                        .font(.caption).monospacedDigit().foregroundStyle(.secondary).frame(
-                            maxWidth: .infinity, alignment: .leading
-                        ).padding(.horizontal, 8)
+                            .font(.caption).monospacedDigit().foregroundStyle(.secondary).fixedSize()
+                            .columnLayoutAnchor("search-result-count")
+                        }.padding(.horizontal, 8)
                     } content: {
                         VStack(spacing: 0) {
                             if results.isEmpty && !search.hasPendingQuery {
@@ -155,6 +148,37 @@ struct SearchView<Content: View>: View {
 
     private var hasOtherLibraries: Bool { !search.otherLibraries().isEmpty }
 
+    /// The button names the current scope, a folder middle-truncated; the menu lists every choice in full.
+    private var scopeMenu: some View {
+        let title = scopeChoice.wrappedValue.title(folder: workspace.selectedFolder?.name)
+        return Menu {
+            Picker("Search Scope", selection: scopeChoice) {
+                // #197: only while another Library is open; All Documents stays this Library.
+                if hasOtherLibraries {
+                    Text(SearchScopeChoice.allLibraries.title(folder: nil)).tag(SearchScopeChoice.allLibraries)
+                }
+                Text(SearchScopeChoice.library.title(folder: nil)).tag(SearchScopeChoice.library)
+                if let folder = workspace.selectedFolder {
+                    let choice = SearchScopeChoice.folder(folder.id)
+                    Text(choice.title(folder: folder.name)).tag(choice)
+                }
+            }.pickerStyle(.inline).labelsHidden()
+        } label: {
+            // A SwiftUI label (not the pop-up's own title, which truncates its tail) so a folder truncates mid-name.
+            HStack(spacing: 3) {
+                Text(title).lineLimit(1).truncationMode(.middle)
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption).contentShape(Rectangle())
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+        .help(title)
+        .accessibilityLabel("Search Scope").accessibilityValue(title)
+        .accessibilityIdentifier("search-scope")
+        .columnLayoutAnchor("search-scope")
+    }
+
     /// All Libraries | All Documents | “Folder” (#197).
     private var scopeChoice: Binding<SearchScopeChoice> {
         Binding(
@@ -181,6 +205,15 @@ struct SearchView<Content: View>: View {
 enum SearchScopeChoice: Hashable {
     case allLibraries, library
     case folder(UUID)
+
+    /// The scope's name; a folder is its quoted name (`folder`, nil only for the other cases).
+    func title(folder: String?) -> String {
+        switch self {
+        case .allLibraries: "All Libraries"
+        case .library: "All Documents"
+        case .folder: "“\(folder ?? "Folder")”"
+        }
+    }
 }
 
 struct SearchRequestIdentity: Hashable {
