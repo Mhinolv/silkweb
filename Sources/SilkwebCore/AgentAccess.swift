@@ -294,12 +294,14 @@ public final class AgentGrantStore: @unchecked Sendable {
         self.keys = keys
     }
 
-    /// The grants, failing closed (#205) when they were changed outside Silkweb or this Mac lost their key.
+    /// The grants, failing closed (#205) when they were changed outside Silkweb, this Mac lost their key, or the key
+    /// store can't be read.
     public func load() throws -> AgentGrantFile {
         let inspection = try inspect()
         switch inspection.protection {
         case .changedOutside: throw AgentAccessError.grantsChangedOutside
         case .keyMissing: throw AgentAccessError.grantsKeyMissing
+        case .keyUnreadable: throw AgentAccessError.grantsKeyUnreadable
         case .protected, .unprotected: return inspection.file
         }
     }

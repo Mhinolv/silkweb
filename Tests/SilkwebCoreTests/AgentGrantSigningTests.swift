@@ -205,12 +205,14 @@ final class AgentGrantSigningTests: XCTestCase {
         keys.removeKey()
         XCTAssertEqual(try protection(), .keyMissing)
         XCTAssertEqual(loadError(), "grants_key_missing")
-        // A keychain that can't be read: a signed file fails closed; an unsigned one loads as it always has.
+        // A keychain that can't be read: signed or unsigned, the file fails closed.
         let failing = AgentGrantMemoryKeys(hasKey: true)
         failing.fails = true
-        XCTAssertEqual(try protection(failing), .keyMissing)
+        XCTAssertEqual(try protection(failing), .keyUnreadable)
+        XCTAssertEqual(loadError(failing), "grants_key_unreadable")
         try AgentGrantFile(grants: [grant()]).write(to: grantsURL)
-        XCTAssertEqual(try protection(failing), .unprotected)
+        XCTAssertEqual(try protection(failing), .keyUnreadable)
+        XCTAssertEqual(loadError(failing), "grants_key_unreadable")
         // A missing file is empty: protected once a key exists, else unprotected.
         try FileManager.default.removeItem(at: grantsURL)
         XCTAssertEqual(
@@ -275,6 +277,49 @@ final class AgentGrantSigningTests: XCTestCase {
 
         XCTAssertEqual(keys.signCount, 1, "no agent path signed")
         XCTAssertEqual(try Data(contentsOf: grantsURL), before, "no agent path wrote the grants file")
+    }
+
+    func testUnreadableKeychainRefusesAStrippedAndWidenedFile() throws {
+        // The owner protected grants; an agent strips the signature, widens its grant and runs where the keychain
+        // can't be read (a sandbox, SSH, a locked keychain).
+        try writeSigned([grant()])
+        try edit { $0.removeValue(forKey: "signature") }
+        try editGrant {
+            $0["access"] = "read-create"
+            $0["extra_read_folders"] = ["Notes/Private"]
+        }
+        keys.fails = true
+        AgentGrantKeys.verifier = keys
+        let message = "Silkweb can’t check whether agent grants are protected. Run it from your normal login session."
+
+        XCTAssertEqual(try protection(), .keyUnreadable)
+        XCTAssertEqual(loadError(), "grants_key_unreadable")
+        let read = cli(["memory", "read", "Notes/Private/Diary.md", "--grant", "Silkweb"])
+        XCTAssertEqual(read.status, 77)
+        XCTAssertEqual(code(read), "grants_key_unreadable")
+        XCTAssertTrue(read.stderr.contains(message), read.stderr)
+        let create = cli(
+            [
+                "memory", "create", "--grant", "Silkweb", "--folder", "memories", "--title", "Widened", "--body-file",
+                "-", "--agent", "codex", "--session", "s",
+            ], stdin: "Body.")
+        XCTAssertEqual(code(create), "grants_key_unreadable")
+        let session = AgentSession(project: "Silkweb", store: AgentGrantStore(url: grantsURL))
+        XCTAssertThrowsError(try session.authorize(.read, path: "Notes/Private/Diary.md")) {
+            XCTAssertEqual(($0 as? AgentAccessError)?.code, "grants_key_unreadable")
+        }
+        XCTAssertEqual(AgentHelper.exitStatus(for: "grants_key_unreadable"), 77)
+
+        // A deleted file can't be told apart from no grants yet, so it isn't treated as unprotected either.
+        try FileManager.default.removeItem(at: grantsURL)
+        XCTAssertEqual(try AgentGrantSigning.inspect(grantsURL, keys: keys).protection, .keyUnreadable)
+
+        // The keychain readable again with no key yet: an unsigned file loads as it always has.
+        keys.fails = false
+        keys.removeKey()
+        try AgentGrantFile(grants: [grant()]).write(to: grantsURL)
+        XCTAssertEqual(try protection(), .unprotected)
+        XCTAssertNil(loadError())
     }
 
     // MARK: grant init

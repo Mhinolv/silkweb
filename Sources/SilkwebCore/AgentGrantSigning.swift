@@ -186,6 +186,9 @@ public enum AgentGrantProtection: String, Equatable, Sendable {
     case changedOutside
     /// Signed, but this Mac has no key (a new Mac, a keychain reset). Every grant fails closed.
     case keyMissing
+    /// The key store can't be read (an agent sandbox, SSH, a locked keychain), so Silkweb can't tell whether grants
+    /// are protected. Signed or unsigned, every grant fails closed.
+    case keyUnreadable
 
     /// Whether helpers may use the grants.
     public var isUsable: Bool { self == .unprotected || self == .protected }
@@ -233,6 +236,11 @@ extension AgentAccessError {
         message: "Silkweb can’t find the key that protects agent grants on this Mac, so no grant is in effect. Ask "
             + "the owner to review them in Silkweb.")
 
+    /// #205: the key store can't be read, so an unsigned file may have been stripped of its signature.
+    public static let grantsKeyUnreadable = AgentAccessError(
+        code: "grants_key_unreadable", title: noAccess,
+        message: "Silkweb can’t check whether agent grants are protected. Run it from your normal login session.")
+
     /// #205: a write to protected grants from a path that can't sign (no terminal, not the app).
     public static let grantsNeedOwner = AgentAccessError(
         code: "grants_signing_required", title: noAccess,
@@ -252,14 +260,15 @@ extension AgentAccessError {
 
 /// Verifying, signing and saving `agent-grants.json` (#205).
 public enum AgentGrantSigning {
-    /// How far `file` can be trusted with this Mac's key. When the key store can't be read, a signed file fails
-    /// closed (`keyMissing`) and an unsigned one loads as it always has.
+    /// How far `file` can be trusted with this Mac's key. When the key store can't be read (anything but “no key
+    /// yet”), every file fails closed (`keyUnreadable`): an unsigned one may be a protected file with its signature
+    /// stripped. An unsigned file loads as it always has only when the store says there's no key.
     public static func protection(of file: AgentGrantFile, keys: any AgentGrantVerifier) -> AgentGrantProtection {
         let key: P256.Signing.PublicKey?
         do {
             key = try keys.verificationKey()
         } catch {
-            return file.signature == nil ? .unprotected : .keyMissing
+            return .keyUnreadable
         }
         guard let signature = file.signature else { return key == nil ? .unprotected : .changedOutside }
         guard let key else { return .keyMissing }
@@ -291,14 +300,18 @@ public enum AgentGrantSigning {
     }
 
     /// The grants file at `url` and how far it can be trusted; a missing file is an empty one (protected once a key
-    /// exists). A broken or newer file throws `AgentAccessError`.
+    /// exists, `keyUnreadable` when the key store can't be read). A broken or newer file throws `AgentAccessError`.
     public static func inspect(_ url: URL, keys: any AgentGrantVerifier) throws -> AgentGrantInspection {
         do {
             return try AgentGrantStore(url: url, keys: keys).inspect()
         } catch let error as AgentAccessError where error.code == "no_grants_file" {
-            let hasKey = (try? keys.verificationKey()) != nil
-            return AgentGrantInspection(
-                file: AgentGrantFile(), protection: hasKey ? .protected : .unprotected, exists: false)
+            let protection: AgentGrantProtection
+            do {
+                protection = try keys.verificationKey() == nil ? .unprotected : .protected
+            } catch {
+                protection = .keyUnreadable
+            }
+            return AgentGrantInspection(file: AgentGrantFile(), protection: protection, exists: false)
         }
     }
 
@@ -317,6 +330,7 @@ public enum AgentGrantSigning {
         switch current.protection {
         case .changedOutside where !adopt: throw AgentAccessError.grantsChangedOutside
         case .keyMissing where !adopt: throw AgentAccessError.grantsKeyMissing
+        case .keyUnreadable where !adopt: throw AgentAccessError.grantsKeyUnreadable
         default: break
         }
         if adopt || current.protection == .protected {

@@ -174,7 +174,7 @@ public enum AgentHelper {
             "invalid_grants_file", "unsupported_grants_version", "invalid_grant", "out_of_scope",
             "create_not_allowed", "invalid_path", "excluded_name", "update_not_allowed", "update_requires_proposal",
             "invalid_requests_file", "unsupported_requests_version", "approve_would_widen", "invalid_grants_signature",
-            "grants_key_missing", "grants_signing_required", "needs_authentication":
+            "grants_key_missing", "grants_key_unreadable", "grants_signing_required", "needs_authentication":
             return 77
         default:
             return 70

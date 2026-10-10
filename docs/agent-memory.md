@@ -317,9 +317,13 @@ the helper, MCP and the app refuse every grant when the file was changed outside
   | unsigned | none | as before (not tamper-protected) | strip “Agent grants aren’t protected yet.” + **Protect Grants…**; Settings “· Not protected” |
   | signed but changed, a `signature` that isn't valid, or unsigned | exists | fail closed: `invalid_grants_signature` | strip “Agent grants were changed outside Silkweb. Agents can’t use any grant until you review them.” + **Review Grants…**; “· Needs review”; read-only |
   | signed | none (new Mac, keychain reset) | fail closed: `grants_key_missing` | strip “Silkweb can’t find the key that protects agent grants on this Mac.” + **Review Grants…**; read-only |
+  | signed, unsigned or none | can't be read (agent sandbox, SSH, locked keychain) | fail closed: `grants_key_unreadable` | strip “Silkweb can’t check whether agent grants are protected. Agents can’t use any grant.” + **Review Grants…**; “· Needs review”; read-only |
 
-  If the keychain can't be read, a signed file fails closed (`grants_key_missing`) and an unsigned one loads as
-  before. Failing closed means no grant at all: every operation refuses until the owner reviews.
+  “No key” means the keychain answered that the item doesn't exist. Any other keychain error is “can't be read”:
+  Silkweb can't tell an unprotected file from a protected one with its signature stripped, so even an unsigned file
+  fails closed (“Silkweb can’t check whether agent grants are protected. Run it from your normal login
+  session.”). Failing closed means no grant at all: every operation refuses until the keychain can be read or the
+  owner reviews.
 - **Who signs.** Only the owner's paths: `silkweb grant init` and `grant approve` with a terminal on stdin, and
   the app (after owner authentication, or for a change that only narrows, pauses, relabels or removes grants of a
   verified file). The memory commands and `silkweb mcp` hold a verifier only. Without a terminal nothing is
@@ -345,6 +349,9 @@ the helper, MCP and the app refuse every grant when the file was changed outside
 - **Limits.** This proves the file was last saved by an owner path on this Mac. It doesn't stop a process that
   can drive the keychain as the owner (for example, deleting the key item and signing with its own), or one with a
   pseudo-terminal answering `grant init`'s questions; client rules (#230) keep agents' own tools off these.
+  Stripping the signature and running the helper where the keychain can't be read doesn't load the edited
+  grants: an unreadable keychain refuses every file (`grants_key_unreadable`). Before the owner first protects
+  grants there is no key, so an unsigned file is not tamper-protected at all.
 
 ### Setting up a grant (#186)
 
@@ -599,6 +606,7 @@ document text or the requested target.
 | `update_not_allowed` | This grant can’t update documents. Ask the owner to switch it to Read, Create and Update. (On an unqualified filesystem: This Library isn’t on a local disk, so agents can only read it.) |
 | `invalid_grants_signature` | Agent grants failed verification, so no grant is in effect. Ask the owner to review them in Silkweb. |
 | `grants_key_missing` | Silkweb can’t find the key that protects agent grants on this Mac, so no grant is in effect. Ask the owner to review them in Silkweb. |
+| `grants_key_unreadable` | Silkweb can’t check whether agent grants are protected. Run it from your normal login session. |
 
 The owner changes this file in the [Agent Access window](#agent-access-window-229) (#229) or with
 `silkweb grant init`. Hand edits work only while grants are unprotected; once [protected](#protected-grants-205)
@@ -1171,7 +1179,7 @@ and `--supersedes` (create).
 | 69 | Busy; try again | `library_busy`, `stale_snapshot`, `rate_limited`, `document_has_unsaved_changes`, `too_many_requests` |
 | 70 | Unexpected helper failure | `internal_error` |
 | 74 | Library I/O | `library_not_found`, `library_unreadable`, `unreadable`, `write_failed`, `disk_full`, `permission_denied`, `grants_signing_failed` |
-| 77 | Access | `grant_required`, `grant_not_found`, `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `invalid_grants_signature`, `grants_key_missing`, `grants_signing_required`, `needs_authentication`, `no_grant`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `invalid_path`, `excluded_name`, `update_not_allowed`, `update_requires_proposal`, `invalid_requests_file`, `unsupported_requests_version`, `approve_would_widen` |
+| 77 | Access | `grant_required`, `grant_not_found`, `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `invalid_grants_signature`, `grants_key_missing`, `grants_key_unreadable`, `grants_signing_required`, `needs_authentication`, `no_grant`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `invalid_path`, `excluded_name`, `update_not_allowed`, `update_requires_proposal`, `invalid_requests_file`, `unsupported_requests_version`, `approve_would_widen` |
 
 - **One bad-input code.** `invalid_argument` covers usage mistakes (unknown command or option, a
   repeated or missing option, `--body` text), bad values (`--limit`, `--type`, dates, `--id`, `--cursor`)

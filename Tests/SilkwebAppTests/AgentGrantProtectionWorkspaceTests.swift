@@ -346,6 +346,21 @@ final class AgentGrantProtectionWorkspaceTests: XCTestCase {
         XCTAssertEqual(try protectionOnDisk, .protected)
     }
 
+    func testUnreadableKeychainMakesUnsignedGrantsReadOnly() async throws {
+        try seedUnsigned([grant("Silkweb")])
+        keys.fails = true
+        let model = makeModel()
+        await model.reload()
+        XCTAssertEqual(model.protection, .keyUnreadable)
+        XCTAssertEqual(model.protectionStrip?.text, AgentAccessModel.keyUnreadableText)
+        XCTAssertEqual(model.protectionStrip?.icon, "exclamationmark.shield")
+        XCTAssertTrue(model.isReadOnly)
+        XCTAssertEqual(model.summary, "1 grant · Needs review")
+        XCTAssertThrowsError(
+            try AgentGrantOwner.remove(project: "Silkweb", in: grantsURL, keys: keys))
+        XCTAssertEqual(try AgentGrantOwner.inspect(grantsURL, keys: AgentGrantNoKey()).file.grants.count, 1)
+    }
+
     // MARK: Offscreen hierarchy
 
     /// GUI rule: the real window content through every protection state with a resize sweep, the read-only detail, and
@@ -401,5 +416,11 @@ final class AgentGrantProtectionWorkspaceTests: XCTestCase {
         await model.reload()
         XCTAssertEqual(model.protection, .keyMissing)
         try await sweep()
+        keys.fails = true
+        await model.reload()
+        XCTAssertEqual(model.protection, .keyUnreadable)
+        XCTAssertNotNil(model.protectionStrip)
+        try await sweep()
+        keys.fails = false
     }
 }

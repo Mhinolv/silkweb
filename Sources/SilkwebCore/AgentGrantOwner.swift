@@ -332,7 +332,7 @@ public enum AgentGrantOwner {
         } catch let error as AgentAccessError {
             switch error.code {
             case "needs_authentication": throw Failure.needsAuthentication
-            case "invalid_grants_signature", "grants_key_missing": throw Failure.needsReview
+            case "invalid_grants_signature", "grants_key_missing", "grants_key_unreadable": throw Failure.needsReview
             default: throw Failure.signingFailed
             }
         } catch {

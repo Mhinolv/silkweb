@@ -239,6 +239,7 @@ public enum AgentGrantInit {
         switch current.protection {
         case .changedOutside: throw AgentAccessError.grantsChangedOutside
         case .keyMissing: throw AgentAccessError.grantsKeyMissing
+        case .keyUnreadable: throw AgentAccessError.grantsKeyUnreadable
         case .protected, .unprotected: break
         }
         let file = current.file

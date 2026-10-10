@@ -236,6 +236,8 @@ import SilkwebCore
             return ("exclamationmark.shield", Self.changedOutsideText, "Review Grants…")
         case .keyMissing:
             return ("exclamationmark.shield", Self.keyMissingText, "Review Grants…")
+        case .keyUnreadable:
+            return ("exclamationmark.shield", Self.keyUnreadableText, "Review Grants…")
         case .unprotected where needsProtection:
             return ("lock.open", "Agent grants aren’t protected yet.", "Protect Grants…")
         default:
@@ -246,6 +248,16 @@ import SilkwebCore
     static let changedOutsideText =
         "Agent grants were changed outside Silkweb. Agents can’t use any grant until you review them."
     static let keyMissingText = "Silkweb can’t find the key that protects agent grants on this Mac."
+    static let keyUnreadableText = "Silkweb can’t check whether agent grants are protected. Agents can’t use any grant."
+
+    /// The strip's text for grants that need review, for alerts that say why a change can't happen.
+    private var readOnlyText: String {
+        switch protection {
+        case .keyMissing: return Self.keyMissingText
+        case .keyUnreadable: return Self.keyUnreadableText
+        default: return Self.changedOutsideText
+        }
+    }
 
     /// Protect Grants… / Review Grants…: every grant on disk, checked. `then` runs after signing (an authenticated
     /// change that waited for protection), without asking for authentication again.
@@ -585,8 +597,7 @@ import SilkwebCore
         guard deciding == nil else { return }
         // #205: grants that need review can't change; the alert says why, as the strip does.
         if isReadOnly {
-            let text = protection == .keyMissing ? Self.keyMissingText : Self.changedOutsideText
-            _ = await present(AgentAccessAlerts.failure("Can’t Approve This Request", text), window)
+            _ = await present(AgentAccessAlerts.failure("Can’t Approve This Request", readOnlyText), window)
             return
         }
         deciding = request.id
