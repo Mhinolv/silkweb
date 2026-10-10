@@ -90,6 +90,16 @@ struct SearchView<Content: View>: View {
                                             .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
+                                    // #227: resolved only when chosen, so rows build no paths.
+                                    .contextMenu {
+                                        Button("Reveal in Finder") { workspace.revealSearchResult(result) }
+                                        Button("Copy Path") { workspace.copySearchResultPath(result, relative: false) }
+                                            .modifierKeyAlternate(.option) {
+                                                Button("Copy Relative Path") {
+                                                    workspace.copySearchResultPath(result, relative: true)
+                                                }
+                                            }
+                                    }
                                     .tag(result.id)
                                     .listRowInsets(EdgeInsets())
                                     .listRowSeparator(.hidden)

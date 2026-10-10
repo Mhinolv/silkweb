@@ -90,6 +90,7 @@ Before adding any shortcut, check it against this table. 1.25 audits the final m
 | File | Rename… | ↩ † (sidebar/list focused; no menu key equivalent) | 1.6 |
 | File | Move To… | ⌃⌘M † (sidebar/list focused) | 1.7 |
 | File | Reveal in Finder | ⌥⌘R | 1.6 |
+| File | Copy Path (absolute POSIX path of what Reveal in Finder shows; the list copies its whole selection, one per line, the editor its document. Context menus: directly below Reveal in Finder, with ⌥ Copy Relative Path, none for a Library root) | ⌥⌘C | #227 |
 | File | Move to Trash | ⌘⌫ † (sidebar/list focused) | 1.8 |
 | File | Export ▸ HTML… / PDF… | ⇧⌘E / ⌥⌘P | 1.22 / 1.23 |
 | File | Page Setup… / Print… | ⇧⌘P / ⌘P | 1.23 |

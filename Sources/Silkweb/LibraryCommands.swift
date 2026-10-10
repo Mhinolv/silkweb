@@ -172,6 +172,36 @@ extension LibraryWorkspace {
         ])
     }
 
+    /// #227: Copy Path (absolute) or Copy Relative Path, one path per line. Without paths (File ▸ Copy Path) it copies
+    /// what Reveal in Finder would show, except that the list copies its whole selection and the editor its document.
+    func copyPaths(_ paths: [String]? = nil, relative: Bool = false) {
+        guard let root else { return }
+        let paths = paths ?? copyPathSelection
+        guard !paths.isEmpty, !relative || LibraryPathCopy.canCopyRelative(paths) else { return }
+        pathPasteboard.clearContents()
+        pathPasteboard.setString(LibraryPathCopy.string(root: root, paths: paths, relative: relative), forType: .string)
+    }
+
+    var copyPathSelection: [String] {
+        if focusColumn == 1, !session.selectedDocuments.isEmpty {
+            return LibraryPathCopy.ordered(session.selectedDocuments, in: documents.map(\.relativePath))
+        }
+        if focusColumn == 2, let path = editor.url.flatMap(libraryPath) { return [path] }
+        return [selectedItem?.path ?? targetFolder]
+    }
+
+    /// A file's path relative to this Library, nil outside it.
+    func libraryPath(_ url: URL) -> String? {
+        guard let root, url.path.hasPrefix(root.path + "/") else { return nil }
+        return String(url.path.dropFirst(root.path.count + 1))
+    }
+
+    /// A list row's menu acts on the whole selection when the row is part of it, in list order.
+    func documentCopyPaths(_ path: String) -> [String] {
+        guard session.selectedDocuments.contains(path) else { return [path] }
+        return LibraryPathCopy.ordered(session.selectedDocuments, in: documents.map(\.relativePath))
+    }
+
     /// `added`: other Library paths Silkweb itself just wrote (an import, a restore from the Trash), so they're
     /// never shown as changed outside Silkweb (#230); the changes' new paths count too.
     func refresh(_ changes: LibraryChangeSet, added: [String] = []) async throws {
@@ -193,6 +223,27 @@ extension LibraryWorkspace {
         mutationRevealURLs = []
         mutationErrorTitle = title ?? error.localizedDescription
         mutationError = (error as? LocalizedError)?.recoverySuggestion ?? error.localizedDescription
+    }
+}
+
+extension NSMenu {
+    /// #227: Copy Path, and Copy Relative Path in its place while Option is held (not for a Library root). Both send
+    /// `action`; the handler tells them apart by `isAlternate`.
+    func addCopyPathItems(
+        target: AnyObject, action: Selector, object: Any?, offersRelative: Bool, enabled: Bool = true
+    ) {
+        let copy = NSMenuItem(title: "Copy Path", action: action, keyEquivalent: "")
+        var items = [copy]
+        if offersRelative {
+            let relative = NSMenuItem(title: "Copy Relative Path", action: action, keyEquivalent: "")
+            relative.keyEquivalentModifierMask = .option
+            relative.isAlternate = true
+            items.append(relative)
+        }
+        for item in items {
+            item.target = target; item.representedObject = object; item.isEnabled = enabled
+            addItem(item)
+        }
     }
 }
 

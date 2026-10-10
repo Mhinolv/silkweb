@@ -650,11 +650,11 @@ final class LibrarySectionsTests: XCTestCase {
         let header = try XCTUnwrap(outline.view(atColumn: 0, row: 0, makeIfNecessary: true) as? SectionHeaderCell)
         XCTAssertEqual(header.textField?.textColor, .labelColor, "the current Library's header is the cue")
         var menu = try headerMenu()
-        XCTAssertEqual(menu.items.map(\.title)[2...3], ["Collapse All Libraries", "Expand All Libraries"])
-        XCTAssertEqual(menu.items.map(\.isEnabled)[2...3], [false, true], "only the item that changes something")
+        XCTAssertEqual(menu.items.map(\.title)[3...4], ["Collapse All Libraries", "Expand All Libraries"])
+        XCTAssertEqual(menu.items.map(\.isEnabled)[3...4], [false, true], "only the item that changes something")
 
         // Expand All from the header menu: every section's rows, Gamma's built now; Alpha's scope is selected.
-        menu.performActionForItem(at: 3)
+        menu.performActionForItem(at: 4)
         try await settle(window)
         XCTAssertEqual(
             rows(outline),
@@ -667,10 +667,10 @@ final class LibrarySectionsTests: XCTestCase {
         XCTAssertTrue(registry.current === alpha)
         XCTAssertFalse(registry.canExpandAllSections)
         menu = try headerMenu()
-        XCTAssertEqual(menu.items.map(\.isEnabled)[2...3], [true, false])
+        XCTAssertEqual(menu.items.map(\.isEnabled)[3...4], [true, false])
 
         // Collapse All from the header menu; one chevron still expands just its section afterwards.
-        menu.performActionForItem(at: 2)
+        menu.performActionForItem(at: 3)
         try await settle(window)
         XCTAssertEqual(rows(outline).count, 3)
         outline.expandItem(outline.item(atRow: 1))
@@ -799,11 +799,14 @@ final class LibrarySectionsTests: XCTestCase {
         let menu = try XCTUnwrap(outline.menu(for: event))
         XCTAssertEqual(
             menu.items.map(\.title),
-            ["Reveal in Finder", "", "Collapse All Libraries", "Expand All Libraries", "", "Close Library"])
-        XCTAssertTrue(menu.items[1].isSeparatorItem)
-        XCTAssertTrue(menu.items[4].isSeparatorItem)
+            [
+                "Reveal in Finder", "Copy Path", "", "Collapse All Libraries", "Expand All Libraries", "",
+                "Close Library",
+            ])
+        XCTAssertTrue(menu.items[2].isSeparatorItem)
+        XCTAssertTrue(menu.items[5].isSeparatorItem)
         XCTAssertTrue(menu.items.allSatisfy { $0.image == nil && $0.keyEquivalent.isEmpty }, "text only")
-        menu.performActionForItem(at: 5)
+        menu.performActionForItem(at: 6)
         _ = try await waitUntil("Alpha's section closes") { registry.sections.count == 1 }
         XCTAssertEqual(roots(registry), ["Beta"])
         XCTAssertNil(alpha.root.flatMap { registry.workspace(for: $0) })
@@ -815,7 +818,8 @@ final class LibrarySectionsTests: XCTestCase {
             NSEvent.mouseEvent(
                 with: .rightMouseDown, location: lonePoint, modifierFlags: [], timestamp: 0,
                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
-        XCTAssertEqual(outline.menu(for: loneEvent)?.items.map(\.title), ["Reveal in Finder", "", "Close Library"])
+        XCTAssertEqual(
+            outline.menu(for: loneEvent)?.items.map(\.title), ["Reveal in Finder", "Copy Path", "", "Close Library"])
         // A folder row's menu is still the folder menu.
         let folderPoint = outline.convert(NSPoint(x: 40, y: outline.rect(ofRow: 3).midY), to: nil)
         let folderEvent = try XCTUnwrap(

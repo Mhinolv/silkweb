@@ -363,6 +363,7 @@ final class EditorTabButton: NSView {
         if tab.isPreview { add("Keep Open", #selector(keepOpen)) }
         add("Reveal in Library", #selector(revealInLibrary))
         add("Reveal in Finder", #selector(revealInFinder))
+        menu.addCopyPathItems(target: self, action: #selector(copyPath(_:)), object: nil, offersRelative: true)
         menu.autoenablesItems = false
         for item in menu.items where !item.isSeparatorItem { item.isEnabled = !workspace.mutating }
         return menu
@@ -387,5 +388,10 @@ final class EditorTabButton: NSView {
     }
     @objc private func revealInFinder() {
         if let url = tab.editor.url { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+    }
+    /// #227: the tab's document, relative to the tab's own Library.
+    @objc func copyPath(_ sender: NSMenuItem) {
+        guard let path = tab.editor.url.flatMap(owner.libraryPath) else { return }
+        owner.copyPaths([path], relative: sender.isAlternate)
     }
 }
