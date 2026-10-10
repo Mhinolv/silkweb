@@ -53,6 +53,22 @@ public enum AgentGrantOwner {
         static let writeFailed = Failure(
             code: "write_failed", title: saveTitle,
             message: "Silkweb couldn’t save “agent-grants.json”. Nothing was saved.")
+
+        /// #205: grants changed outside Silkweb, or this Mac lost their key. Only Review Grants… writes then.
+        public static let needsReview = Failure(
+            code: "needs_review", title: saveTitle,
+            message: "Agent grants need your review before they can change. Choose Review Grants… first. Nothing was "
+                + "saved.")
+
+        /// #205: the keychain couldn't sign, or there's no signer.
+        public static let signingFailed = Failure(
+            code: "grants_signing_failed", title: saveTitle,
+            message: "Silkweb couldn’t use the key that protects agent grants. Nothing was saved.")
+
+        /// #205: the file changed while the owner reviewed it.
+        public static let reviewChanged = Failure(
+            code: "grants_changed", title: "Can’t Sign Agent Grants",
+            message: "Agent grants changed while you reviewed them. Review them again. Nothing was saved.")
     }
 
     /// “A grant for “Silkweb” already exists.”
@@ -67,13 +83,73 @@ public enum AgentGrantOwner {
 
     // MARK: Reading
 
-    /// The grants file, or an empty one when there's none yet. A broken or newer file throws `AgentAccessError`.
-    public static func load(_ url: URL) throws -> AgentGrantFile {
+    /// The grants file, or an empty one when there's none yet. A broken or newer file throws `AgentAccessError`, as
+    /// does one that changed outside Silkweb or lost its key (#205).
+    public static func load(_ url: URL, keys: any AgentGrantVerifier = AgentGrantKeys.verifier) throws -> AgentGrantFile
+    {
         do {
-            return try AgentGrantStore(url: url).load()
+            return try AgentGrantStore(url: url, keys: keys).load()
         } catch let error as AgentAccessError where error.code == "no_grants_file" {
             return AgentGrantFile()
         }
+    }
+
+    /// #205: the grants and how far they can be trusted, for the Agent Access window (which shows grants it can't
+    /// change). A missing file is an empty one.
+    public static func inspect(_ url: URL, keys: any AgentGrantVerifier = AgentGrantKeys.verifier) throws
+        -> AgentGrantInspection
+    {
+        try AgentGrantSigning.inspect(url, keys: keys)
+    }
+
+    /// The grants a change starts from: refuses while they need review.
+    private static func current(_ url: URL, keys: (any AgentGrantSigner)?) throws -> AgentGrantInspection {
+        let current = try inspect(url, keys: keys ?? AgentGrantKeys.verifier)
+        guard current.protection.isUsable else { throw Failure.needsReview }
+        return current
+    }
+
+    // MARK: Protecting (#205)
+
+    /// Protect Grants… / Review Grants…: keeps the grants in `keep` (by project) from `expected`, the file as the owner
+    /// reviewed it, and signs the result with `keys`, making this Mac's key when there's none. Refuses if the file
+    /// changed since. The caller authenticated the owner first.
+    public static func adopt(
+        keeping keep: Set<String>, expected: AgentGrantFile, in url: URL, keys: (any AgentGrantSigner)?
+    ) throws {
+        guard let keys else { throw Failure.signingFailed }
+        let current = try inspect(url, keys: keys)
+        guard current.file.grants == expected.grants, current.file.version == expected.version else {
+            throw Failure.reviewChanged
+        }
+        var file = current.file
+        file.grants.removeAll { !keep.contains($0.project) }
+        try write(file, to: url, current: current, keys: keys, authenticated: true, adopt: true)
+    }
+
+    /// “Changed: access raised to Read and Create” for a grant on disk against the app's last verified copy (nil when
+    /// that copy didn't have it), or nil when it's unchanged.
+    public static func changeSummary(from verified: AgentGrant?, to grant: AgentGrant) -> String? {
+        guard let verified else { return "Added outside Silkweb" }
+        guard verified != grant else { return nil }
+        let folders = { (paths: [String]) in
+            paths.map { "“\(AgentMemoryContract.displayPath($0))”" }.joined(separator: ", ")
+        }
+        let parts = widenings(from: verified, to: grant).map { widening -> String in
+            switch widening {
+            case .newGrant: return "added"
+            case .access(_, let to): return "access raised to \(to.displayName)"
+            case .readFolders(let paths):
+                return "read \(paths.count == 1 ? "folder" : "folders") added: \(folders(paths))"
+            case .agentFolder(let key): return "agent folder set to “\(key)”"
+            case .createFolders(let paths):
+                return "create \(paths.count == 1 ? "folder" : "folders") added: \(folders(paths))"
+            case .library: return "Library changed"
+            case .limits: return "limits changed"
+            case .resume: return "resumed"
+            }
+        }
+        return "Changed: " + (parts.isEmpty ? "narrowed or relabelled" : parts.joined(separator: "; "))
     }
 
     // MARK: Classifying
@@ -184,13 +260,19 @@ public enum AgentGrantOwner {
     /// Saves `grant` over `original` (the grant as the editor loaded it), or adds it when `original` is nil. Refuses a
     /// widening without `authenticated`, a grant changed or removed on disk since `original`, and a new grant whose
     /// key exists. Other grants are kept as they are. Returns the saved grant.
+    ///
+    /// #205: `keys` signs once grants are protected (an unauthenticated change only when it's a pure narrowing). An
+    /// authenticated first grant on an empty file protects it from the start; other unprotected files stay unsigned
+    /// (the app reviews them with `adopt` first). Grants that need review refuse every change.
     @discardableResult
     public static func save(
-        _ grant: AgentGrant, replacing original: AgentGrant?, in url: URL, authenticated: Bool
+        _ grant: AgentGrant, replacing original: AgentGrant?, in url: URL, authenticated: Bool,
+        keys: (any AgentGrantSigner)? = nil
     ) throws -> AgentGrant {
         let grant = try validated(grant)
         if !widenings(from: original, to: grant).isEmpty, !authenticated { throw Failure.needsAuthentication }
-        var file = try load(url)
+        let current = try current(url, keys: keys)
+        var file = current.file
         let index = file.grants.firstIndex { $0.project == grant.project }
         if let original {
             guard original.project == grant.project else { throw Failure.invalid(invalidProjectMessage) }
@@ -201,16 +283,20 @@ public enum AgentGrantOwner {
             guard index == nil else { throw Failure.exists(grant.project) }
             file.grants.append(grant)
         }
-        try write(file, to: url)
+        try write(
+            file, to: url, current: current, keys: keys, authenticated: authenticated,
+            adopt: authenticated && keys != nil && current.protection == .unprotected && current.file.grants.isEmpty)
         return grant
     }
 
     /// Pause (`revoked_at`, keeping the first date) or Resume. Resuming widens, so it needs `authenticated`.
     @discardableResult
-    public static func setPaused(_ paused: Bool, project: String, in url: URL, authenticated: Bool, now: Date = Date())
-        throws -> AgentGrant
-    {
-        var file = try load(url)
+    public static func setPaused(
+        _ paused: Bool, project: String, in url: URL, authenticated: Bool, now: Date = Date(),
+        keys: (any AgentGrantSigner)? = nil
+    ) throws -> AgentGrant {
+        let current = try current(url, keys: keys)
+        var file = current.file
         guard let index = file.grants.firstIndex(where: { $0.project == project }) else {
             throw Failure.notFound(project)
         }
@@ -219,23 +305,36 @@ public enum AgentGrantOwner {
         // Whole seconds, as the file stores them.
         file.setEnabled(
             !paused, project: project, at: Date(timeIntervalSince1970: now.timeIntervalSince1970.rounded(.down)))
-        if file.grants[index] != before { try write(file, to: url) }
+        if file.grants[index] != before {
+            try write(file, to: url, current: current, keys: keys, authenticated: authenticated)
+        }
         return file.grants[index]
     }
 
     /// Remove Grant…: deletes the row. Agents using it stop at their next operation; no Document changes.
-    public static func remove(project: String, in url: URL) throws {
-        var file = try load(url)
+    public static func remove(project: String, in url: URL, keys: (any AgentGrantSigner)? = nil) throws {
+        let current = try current(url, keys: keys)
+        var file = current.file
         guard file.grants.contains(where: { $0.project == project }) else { throw Failure.notFound(project) }
         file.grants.removeAll { $0.project == project }
-        try write(file, to: url)
+        try write(file, to: url, current: current, keys: keys, authenticated: false)
     }
 
-    private static func write(_ file: AgentGrantFile, to url: URL) throws {
+    private static func write(
+        _ file: AgentGrantFile, to url: URL, current: AgentGrantInspection, keys: (any AgentGrantSigner)?,
+        authenticated: Bool, adopt: Bool = false
+    ) throws {
         var file = file
         file.version = AgentGrantFile.currentVersion
         do {
-            try file.write(to: url)
+            try AgentGrantSigning.save(
+                file, to: url, current: current, signer: keys, authenticated: authenticated, adopt: adopt)
+        } catch let error as AgentAccessError {
+            switch error.code {
+            case "needs_authentication": throw Failure.needsAuthentication
+            case "invalid_grants_signature", "grants_key_missing": throw Failure.needsReview
+            default: throw Failure.signingFailed
+            }
         } catch {
             throw Failure.writeFailed
         }

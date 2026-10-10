@@ -32,6 +32,11 @@ import SilkwebCore
     }
 
     private(set) var file = AgentGrantFile()
+    /// #205: how far the grants on disk can be trusted. Grants that changed outside Silkweb or lost their key are still
+    /// listed, read-only, until the owner reviews them.
+    private(set) var protection = AgentGrantProtection.unprotected
+    /// Protect Grants… / Review Grants….
+    var review: GrantReview?
     /// Why the grants file can't be read (broken or newer); the list keeps what it showed.
     private(set) var loadError: String?
     /// Every Library's requests, waiting and decided.
@@ -59,6 +64,15 @@ import SilkwebCore
     @ObservationIgnored var present: @MainActor (NSAlert, NSWindow?) async -> NSApplication.ModalResponse =
         AgentAccessModel.presentAlert
     @ObservationIgnored var clock: @MainActor () -> Date = { Date() }
+    /// #205: the keychain in the app (set at launch); tests use memory keys. Nil verifies with the process's keys and
+    /// signs nothing.
+    @ObservationIgnored var keys: (any AgentGrantSigner)?
+    /// Holds Not Now for the one-time Protect agent grants? alert. Tests replace it.
+    @ObservationIgnored var defaults = UserDefaults.standard
+    static let protectionDeclinedKey = "AgentGrantsProtectionDeclined"
+    /// The last grants that verified, kept in memory to say what changed outside Silkweb.
+    @ObservationIgnored private(set) var lastVerified: AgentGrantFile?
+    @ObservationIgnored private var offeredProtection = false
     /// The library window's sections: the current Library leads, New Grant offers them, Show in Agent Activity opens one.
     @ObservationIgnored weak var registry: LibraryWindowRegistry?
     @ObservationIgnored weak var window: NSWindow?
@@ -86,14 +100,17 @@ import SilkwebCore
         let previous = reloadTask
         let grantsURL = grantsURL
         let store = requestStore
+        let verifier = verifier
         let task = Task {
             await previous?.value
             let (grants, requests) = await Task.detached(priority: .utility) {
-                (Result { try AgentGrantOwner.load(grantsURL) }, try? store.load().requests)
+                (Result { try AgentGrantOwner.inspect(grantsURL, keys: verifier) }, try? store.load().requests)
             }.value
             switch grants {
             case .success(let loaded):
-                if loaded != file { file = loaded }
+                if loaded.file != file { file = loaded.file }
+                if loaded.protection != protection { protection = loaded.protection }
+                if loaded.protection == .protected { lastVerified = loaded.file }
                 if loadError != nil { loadError = nil }
             case .failure(let error):
                 let message = (error as? AgentAccessError)?.message ?? "The grants file can’t be read."
@@ -188,12 +205,109 @@ import SilkwebCore
         return requests.count { $0.isPending(at: now) }
     }
 
-    /// “3 grants · 1 request waiting” for Settings ▸ Library.
+    /// “3 grants · Needs review · 1 request waiting” for Settings ▸ Library.
     var summary: String {
-        let grants = file.grants.count == 1 ? "1 grant" : "\(file.grants.count) grants"
+        var parts = [file.grants.count == 1 ? "1 grant" : "\(file.grants.count) grants"]
+        if isReadOnly {
+            parts.append("Needs review")
+        } else if needsProtection {
+            parts.append("Not protected")
+        }
         let waiting = waitingCount
-        guard waiting > 0 else { return grants }
-        return grants + " · " + (waiting == 1 ? "1 request waiting" : "\(waiting) requests waiting")
+        if waiting > 0 { parts.append(waiting == 1 ? "1 request waiting" : "\(waiting) requests waiting") }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: Protection (#205)
+
+    /// The keys that check grants: the app's keychain, or the process's verifier in tests that set none.
+    private var verifier: any AgentGrantVerifier { keys ?? AgentGrantKeys.verifier }
+
+    /// Changed outside Silkweb or the key is missing: every control that saves is off until Review Grants….
+    var isReadOnly: Bool { !protection.isUsable }
+
+    /// Unsigned grants exist, no key protects them yet, and this window can sign (the app always can).
+    var needsProtection: Bool { keys != nil && protection == .unprotected && !file.grants.isEmpty }
+
+    /// The full-width strip above the window's content, or nil when there's nothing to say.
+    var protectionStrip: (icon: String, text: String, button: String)? {
+        switch protection {
+        case .changedOutside:
+            return ("exclamationmark.shield", Self.changedOutsideText, "Review Grants…")
+        case .keyMissing:
+            return ("exclamationmark.shield", Self.keyMissingText, "Review Grants…")
+        case .unprotected where needsProtection:
+            return ("lock.open", "Agent grants aren’t protected yet.", "Protect Grants…")
+        default:
+            return nil
+        }
+    }
+
+    static let changedOutsideText =
+        "Agent grants were changed outside Silkweb. Agents can’t use any grant until you review them."
+    static let keyMissingText = "Silkweb can’t find the key that protects agent grants on this Mac."
+
+    /// Protect Grants… / Review Grants…: every grant on disk, checked. `then` runs after signing (an authenticated
+    /// change that waited for protection), without asking for authentication again.
+    func beginReview(then: (@MainActor () async -> Void)? = nil) {
+        var changes: [String: String] = [:]
+        let tampered = protection == .changedOutside
+        if tampered, let lastVerified {
+            for grant in file.grants {
+                changes[grant.project] = AgentGrantOwner.changeSummary(
+                    from: lastVerified.grant(for: grant.project), to: grant)
+            }
+        }
+        review = GrantReview(
+            file: file, protecting: protection == .unprotected, changes: changes,
+            knowsPrevious: !tampered || lastVerified != nil, then: then)
+    }
+
+    /// Sign Grants: owner authentication, then only the checked grants, signed. A cancelled prompt writes nothing and
+    /// keeps the sheet open.
+    @discardableResult
+    func signGrants() async -> Bool {
+        guard let review, !review.signing else { return false }
+        guard await authenticate("protect agent grants") else { return false }
+        review.signing = true
+        defer { review.signing = false }
+        let (keep, expected, url, keys) = (review.kept, review.file, grantsURL, keys)
+        let result = await Task.detached(priority: .userInitiated) {
+            Result { try AgentGrantOwner.adopt(keeping: keep, expected: expected, in: url, keys: keys) }
+        }.value
+        if case .failure(let error) = result {
+            _ = await present(AgentAccessAlerts.failure(error), window?.attachedSheet ?? window)
+            await reload()
+            return false
+        }
+        self.review = nil
+        // An unedited selection follows the signed file; edits waiting in `then` are kept.
+        await reload()
+        await review.then?()
+        return true
+    }
+
+    /// Protect agent grants? once, on the first launch with unsigned grants. Not Now is remembered and never asks
+    /// again. True when the owner chose Review Grants… (the caller opens the window, which shows the sheet).
+    func offerProtection(in window: NSWindow?) async -> Bool {
+        guard !offeredProtection else { return false }
+        await reload()
+        guard needsProtection, !defaults.bool(forKey: Self.protectionDeclinedKey) else { return false }
+        offeredProtection = true
+        guard await present(AgentAccessAlerts.protect(), window) == .alertFirstButtonReturn else {
+            defaults.set(true, forKey: Self.protectionDeclinedKey)
+            return false
+        }
+        beginReview()
+        return true
+    }
+
+    /// An authenticated change on unsigned grants protects them first: the sheet lists every grant, and its one
+    /// authentication covers the change too. False when the change goes ahead now.
+    private func protectFirst(_ change: @escaping @MainActor () async -> Void) -> Bool {
+        guard needsProtection else { return false }
+        beginReview(then: change)
+        return true
     }
 
     /// The label the Agent Activity pull-down shows for a receipt's grant.
@@ -305,19 +419,21 @@ import SilkwebCore
     }
 
     /// Save: a widening change asks for owner authentication first; cancelling it writes nothing and keeps the edits.
+    /// #205: on unsigned grants a widening change protects them first (`authenticated` is then already true).
     @discardableResult
-    func save() async -> Bool {
-        guard let draft, isEdited, !saving else { return !isEdited }
+    func save(authenticated: Bool = false) async -> Bool {
+        guard let draft, isEdited, !saving, !isReadOnly else { return !isEdited }
         let original = original
         let widens = !AgentGrantOwner.widenings(from: original, to: draft).isEmpty
-        if widens {
+        if widens, !authenticated {
+            if protectFirst({ [weak self] in _ = await self?.save(authenticated: true) }) { return false }
             guard await authenticate("change agent access for “\(draft.displayLabel)”") else { return false }
         }
         saving = true
         defer { saving = false }
-        let url = grantsURL
+        let (url, keys) = (grantsURL, keys)
         let result = await Task.detached(priority: .userInitiated) {
-            Result { try AgentGrantOwner.save(draft, replacing: original, in: url, authenticated: widens) }
+            Result { try AgentGrantOwner.save(draft, replacing: original, in: url, authenticated: widens, keys: keys) }
         }.value
         switch result {
         case .success(let saved):
@@ -333,14 +449,21 @@ import SilkwebCore
     }
 
     /// Pause Access (no authentication) or Resume Access (authentication first), applied at once.
-    func setPaused(_ paused: Bool, project: String) async {
+    func setPaused(_ paused: Bool, project: String, authenticated: Bool = false) async {
+        guard !isReadOnly else { return }
         let label = label(for: project)
-        if !paused { guard await authenticate("resume agent access for “\(label)”") else { return } }
-        let url = grantsURL
+        if !paused, !authenticated {
+            if protectFirst({ [weak self] in await self?.setPaused(false, project: project, authenticated: true) }) {
+                return
+            }
+            guard await authenticate("resume agent access for “\(label)”") else { return }
+        }
+        let (url, keys) = (grantsURL, keys)
         let now = clock()
         let result = await Task.detached(priority: .userInitiated) {
             Result {
-                try AgentGrantOwner.setPaused(paused, project: project, in: url, authenticated: !paused, now: now)
+                try AgentGrantOwner.setPaused(
+                    paused, project: project, in: url, authenticated: !paused, now: now, keys: keys)
             }
         }.value
         switch result {
@@ -358,12 +481,12 @@ import SilkwebCore
 
     /// Remove Grant…: asks, then deletes the row. Pause is the reversible option.
     func remove(project: String) async {
-        guard await present(AgentAccessAlerts.remove(label(for: project)), window) == .alertFirstButtonReturn else {
-            return
-        }
-        let url = grantsURL
+        guard !isReadOnly,
+            await present(AgentAccessAlerts.remove(label(for: project)), window) == .alertFirstButtonReturn
+        else { return }
+        let (url, keys) = (grantsURL, keys)
         let result = await Task.detached(priority: .userInitiated) {
-            Result { try AgentGrantOwner.remove(project: project, in: url) }
+            Result { try AgentGrantOwner.remove(project: project, in: url, keys: keys) }
         }.value
         if case .failure(let error) = result {
             _ = await present(AgentAccessAlerts.failure(error), window)
@@ -380,6 +503,7 @@ import SilkwebCore
 
     /// New Grant…: the sheet, on the current Library when one is open.
     func beginNewGrant() {
+        guard !isReadOnly else { return }
         newGrant = NewGrantForm(library: registry?.current.root?.path ?? libraryChoices.first ?? "")
     }
 
@@ -427,13 +551,23 @@ import SilkwebCore
             }
             grant = value.grant
         }
+        // #205: unsigned grants are protected first; the New Grant sheet gives way to the review sheet.
+        if protectFirst({ [weak self] in _ = await self?.saveNewGrant(grant, alertWindow: self?.window) }) {
+            newGrant = nil
+            return true
+        }
         guard await authenticate("give agents access to “\(grant.displayLabel)”") else { return false }
-        let url = grantsURL
+        return await saveNewGrant(grant, alertWindow: sheet)
+    }
+
+    /// Saves an authenticated new grant and selects it.
+    private func saveNewGrant(_ grant: AgentGrant, alertWindow: NSWindow?) async -> Bool {
+        let (url, keys) = (grantsURL, keys)
         let saved = await Task.detached(priority: .userInitiated) {
-            Result { try AgentGrantOwner.save(grant, replacing: nil, in: url, authenticated: true) }
+            Result { try AgentGrantOwner.save(grant, replacing: nil, in: url, authenticated: true, keys: keys) }
         }.value
         if case .failure(let error) = saved {
-            _ = await present(AgentAccessAlerts.failure(error), sheet)
+            _ = await present(AgentAccessAlerts.failure(error), alertWindow)
             return false
         }
         newGrant = nil
@@ -449,13 +583,19 @@ import SilkwebCore
     /// then the same core approval as `silkweb grant approve`. A widen refusal offers Show Grant.
     func approve(_ request: AgentAccessRequest) async {
         guard deciding == nil else { return }
+        // #205: grants that need review can't change; the alert says why, as the strip does.
+        if isReadOnly {
+            let text = protection == .keyMissing ? Self.keyMissingText : Self.changedOutsideText
+            _ = await present(AgentAccessAlerts.failure("Can’t Approve This Request", text), window)
+            return
+        }
         deciding = request.id
         defer { deciding = nil }
         let store = requestStore
-        let grants = grantsURL
+        let (grants, verifier) = (grantsURL, verifier)
         let now = clock()
         let preview = await Task.detached(priority: .userInitiated) {
-            Result { try store.previewApproval(request.id, grantsURL: grants, now: now) }
+            Result { try store.previewApproval(request.id, grantsURL: grants, now: now, keys: verifier) }
         }.value
         if case .failure(let error) = preview {
             let showGrant =
@@ -466,9 +606,19 @@ import SilkwebCore
             return
         }
         guard await present(AccessRequestAlerts.confirm(request), window) == .alertFirstButtonReturn else { return }
+        if protectFirst({ [weak self] in await self?.decideApproval(request) }) { return }
         guard await authenticate("approve access for “\(request.agentName)” to “\(request.project)”") else { return }
+        await decideApproval(request)
+    }
+
+    /// The approval itself, after authentication: signed when grants are protected.
+    private func decideApproval(_ request: AgentAccessRequest) async {
+        let store = requestStore
+        let (grants, keys) = (grantsURL, keys)
         let decided = await Task.detached(priority: .userInitiated) {
-            Result { try store.decide(request.id, approve: true, via: .app, grantsURL: grants, now: Date()) }
+            Result {
+                try store.decide(request.id, approve: true, via: .app, grantsURL: grants, now: Date(), signer: keys)
+            }
         }.value
         if case .failure(let error) = decided {
             _ = await present(AccessRequestAlerts.refusal(error), window)
@@ -521,6 +671,38 @@ import SilkwebCore
     }
 }
 
+/// #205: Protect Agent Grants / Review Agent Grants: every grant on disk with a keep checkbox (checked), and what
+/// changed outside Silkweb when the app's last verified copy knows.
+@MainActor @Observable final class GrantReview: Identifiable {
+    let id = UUID()
+    /// The grants as the sheet shows them; signing refuses if the file changed since.
+    let file: AgentGrantFile
+    /// Unsigned grants being protected for the first time, rather than grants to review.
+    let protecting: Bool
+    /// “Changed: access raised to Read and Create” by project.
+    let changes: [String: String]
+    /// False when the grants changed outside Silkweb and the app has no earlier copy to compare with.
+    let knowsPrevious: Bool
+    /// Projects to keep.
+    var kept: Set<String>
+    var signing = false
+    @ObservationIgnored let then: (@MainActor () async -> Void)?
+
+    init(
+        file: AgentGrantFile, protecting: Bool, changes: [String: String], knowsPrevious: Bool,
+        then: (@MainActor () async -> Void)?
+    ) {
+        self.file = file
+        self.protecting = protecting
+        self.changes = changes
+        self.knowsPrevious = knowsPrevious
+        self.then = then
+        kept = Set(file.grants.map(\.project))
+    }
+
+    var title: String { protecting ? "Protect Agent Grants" : "Review Agent Grants" }
+}
+
 /// The New Grant sheet's fields.
 @MainActor @Observable final class NewGrantForm: Identifiable {
     let id = UUID()
@@ -543,6 +725,18 @@ import SilkwebCore
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Don’t Save")
         alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
+        return alert
+    }
+
+    /// #205: the one-time offer on the first launch with unsigned grants. Review Grants… / Not Now.
+    static func protect() -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "Protect agent grants?"
+        alert.informativeText =
+            "Silkweb can sign your grants with a key in your keychain. Agents then can’t use a grant changed outside "
+            + "Silkweb."
+        alert.addButton(withTitle: "Review Grants…")
+        alert.addButton(withTitle: "Not Now").keyEquivalent = "\u{1b}"
         return alert
     }
 

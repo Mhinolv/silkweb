@@ -281,15 +281,32 @@ public struct AgentAccessError: Error, Equatable, Sendable {
 }
 
 /// `agent-grants.json`, re-read only when its stamp (inode, size, change and modification times)
-/// changes, so checking for revocation before every operation costs one `stat`.
+/// changes, so checking for revocation before every operation costs one `stat`. Each re-read also verifies the
+/// signature (#205) with `keys`.
 public final class AgentGrantStore: @unchecked Sendable {
     public let url: URL
+    public let keys: any AgentGrantVerifier
     private let lock = NSLock()
-    private var cache: (stamp: [Int], file: AgentGrantFile)?
+    private var cache: (stamp: [Int], inspection: AgentGrantInspection)?
 
-    public init(url: URL) { self.url = url }
+    public init(url: URL, keys: any AgentGrantVerifier = AgentGrantKeys.verifier) {
+        self.url = url
+        self.keys = keys
+    }
 
+    /// The grants, failing closed (#205) when they were changed outside Silkweb or this Mac lost their key.
     public func load() throws -> AgentGrantFile {
+        let inspection = try inspect()
+        switch inspection.protection {
+        case .changedOutside: throw AgentAccessError.grantsChangedOutside
+        case .keyMissing: throw AgentAccessError.grantsKeyMissing
+        case .protected, .unprotected: return inspection.file
+        }
+    }
+
+    /// The grants and how far they can be trusted, whatever that is. Only the owner's paths use the grants of a file
+    /// that isn't usable, to show and review them.
+    public func inspect() throws -> AgentGrantInspection {
         var info = stat()
         guard stat(url.path, &info) == 0 else {
             throw errno == ENOENT || errno == ENOTDIR ? missing : invalid
@@ -300,7 +317,7 @@ public final class AgentGrantStore: @unchecked Sendable {
         ]
         lock.lock()
         defer { lock.unlock() }
-        if let cache, cache.stamp == stamp { return cache.file }
+        if let cache, cache.stamp == stamp { return cache.inspection }
         let file: AgentGrantFile
         do {
             file = try JSONDecoder().decode(AgentGrantFile.self, from: Data(contentsOf: url))
@@ -315,9 +332,11 @@ public final class AgentGrantStore: @unchecked Sendable {
                 code: "unsupported_grants_version", title: AgentAccessError.noAccess,
                 message: "The grants file was saved by a newer version of Silkweb.")
         }
+        let inspection = AgentGrantInspection(
+            file: file, protection: AgentGrantSigning.protection(of: file, keys: keys))
         // Stamped before reading, so a replacement during the read is picked up next time.
-        cache = (stamp, file)
-        return file
+        cache = (stamp, inspection)
+        return inspection
     }
 
     private var missing: AgentAccessError {

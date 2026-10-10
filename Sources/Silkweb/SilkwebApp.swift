@@ -1,10 +1,17 @@
 import AppKit
+import SilkwebCore
 import SwiftUI
 
 @main
 struct SilkwebApp: App {
     @NSApplicationDelegateAdaptor(EditorApplicationDelegate.self) private var appDelegate
     private let registry = LibraryWindowRegistry.shared
+
+    init() {
+        // #205: grants are verified with this Mac's keychain key; the Agent Access window signs owner saves with it.
+        AgentGrantKeys.verifier = AgentGrantKeychain()
+        AgentAccessModel.shared.keys = AgentGrantKeychain()
+    }
 
     var body: some Scene {
         // One library window; each open Library is a sidebar section (#195). `.newItem` is replaced below, so
@@ -32,6 +39,7 @@ struct SilkwebApp: App {
 struct LibraryWindow: View {
     static let sceneID = "library"
     let registry: LibraryWindowRegistry
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         LibraryWorkspaceView(workspace: registry.current, registry: registry)
@@ -41,6 +49,12 @@ struct LibraryWindow: View {
                 // #229: grant labels for the Agent Activity pull-down and the Settings ▸ Library summary.
                 AgentAccessModel.shared.registry = registry
                 AgentAccessModel.shared.start()
+                // #205: once, on the first launch with unsigned grants; Review Grants… opens the sheet in Agent Access.
+                Task {
+                    if await AgentAccessModel.shared.offerProtection(in: registry.libraryWindow) {
+                        openWindow(id: AgentAccessModel.sceneID)
+                    }
+                }
             }
     }
 }
