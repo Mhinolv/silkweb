@@ -285,6 +285,74 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
   are never followed or listed.
 - MCP roots and client names may narrow a grant but never widen it.
 
+### Protected grants (#205)
+
+Once the owner protects their grants, `agent-grants.json` is **tamper-evident**: it carries a signature, and
+the helper, MCP and the app refuse every grant when the file was changed outside Silkweb.
+
+```json
+{
+  "grants" : [ … ],
+  "signature" : { "algorithm" : "ecdsa-p256-sha256", "key_id" : "3f9a1c2b4d5e6f70", "value" : "<base64 r‖s>" },
+  "version" : 1
+}
+```
+
+- **Key.** An ECDSA P-256 key in the login keychain, item “Silkweb Agent Grants” (generic password, account
+  `agent-grants-signing-key`). Its secret data is the private key; its `generic` attribute is the public key,
+  which any process reads without a prompt. The private key is never written anywhere else. The verify key
+  never comes from the grants file. The first signature makes the key; **the key existing means grants are
+  protected on this Mac.** The first time the other binary (the app or the helper) signs, macOS may ask the
+  owner to allow it to use the keychain item.
+- **Signed bytes.** `{"grants":[…],"version":N}` as compact JSON with sorted keys and unescaped slashes, of the
+  grants as Silkweb decodes them (unknown keys dropped, values normalized: `read-only` reads as `read`, and so
+  on). Formatting, key order and unknown keys don't matter; every change a reader would see does. `key_id` is
+  the first 8 bytes of the public key's SHA-256, for information only. The file stays `version: 1`: older builds
+  ignore `signature`.
+- **States** (checked on every re-read, so once per changed file stamp):
+
+  | File | Key | Helpers and MCP | App |
+  |---|---|---|---|
+  | none, or signed and valid | any | as before | nothing extra |
+  | unsigned | none | as before (not tamper-protected) | strip “Agent grants aren’t protected yet.” + **Protect Grants…**; Settings “· Not protected” |
+  | signed but changed, a `signature` that isn't valid, or unsigned | exists | fail closed: `invalid_grants_signature` | strip “Agent grants were changed outside Silkweb. Agents can’t use any grant until you review them.” + **Review Grants…**; “· Needs review”; read-only |
+  | signed | none (new Mac, keychain reset) | fail closed: `grants_key_missing` | strip “Silkweb can’t find the key that protects agent grants on this Mac.” + **Review Grants…**; read-only |
+  | signed, unsigned or none | can't be read (agent sandbox, SSH, locked keychain) | fail closed: `grants_key_unreadable` | strip “Silkweb can’t check whether agent grants are protected. Agents can’t use any grant.” + **Review Grants…**; “· Needs review”; read-only |
+
+  “No key” means the keychain answered that the item doesn't exist. Any other keychain error is “can't be read”:
+  Silkweb can't tell an unprotected file from a protected one with its signature stripped, so even an unsigned file
+  fails closed (“Silkweb can’t check whether agent grants are protected. Run it from your normal login
+  session.”). Failing closed means no grant at all: every operation refuses until the keychain can be read or the
+  owner reviews.
+- **Who signs.** Only the owner's paths: `silkweb grant init` and `grant approve` with a terminal on stdin, and
+  the app (after owner authentication, or for a change that only narrows, pauses, relabels or removes grants of a
+  verified file). The memory commands and `silkweb mcp` hold a verifier only. Without a terminal nothing is
+  signed, so a write to protected grants is refused (`grants_signing_required`); `--grants` files are verified
+  with the same key.
+- **Adoption.** On the first launch with unsigned grants the app asks once, “Protect agent grants?” (**Review
+  Grants…** / **Not Now**). Not Now is remembered: it never asks again, the strip stays, and unsigned grants keep
+  working without tamper protection. **Protect Grants…** / **Review Grants…** open a sheet listing every grant
+  on disk with a checkbox; **Sign Grants** asks for Touch ID or the password and writes only the checked grants,
+  signed (making a new key if there's none). In review, a grant that differs from the app's last verified copy
+  says how (“Changed: access raised to Read and Create”); without one, “Silkweb doesn’t have the previous version.
+  Uncheck any grant you don’t recognise.” An authenticated change (new grant, widening, resume, approve) on
+  unsigned grants shows this sheet first, and one authentication covers both. A first grant on an empty file is
+  protected from the start.
+- **Terminal.** `grant init` signs when it saves. On unsigned grants it prints “This also protects N existing
+  grants:”, one line per grant, and asks `Protect them? [y/N]`; no keeps the file unsigned. Only the real file is
+  protected this way: a `--grants` file elsewhere never makes the key (it stays unsigned until a key exists, then
+  is signed like the real one). `grant approve`
+  re-signs protected grants and never protects unsigned ones by itself. Both refuse grants that need review
+  (“Agent grants were changed outside Silkweb. Review them in Silkweb’s Agent Access window. Nothing was
+  saved.”).
+- **Recovery.** A lost key is recovered with Review Grants… in the app: check each grant, a new key, re-sign.
+- **Limits.** This proves the file was last saved by an owner path on this Mac. It doesn't stop a process that
+  can drive the keychain as the owner (for example, deleting the key item and signing with its own), or one with a
+  pseudo-terminal answering `grant init`'s questions; client rules (#230) keep agents' own tools off these.
+  Stripping the signature and running the helper where the keychain can't be read doesn't load the edited
+  grants: an unreadable keychain refuses every file (`grants_key_unreadable`). Before the owner first protects
+  grants there is no key, so an unsigned file is not tamper-protected at all.
+
 ### Setting up a grant (#186)
 
 With several Libraries open, each needs its own grant: see [Personal Library › Agent memory](personal-library.md#agent-memory).
@@ -536,10 +604,13 @@ document text or the requested target.
 | `too_large` | That document is larger than this grant’s read limit (1 MB). For creates: This document is larger than the grant allows (256 KB). Nothing was created. |
 | `not_found` | There’s no document at that location. (Only for targets inside the scope, and for any ID that is unknown or outside it.) |
 | `update_not_allowed` | This grant can’t update documents. Ask the owner to switch it to Read, Create and Update. (On an unqualified filesystem: This Library isn’t on a local disk, so agents can only read it.) |
+| `invalid_grants_signature` | Agent grants failed verification, so no grant is in effect. Ask the owner to review them in Silkweb. |
+| `grants_key_missing` | Silkweb can’t find the key that protects agent grants on this Mac, so no grant is in effect. Ask the owner to review them in Silkweb. |
+| `grants_key_unreadable` | Silkweb can’t check whether agent grants are protected. Run it from your normal login session. |
 
 The owner changes this file in the [Agent Access window](#agent-access-window-229) (#229) or with
-`silkweb grant init`; hand edits still work and the window picks them up. The CLI (#135) and MCP never
-write it.
+`silkweb grant init`. Hand edits work only while grants are unprotected; once [protected](#protected-grants-205)
+(#205) a hand edit stops every grant until Review Grants…. The CLI (#135) and MCP never write it.
 
 ### Agent Access window (#229)
 
@@ -1107,8 +1178,8 @@ and `--supersedes` (create).
 | 65 | Bad input data | `envelope_malformed`, `envelope_schema_newer`, `envelope_invalid_field`, `too_large`, `idempotency_conflict`, `not_found`, `revision_changed`, `request_not_found`, `request_decided`, `invalid_agent_folder`, `invalid_create_folder` |
 | 69 | Busy; try again | `library_busy`, `stale_snapshot`, `rate_limited`, `document_has_unsaved_changes`, `too_many_requests` |
 | 70 | Unexpected helper failure | `internal_error` |
-| 74 | Library I/O | `library_not_found`, `library_unreadable`, `unreadable`, `write_failed`, `disk_full`, `permission_denied` |
-| 77 | Access | `grant_required`, `grant_not_found`, `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `no_grant`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `invalid_path`, `excluded_name`, `update_not_allowed`, `update_requires_proposal`, `invalid_requests_file`, `unsupported_requests_version`, `approve_would_widen` |
+| 74 | Library I/O | `library_not_found`, `library_unreadable`, `unreadable`, `write_failed`, `disk_full`, `permission_denied`, `grants_signing_failed` |
+| 77 | Access | `grant_required`, `grant_not_found`, `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `invalid_grants_signature`, `grants_key_missing`, `grants_key_unreadable`, `grants_signing_required`, `needs_authentication`, `no_grant`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `invalid_path`, `excluded_name`, `update_not_allowed`, `update_requires_proposal`, `invalid_requests_file`, `unsupported_requests_version`, `approve_would_widen` |
 
 - **One bad-input code.** `invalid_argument` covers usage mistakes (unknown command or option, a
   repeated or missing option, `--body` text), bad values (`--limit`, `--type`, dates, `--id`, `--cursor`)
@@ -1462,7 +1533,8 @@ Run these once from the repository root. Each step shows its expected output.
    {"version":1,"grants":[{"project":"Silkweb","library":{"path":"/Users/me/Writing"},"access":"read-create"}]}
    EOF
    ```
-   (No output.)
+   (No output.) This writes an unprotected file; with protected grants (#205) the helper refuses it
+   (`invalid_grants_signature`). Use `silkweb grant init` instead once grants are protected.
 
 4. Quit Silkweb (⌘Q), then ask the helper for its scope. With one grant, `--grant` isn’t needed.
 

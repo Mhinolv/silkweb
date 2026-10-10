@@ -126,7 +126,7 @@ Replace `<code>` with the `error.code` from the result, for example `create_not_
 
 - **Access refusals** (exit status `77` from the command line): `grant_required`, `grant_not_found`,
   `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `no_grant`,
-  `invalid_grant`, `out_of_scope`, `create_not_allowed`, `update_not_allowed`,
+  `invalid_grants_signature`, `grants_key_missing`, `grants_key_unreadable`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `update_not_allowed`,
   `update_requires_proposal`, `invalid_path` and `excluded_name`. Don't retry them. Pass the message on;
   it already says what the owner can do.
 - **No access yet** (`grant_not_found`, `no_grants_file`), or the grant is too narrow for the task: ask

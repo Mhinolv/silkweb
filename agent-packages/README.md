@@ -85,6 +85,11 @@ When it's done, it prints the `claude mcp add`, `codex mcp add` and Gemini CLI c
 
 #### Editing the file by hand
 
+Once your grants are protected (#205: Protect Grants… in Silkweb's Agent Access window, or yes to “Protect
+them?” in `grant init`), a hand edit stops **every** grant: helpers answer `invalid_grants_signature` until you
+choose Review Grants… in Agent Access. Change protected grants there (labels, read folders, access) or with
+`grant init` in Terminal instead. Unprotected files can still be edited by hand, as below.
+
 Labels, limits and extra read folders aren't set by `grant init`; edit the file for those. If the file
 doesn't exist yet, save this template as `agent-grants.json` in
 `~/Library/Application Support/Silkweb/` and set `project`, `label` and `library.path`. If it already
@@ -360,7 +365,8 @@ gemini extensions uninstall silkweb-memory
 ```
 
 Uninstalling never touches your Library. Documents agents created stay where they are. To stop all
-agents at once, turn the grant off in `agent-grants.json` (see [Create the grant](#2-create-the-grant)).
+agents at once, pause the grant in Silkweb's Agent Access window (or, for unprotected grants, turn it off in
+`agent-grants.json`; see [Create the grant](#2-create-the-grant)).
 
 ## Tested versions
 
