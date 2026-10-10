@@ -111,11 +111,17 @@ final class SidebarScopeSequenceTests: XCTestCase {
         /// hidden window doesn't run AppKit's press tracking, so the row shown during the press is recorded when
         /// `mouseDown` returns, and the release then commits the clicked row as AppKit does.
         func clickSidebar(_ path: String) throws {
+            try clickSidebarRow(path) { $0.folder?.relativePath == path }
+        }
+        func clickTag(_ name: String) throws {
+            try clickSidebarRow("#" + name) { $0.tag?.name == name }
+        }
+        private func clickSidebarRow(_ label: String, where matches: (FolderSidebar.Item) -> Bool) throws {
             let outline = try XCTUnwrap(self.outline)
             let row = (0..<outline.numberOfRows).first {
-                (outline.item(atRow: $0) as? FolderSidebar.Item)?.folder?.relativePath == path
+                (outline.item(atRow: $0) as? FolderSidebar.Item).map(matches) == true
             }
-            let index = try XCTUnwrap(row, "sidebar row \(path)")
+            let index = try XCTUnwrap(row, "sidebar row \(label)")
             let rect = outline.rect(ofRow: index)
             let point = outline.convert(NSPoint(x: rect.maxX - 40, y: rect.midY), to: nil)
             XCTAssertEqual(outline.row(at: outline.convert(point, from: nil)), index)
@@ -128,6 +134,14 @@ final class SidebarScopeSequenceTests: XCTestCase {
             if outline.selectedRow != index {
                 outline.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
             }
+        }
+
+        /// The capsule is on `row` while the list, breadcrumb scope and editor still show Alpha's opened document.
+        func keepsAlpha(capsule row: String, editor: URL?, frame: Int) {
+            XCTAssertEqual(selectedRow, row, "frame \(frame): the capsule stays on the clicked row")
+            XCTAssertEqual(workspace.session.selectedFolder, "Alpha", "frame \(frame): the scope waits for idle")
+            XCTAssert(paths.allSatisfy { $0.hasPrefix("Alpha/") }, "frame \(frame): the list keeps Alpha")
+            XCTAssertEqual(workspace.editor.url, editor, "frame \(frame): the editor is unchanged while busy")
         }
 
         func waitForEditor(_ path: String) async throws {
@@ -152,6 +166,12 @@ final class SidebarScopeSequenceTests: XCTestCase {
                     .write(to: url.appendingPathComponent("\(folder) \(index).md"))
             }
         }
+        // One tag, so the sidebar has a tag row (#211).
+        let tagged = UUID()
+        try LibraryMetadataStore.save(
+            TagEditor.add(
+                ["travel"], documents: [tagged], metadata: LibraryMetadata(IDsByPath: ["Gamma/Gamma 1.md": tagged])),
+            root: root)
         let suite = "Silkweb.ScopeSequence." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: suite)
@@ -262,24 +282,115 @@ final class SidebarScopeSequenceTests: XCTestCase {
         XCTAssertEqual(h.workspace.session.selectedFolder, "Beta")
     }
 
-    /// A refused switch is the only case that moves the capsule back: once, B → A.
-    @MainActor func testRefusedFolderSwitchMovesBackOnce() async throws {
+    /// #211: a folder click while the library is busy is queued, not refused. The capsule stays on the clicked
+    /// row on every frame while the list and editor keep the old scope; the folder opens once the library is idle.
+    @MainActor func testFolderClickWhileBusyStaysAndOpensWhenIdle() async throws {
         let h = try await makeHarness()
         defer { h.stopRecording(); h.cleanUp() }
         try await openDocumentInAlpha(h)
-        let document = h.workspace.session.selectedDocuments
+        let opened = h.workspace.editor.url
 
         try h.startRecording()
         h.workspace.mutating = true
         try h.clickSidebar("Beta")
         h.record()
-        try await h.drain()
+        for frame in 0..<10 {
+            try await h.pump()
+            h.keepsAlpha(capsule: "Beta", editor: opened, frame: frame)
+        }
+        await h.workspace.waitForNavigation()
+        for frame in 10..<15 {
+            try await h.pump()
+            h.keepsAlpha(capsule: "Beta", editor: opened, frame: frame)
+        }
         h.workspace.mutating = false
         try await h.drain()
         h.stopRecording()
 
-        XCTAssertEqual(h.sequence, ["Beta", "Alpha"], "a refused switch moves back once")
+        XCTAssertEqual(h.sequence, ["Beta"], "a queued click never moves the capsule back")
+        XCTAssertEqual(h.workspace.session.selectedFolder, "Beta")
+        XCTAssertEqual(h.workspace.session.selectedDocuments, [])
+        XCTAssert(h.paths.allSatisfy { $0.hasPrefix("Beta/") }, "the list shows Beta once idle")
+        XCTAssertEqual(h.workspace.editor.url, opened, "a scope switch keeps the editor's document")
+    }
+
+    /// Folder, tag and folder clicks while loading: the capsule follows each, and only the last opens.
+    @MainActor func testLastSidebarClickWhileBusyWins() async throws {
+        let h = try await makeHarness()
+        defer { h.stopRecording(); h.cleanUp() }
+        try await openDocumentInAlpha(h)
+        let opened = h.workspace.editor.url
+
+        try h.startRecording()
+        h.workspace.loading = true
+        for row in ["Beta", "#travel", "Gamma", "#travel"] {
+            if row.hasPrefix("#") { try h.clickTag(String(row.dropFirst())) } else { try h.clickSidebar(row) }
+            h.record()
+            for frame in 0..<3 {
+                try await h.pump()
+                h.keepsAlpha(capsule: row, editor: opened, frame: frame)
+            }
+        }
+        h.workspace.loading = false
+        try await h.drain()
+        h.stopRecording()
+
+        XCTAssertEqual(h.sequence, ["Beta", "#travel", "Gamma", "#travel"])
+        XCTAssertNotNil(h.workspace.session.selectedTagID, "the last click (the tag) opens")
+        XCTAssertNil(h.workspace.session.selectedFolder)
+        XCTAssertEqual(h.paths, ["Gamma/Gamma 1.md"])
+    }
+
+    /// A document click after a queued folder click shares the slot: the document wins and the capsule moves back
+    /// to the scope that lists it.
+    @MainActor func testDocumentClickAfterQueuedFolderWins() async throws {
+        let h = try await makeHarness()
+        defer { h.stopRecording(); h.cleanUp() }
+        try await openDocumentInAlpha(h)
+        let target = h.paths[2]
+        XCTAssertNotEqual(h.workspace.session.selectedDocuments, [target])
+
+        h.workspace.mutating = true
+        try h.clickSidebar("Beta")
+        try await h.pump()
+        XCTAssertEqual(h.selectedRow, "Beta")
+        try h.clickDocument(2)
+        try await h.pump()
+        XCTAssertEqual(h.selectedRow, "Alpha", "the newer document click returns the capsule to its scope")
+        h.workspace.mutating = false
+        try await h.waitForEditor(target)
+        try await h.drain()
+
+        XCTAssertEqual(h.selectedRow, "Alpha")
         XCTAssertEqual(h.workspace.session.selectedFolder, "Alpha")
-        XCTAssertEqual(h.workspace.session.selectedDocuments, document)
+        XCTAssertEqual(h.workspace.session.selectedDocuments, [target])
+    }
+
+    /// The queued folder is kept by ID: a rename in the same mutation is followed; a trashed one is dropped and the
+    /// capsule returns to the scope the list shows.
+    @MainActor func testQueuedFolderFollowsARenameAndIsDroppedWhenDeleted() async throws {
+        let h = try await makeHarness()
+        defer { h.stopRecording(); h.cleanUp() }
+        try await openDocumentInAlpha(h)
+        let engine = try LibraryMutations(root: h.root)
+
+        h.workspace.mutating = true
+        try h.clickSidebar("Beta")
+        try await h.workspace.refresh(try await engine.rename("Beta", to: "Delta"))
+        h.workspace.mutating = false
+        try await h.drain()
+        XCTAssertEqual(h.workspace.session.selectedFolder, "Delta", "the renamed folder opens")
+        XCTAssertEqual(h.selectedRow, "Delta")
+
+        try h.clickSidebar("Alpha")
+        try await h.drain()
+        h.workspace.mutating = true
+        try h.clickSidebar("Gamma")
+        try FileManager.default.removeItem(at: h.root.appendingPathComponent("Gamma"))
+        try await h.workspace.refresh(LibraryChangeSet(changes: []))
+        h.workspace.mutating = false
+        try await h.drain()
+        XCTAssertEqual(h.workspace.session.selectedFolder, "Alpha", "a deleted target opens nothing")
+        XCTAssertEqual(h.selectedRow, "Alpha", "the capsule returns to the scope the list shows")
     }
 }
