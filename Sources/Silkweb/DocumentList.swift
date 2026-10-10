@@ -34,15 +34,22 @@ struct DocumentList: View {
                             "Folder Unavailable", systemImage: "lock",
                             description: Text("You don't have permission to view this folder."))
                     }
-                } else if workspace.agentScope && workspace.documents.isEmpty && workspace.agentFilter != nil {
+                } else if workspace.agentScope && workspace.documents.isEmpty
+                    && (workspace.agentFilter != nil || workspace.outsideFilter)
+                {
                     ColumnEmptyState {
                         ContentUnavailableView {
                             Label("No Agent Documents", systemImage: "clock.arrow.circlepath")
                         } description: {
-                            Text("No documents from this agent.")
+                            Text(
+                                workspace.outsideFilter
+                                    ? "No documents changed outside Silkweb." : "No documents from this agent.")
                         } actions: {
                             ColumnEmptyActions(actions: [
-                                .init(title: "Show All Agents") { workspace.agentFilter = nil }
+                                .init(title: "Show All Agents") {
+                                    workspace.agentFilter = nil
+                                    workspace.outsideFilter = false
+                                }
                             ])
                         }
                     }
@@ -135,12 +142,24 @@ struct DocumentRow: View {
     /// #137: in Agent Activity scope only, the latest agent write to this Document; the row shows its date and
     /// agent, and “Updated” when it was an update (#204).
     var agentEntry: AgentActivityEntry? = nil
+    /// #230: in Agent Activity scope only, a change made outside Silkweb; the row shows the file's date and
+    /// “Added outside Silkweb” or “Changed outside Silkweb” instead of an agent. Text only.
+    var outsideChange: OutsideChange? = nil
     @Environment(\.locale) private var locale
     @State private var summary: DocumentSummary?
     private var title: String { URL(fileURLWithPath: document.name).deletingPathExtension().lastPathComponent }
-    private var sortsByCreated: Bool { agentEntry == nil && workspace.listPreference.key == .created }
+    private var sortsByCreated: Bool {
+        agentEntry == nil && outsideChange == nil && workspace.listPreference.key == .created
+    }
     private var date: Date? {
-        agentEntry.map { $0.date ?? document.created } ?? (sortsByCreated ? document.created : document.modified)
+        if outsideChange != nil { return document.modified }
+        return agentEntry.map { $0.date ?? document.created } ?? (sortsByCreated ? document.created : document.modified)
+    }
+    /// The agent part of the secondary line: the outside status, else the receipt's agent (and “Updated”).
+    private var agentParts: [String] {
+        if let outsideChange { return [outsideChange.label] }
+        guard let agentEntry else { return [] }
+        return [agentEntry.agent] + (agentEntry.isUpdate ? ["Updated"] : [])
     }
     private var dateText: String? {
         date.map {
@@ -161,17 +180,15 @@ struct DocumentRow: View {
             }
             HStack(spacing: 0) {
                 if let dateText { Text(dateText).fixedSize().layoutPriority(1) }
-                // The date, agent and “Updated” never truncate; the location gives way first.
-                if let agent = agentEntry?.agent {
-                    if dateText != nil { Text(" · ").foregroundStyle(.tertiary).fixedSize().layoutPriority(1) }
-                    Text(agent).fixedSize().layoutPriority(1)
-                    if agentEntry?.isUpdate == true {
+                // The date, agent, “Updated” and outside status never truncate; the location gives way first.
+                ForEach(Array(agentParts.enumerated()), id: \.offset) { index, part in
+                    if dateText != nil || index > 0 {
                         Text(" · ").foregroundStyle(.tertiary).fixedSize().layoutPriority(1)
-                        Text("Updated").fixedSize().layoutPriority(1)
                     }
+                    Text(part).fixedSize().layoutPriority(1)
                 }
                 if let location {
-                    if dateText != nil || agentEntry != nil {
+                    if dateText != nil || !agentParts.isEmpty {
                         Text(" · ").foregroundStyle(.tertiary).fixedSize().layoutPriority(1)
                     }
                     Text(location).truncationMode(.head)
@@ -195,6 +212,12 @@ struct DocumentRow: View {
         .accessibilityElement(children: workspace.rename?.path == document.relativePath ? .contain : .ignore)
         .accessibilityLabel(title)
         .accessibilityValue(accessibilityValue)
+        .accessibilityActions {
+            if outsideChange != nil {
+                Button("Keep") { Task { await workspace.keepOutsideChanges([document.relativePath]) } }
+                Button("Move to Trash") { workspace.trashOutsideChanges([document.relativePath]) }
+            }
+        }
         .task(id: DocumentSummaryIdentity(path: document.relativePath, modified: document.modified)) {
             summary = nil
             summary = await DocumentSummary.load(document: document, root: root)
@@ -215,7 +238,9 @@ struct DocumentRow: View {
             let sentence = summary.excerpt.prefix { !".!?。".contains($0) }
             value += (value.isEmpty ? "" : ". ") + sentence
         }
-        if let entry = agentEntry {
+        if let outsideChange {
+            value += (value.isEmpty ? "" : ", ") + outsideChange.accessibilityDescription
+        } else if let entry = agentEntry {
             value += (value.isEmpty ? "" : ", ") + (entry.isUpdate ? "updated by " : "agent-created by ") + entry.agent
         }
         return value

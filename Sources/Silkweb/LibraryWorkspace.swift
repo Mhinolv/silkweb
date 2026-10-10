@@ -31,6 +31,7 @@ final class LibraryWorkspace {
         preview = PreviewCoordinator(defaults: defaults)
         search.knowledge = knowledge
         search.window = { [weak self] in self?.libraryWindow }
+        emptyEditor.didSave = { [weak self] url, digest in self?.noteSilkwebSave(url, digest: digest) }
     }
     var tagCounts: [UUID: Int] = [:]
     var tags: [LibraryTag] = []
@@ -94,8 +95,43 @@ final class LibraryWorkspace {
     /// The Agent Activity sidebar row is selected. Never saved; it implies no folder and no tag scope.
     var agentScope = false { didSet { documentCache = nil } }
     /// The All Agents ▾ choice, kept for this window session only.
-    var agentFilter: String? { didSet { documentCache = nil } }
+    var agentFilter: String? {
+        didSet {
+            documentCache = nil
+            if agentFilter != nil { outsideFilter = false }
+        }
+    }
     @ObservationIgnored var agentReloadTask: Task<Void, Never>?
+    /// #230: All Agents ▾ ▸ Outside Silkweb. Exclusive with `agentFilter`.
+    var outsideFilter = false {
+        didSet {
+            documentCache = nil
+            if outsideFilter { agentFilter = nil }
+        }
+    }
+    /// #230: Documents changed outside Silkweb, in Library order. Assigned only when it changes.
+    var outsideChanges: [OutsideChange] = [] {
+        didSet {
+            guard outsideChanges != oldValue else { return }
+            outsideByPath = Dictionary(
+                outsideChanges.map { ($0.document.relativePath, $0) }, uniquingKeysWith: { first, _ in first })
+            // The last one was kept or trashed: the filter has nothing left to show, and its menu item is gone.
+            if outsideChanges.isEmpty && outsideFilter { outsideFilter = false }
+            updateAgentEntries(force: true)
+        }
+    }
+    @ObservationIgnored private(set) var outsideByPath: [String: OutsideChange] = [:]
+    /// The ledger of Documents Silkweb accounts for; `nil` while it can't be read (detection is off then).
+    @ObservationIgnored var outsideLedger: OutsideChangeLedger?
+    /// Silkweb saves to paths the index didn't know yet (a conflict copy, Save Again), by path.
+    @ObservationIgnored var pendingSilkwebSaves: [String: String] = [:]
+    /// Ledger entries not written yet (saves are debounced).
+    @ObservationIgnored var outsideUnsaved: [String: String] = [:]
+    @ObservationIgnored var outsideDetector = OutsideChangeDetector()
+    @ObservationIgnored var outsideTask: Task<Void, Never>?
+    @ObservationIgnored var outsideSaveTask: Task<Void, Never>?
+    /// Bumped by every snapshot or receipt change; a detection for an older one is dropped.
+    @ObservationIgnored var outsideGeneration = 0
     /// #203: this Library's access requests, waiting and decided, from Application Support. Assigned only on change.
     var accessRequests: [AgentAccessRequest] = [] {
         didSet { if agentScope && !hasAgentActivity { agentScope = false } }
@@ -114,12 +150,18 @@ final class LibraryWorkspace {
     /// Expiry is computed on read; snapshots pin the time.
     @ObservationIgnored var accessRequestClock: @MainActor () -> Date = { Date() }
 
-    private func updateAgentEntries() {
+    /// `force`: only the outside changes moved, so the receipts' entries are the same but the list isn't.
+    private func updateAgentEntries(force: Bool = false) {
         let entries = snapshot.map { agentActivity.entries(in: $0) } ?? []
-        guard entries != agentEntries else { return }
-        agentEntries = entries
-        agentEntriesByPath = Dictionary(
-            entries.map { ($0.document.relativePath, $0) }, uniquingKeysWith: { first, _ in first })
+        let changed = entries != agentEntries
+        if changed {
+            agentEntries = entries
+            agentEntriesByPath = Dictionary(
+                entries.map { ($0.document.relativePath, $0) }, uniquingKeysWith: { first, _ in first })
+        }
+        // A new snapshot or new receipts: look for outside changes again, off the main thread.
+        if !force { scheduleOutsideDetection() }
+        guard force || changed else { return }
         documentCache = nil
         // Receipts were removed: the hidden row can't stay the list's scope.
         if agentScope && !hasAgentActivity { agentScope = false }
@@ -239,7 +281,7 @@ final class LibraryWorkspace {
     var documents: [LibraryDocument] {
         guard let snapshot else { return [] }
         let preference = listPreference
-        let agents: String?? = agentScope ? .some(agentFilter) : nil
+        let agents: String?? = agentScope ? .some(outsideFilter ? "\u{0}outside" : agentFilter) : nil
         if let cached = documentCache, cached.folder == session.selectedFolder, cached.preference == preference,
             cached.tag == session.selectedTagID, cached.agents == agents
         {
@@ -249,7 +291,7 @@ final class LibraryWorkspace {
         // Agent Activity is newest receipt first whatever Sort By says, as search results are.
         let scoped =
             agentScope
-            ? agentEntries.filter { agentFilter == nil || $0.agent == agentFilter }.map(\.document)
+            ? agentActivityDocuments
             : snapshot.presentation.documents(in: selectedFolder, preference: preference)
         let documents = scoped.filter {
             TagEditor.matches(
@@ -400,6 +442,8 @@ final class LibraryWorkspace {
         mediaRetryTask?.cancel()
         saveTask?.cancel()
         agentReloadTask?.cancel()
+        await persistOutsideLedgerNow()
+        resetOutsideChanges()
         watcher?.stop()
         watcher = nil
         search.reset()
@@ -466,6 +510,8 @@ final class LibraryWorkspace {
             watcher?.stop()
             watcher = nil
             agentReloadTask?.cancel()
+            await persistOutsideLedgerNow()
+            resetOutsideChanges()
             agentScope = false
             agentFilter = nil
             agentActivity = AgentActivity()
@@ -504,6 +550,7 @@ final class LibraryWorkspace {
                 { /* A rebuildable navigation session can fall back to its defaults. */  }
                 guard !Task.isCancelled else { return }
                 agentActivity = await Self.loadAgentActivity(root: url)
+                outsideLedger = await Self.loadOutsideLedger(root: url)
                 install(scanned)
                 session = restored.pruningPreferences(
                     folderIDs: Set(scanned.folders.map(\.id)), tagIDs: Set(scanned.metadata.tags.map(\.id)))
@@ -728,12 +775,17 @@ final class LibraryWorkspace {
             // Finder batches are installed without row animations.
             var transaction = Transaction()
             transaction.disablesAnimations = true
+            let flagged = Set(outsideChanges.map(\.document.id))
             withTransaction(transaction) {
                 session = LibraryReconciler.session(session, from: old, to: scanned)
                 install(scanned)
                 rekeyTabs(in: scanned)
                 revision += 1
             }
+            await waitForOutsideDetection()
+            // A helper create publishes the Document before its receipt: reread the receipts before a new
+            // Document stays flagged.
+            if outsideChanges.contains(where: { !flagged.contains($0.document.id) }) { await reloadAgentActivity() }
         } catch {
             guard !Task.isCancelled, self.root == root, !loading else { return }
             if !FileManager.default.fileExists(atPath: root.path) {
@@ -857,7 +909,7 @@ final class LibraryWorkspace {
         // Revealing a Document Agent Activity doesn't list (a link, a search result) shows All Documents.
         if changesScope {
             agentScope = agents
-        } else if agentScope, !documents.allSatisfy({ agentEntriesByPath[$0] != nil }) {
+        } else if agentScope, !documents.allSatisfy({ agentEntriesByPath[$0] != nil || outsideByPath[$0] != nil }) {
             agentScope = false
         }
         session = next

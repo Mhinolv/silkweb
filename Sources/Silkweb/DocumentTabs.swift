@@ -61,6 +61,7 @@ extension LibraryWorkspace {
     private func openEditor(_ url: URL) async -> DocumentSession? {
         guard let snapshot else { return nil }
         let editor = DocumentSession()
+        editor.didSave = { [weak self] url, digest in self?.noteSilkwebSave(url, digest: digest) }
         await editor.configure(root: snapshot.rootURL, recoveryDirectory: recoveryDirectory)
         guard await editor.open(url, readOnly: snapshot.isReadOnly) else { return nil }
         reportUnreadableRecovery(editor.unreadableRecovery)

@@ -172,9 +172,12 @@ extension LibraryWorkspace {
         ])
     }
 
-    func refresh(_ changes: LibraryChangeSet) async throws {
+    /// `added`: other Library paths Silkweb itself just wrote (an import, a restore from the Trash), so they're
+    /// never shown as changed outside Silkweb (#230); the changes' new paths count too.
+    func refresh(_ changes: LibraryChangeSet, added: [String] = []) async throws {
         guard let root else { return }
         let scanned = try await LibraryScanner.scan(root: root)
+        await accountSilkwebChanges(changes.changes.map(\.newPath) + added, in: scanned)
         install(scanned)
         session = session.applying(changes)
         for editor in allEditors {
@@ -247,7 +250,7 @@ extension LibraryWorkspace {
                     let remaining = items.filter { !restored.contains($0.originalPath) }
                     libraryUndo.removeLast()
                     if !remaining.isEmpty { libraryUndo.append(.trash(remaining)) }
-                    try await refresh(LibraryChangeSet(changes: []))
+                    try await refresh(LibraryChangeSet(changes: []), added: Array(restored))
                     reportTrashFailures(result.failures, reveal: remaining.map(\.trashURL), restoring: true)
                     return
                 case .move(let plan):

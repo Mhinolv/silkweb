@@ -52,9 +52,15 @@ struct DocumentInfo: View {
                         if let date = document.modified {
                             Text("Modified").font(.headline); Text(date.formatted()).font(.caption)
                         }
-                        // #137: only Documents with a receipt or an envelope agent claim show anything here.
+                        // #230: a change made outside Silkweb leads the Agent block.
+                        let outside = workspace.outsideChange(for: document)
+                        if let outside {
+                            OutsideChangeSection(change: outside, workspace: workspace)
+                        }
+                        // #137: only Documents with a receipt or an envelope agent claim show anything here. A flagged
+                        // claim without a receipt is already described above.
                         if let provenance, provenance.path == document.relativePath,
-                            let value = provenance.provenance
+                            let value = provenance.provenance, outside == nil || value.hasReceipt
                         {
                             AgentProvenanceSection(
                                 provenance: value, modified: document.modified, root: workspace.snapshot?.rootURL)

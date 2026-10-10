@@ -66,6 +66,11 @@ Do **not** open or read the product owner's personal MWeb library/notes content 
 | Agent memory contract (grants, layout, guarantees) and the headless `silkweb` helper (`build/helper/silkweb`) | `docs/agent-memory.md`, `Sources/SilkwebHelper/` |
 | Agent memory skills and install docs for Claude Code, Codex, Gemini CLI. Edit only `shared/silkweb-memory.md`, then run `scripts/agent_packages.sh` | `agent-packages/` |
 
+**Agent memory writes go through the helper only.** Never write, edit, move or delete files in a Silkweb Library
+with your own file tools; use `silkweb memory …` or the MCP tools,
+and `grant_request` when they refuse. Client deny rules and what each client can't block: `docs/agent-memory.md` ›
+Enforcement (#230).
+
 Put anything testable in `SilkwebCore` and cover it with XCTest. The app target stays thin.
 
 ## Persistence Rules
