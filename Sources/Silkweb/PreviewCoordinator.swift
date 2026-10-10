@@ -317,6 +317,10 @@ final class PreviewCoordinator {
         error = nil
     }
 
+    /// #238: a new web view (the editor column rebuilt when its Library becomes current again) shows no page yet,
+    /// so its first load gets the spinner like any other instead of a silent blank pane.
+    func webViewReplaced() { finishedDocument = nil }
+
     func currentHeading(caret: Int) -> String? {
         if mode == .preview { return visibleHeading }
         return headings.last { $0.sourceRange.location != NSNotFound && $0.sourceRange.location <= caret }?.id

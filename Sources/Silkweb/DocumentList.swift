@@ -290,6 +290,12 @@ struct DocumentDetail: View {
                         session: workspace.editor, readOnlyLibrary: workspace.snapshot?.isReadOnly == true,
                         workspace: workspace)
                 }
+            } else if workspace.loading, workspace.pendingSelection?.ids.isEmpty == false {
+                // #238: an open queued while the Library loads (#209) completes on its own; say so.
+                DelayedLibraryProgress(count: workspace.loadingCount)
+            } else if workspace.openingDocument || workspace.pendingSelection?.ids.isEmpty == false {
+                // #238: the buffer is still loading; fast opens never show the spinner.
+                DelayedProgress(label: "Opening document…", delay: .milliseconds(150))
             } else if workspace.session.selectedDocuments.count > 1 {
                 ContentUnavailableView(
                     "\(workspace.session.selectedDocuments.count) Documents Selected", systemImage: "doc.on.doc"
