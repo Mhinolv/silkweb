@@ -89,7 +89,8 @@ final class ImportReview {
                 }
                 published = true
                 // Once published, finish the library refresh even if Stop arrived at the commit boundary.
-                try await Task { @MainActor in try await workspace.refresh(LibraryChangeSet(changes: [])) }.value
+                try await Task { @MainActor in try await workspace.refresh(LibraryChangeSet(changes: []), added: [path])
+                }.value
                 var ancestor = plan.destination
                 while !ancestor.isEmpty {
                     workspace.session.expandedFolders.insert(ancestor)

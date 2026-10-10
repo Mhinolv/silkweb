@@ -376,7 +376,10 @@ final class AgentQualificationWorkspaceTests: XCTestCase {
         let all = workspace.snapshot?.documents.map(\.relativePath) ?? []
         XCTAssertEqual(all.sorted(), [Self.draft, "Memory/Projects/Silkweb/Handoffs/Published.md"].sorted())
         XCTAssertFalse(workspace.snapshot?.folders.contains { $0.relativePath.contains(".silkweb") } ?? true)
-        XCTAssertFalse(workspace.hasAgentActivity, "no receipt yet, so no Agent Activity row")
+        XCTAssertEqual(workspace.agentEntries, [], "no receipt yet")
+        // #230: the helper's interrupted create isn't “outside Silkweb” (its intent is still staged); only the
+        // owner draft this fixture wrote straight to disk is, and that row arrives quietly.
+        XCTAssertEqual(workspace.outsideChanges.map(\.document.relativePath), [Self.draft])
         XCTAssertEqual(announcements, [])
     }
 }

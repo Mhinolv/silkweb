@@ -79,7 +79,8 @@ Or give every answer as an option, so it asks nothing:
   give itself access. Agents' skills tell them never to run it.
 
 When it's done, it prints the `claude mcp add`, `codex mcp add` and Gemini CLI commands from
-[Install](#install) with your helper path and project key filled in.
+[Install](#install) with your helper path and project key filled in, then the rules from
+[Keep agents on the helper](#keep-agents-on-the-helper) with your Library's path.
 
 #### Editing the file by hand
 
@@ -224,10 +225,47 @@ rm -r "$TMPDIR/silkweb-memory"
 3. Run `/extensions`. The list includes `silkweb-memory`. `/silkweb:recall` and `/silkweb:checkpoint`
    are available as commands.
 
+### Keep agents on the helper
+
+The skill tells agents never to write in the Library with their own file tools: every Library write goes
+through the `silkweb` server, which checks the grant and leaves a receipt. These client rules make that
+stick where the client can enforce it. They block **writes only**, so agents can still read and search the
+Library folder and your repository work keeps working. `grant init` prints them with your Library's path
+filled in; below, `/Users/me/Writing` stands for it.
+
+**Claude Code.** Add the three rules to `permissions.deny` in your user `~/.claude/settings.json`. If the
+file already has a `deny` list, add them to it and keep everything else. In Claude Code rules `//` starts
+an absolute path.
+
+```json
+{
+  "permissions": {
+    "deny": [
+      "Write(//Users/me/Writing/**)",
+      "Edit(//Users/me/Writing/**)",
+      "NotebookEdit(//Users/me/Writing/**)"
+    ]
+  }
+}
+```
+
+**Codex CLI.** In its `workspace-write` sandbox Codex writes only in the folder you start it in and in the
+folders listed as `sandbox_workspace_write.writable_roots` in `~/.codex/config.toml`. Keep the Library out
+of that list, and don't start `codex` in the Library or in a folder that holds it.
+
+**Gemini CLI.** Gemini CLI can't enforce it: it has no rule that keeps its file tools out of one folder.
+Rely on the skill.
+
+Shell commands aren't covered by these rules in any client. What each client can and can't block is in
+the [agent memory contract](../docs/agent-memory.md#enforcement-230). When an agent writes in the Library
+anyway, Silkweb lists the Document in Agent Activity as “Added outside Silkweb” or “Changed outside
+Silkweb”.
+
 ## Update
 
 Update after pulling a new version of this repository. Your other skills, servers and instruction-file
-text stay as they are.
+text stay as they are. If you haven't added the rules in [Keep agents on the helper](#keep-agents-on-the-helper)
+yet, add them now; when your Library moves, change their path to the new one.
 
 **Remove the old block first.** Each fragment sits between `<!-- silkweb-memory:begin v1 -->` and
 `<!-- silkweb-memory:end -->`. Check that both lines are there exactly once before you remove it:

@@ -8,6 +8,8 @@ final class DocumentSession {
     @ObservationIgnored var didEdit: (() -> Void)?
     /// Sees every banner announcement this session posts (tests count them, #139).
     @ObservationIgnored var didAnnounce: ((String) -> Void)?
+    /// #230: each write Silkweb makes for this buffer, with the `sha256:` digest it published.
+    @ObservationIgnored var didSave: ((URL, String) -> Void)?
     /// The banner and state last announced. Watcher ticks (an agent create, for one) re-publish an unchanged
     /// conflict or failure; it's announced once, until the document saves cleanly or another one opens (#139).
     @ObservationIgnored private var announced: (banner: String, state: DocumentSaveState)?
@@ -76,7 +78,11 @@ final class DocumentSession {
         assetProgress = nil
         diskText = nil
         conflictCopy = nil
-        coordinator = SaveCoordinator(store: DocumentStore(root: root), recoveryDirectory: recoveryDirectory)
+        coordinator = SaveCoordinator(
+            store: DocumentStore(root: root), recoveryDirectory: recoveryDirectory,
+            didSave: { [weak self] url, revision in
+                Task { @MainActor in self?.didSave?(url, "sha256:" + revision.digest) }
+            })
         positions = [:]
         url = nil
         text = ""

@@ -21,6 +21,7 @@ extension LibraryWorkspace {
         }
         agentReloadTask = task
         await task.value
+        await waitForOutsideDetection()
     }
 
     func selectAgentActivity() {
@@ -52,22 +53,69 @@ struct AgentActivityStrip: View {
             .buttonStyle(.borderless).fixedSize()
             .accessibilityValue(workspace.accessRequestsWaitingLabel ?? "")
             Menu {
-                Button("All Agents") { workspace.agentFilter = nil }
+                Button("All Agents") {
+                    workspace.agentFilter = nil
+                    workspace.outsideFilter = false
+                }
                 Divider()
                 ForEach(agents, id: \.name) { agent in
                     Button("\(agent.name) (\(agent.count))") { workspace.agentFilter = agent.name }
                 }
+                // #230: changes no receipt accounts for, after the claimed agents.
+                if !workspace.outsideChanges.isEmpty {
+                    Divider()
+                    Button("Outside Silkweb (\(workspace.outsideChanges.count))") { workspace.outsideFilter = true }
+                }
             } label: {
-                Text(workspace.agentFilter ?? "All Agents")
+                Text(filterTitle)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
             .accessibilityLabel("Filter by agent")
-            .accessibilityValue(workspace.agentFilter ?? "All Agents")
+            .accessibilityValue(filterTitle)
         }
         .font(.caption).monospacedDigit().padding(.horizontal, Spacing.small).frame(height: 28)
         .paneStrip(hairline: .bottom)
         .accessibilityElement(children: .contain).accessibilityLabel("Agent activity")
+    }
+
+    private var filterTitle: String {
+        workspace.outsideFilter ? "Outside Silkweb" : workspace.agentFilter ?? "All Agents"
+    }
+}
+
+/// #230: Document Info's text-only block for a change made outside Silkweb, in the Agent block's label/value pairs.
+/// Keep clears the flag; Move to Trash… is the existing Trash command. Nothing happens on its own.
+struct OutsideChangeSection: View {
+    let change: OutsideChange
+    let workspace: LibraryWorkspace
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // With a receipt the Agent block below names the agent; this one only says what changed.
+            pair(change.hasReceipt ? "Status" : "Agent", change.label)
+            if !change.hasReceipt { pair("Operation", "No Silkweb receipt") }
+            HStack(spacing: 8) {
+                Button("Keep") { Task { await workspace.keepOutsideChanges([change.document.relativePath]) } }
+                    .disabled(!workspace.canKeepOutsideChanges)
+                    .accessibilityHint("Stops listing this document as changed outside Silkweb")
+                Button("Move to Trash…") { workspace.trashOutsideChanges([change.document.relativePath]) }
+                    .disabled(!workspace.canMutate)
+            }
+            .controlSize(.small)
+            Text("Silkweb can’t tell which app made this change.")
+                .font(.caption).foregroundStyle(.tertiary)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(change.label)
+    }
+
+    private func pair(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.headline)
+            Text(value).font(.caption).textSelection(.enabled)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

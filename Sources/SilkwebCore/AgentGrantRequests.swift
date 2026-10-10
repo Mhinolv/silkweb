@@ -149,7 +149,7 @@ enum AgentGrantRequests {
             AgentGrantInit.summary(
                 grant, outcome: outcome, filesystem: decision.filesystem ?? .unqualified,
                 fileName: AgentGrantInit.displayPath(grantsURL, home: home)) + "\n"
-            + AgentGrantInit.installBlock(helper: helper, project: grant.project)
+            + AgentGrantInit.installBlock(helper: helper, project: grant.project, library: grant.library.path)
         return AgentHelper.Output(status: 0, stdout: stdout, stderr: "")
     }
 
