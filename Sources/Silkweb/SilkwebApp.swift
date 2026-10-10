@@ -128,6 +128,13 @@ struct WorkspaceCommands: Commands {
             Button(state.sidebarsTitle) { workspace.toggleSidebars() }
                 .keyboardShortcut("s", modifiers: [.control, .command])
                 .disabled(!state.canToggleSidebars)
+            if let registry {
+                // #225: every Library section's header at once; no shortcut.
+                Button("Collapse All Libraries") { registry.setAllSectionsCollapsed(true) }
+                    .disabled(!registry.canCollapseAllSections)
+                Button("Expand All Libraries") { registry.setAllSectionsCollapsed(false) }
+                    .disabled(!registry.canExpandAllSections)
+            }
         }
         CommandGroup(after: .sidebar) {
             Button(state.previewMode == .preview ? "Show Editor" : "Show Preview") { workspace.preview.togglePreview() }

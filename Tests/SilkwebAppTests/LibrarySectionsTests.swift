@@ -572,10 +572,14 @@ final class LibrarySectionsTests: XCTestCase {
         try await settle(window)
 
         // The Show/Hide chevron: Alpha's rows go, its scope stays.
+        let expandedFolders = alpha.session.expandedFolders
+        XCTAssertTrue(expandedFolders.contains(""))
         outline.collapseItem(outline.item(atRow: 0))
         XCTAssertTrue(alpha.sectionCollapsed)
         XCTAssertEqual(rows(outline), ["# Alpha", "# Beta", "All Documents", "Beta", "Notes", "Tags"])
         XCTAssertEqual(alpha.session.selectedFolder, "Notes")
+        XCTAssertEqual(alpha.session.expandedFolders, expandedFolders, "#225: hidden folders keep their expansion")
+        XCTAssertTrue(alpha.tagsExpanded)
         XCTAssertTrue(registry.current === alpha)
 
         // Expanding brings the rows back with the scope selected.
@@ -596,6 +600,87 @@ final class LibrarySectionsTests: XCTestCase {
         XCTAssertNotNil(beta.snapshot)
     }
 
+    /// #225: Collapse / Expand All Libraries (View ▸ and the header menu) act on every section, the current one
+    /// included; selection, scope and tabs stay, and a section never expanded before builds its tree (#197).
+    func testCollapseAndExpandAllLibraries() async throws {
+        let registry = makeRegistry()
+        let alpha = try await added(registry, try library("Alpha", document: "Alpha"))
+        XCTAssertFalse(registry.canCollapseAllSections, "one section: nothing to do")
+        XCTAssertFalse(registry.canExpandAllSections)
+        registry.setAllSectionsCollapsed(true)
+        XCTAssertFalse(alpha.sectionCollapsed, "a lone section is left as it is")
+        let beta = try await added(registry, try library("Beta", document: "Beta"))
+        let gamma = try await added(registry, try library("Gamma", document: "Gamma"))
+        await openDocument(alpha, "Notes/Alpha.md")
+        gamma.sectionCollapsed = true // Never expanded: its folder tree isn't built yet.
+        let (window, sidebar) = try hostWindow(registry)
+        try await settle(window)
+        let sections = try XCTUnwrap(sidebar())
+        let outline = try XCTUnwrap(sections.outline)
+        XCTAssertNil(sections.headers[2].coordinator)
+        outline.selectRowIndexes(IndexSet(integer: 3), byExtendingSelection: false)
+        XCTAssertTrue(registry.current === alpha)
+        try await settle(window)
+        XCTAssertTrue(registry.canCollapseAllSections)
+        XCTAssertTrue(registry.canExpandAllSections, "Gamma is collapsed")
+
+        func headerMenu() throws -> NSMenu {
+            let point = outline.convert(NSPoint(x: 40, y: outline.rect(ofRow: 0).midY), to: nil)
+            let event = try XCTUnwrap(
+                NSEvent.mouseEvent(
+                    with: .rightMouseDown, location: point, modifierFlags: [], timestamp: 0,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            return try XCTUnwrap(outline.menu(for: event))
+        }
+
+        // Collapse All: only the headers; Alpha stays current with its scope and tab.
+        let expandedFolders = [alpha, beta].map(\.session.expandedFolders)
+        registry.setAllSectionsCollapsed(true)
+        try await settle(window)
+        XCTAssertEqual(rows(outline), ["# Alpha", "# Beta", "# Gamma"])
+        XCTAssertEqual([alpha, beta, gamma].map(\.sectionCollapsed), [true, true, true])
+        XCTAssertTrue(registry.current === alpha)
+        XCTAssertEqual(alpha.session.selectedFolder, "Notes")
+        XCTAssertEqual(alpha.editor.url?.lastPathComponent, "Alpha.md")
+        XCTAssertEqual(
+            [alpha, beta].map(\.session.expandedFolders), expandedFolders, "hidden folders keep their expansion")
+        XCTAssertTrue(alpha.tagsExpanded)
+        XCTAssertFalse(registry.canCollapseAllSections)
+        XCTAssertTrue(registry.canExpandAllSections)
+        let header = try XCTUnwrap(outline.view(atColumn: 0, row: 0, makeIfNecessary: true) as? SectionHeaderCell)
+        XCTAssertEqual(header.textField?.textColor, .labelColor, "the current Library's header is the cue")
+        var menu = try headerMenu()
+        XCTAssertEqual(menu.items.map(\.title)[2...3], ["Collapse All Libraries", "Expand All Libraries"])
+        XCTAssertEqual(menu.items.map(\.isEnabled)[2...3], [false, true], "only the item that changes something")
+
+        // Expand All from the header menu: every section's rows, Gamma's built now; Alpha's scope is selected.
+        menu.performActionForItem(at: 3)
+        try await settle(window)
+        XCTAssertEqual(
+            rows(outline),
+            [
+                "# Alpha", "All Documents", "Alpha", "Notes", "Tags", "# Beta", "All Documents", "Beta", "Notes",
+                "Tags", "# Gamma", "All Documents", "Gamma", "Notes", "Tags",
+            ])
+        XCTAssertNotNil(sections.headers[2].coordinator)
+        XCTAssertEqual(outline.selectedRow, 3)
+        XCTAssertTrue(registry.current === alpha)
+        XCTAssertFalse(registry.canExpandAllSections)
+        menu = try headerMenu()
+        XCTAssertEqual(menu.items.map(\.isEnabled)[2...3], [true, false])
+
+        // Collapse All from the header menu; one chevron still expands just its section afterwards.
+        menu.performActionForItem(at: 2)
+        try await settle(window)
+        XCTAssertEqual(rows(outline).count, 3)
+        outline.expandItem(outline.item(atRow: 1))
+        XCTAssertFalse(beta.sectionCollapsed)
+        try await settle(window, 1)
+        XCTAssertEqual(rows(outline), ["# Alpha", "# Beta", "All Documents", "Beta", "Notes", "Tags", "# Gamma"])
+        XCTAssertTrue(registry.canCollapseAllSections)
+        XCTAssertTrue(registry.canExpandAllSections)
+    }
+
     func testHeaderMenuAndFileMenuCloseLibrary() async throws {
         let registry = makeRegistry()
         let (window, sidebar) = try hostWindow(registry)
@@ -609,15 +694,25 @@ final class LibrarySectionsTests: XCTestCase {
                 with: .rightMouseDown, location: point, modifierFlags: [], timestamp: 0,
                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         let menu = try XCTUnwrap(outline.menu(for: event))
-        XCTAssertEqual(menu.items.map(\.title), ["Reveal in Finder", "", "Close Library"])
+        XCTAssertEqual(
+            menu.items.map(\.title),
+            ["Reveal in Finder", "", "Collapse All Libraries", "Expand All Libraries", "", "Close Library"])
         XCTAssertTrue(menu.items[1].isSeparatorItem)
+        XCTAssertTrue(menu.items[4].isSeparatorItem)
         XCTAssertTrue(menu.items.allSatisfy { $0.image == nil && $0.keyEquivalent.isEmpty }, "text only")
-        menu.performActionForItem(at: 2)
+        menu.performActionForItem(at: 5)
         _ = try await waitUntil("Alpha's section closes") { registry.sections.count == 1 }
         XCTAssertEqual(roots(registry), ["Beta"])
         XCTAssertNil(alpha.root.flatMap { registry.workspace(for: $0) })
         try await settle(window)
         XCTAssertEqual(rows(outline), ["# Beta", "All Documents", "Beta", "Notes", "Tags"])
+        // #225: one section left: no bulk items in its header menu.
+        let lonePoint = outline.convert(NSPoint(x: 40, y: outline.rect(ofRow: 0).midY), to: nil)
+        let loneEvent = try XCTUnwrap(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: lonePoint, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        XCTAssertEqual(outline.menu(for: loneEvent)?.items.map(\.title), ["Reveal in Finder", "", "Close Library"])
         // A folder row's menu is still the folder menu.
         let folderPoint = outline.convert(NSPoint(x: 40, y: outline.rect(ofRow: 3).midY), to: nil)
         let folderEvent = try XCTUnwrap(

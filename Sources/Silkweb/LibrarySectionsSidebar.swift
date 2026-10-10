@@ -431,6 +431,9 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
             return
         }
         guard let owner = (item as? FolderSidebar.Item)?.owner else { return }
+        // A collapsing header also collapses its open folders and Tags: they hide with the section, so their saved
+        // expansion stays for when it shows again (#225).
+        if let header = owner.header, outline?.isItemExpanded(header) == false { return }
         if expanded {
             owner.outlineViewItemDidExpand(notification)
         } else {
@@ -461,6 +464,18 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
             reveal.representedObject = header.workspace
         }
         menu.addItem(.separator())
+        if registry.sections.count > 1 {
+            // #225: between Reveal in Finder and Close Library; each is disabled when it would change nothing.
+            let collapse = menu.addItem(
+                withTitle: "Collapse All Libraries", action: #selector(collapseAll(_:)), keyEquivalent: "")
+            collapse.target = self
+            collapse.isEnabled = registry.canCollapseAllSections
+            let expand = menu.addItem(
+                withTitle: "Expand All Libraries", action: #selector(expandAll(_:)), keyEquivalent: "")
+            expand.target = self
+            expand.isEnabled = registry.canExpandAllSections
+            menu.addItem(.separator())
+        }
         let close = menu.addItem(withTitle: "Close Library", action: #selector(closeLibrary(_:)), keyEquivalent: "")
         close.target = self
         close.representedObject = header.workspace
@@ -476,6 +491,10 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
     @objc private func locateLibrary(_ sender: NSMenuItem) {
         (sender.representedObject as? LibraryWorkspace)?.chooseFolder(replacing: true)
     }
+
+    @objc private func collapseAll(_ sender: NSMenuItem) { registry.setAllSectionsCollapsed(true) }
+
+    @objc private func expandAll(_ sender: NSMenuItem) { registry.setAllSectionsCollapsed(false) }
 
     @objc private func closeLibrary(_ sender: NSMenuItem) {
         guard let workspace = sender.representedObject as? LibraryWorkspace else { return }

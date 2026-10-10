@@ -93,6 +93,8 @@ struct SnapshotScenario {
     var secondLibrary = false
     /// #195: the second section collapsed with its header's Show/Hide chevron.
     var sectionCollapsed = false
+    /// #225: View ▸ Collapse All Libraries once the window is up, the current section included.
+    var allSectionsCollapsed = false
     /// #197: opens this document in the second Library's tab, so the one strip spans both Libraries.
     var secondLibraryTab: String? = nil
     /// #197: Search Library's All Libraries segment, or Quick Open's All Libraries toggle, is on.
@@ -374,6 +376,10 @@ struct SnapshotScenario {
         .init(
             name: "sidebar-section-collapsed", folder: "Coffee/Brewing Guides", document: pourOver,
             secondLibrary: true, sectionCollapsed: true),
+        // #225: Collapse All Libraries: only the two headers, the current one still in labelColor; list and editor stay.
+        .init(
+            name: "sidebar-all-collapsed", folder: "Coffee/Brewing Guides", document: pourOver,
+            secondLibrary: true, allSectionsCollapsed: true),
         // #197: tabs from two Libraries in one strip, each with its “ · <Library>” suffix; the active one is edited.
         .init(
             name: "tabs-two-libraries", folder: "Coffee/Brewing Guides", document: pourOver,
@@ -1424,6 +1430,13 @@ final class SnapshotHarness {
                 else { throw SnapshotFailure.error("The sidebar does not show two Library sections") }
                 if scenario.sectionCollapsed, outline.isItemExpanded(sections.headers[1]) {
                     throw SnapshotFailure.error("The second section is not collapsed")
+                }
+                if scenario.allSectionsCollapsed {
+                    registry?.setAllSectionsCollapsed(true)
+                    try await wait("every section collapses") {
+                        controller.view.layoutSubtreeIfNeeded()
+                        return sections.headers.allSatisfy { !outline.isItemExpanded($0) } && outline.numberOfRows == 2
+                    }
                 }
             }
             if let restore = scenario.restore {

@@ -138,6 +138,22 @@ import SilkwebCore
         setCurrent(workspace)
     }
 
+    /// View ▸ and the section header menu (#225): only with two or more sections, and only when some header would
+    /// change.
+    var canCollapseAllSections: Bool { sections.count > 1 && sections.contains { !$0.sectionCollapsed } }
+    var canExpandAllSections: Bool { sections.count > 1 && sections.contains { $0.sectionCollapsed } }
+
+    /// Collapse / Expand All Libraries (#225): every section's header, the current one included. The selection,
+    /// scope, tabs and list stay; a section first expanded here builds its tree then (#197). One session save.
+    func setAllSectionsCollapsed(_ collapsed: Bool) {
+        guard collapsed ? canCollapseAllSections : canExpandAllSections else { return }
+        let suspended = sessionSuspended
+        sessionSuspended = true
+        for workspace in sections { workspace.sectionCollapsed = collapsed }
+        sessionSuspended = suspended
+        saveSession()
+    }
+
     private func setCurrent(_ workspace: LibraryWorkspace) {
         guard workspace !== current else { return }
         current = workspace
