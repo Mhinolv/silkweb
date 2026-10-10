@@ -260,6 +260,8 @@ Grants live **outside the Library**, so a document inside it can’t widen its o
 
 ### Setting up a grant (#186)
 
+With several Libraries open, each needs its own grant: see [Personal Library › Agent memory](personal-library.md#agent-memory).
+
 The owner adds a grant with `silkweb grant init`, run in Terminal, instead of editing JSON:
 
 ```text
