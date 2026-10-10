@@ -46,7 +46,9 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
         var title: String { header.workspace.errorTitle == "Library Not Found" ? "Not Found" : "Can’t Open" }
     }
 
-    static let headerSpacing: CGFloat = 12
+    /// A source list already leaves 13 pt above every group row but the first, so a later header row is shorter
+    /// than a lone row: its label sits at the row's top, its midline 20 pt under the previous section (#224).
+    static let laterHeaderHeight: CGFloat = 21
 
     let registry: LibraryWindowRegistry
     private(set) var headers: [Header] = []
@@ -314,7 +316,7 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
 
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
         guard let header = item as? Header, header !== headers.first else { return Spacing.sidebarRowHeight }
-        return Spacing.sidebarRowHeight + Self.headerSpacing
+        return Self.laterHeaderHeight
     }
 
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
@@ -481,7 +483,8 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
     }
 }
 
-/// A Library section's header: the folder name, 11 pt semibold, under 12 pt of space (none above the first).
+/// A Library section's header: the folder name, 11 pt semibold, centred where a lone row's title is, measured up
+/// from the row's bottom; a later header's shorter row puts it at the top (#224).
 final class SectionHeaderCell: NSTableCellView {
     /// #196: an 11 pt orange warning after the name while the Library can't open.
     let warning = NSImageView()
