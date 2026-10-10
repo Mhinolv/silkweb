@@ -540,6 +540,27 @@ The Settings ▸ Library ▸ Agent Access section comes later and only edits thi
 owner writes it by hand (see [Spike](#spike-app-closed-access-in-terminal-macos-15) step 3); the CLI
 (#135) never writes it.
 
+### Enforcement (#230)
+
+Grants are checked only by the helper. The Library is an ordinary folder, so an agent whose client lets
+its own file tools write there can still change it without a grant, a receipt or an Agent Activity row.
+The skill forbids that (“Never write, edit, move or delete files in the Library with your own file
+tools.”), and the client rules below make it stick where the client can enforce it. `grant init` and
+`grant approve` print them after the MCP lines, under **Keep agents on the helper (write-protect the
+Library):**, with the grant's Library path filled in (`agent-packages/README.md` › Keep agents on the
+helper has the same text). They block **writes only**: reads stay allowed, so repository work and
+searching the folder keep working.
+
+| Client | Blocks writes | Blocks reads | Gap |
+|---|---|---|---|
+| Claude Code | Yes: `permissions.deny` with `Write(//<Library>/**)`, `Edit(//<Library>/**)` and `NotebookEdit(//<Library>/**)` in `~/.claude/settings.json` (`//` starts an absolute path) | No (writes only by design) | Shell commands (`Bash`) aren't path rules, so a redirection or `mv` can still write. |
+| Codex CLI | Yes, in its `workspace-write` sandbox, when the Library isn't the folder Codex starts in, isn't inside it, and isn't in `sandbox_workspace_write.writable_roots` (`~/.codex/config.toml`) | No | Started in the Library (or a folder holding it), or with a sandbox mode that allows every write, Codex can write there, shell included. Codex has no per-folder deny list. |
+| Gemini CLI | No: “Not enforceable; rely on the skill.” | No | No setting keeps its file tools out of one folder. Only the skill and the app's [Outside Silkweb](#outside-silkweb-230) rows apply. |
+
+Whatever gets through shows in the app as “Added outside Silkweb” or “Changed outside Silkweb”
+(see [Outside Silkweb](#outside-silkweb-230)). Proving which process wrote a file is out of scope: macOS
+doesn't attribute writes to a client.
+
 ## Filesystems
 
 **Owner decision (2026-10-07): the MVP supports local-disk Libraries only.** iCloud Drive, Dropbox and
@@ -565,7 +586,9 @@ clients that mirror an ordinary local folder without File Provider, so don’t g
 `silkweb` helper, contract version 1 or later) and the Library is on a **qualified local
 filesystem**. It doesn’t cover:
 
-- other programs running as the same user that edit the files directly,
+- other programs running as the same user that edit the files directly (an agent's own file tools
+  included: see [Enforcement](#enforcement-230) for what the clients can block, and
+  [Outside Silkweb](#outside-silkweb-230) for how the app shows such changes),
 - storage or hardware failure,
 - keystrokes typed just before a machine crash that hadn’t been autosaved yet,
 - unqualified filesystems.
@@ -1287,6 +1310,49 @@ or tabs. It never opens anything, and it never posts an announcement, sound, bad
   `.silkweb/agent-history/` reload the receipts on their own debounce. That reload never rescans the Library and never writes anything,
   so it can't feed back into the index, search or autosave. The new Document itself arrives through the
   normal external-change refresh. The two can land in either order.
+
+### Outside Silkweb (#230)
+
+Silkweb says only what it can prove: a change came neither through Silkweb nor through the helper, and
+there's no Silkweb receipt for it. It never says which app made it, and never “unauthorized”.
+
+- **Added outside Silkweb:** a Document under `Memory/` (compared ignoring case) that no published
+  receipt matches and that the ledger below doesn't hold.
+- **Changed outside Silkweb:** a Document with a `silkweb-memory` envelope (well-formed, malformed or
+  newer) whose current bytes match neither its latest receipt's `contentDigest` nor its ledger digest. A
+  Document under `Memory/` without a receipt is checked the same way once the ledger holds it. Receipts
+  without a `contentDigest` (older helpers) are never compared.
+- **Never flagged:** Documents outside `Memory/` without a receipt (an envelope there keeps the #137
+  “(claimed)” Info block), Documents without an envelope once the ledger holds them (so the owner's edits
+  in VS Code, iA Writer or Finder to a known Document never flag it), anything Silkweb itself saved, and
+  unsaved editor text (nothing changed on disk).
+- **The ledger** is `.silkweb/outside-changes.json`, `{"version": 1, "documents": {"<index UUID>":
+  "sha256:…"}}`. Missing keys decode to defaults; a newer `version` turns detection off instead of
+  dropping entries. Silkweb adds a Document when it creates, imports, moves or restores it into `Memory/`
+  (New Document, Import Folder Copy…, Move To…, drag, rename, Undo Move to Trash), on every save Silkweb
+  makes to a Document under `Memory/` or one with a receipt (autosave, conflict copies, Save Again), and on
+  **Keep**. Saves are written after a 500 ms debounce, merged with the file, and entries for Documents
+  that no longer exist are dropped. Only the app writes it; a read-only Library keeps it in memory. A
+  Library opened by a build without the ledger has none yet, so its existing Documents under `Memory/`
+  without a receipt show as added once; Keep clears them.
+- **When:** after every snapshot or receipt change, on the debounced watcher refresh and receipt
+  reload, off the main thread. A Document is reread only when its modification date changes. It never
+  runs on keystrokes, never writes to a Document, and never moves focus, selection or scroll. A new
+  Document that a helper create published before its receipt is checked again after the receipts reload,
+  so it doesn't stay flagged.
+- **Agent Activity** shows when only these exist, and its `(n)` counts them (each Document once). In that
+  scope the row's second line reads `Oct 10 · Added outside Silkweb · Memory › Projects › Silkweb` (the
+  file's modification date; the status never truncates) and its accessibility value ends “added outside
+  Silkweb, no Silkweb receipt”, with **Keep** and **Move to Trash** as accessibility actions. Rows sort
+  with the receipts, newest first. **All Agents ▾** ends with a divider and **Outside Silkweb (2)**.
+- **Document Info** leads the Agent block with “Agent · Added outside Silkweb” (or “Changed outside
+  Silkweb”), “Operation · No Silkweb receipt”, **Keep** and **Move to Trash…**, and “Silkweb can’t tell
+  which app made this change.” For a Document with a receipt the first pair is “Status · Changed outside
+  Silkweb” and the #137 Agent block follows. The row's context menu adds **Keep** after **Reveal in
+  Finder**; **Move to Trash** is the existing item.
+- **Keep** stores the current digest in the ledger. The Document comes back only if it changes again and
+  has an envelope. **Move to Trash…** is the existing Trash command with its confirmation rules and Undo.
+  Nothing is deleted automatically.
 
 ## Safety exclusions
 

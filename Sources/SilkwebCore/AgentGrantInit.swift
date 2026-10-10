@@ -90,6 +90,7 @@ public enum AgentGrantInit {
         """
 
     static let placeholderHelper = "<SILKWEB_HELPER>"
+    static let placeholderLibrary = "<LIBRARY>"
     static let notLocalWarning =
         "Agents can read; creating stays off until the Library is on a local APFS or HFS+ disk."
 
@@ -319,7 +320,7 @@ public enum AgentGrantInit {
             file, project: project, library: library.url, access: access, agentFolder: agentFolder,
             createFolders: createFolders, now: now)
         let helper = helperPath(executable, environment: environment, currentDirectory: currentDirectory)
-        let install = installBlock(helper: helper, project: project)
+        let install = installBlock(helper: helper, project: project, library: library.url.path)
         if dryRun {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -603,8 +604,8 @@ public enum AgentGrantInit {
     }
 
     /// The `agent-packages/README.md` › Install commands, byte for byte, with the helper path and
-    /// project key filled in.
-    static func installBlock(helper: String?, project: String) -> String {
+    /// project key filled in, then the client rules that keep agents' own file tools out of `library` (#230).
+    static func installBlock(helper: String?, project: String, library: String?) -> String {
         let shownHelper = helper ?? placeholderHelper
         let helperWord = helper.map(shellQuoted) ?? placeholderHelper
         let grant = shellQuoted(project)
@@ -621,11 +622,44 @@ public enum AgentGrantInit {
             "    sed -i '' \(substitutions) \"$TMPDIR/silkweb-memory/gemini-extension.json\" \"$TMPDIR/silkweb-memory/GEMINI.md\"",
             "    gemini extensions install \"$TMPDIR/silkweb-memory\"",
             "",
+        ]
+        lines += writeProtection(library: library)
+        lines += [
+            "",
             "Then install the skills: agent-packages/README.md › Install.",
             "Check: \(helperWord) memory capabilities --grant \(grant) --pretty",
         ]
         if helper == nil { lines.append("Replace \(placeholderHelper) with the helper’s absolute path.") }
+        if library == nil { lines.append("Replace \(placeholderLibrary) with the Library’s absolute path.") }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// #230: one snippet per client that blocks its own file tools from writing in the Library, so Library writes go
+    /// through the helper. Reads stay allowed. `docs/agent-memory.md` › Enforcement lists what each one can't block.
+    static func writeProtection(library: String?) -> [String] {
+        [
+            "Keep agents on the helper (write-protect the Library):",
+            "  Claude Code: add to \"permissions\" › \"deny\" in ~/.claude/settings.json",
+        ]
+            + claudeDenyRules(library: library).enumerated().map { index, rule in
+                "    " + rule + (index < 2 ? "," : "")
+            }
+            + [
+                "  Codex CLI: keep the Library out of sandbox_workspace_write.writable_roots in ~/.codex/config.toml,",
+                "    and don't start codex in \(library.map(shellQuoted) ?? placeholderLibrary) or a folder that holds it.",
+                "  Gemini CLI: Not enforceable; rely on the skill.",
+                "  Reads stay allowed. Shell commands aren't covered: docs/agent-memory.md › Enforcement.",
+            ]
+    }
+
+    /// Claude Code `permissions.deny` entries as JSON strings. `//` starts an absolute path in Claude Code rules.
+    static func claudeDenyRules(library: String?) -> [String] {
+        let path = library.map { "/" + $0 } ?? placeholderLibrary
+        return ["Write", "Edit", "NotebookEdit"].map { tool in
+            let rule = "\(tool)(\(path)/**)"
+            return "\"" + rule.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                + "\""
+        }
     }
 
     /// One shell word: as is when it's plain, otherwise in single quotes.

@@ -24,14 +24,19 @@ public struct AgentActivityEntry: Equatable, Sendable {
     public var isUpdate: Bool { receipt.operation == .update }
 }
 
-/// The receipts under `.silkweb/agent-events/`, read for display only (#137). Loading never writes, repairs or
+/// The receipts under `.silkweb/agent-events/` (and, #230, the interrupted creates under `.silkweb/agent-staging/`),
+/// read for display only (#137). Loading never writes, repairs or
 /// creates anything, never takes the Library gate and never follows a link, so a receipt arriving can't feed
 /// back into the watcher, the index or autosave.
 public struct AgentActivity: Equatable, Sendable {
     public var receipts: [AgentReceipt]
+    /// #230: content digests of helper creates still in `.silkweb/agent-staging/`: published (or about to be) but
+    /// without a receipt until the helper reconciles them. Such a Document isn't “outside Silkweb”.
+    public var pendingDigests: Set<String> = []
 
-    public init(receipts: [AgentReceipt] = []) {
+    public init(receipts: [AgentReceipt] = [], pendingDigests: Set<String> = []) {
         self.receipts = receipts
+        self.pendingDigests = pendingDigests
     }
 
     /// The Library has agent activity to show: at least one receipt that published a Document.
@@ -43,19 +48,23 @@ public struct AgentActivity: Equatable, Sendable {
     public static func load(root: URL) -> AgentActivity {
         guard let library = try? AgentCreateFiles.openRoot(root) else { return AgentActivity() }
         defer { close(library) }
-        guard
-            let events = try? AgentCreateFiles.metadataFolder(
-                library, AgentCreateService.eventsFolder, create: false)
-        else { return AgentActivity() }
-        defer { close(events) }
         let decoder = JSONDecoder()
-        let receipts = AgentCreateFiles.names(events).sorted().compactMap { name -> AgentReceipt? in
-            guard name.hasSuffix(".json"), !name.hasPrefix("."), !name.contains(".tmp-"),
-                let data = AgentCreateFiles.read(events, name, maxBytes: 65_536)
-            else { return nil }
-            return try? decoder.decode(AgentReceipt.self, from: data)
+        func decoded<T: Decodable>(_ folder: String, as type: T.Type) -> [T] {
+            guard let descriptor = try? AgentCreateFiles.metadataFolder(library, folder, create: false) else {
+                return []
+            }
+            defer { close(descriptor) }
+            return AgentCreateFiles.names(descriptor).sorted().compactMap { name -> T? in
+                guard name.hasSuffix(".json"), !name.hasPrefix("."), !name.contains(".tmp-"),
+                    let data = AgentCreateFiles.read(descriptor, name, maxBytes: 65_536)
+                else { return nil }
+                return try? decoder.decode(T.self, from: data)
+            }
         }
-        return AgentActivity(receipts: receipts)
+        let intents = decoded(AgentCreateService.stagingFolder, as: AgentCreateIntent.self)
+        return AgentActivity(
+            receipts: decoded(AgentCreateService.eventsFolder, as: AgentReceipt.self),
+            pendingDigests: Set(intents.map(\.contentDigest)))
     }
 
     /// Published receipts matched to Documents that still exist, newest receipt first. A receipt finds its

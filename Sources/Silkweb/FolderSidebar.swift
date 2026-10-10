@@ -99,7 +99,7 @@ struct FolderSidebar: NSViewRepresentable {
         let workspace = coordinator.workspace
         if coordinator.rootURL != snapshot.rootURL || coordinator.revision != workspace.revision
             || coordinator.agentVisible != workspace.hasAgentActivity
-            || coordinator.agentCount != workspace.agentEntries.count
+            || coordinator.agentCount != workspace.agentActivityCount
             || coordinator.waitingRequests != workspace.pendingAccessRequestCount
         {
             coordinator.revision = workspace.revision
@@ -198,7 +198,7 @@ struct FolderSidebar: NSViewRepresentable {
             counts = snapshot.presentation.counts
             totalCount = snapshot.documents.count
             tagCounts = workspace.tagCounts
-            agentCount = workspace.agentEntries.count
+            agentCount = workspace.agentActivityCount
             waitingRequests = workspace.pendingAccessRequestCount
             let agentVisible = workspace.hasAgentActivity
             guard

@@ -90,6 +90,16 @@ final class AgentGrantInitTests: XCTestCase {
             sed -i '' -e 's|<SILKWEB_HELPER>|\(helper)|' -e 's|<GRANT_ID>|\(project)|' "$TMPDIR/silkweb-memory/gemini-extension.json" "$TMPDIR/silkweb-memory/GEMINI.md"
             gemini extensions install "$TMPDIR/silkweb-memory"
 
+        Keep agents on the helper (write-protect the Library):
+          Claude Code: add to "permissions" › "deny" in ~/.claude/settings.json
+            "Write(/\(library.path)/**)",
+            "Edit(/\(library.path)/**)",
+            "NotebookEdit(/\(library.path)/**)"
+          Codex CLI: keep the Library out of sandbox_workspace_write.writable_roots in ~/.codex/config.toml,
+            and don't start codex in '\(library.path)' or a folder that holds it.
+          Gemini CLI: Not enforceable; rely on the skill.
+          Reads stay allowed. Shell commands aren't covered: docs/agent-memory.md › Enforcement.
+
         Then install the skills: agent-packages/README.md › Install.
         Check: \(helper) memory capabilities --grant \(project) --pretty
 
@@ -601,14 +611,46 @@ final class AgentGrantInitTests: XCTestCase {
     func testInstallLinesMatchTheReadme() throws {
         let readme = try String(
             contentsOf: Self.repository.appendingPathComponent("agent-packages/README.md"), encoding: .utf8)
-        let commands = AgentGrantInit.installBlock(helper: "/Users/me/.local/bin/silkweb", project: "Silkweb")
-            .components(separatedBy: "\n").filter { $0.hasPrefix("    ") }
+        let block = AgentGrantInit.installBlock(
+            helper: "/Users/me/.local/bin/silkweb", project: "Silkweb", library: "/Users/me/Writing")
+        let parts = block.components(separatedBy: "Keep agents on the helper (write-protect the Library):\n")
+        XCTAssertEqual(parts.count, 2)
+        let commands = parts[0].components(separatedBy: "\n").filter { $0.hasPrefix("    ") }
             .map { $0.trimmingCharacters(in: .whitespaces) }
         XCTAssertEqual(commands.count, 5)
         for command in commands {
             XCTAssertTrue(readme.contains("```sh\n\(command)\n```"), "README lacks “\(command)”")
         }
         XCTAssertTrue(readme.contains("/Users/me/.local/bin/silkweb memory capabilities --grant Silkweb --pretty"))
+        // #230: the README shows the same deny rules for the example Library, ready to paste into settings.json.
+        let rules = AgentGrantInit.claudeDenyRules(library: "/Users/me/Writing")
+        XCTAssertEqual(
+            rules,
+            [
+                #""Write(//Users/me/Writing/**)""#, #""Edit(//Users/me/Writing/**)""#,
+                #""NotebookEdit(//Users/me/Writing/**)""#,
+            ])
+        for rule in rules { XCTAssertTrue(readme.contains("      " + rule), "README lacks \(rule)") }
+        XCTAssertTrue(readme.contains("sandbox_workspace_write.writable_roots"))
+        XCTAssertTrue(readme.contains("Gemini CLI can't enforce it"))
+    }
+
+    /// #230: the deny rules are valid JSON strings whatever the Library path, and without a path the block keeps a
+    /// placeholder and says so.
+    func testWriteProtectionRulesAreJSONAndKeepAPlaceholderWithoutALibrary() throws {
+        let odd = #"/Users/me/My "Quoted" \ Library"#
+        for rule in AgentGrantInit.claudeDenyRules(library: odd) {
+            let decoded = try JSONDecoder().decode(String.self, from: Data(rule.utf8))
+            XCTAssertTrue(decoded.hasSuffix("(/" + odd + "/**)"), decoded)
+        }
+        let lines = AgentGrantInit.writeProtection(library: odd)
+        XCTAssertTrue(
+            lines.contains(
+                #"    and don't start codex in '/Users/me/My "Quoted" \ Library' or a folder that holds it."#))
+        let block = AgentGrantInit.installBlock(helper: "/bin/silkweb", project: "Silkweb", library: nil)
+        XCTAssertTrue(block.contains(#"    "Write(<LIBRARY>/**)","#))
+        XCTAssertTrue(block.hasSuffix("Replace <LIBRARY> with the Library’s absolute path.\n"))
+        XCTAssertTrue(block.contains("  Gemini CLI: Not enforceable; rely on the skill.\n"))
     }
 
     func testHelperPathIsAbsoluteKeepsLinksAndFallsBackToThePlaceholder() throws {
@@ -642,7 +684,8 @@ final class AgentGrantInitTests: XCTestCase {
     func testInstallLinesQuoteValuesForTheShellSedAndJSON() throws {
         let helper = "/Users/me/My Tools/silkweb"
         let project = #"Bob's & "Co" | $x \ 1"#
-        let lines = AgentGrantInit.installBlock(helper: helper, project: project).components(separatedBy: "\n")
+        let lines = AgentGrantInit.installBlock(helper: helper, project: project, library: nil)
+            .components(separatedBy: "\n")
         XCTAssertEqual(AgentGrantInit.shellQuoted("Silkweb"), "Silkweb")
         XCTAssertEqual(AgentGrantInit.shellQuoted("a b"), "'a b'")
         XCTAssertEqual(AgentGrantInit.shellQuoted("it's"), #"'it'\''s'"#)

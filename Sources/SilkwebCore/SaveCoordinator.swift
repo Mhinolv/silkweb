@@ -112,12 +112,17 @@ public actor SaveCoordinator {
     private let markers: DocumentEditingMarker.Holder?
     /// Each URL's Library-relative path for its marker (`nil` outside the Library), worked out once.
     private var markerPaths: [URL: String?] = [:]
+    /// #230: every successful write, with the revision it published, so the app can tell its own saves from
+    /// changes made outside Silkweb.
+    private let didSave: (@Sendable (URL, DocumentRevision) -> Void)?
 
     public init(
-        store: DocumentStore = DocumentStore(), recoveryDirectory: URL? = nil, busyRetryDelay: Duration = .seconds(2)
+        store: DocumentStore = DocumentStore(), recoveryDirectory: URL? = nil, busyRetryDelay: Duration = .seconds(2),
+        didSave: (@Sendable (URL, DocumentRevision) -> Void)? = nil
     ) {
         self.store = store
         self.busyRetryDelay = busyRetryDelay
+        self.didSave = didSave
         markers = store.gate.map { DocumentEditingMarker.Holder(root: $0.root) }
         self.recoveryDirectory = recoveryDirectory ?? Self.defaultRecoveryDirectory
     }
@@ -256,7 +261,9 @@ public actor SaveCoordinator {
         entry = latest
         do {
             guard let revision = entry.revision else { throw CocoaError(.fileReadNoSuchFile) }
-            entry.revision = try store.saveHoldingGate(entry.text, to: url, expectedRevision: revision)
+            let saved = try store.saveHoldingGate(entry.text, to: url, expectedRevision: revision)
+            entry.revision = saved
+            didSave?(url, saved)
             entry.state = .clean
             entry.attempts = 0
             // A leftover draft must never silently overwrite the successfully saved file.
@@ -487,12 +494,15 @@ public actor SaveCoordinator {
             in: CharacterSet(charactersIn: "/"))
         let mutations = try LibraryMutations(root: root)
         let name = try await mutations.uniqueName(base: base, in: parent)
-        _ = try await mutations.createDocument(named: name, in: parent, text: keepMine ? disk.text : entry.text)
+        let copyText = keepMine ? disk.text : entry.text
+        _ = try await mutations.createDocument(named: name, in: parent, text: copyText)
         let copy = url.deletingLastPathComponent().appendingPathComponent(name)
+        didSave?(copy, DocumentRevision(data: Data(copyText.utf8)))
         // An edit queued during the copy IO must also survive resolution.
         guard let latest = entries[url] else { throw CocoaError(.fileWriteUnknown) }
         if keepMine {
             let revision = try store.save(latest.text, to: url, expectedRevision: disk.revision)
+            didSave?(url, revision)
             entries[url] = Entry(text: latest.text, revision: revision, state: .clean)
         } else {
             guard latest.text == entry.text else { throw CocoaError(.fileWriteUnknown) }
@@ -524,6 +534,7 @@ public actor SaveCoordinator {
         _ = try await mutations.createDocument(named: name, in: parent, text: entry.text)
         let target = url.deletingLastPathComponent().appendingPathComponent(name)
         let loaded = try store.load(target)
+        didSave?(target, loaded.revision)
         guard let latest = entries[url] else { throw CocoaError(.fileWriteUnknown) }
         entries[url] = nil
         syncMarker(url)

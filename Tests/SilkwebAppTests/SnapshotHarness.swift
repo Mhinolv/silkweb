@@ -106,6 +106,10 @@ struct SnapshotScenario {
     /// #203 access requests: "waiting", "history" and "empty" host the Access Requests sheet; "requests-only" is
     /// the library window in Agent Activity with requests but no receipts; "widen-refused" is the refusal alert.
     var accessRequests: String? = nil
+    /// #230 Library changes outside Silkweb, in Agent Activity: "only" (one direct write, no receipts), "mixed" (the
+    /// #137 receipts with “Helper spike” changed outside Silkweb), "info" (Document Info on the direct write) and
+    /// "filter" (All Agents ▾ ▸ Outside Silkweb on the #137 fixture: the changed envelope and the unkept claim).
+    var outsideChanges: String? = nil
 
     static let deepFolder =
         "Field Notes/Vanlife/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle State Park"
@@ -119,6 +123,8 @@ struct SnapshotScenario {
     static let agentClaimed = "Memory/Projects/Silkweb/Memories/Prefer local disks.md"
     /// #139: the owner's own Document in an agent create folder; written only for "dirty-open".
     static let ownerNotes = memoryFolder + "/Owner notes.md"
+    /// #230: the reported repro, written straight into the project Folder without the helper.
+    static let outsideOverview = "Memory/Projects/Silkweb/Silkweb Overview.md"
 
     static let pourOver = "Coffee/Brewing Guides/Pour-Over in Five Steps.md"
     /// #90: the owner's non-default amber Accent.
@@ -297,6 +303,11 @@ struct SnapshotScenario {
         .init(name: "access-requests-history", accessRequests: "history"),
         .init(name: "access-requests-empty", accessRequests: "empty"),
         .init(name: "agent-activity-requests-only", accessRequests: "requests-only"),
+        // #230: changes outside Silkweb in Agent Activity (text only), Document Info's block, and the filter.
+        .init(name: "agent-activity-outside-only", outsideChanges: "only"),
+        .init(name: "agent-activity-mixed", outsideChanges: "mixed"),
+        .init(name: "agent-outside-info", outsideChanges: "info"),
+        .init(name: "agent-activity-outside-filter", outsideChanges: "filter"),
         .init(name: "access-request-widen-refused", accessRequests: "widen-refused"),
         .init(name: "new-document", folder: "", document: "Snapshot Fixtures/Empty Document.md", createDocument: true),
         .init(
@@ -986,6 +997,36 @@ final class SnapshotHarness {
                 workspace.preview.showsOutline = true
             }
         }
+        if let state = scenario.outsideChanges {
+            // The harness installs its snapshot directly; give it the ledger `open` would load. "mixed" keeps the
+            // envelope-only claim, so only the changed receipt Document stays flagged.
+            var ledger = OutsideChangeLedger()
+            if state == "mixed", let id = snapshot.metadata.IDsByPath[SnapshotScenario.agentClaimed] {
+                ledger.documents[id.uuidString] = AgentCreateService.digest(
+                    try Data(contentsOf: snapshot.rootURL.appendingPathComponent(SnapshotScenario.agentClaimed)))
+            }
+            workspace.outsideLedger = ledger
+            await workspace.reloadAgentActivity()
+            workspace.scheduleOutsideDetection()
+            await workspace.waitForOutsideDetection()
+            let expected = ["only": 1, "info": 1, "mixed": 1, "filter": 2][state] ?? 0
+            guard workspace.outsideChanges.count == expected, workspace.hasAgentActivity else {
+                throw SnapshotFailure.error("Expected \(expected) outside changes, found \(workspace.outsideChanges)")
+            }
+            if state == "info" {
+                workspace.navigate(
+                    folder: nil, documents: [SnapshotScenario.outsideOverview], pinned: true, changesScope: true,
+                    agents: true)
+                await workspace.waitForNavigation()
+                workspace.inspectorInfo = true
+                workspace.preview.showsOutline = true
+            } else {
+                workspace.navigate(folder: nil, documents: [], changesScope: true, agents: true)
+                await workspace.waitForNavigation()
+                if state == "filter" { workspace.outsideFilter = true }
+            }
+            guard workspace.agentScope else { throw SnapshotFailure.error("Agent Activity did not open") }
+        }
     }
 
     /// #204: replaces “title”'s body through `AgentUpdateService` at a fixed UTC time and pins its file dates.
@@ -1153,6 +1194,22 @@ final class SnapshotHarness {
                 if let state = scenario.agentActivity {
                     try makeAgentFixture(at: root)
                     try makeAgentUpdateFixture(state, at: root)
+                }
+                if let state = scenario.outsideChanges {
+                    if ["mixed", "filter"].contains(state) { try makeAgentFixture(at: root) }
+                    if ["only", "info"].contains(state) {
+                        // Oct 7, 2:14 PM UTC, after the #137 receipts.
+                        let overview = root.appendingPathComponent(SnapshotScenario.outsideOverview)
+                        try FileManager.default.createDirectory(
+                            at: overview.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        try Data(
+                            ("# Silkweb overview\n\nA native macOS Markdown library: folders you own, documents you "
+                                + "can read without Silkweb.\n").utf8
+                        ).write(to: overview)
+                        let date = Date(timeIntervalSince1970: 1_791_382_440)
+                        try FileManager.default.setAttributes(
+                            [.creationDate: date, .modificationDate: date], ofItemAtPath: overview.path)
+                    }
                 }
                 if scenario.agentActivity == "dirty-open" {
                     let notes = root.appendingPathComponent(SnapshotScenario.ownerNotes)
@@ -1433,7 +1490,9 @@ final class SnapshotHarness {
                     workspace.editor.state == .clean, workspace.agentEntries.first?.isUpdate == true
                 else { throw SnapshotFailure.error("The update didn't reload in place, or moved selection or focus") }
             }
-            if ["info", "claimed-only", "updated", "proposals-only"].contains(scenario.agentActivity) {
+            if ["info", "claimed-only", "updated", "proposals-only"].contains(scenario.agentActivity)
+                || scenario.outsideChanges == "info"
+            {
                 // The Agent block reads the Document off the main thread.
                 try await Task.sleep(for: .milliseconds(400))
                 controller.view.layoutSubtreeIfNeeded()

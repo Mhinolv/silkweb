@@ -145,7 +145,8 @@ struct DocumentTable: NSViewRepresentable {
                 dateReference: dateReference, pointerState: pointerState,
                 location: locationScope.map {
                     DocumentRowPresentation.location(for: document.relativePath, scope: $0.path, scopeName: $0.name)
-                }, agentEntry: workspace.agentScope ? workspace.agentEntry(for: document) : nil)
+                }, agentEntry: workspace.agentScope ? workspace.agentEntry(for: document) : nil,
+                outsideChange: workspace.agentScope ? workspace.outsideChange(for: document) : nil)
         }
 
         /// Rows show where they live only when the list spans folders: All Documents, a tag, Agent Activity, or
@@ -201,6 +202,10 @@ struct DocumentTable: NSViewRepresentable {
             add("Rename…", #selector(rename(_:)), enabled: workspace.canMutate)
             add("Move To…", #selector(move(_:)), enabled: workspace.canMutate)
             add("Reveal in Finder", #selector(reveal(_:)))
+            // #230: next to Reveal for a Document changed outside Silkweb (or a selection holding some).
+            if !workspace.outsidePaths(path).isEmpty {
+                add("Keep", #selector(keepOutside(_:)), enabled: workspace.canKeepOutsideChanges)
+            }
             let export = NSMenuItem(title: "Export", action: nil, keyEquivalent: "")
             let exportMenu = NSMenu()
             exportMenu.autoenablesItems = false
@@ -268,6 +273,11 @@ struct DocumentTable: NSViewRepresentable {
             workspace.exportPDF(path: path)
         }
         @objc private func reveal(_ sender: NSMenuItem) { workspace.reveal(sender.representedObject as? String) }
+        @objc private func keepOutside(_ sender: NSMenuItem) {
+            guard let path = sender.representedObject as? String else { return }
+            let paths = workspace.outsidePaths(path)
+            Task { await workspace.keepOutsideChanges(paths) }
+        }
         @objc private func trash(_ sender: NSMenuItem) {
             guard let path = sender.representedObject as? String else { return }
             workspace.requestTrash(workspace.documentDragPaths(path), pane: 1)

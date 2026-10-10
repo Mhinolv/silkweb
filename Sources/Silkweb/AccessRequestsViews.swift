@@ -10,7 +10,7 @@ import SwiftUI
 extension LibraryWorkspace {
     /// The Agent Activity row (and Go ▸ Agent Activity) exists once a receipt published a Document, or once this
     /// Library has any access request.
-    var hasAgentActivity: Bool { agentActivity.hasPublished || !accessRequests.isEmpty }
+    var hasAgentActivity: Bool { agentActivity.hasPublished || !accessRequests.isEmpty || !outsideChanges.isEmpty }
 
     /// Waiting requests (oldest first) and the newest 50 decided or expired ones.
     func accessRequestReview(_ now: Date) -> (waiting: [AgentAccessRequest], history: [AgentAccessRequest]) {
