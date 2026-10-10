@@ -97,6 +97,8 @@ struct WorkspaceCommands: Commands {
                 .keyboardShortcut(.delete, modifiers: .command).disabled(!state.canTrash)
             Button("Reveal in Finder") { workspace.reveal() }
                 .keyboardShortcut("r", modifiers: [.command, .option]).disabled(!state.hasLibrary)
+            Button("Copy Path") { workspace.copyPaths() }
+                .keyboardShortcut("c", modifiers: [.command, .option]).disabled(!state.hasLibrary)
             Divider()
             ExportMenu(workspace: workspace, state: state)
             Divider()

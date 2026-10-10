@@ -314,6 +314,24 @@ extension LibraryWorkspace {
         await openSearchResult(result, findText: quick ? nil : ParsedSearchQuery(search.text).findText, pinned: pinned)
     }
 
+    /// #227: the Library a Search Library row lives in (another Library's row is that Library's) and its path there.
+    func searchResultLocation(_ result: SearchResult) -> (workspace: LibraryWorkspace, path: String)? {
+        if let foreign = search.foreignResult(result.id) {
+            guard let other = shell?.workspace(for: foreign.root), let path = other.itemPathsByID[foreign.result.id]
+            else { return nil }
+            return (other, path)
+        }
+        return itemPathsByID[result.id].map { (self, $0) }
+    }
+
+    func revealSearchResult(_ result: SearchResult) {
+        if let (workspace, path) = searchResultLocation(result) { workspace.reveal(path) }
+    }
+
+    func copySearchResultPath(_ result: SearchResult, relative: Bool) {
+        if let (workspace, path) = searchResultLocation(result) { workspace.copyPaths([path], relative: relative) }
+    }
+
     func openSearchResult(_ result: SearchResult, findText: String? = nil, pinned: Bool = false) async {
         if let foreign = search.foreignResult(result.id) {
             // #197: another Library's row makes that Library current and opens the document there, as its own

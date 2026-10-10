@@ -20,7 +20,7 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
         ("New Document", "⌘N"), ("New Folder", "⇧⌘N"), ("New Library…", "⌥⌘N"),
         ("Open Folder in Place…", "⌘O"), ("Quick Open…", "⇧⌘O"), ("Open in New Tab", "⌘T"),
         ("Import Folder Copy…", "⇧⌘I"), ("Close Tab", "⌘W"), ("Close Window", "⇧⌘W"), ("Save", "⌘S"),
-        ("Move To…", "⌃⌘M"), ("Reveal in Finder", "⌥⌘R"), ("Move to Trash", "⌘⌫"),
+        ("Move To…", "⌃⌘M"), ("Reveal in Finder", "⌥⌘R"), ("Copy Path", "⌥⌘C"), ("Move to Trash", "⌘⌫"),
         ("Export ▸ HTML…", "⇧⌘E"), ("Export ▸ PDF…", "⌥⌘P"), ("Page Setup…", "⇧⌘P"), ("Print…", "⌘P"),
         ("Undo", "⌘Z"), ("Redo", "⇧⌘Z"), ("Paste and Match Style", "⌥⇧⌘V"),
         ("Find…", "⌘F"), ("Find and Replace…", "⌥⌘F"), ("Find Next", "⌘G"), ("Find Previous", "⇧⌘G"),
@@ -245,7 +245,10 @@ final class KeyboardAccessibilityAuditTests: XCTestCase {
         let menu = coordinator.menu(path: path)
         XCTAssertEqual(
             menu.items.map(\.title),
-            ["Open in New Tab", "", "Rename…", "Move To…", "Reveal in Finder", "Export", "", "Tags", "Move to Trash"])
+            [
+                "Open in New Tab", "", "Rename…", "Move To…", "Reveal in Finder", "Copy Path", "Copy Relative Path",
+                "Export", "", "Tags", "Move to Trash",
+            ])
         let export = try XCTUnwrap(menu.items.first { $0.title == "Export" }?.submenu)
         // Same titles and order as File ▸ Export; no key equivalents in the context menu.
         XCTAssertEqual(export.items.map(\.title), ["HTML…", "PDF…"])

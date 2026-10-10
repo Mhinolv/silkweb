@@ -582,6 +582,9 @@ struct FolderSidebar: NSViewRepresentable {
             let reveal = menu.addItem(
                 withTitle: "Reveal in Finder", action: #selector(revealFolder(_:)), keyEquivalent: "")
             reveal.target = self; reveal.representedObject = folder.relativePath
+            menu.addCopyPathItems(
+                target: self, action: #selector(copyFolderPath(_:)), object: folder.relativePath,
+                offersRelative: !folder.relativePath.isEmpty)
             menu.addItem(.separator())
             let trash = menu.addItem(withTitle: "Move to Trash", action: #selector(trashFolder(_:)), keyEquivalent: "")
             trash.target = self; trash.representedObject = folder.relativePath
@@ -671,6 +674,10 @@ struct FolderSidebar: NSViewRepresentable {
             if let path = sender.representedObject as? String { workspace.requestTrash([path], pane: 0) }
         }
         @objc private func revealFolder(_ sender: NSMenuItem) { workspace.reveal(sender.representedObject as? String) }
+        @objc func copyFolderPath(_ sender: NSMenuItem) {
+            guard let path = sender.representedObject as? String else { return }
+            workspace.copyPaths([path], relative: sender.isAlternate)
+        }
 
         func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
             guard workspace.canMutate, let path = (item as? Item)?.folder?.relativePath, !path.isEmpty,

@@ -503,6 +503,9 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
                 withTitle: "Reveal in Finder", action: #selector(revealLibrary(_:)), keyEquivalent: "")
             reveal.target = self
             reveal.representedObject = header.workspace
+            // #227: the Library root, absolute only (it has no relative path).
+            menu.addCopyPathItems(
+                target: self, action: #selector(copyLibraryPath(_:)), object: header.workspace, offersRelative: false)
         }
         menu.addItem(.separator())
         if registry.sections.count > 1 {
@@ -527,6 +530,10 @@ struct LibrarySectionsSidebar: NSViewRepresentable {
         if let root = (sender.representedObject as? LibraryWorkspace)?.root {
             NSWorkspace.shared.activateFileViewerSelecting([root])
         }
+    }
+
+    @objc func copyLibraryPath(_ sender: NSMenuItem) {
+        (sender.representedObject as? LibraryWorkspace)?.copyPaths([""])
     }
 
     @objc private func locateLibrary(_ sender: NSMenuItem) {
