@@ -121,6 +121,7 @@ struct FolderSidebar: NSViewRepresentable {
         // Scope changes made outside the sidebar (the toolbar breadcrumb, 1.65) move the selected row too.
         if coordinator.selectedFolder != .some(workspace.session.selectedFolder)
             || coordinator.agentScope != workspace.agentScope
+            || coordinator.pendingScope != workspace.pendingSelection?.scope
         {
             coordinator.selectScope()
         }
@@ -160,6 +161,8 @@ struct FolderSidebar: NSViewRepresentable {
         var restoring = false
         /// The folder scope the selected row last followed.
         var selectedFolder: String??
+        /// The queued scope click (#211) the selected row last followed.
+        var pendingScope: LibraryWorkspace.PendingSelection.Scope?
         var lastFocusRequest = 0
         var revision = 0
         var rename: LibraryRename?
@@ -297,6 +300,19 @@ struct FolderSidebar: NSViewRepresentable {
                 ?? (workspace.session.selectedFolder.flatMap { itemsByPath[$0] } ?? roots.first)
         }
 
+        /// The capsule's row: a scope clicked while the library is busy (#211), else the list's scope.
+        func selectionItem() -> Item? {
+            let pending: Item? =
+                switch workspace.pendingSelection?.scope {
+                case .folder(let id?): workspace.itemPathsByID[id].flatMap { itemsByPath[$0] }
+                case .folder(nil): roots.first
+                case .tag(let id): itemsByTag[id]
+                case .agents: agentItem
+                case nil: nil
+                }
+            return pending ?? scopeItem()
+        }
+
         /// Moves the “current folder” suffix by updating only the old and new rows' cells. The selection capsule
         /// is the only visual mark (owner decision, 1.65: no coral node).
         func updateCurrentScope() {
@@ -337,7 +353,8 @@ struct FolderSidebar: NSViewRepresentable {
             }
             applyExpansion()
             selectedTagID = workspace.session.selectedTagID
-            let item = scopeItem()
+            pendingScope = workspace.pendingSelection?.scope
+            let item = selectionItem()
             if isCurrent {
                 if let item { select(item) }
                 if item == nil { outline.deselectAll(nil) }
@@ -369,7 +386,8 @@ struct FolderSidebar: NSViewRepresentable {
         func selectScope() {
             selectedFolder = .some(workspace.session.selectedFolder)
             agentScope = workspace.agentScope
-            guard isCurrent, let outline, let item = scopeItem(),
+            pendingScope = workspace.pendingSelection?.scope
+            guard isCurrent, let outline, let item = selectionItem(),
                 outline.item(atRow: outline.selectedRow) as? Item !== item
             else {
                 return
@@ -760,8 +778,8 @@ struct FolderSidebar: NSViewRepresentable {
             } else {
                 workspace.selectFolder(item.folder?.relativePath)
             }
-            // An accepted scope switch never rolls back, so its completion leaves the outline alone (#88).
-            guard workspace.navigationGeneration == generation else { return }
+            // An accepted or queued (#211) scope switch never rolls back, so the outline is left alone (#88).
+            guard workspace.navigationGeneration == generation, workspace.pendingSelection?.scope == nil else { return }
             Task {
                 // Refused: once pending navigation drains, the row moves back to the scope the list shows.
                 await workspace.waitForNavigation()

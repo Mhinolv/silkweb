@@ -30,6 +30,7 @@ final class LibraryWorkspace {
         self.columnAutosaveName = columnAutosaveName
         preview = PreviewCoordinator(defaults: defaults)
         search.knowledge = knowledge
+        search.window = { [weak self] in self?.libraryWindow }
     }
     var tagCounts: [UUID: Int] = [:]
     var tags: [LibraryTag] = []
@@ -138,8 +139,18 @@ final class LibraryWorkspace {
     var loading = false {
         didSet { if oldValue && !loading { openPendingSelection() } }
     }
-    /// #209: the last document click while loading or mutating, by ID. It opens once the library is idle.
-    @ObservationIgnored private(set) var pendingSelection: (root: URL?, ids: [UUID], pinned: Bool)?
+    /// #209: the last document or sidebar scope (#211) click while loading or mutating, by ID. It opens once the
+    /// library is idle. Observed: the sidebar capsule stays on a queued scope.
+    struct PendingSelection: Equatable {
+        /// A folder (nil for All Documents), a tag or Agent Activity.
+        enum Scope: Equatable { case folder(UUID?), tag(UUID), agents }
+        var root: URL?
+        /// Nil for a document click, which keeps the list's scope.
+        var scope: Scope?
+        var ids: [UUID] = []
+        var pinned = false
+    }
+    private(set) var pendingSelection: PendingSelection?
     var mediaProgress: (name: String, done: Int, total: Int)?
     var mediaFailures: [AssetFailure] = []
     var mediaDirectoryName = "media"
@@ -774,15 +785,44 @@ final class LibraryWorkspace {
         // #209: a busy library queues the click instead of dropping it. The list shows it at once; the last click
         // opens when the library is idle.
         guard let snapshot else { return }
-        pendingSelection = (root, paths.compactMap { snapshot.metadata.IDsByPath[$0] }, pinned)
+        pendingSelection = PendingSelection(
+            root: root, ids: paths.compactMap { snapshot.metadata.IDsByPath[$0] }, pinned: pinned)
         session.selectedDocuments = paths
+    }
+
+    /// #211: a sidebar row, breadcrumb or menu scope while busy shares the #209 slot; the list keeps its scope.
+    private func queueScope(folder: String?, tag: UUID?, agents: Bool) {
+        guard let snapshot else { return }
+        let scope: PendingSelection.Scope
+        if agents {
+            scope = .agents
+        } else if let tag {
+            scope = .tag(tag)
+        } else if let folder {
+            guard let id = snapshot.metadata.IDsByPath[folder] else { return }
+            scope = .folder(id)
+        } else {
+            scope = .folder(nil)
+        }
+        pendingSelection = PendingSelection(root: root, scope: scope)
     }
 
     /// The queued click follows renames and moves by ID; a target trashed or out of the list's scope is dropped.
     private func openPendingSelection() {
         guard !loading, !mutating, let pending = pendingSelection else { return }
         pendingSelection = nil
-        guard pending.root == root, snapshot != nil else { return }
+        guard pending.root == root, let snapshot else { return }
+        switch pending.scope {
+        case .folder(let id?):
+            if let folder = snapshot.folders.first(where: { $0.id == id }) { selectFolder(folder.relativePath) }
+            return
+        case .folder(nil): return selectFolder(nil)
+        case .tag(let id):
+            if tags.contains(where: { $0.id == id }) { selectTag(id) }
+            return
+        case .agents: return selectAgentActivity()
+        case nil: break
+        }
         let listed = Set(documents.map(\.relativePath))
         let paths = Set(pending.ids.compactMap { itemPathsByID[$0] }).intersection(listed)
         guard !paths.isEmpty else {
@@ -800,8 +840,11 @@ final class LibraryWorkspace {
         folder: String?, documents: Set<String>, pinned: Bool = false, tag: UUID? = nil, changesScope: Bool = false,
         agents: Bool = false
     ) {
-        guard !loading, !mutating else { return }
-        pendingSelection = nil
+        guard !loading, !mutating else {
+            if changesScope { queueScope(folder: folder, tag: tag, agents: agents) }
+            return
+        }
+        if pendingSelection != nil { pendingSelection = nil }
         // The list follows the click at once (#70); the editor swaps in when the buffer has loaded.
         let shown = (
             folder: session.selectedFolder, documents: session.selectedDocuments, tag: session.selectedTagID,

@@ -63,6 +63,8 @@ final class LibrarySearch {
     }
     /// The window's other loaded Libraries, in sidebar order. Set by the registry; a lone workspace has none.
     @ObservationIgnored var otherLibraries: @MainActor () -> [Peer] = { [] }
+    /// The Library's window, where Quick Open shows. Set by the workspace; nil falls back to the key window.
+    @ObservationIgnored var window: @MainActor () -> NSWindow? = { nil }
     /// The id each other Library's document shows under, kept for the session so a selected row stays selected.
     @ObservationIgnored private var foreignIDs: [ForeignKey: UUID] = [:]
     /// The rows of the last All Libraries results that belong to another Library: their Library and real result.
@@ -279,7 +281,8 @@ final class LibrarySearch {
 
     func toggleQuickOpen() {
         if showsQuickOpen { dismissQuickOpen(); return }
-        previousWindow = NSApplication.shared.keyWindow
+        // #226: the panel's field takes focus from this responder; dismissing gives it back.
+        previousWindow = window() ?? NSApplication.shared.keyWindow
         previousResponder = previousWindow?.firstResponder
         quickCompleted = nil
         quickText = ""
