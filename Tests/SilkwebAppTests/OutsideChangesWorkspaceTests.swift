@@ -85,10 +85,7 @@ final class OutsideChangesWorkspaceTests: XCTestCase {
     /// Opens the Library the way the app does: index, receipts, ledger and watcher.
     private func open(_ workspace: LibraryWorkspace? = nil) async throws -> LibraryWorkspace {
         let workspace = try workspace ?? makeWorkspace()
-        workspace.open(root)
-        try await waitUntil("the library opens", timeout: .seconds(10)) {
-            workspace.snapshot != nil && !workspace.loading
-        }
+        try await openLibrary(root, in: workspace)
         return workspace
     }
 

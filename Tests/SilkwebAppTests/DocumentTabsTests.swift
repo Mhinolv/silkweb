@@ -292,11 +292,7 @@ final class DocumentTabsTests: XCTestCase {
             var navigation = LibrarySession()
             navigation.selectedDocuments = ["A.md"]
             try await navigation.save(root: root)
-            workspace.open(root)
-            for _ in 0..<500 {
-                if workspace.error != nil || (!workspace.loading && workspace.snapshot != nil) { break }
-                try await Task.sleep(for: .milliseconds(10))
-            }
+            try await openLibrary(root, in: workspace)
             XCTAssertFalse(workspace.loading)
             XCTAssertNil(workspace.error)
             XCTAssertEqual(workspace.snapshot?.documents.count, 4)

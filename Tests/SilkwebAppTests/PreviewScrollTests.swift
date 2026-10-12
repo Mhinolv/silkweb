@@ -59,16 +59,48 @@ final class PreviewScrollTests: XCTestCase {
             host.view.layoutSubtreeIfNeeded()
         }
         layoutHost()
-        func wait(_ predicate: () -> Bool) async throws {
-            let deadline = Date().addingTimeInterval(10)
-            while !predicate(), Date() < deadline {
+        // #213: this test once hung for 1018 s inside a 10 s wait under parallel-lane load, so one turn of the wait
+        // (the layout pass or the sleep) did not return for minutes: a blocked main thread or a sleeping host. Every
+        // wait and every JavaScript await is bounded and named, and the watchdog logs (with a process sample) any
+        // phase where the main thread stops answering, so the next stall says where it was.
+        let watchdog = MainThreadWatchdog("PreviewScrollTests")
+        defer { watchdog.stop() }
+        func previewState() -> String {
+            guard let web = workspace.preview.webView else { return "no web view" }
+            let coordinator =
+                (web.navigationDelegate as? PreviewView.Coordinator)
+                ?? (web.navigationDelegate as? ScrollSampler)?.delegate
+            return "bounds \(web.bounds.size), loading \(web.isLoading), ready \(coordinator?.ready ?? false), "
+                + "page \(coordinator?.completedPage == nil ? "pending" : "complete"), "
+                + "restoring \(coordinator?.restoring ?? false), "
+                + "error \(coordinator?.navigationError?.localizedDescription ?? workspace.preview.error ?? "none")"
+        }
+        func wait(_ phase: String, _ predicate: () -> Bool) async throws {
+            watchdog.phase = phase
+            let start = ContinuousClock.now
+            let awake = SuspendingClock.now
+            let deadline = start + .seconds(10)
+            var longest = Duration.zero
+            while !predicate(), ContinuousClock.now < deadline {
+                let turn = ContinuousClock.now
                 layoutHost()
                 try await Task.sleep(for: .milliseconds(20))
+                longest = max(longest, ContinuousClock.now - turn)
             }
             // Stop here on failure rather than checking an unloaded/zero-size DOM.
-            _ = try XCTUnwrap(predicate() ? true : nil, "Timed out waiting for the real detail preview and layout")
+            _ = try XCTUnwrap(
+                predicate() ? true : nil,
+                "Timed out waiting for \(phase) after \(ContinuousClock.now - start) (host awake "
+                    + "\(SuspendingClock.now - awake); longest layout+sleep turn \(longest)): \(previewState())")
         }
-        try await wait {
+        func evaluate(_ phase: String, _ script: String) async throws -> Any? {
+            watchdog.phase = phase
+            return try await withDeadline("\(phase): \(previewState())") {
+                try await workspace.preview.webView?.callAsyncJavaScript(
+                    script, arguments: [:], in: nil, contentWorld: .defaultClient)
+            }
+        }
+        try await wait("the real detail preview and layout") {
             guard let coordinator = workspace.preview.webView?.navigationDelegate as? PreviewView.Coordinator else {
                 return false
             }
@@ -100,7 +132,7 @@ final class PreviewScrollTests: XCTestCase {
             """
         web.configuration.userContentController.addUserScript(
             WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .defaultClient))
-        _ = try await web.callAsyncJavaScript(script, arguments: [:], in: nil, contentWorld: .defaultClient)
+        _ = try await evaluate("installing the scroll sampler", script)
         // Hidden pages throttle both requestAnimationFrame and page timers. A
         // serial host-driven poll continues through debounce and mode switches.
         // Keep frame/scroll hooks and navigation samples to catch shorter resets.
@@ -122,12 +154,15 @@ final class PreviewScrollTests: XCTestCase {
         for outline in [false, true] {
             workspace.preview.showsOutline = outline
             try await Task.sleep(for: .milliseconds(700))
-            try await wait { web.bounds.width > 0 && web.bounds.height > 0 }
+            try await wait("a laid-out preview with outline \(outline)") {
+                web.bounds.width > 0 && web.bounds.height > 0
+            }
             // Choose a non-heading-aligned resting offset. Heading/ratio restoration
             // must not pass this test simply by ending at roughly the same section.
-            let value = try await web.callAsyncJavaScript(
-                "scrollTo(0, Math.floor((document.documentElement.scrollHeight - innerHeight) / 2) + 17); return scrollY;",
-                arguments: [:], in: nil, contentWorld: .defaultClient)
+            let value = try await evaluate(
+                "the resting offset with outline \(outline)",
+                "scrollTo(0, Math.floor((document.documentElement.scrollHeight - innerHeight) / 2) + 17); return scrollY;"
+            )
             let baseline = try XCTUnwrap(value as? Double)
             XCTAssertGreaterThan(baseline, 1000)
             try await Task.sleep(for: .milliseconds(350))
@@ -137,14 +172,14 @@ final class PreviewScrollTests: XCTestCase {
                 let changed = source.replacingOccurrences(
                     of: "Resting viewport", with: "Resting viewport \(outline)-\(edit)")
                 workspace.editor.text = changed
-                try await wait {
+                try await wait("edit \(edit) with outline \(outline)") {
                     workspace.preview.html.contains("Resting viewport \(outline)-\(edit)")
                         && delegate.lastHTML == workspace.preview.html && !delegate.restoring
                 }
                 try await Task.sleep(for: .milliseconds(350))
-                let title = try await web.callAsyncJavaScript(
-                    "return document.querySelector('h1').textContent;", arguments: [:], in: nil,
-                    contentWorld: .defaultClient)
+                let title = try await evaluate(
+                    "the title after edit \(edit) with outline \(outline)",
+                    "return document.querySelector('h1').textContent;")
                 XCTAssertEqual(title as? String, "Resting viewport \(outline)-\(edit)")
                 XCTAssertGreaterThan(
                     sampler.polls - pollsBeforeEdit, 5,
@@ -161,7 +196,7 @@ final class PreviewScrollTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(500))
             sampler.begin(at: baseline)
             workspace.preview.mode = .split
-            try await wait {
+            try await wait("Split entry with outline \(outline)") {
                 workspace.preview.html.contains("Edited while hidden") && delegate.lastHTML == workspace.preview.html
                     && !delegate.restoring && web.bounds.width > 0 && web.bounds.height > 0
             }
@@ -173,12 +208,12 @@ final class PreviewScrollTests: XCTestCase {
             sampler.baseline = nil
         }
         // Explicit navigation still moves the preview; excluded from stability samples.
-        try await wait { web.bounds.width > 0 && web.bounds.height > 0 }
+        try await wait("a laid-out preview before Outline navigation") { web.bounds.width > 0 && web.bounds.height > 0 }
         workspace.preview.scrollPreview(to: "section-99")
         try await Task.sleep(for: .milliseconds(700))
-        let top = try await web.callAsyncJavaScript(
-            "return document.getElementById('section-99').getBoundingClientRect().top;", arguments: [:], in: nil,
-            contentWorld: .defaultClient)
+        let top = try await evaluate(
+            "the Outline navigation target", "return document.getElementById('section-99').getBoundingClientRect().top;"
+        )
         XCTAssertGreaterThan(web.bounds.height, 0, "Outline navigation must use a laid-out preview")
         let anchorTop = try XCTUnwrap(top as? Double)
         XCTAssertGreaterThanOrEqual(anchorTop, -2)
@@ -186,6 +221,7 @@ final class PreviewScrollTests: XCTestCase {
         // Exercise the changed representable lifecycle in the real hierarchy after
         // the scroll assertion: reflow at small/large sizes and every display mode.
         for mode in DocumentViewMode.allCases {
+            watchdog.phase = "the resize sweep in \(mode)"
             workspace.preview.mode = mode
             for size in [
                 NSSize(width: 560, height: 200), NSSize(width: 1400, height: 900), NSSize(width: 2400, height: 1600),
@@ -199,16 +235,17 @@ final class PreviewScrollTests: XCTestCase {
         workspace.preview.mode = .split
         window.setContentSize(NSSize(width: 1400, height: 900))
         layoutHost()
-        try await wait { web.bounds.width > 0 && web.bounds.height > 0 }
+        try await wait("a laid-out preview after the resize sweep") { web.bounds.width > 0 && web.bounds.height > 0 }
         // Empty, smallest, structured, and long content exercise append/remove,
         // replacement, nested text, Unicode, and image anchors on the live DOM.
         for text in ["", "# A", "# 日本語 👩🏽‍💻\n\n> **Bold**\n\n- one\n- two\n\n![Local](local.png)\n", source] {
             workspace.editor.text = text
             workspace.preview.schedule(text: text, document: url, root: root)
             try await Task.sleep(for: .milliseconds(600))
-            try await wait { delegate.lastHTML == workspace.preview.html && !delegate.restoring }
-            let rendered = try await web.callAsyncJavaScript(
-                "return document.body.innerHTML;", arguments: [:], in: nil, contentWorld: .defaultClient)
+            try await wait("rendering \(text.count) characters") {
+                delegate.lastHTML == workspace.preview.html && !delegate.restoring
+            }
+            let rendered = try await evaluate("the rendered body", "return document.body.innerHTML;")
             XCTAssertNotNil(rendered as? String)
             XCTAssertNil(workspace.preview.error)
         }

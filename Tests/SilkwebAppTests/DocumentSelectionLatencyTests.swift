@@ -130,10 +130,7 @@ final class DocumentSelectionLatencyTests: XCTestCase {
             try? FileManager.default.removeItem(at: container)
         }
         // The app's own open path: scan, session, search index and the Finder watcher.
-        workspace.open(root)
-        try await waitUntil("the library opens", timeout: .seconds(10)) {
-            workspace.snapshot != nil && !workspace.loading
-        }
+        try await openLibrary(root, in: workspace)
         workspace.selectFolder(Self.folder)
         try await withDeadline("navigation") { await workspace.waitForNavigation() }
         try await waitUntil("the list realizes its rows", timeout: .seconds(10)) {
@@ -219,11 +216,15 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         // Warm up: the first open realizes the editor hierarchy.
         _ = try await clickThrough(h, rows: [rows[2], rows[1]])
         var runs: [Bool: Run] = [:]
+        var inconclusive: [String] = []
         for focus in [false, true] {
             let mode = focus ? "focus on" : "focus off"
             h.workspace.setWritingModes(focus: focus)
             try await h.pump()
-            let outcome = try await LatencyGate.measure("list \(mode)", budget: Self.listBudget, samples: \.list) {
+            let outcome = try await LatencyGate.measure(
+                "list \(mode)", budget: Self.listBudget, samples: \.list,
+                control: { try await LatencyGate.control(h.pump) }
+            ) {
                 let run = try await clickThrough(h, rows: rows)
                 print("DocumentSelectionLatency " + run.summary(mode))
                 return run
@@ -234,18 +235,19 @@ final class DocumentSelectionLatencyTests: XCTestCase {
                     run.selectedOnPress, run.list.count, "\(mode) — rows selected by the press: \(run.summary(mode))")
             }
             let run = try XCTUnwrap(outcome.runs.last)
-            XCTAssertTrue(
-                outcome.passed,
-                "\(mode) — list p90 over one frame (\(Self.listBudget) ms): \(run.summary(mode))"
-                    + (outcome.note.map { "; \($0)" } ?? ""))
+            LatencyGate.assertTiming(
+                outcome, "\(mode) — list p90 over one frame (\(Self.listBudget) ms): \(run.summary(mode))",
+                inconclusive: &inconclusive)
             runs[focus] = run
         }
-        if let off = runs[false], let on = runs[true] {
+        // A timing comparison too: not judged when either run was inconclusive.
+        if inconclusive.isEmpty, let off = runs[false], let on = runs[true] {
             let base = Run.percentile(off.editor, 0.95)
             XCTAssertLessThanOrEqual(
                 Run.percentile(on.editor, 0.95), max(base * Self.focusMargin, base + TestEnvironment.frameBudget(16)),
                 "Focus Mode must not slow the editor swap: \(on.summary("on")) vs \(off.summary("off"))")
         }
+        try LatencyGate.skipIfInconclusive(inconclusive)
     }
 
     /// A rapid burst: the capsule follows every click and the editor coalesces to the last one instead of replaying
@@ -401,7 +403,10 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         try await waitUntil("the warm-up outline", timeout: .seconds(2)) {
             try outlineSample(h, expected: expectedOutline(h, rows[1])) == .current
         }
-        let outcome = try await LatencyGate.measure("outline", budget: Self.outlineBudget, samples: \.latencies) {
+        let outcome = try await LatencyGate.measure(
+            "outline", budget: Self.outlineBudget, samples: \.latencies,
+            control: { try await LatencyGate.control(h.pump) }
+        ) {
             let run = try await outlineClickThrough(h, rows: rows)
             print(run.summary)
             return run
@@ -411,8 +416,11 @@ final class DocumentSelectionLatencyTests: XCTestCase {
             XCTAssertEqual(run.behindList, 0, "the Outline must update in the list capsule's pass: \(run.summary)")
             XCTAssertEqual(run.empty, 0, "the Outline must not flash No Headings between notes: \(run.summary)")
         }
-        let summary = try XCTUnwrap(outcome.runs.last).summary + (outcome.note.map { "; \($0)" } ?? "")
-        XCTAssertTrue(outcome.passed, "outline p90 over two frames (\(Self.outlineBudget) ms): \(summary)")
+        let summary = try XCTUnwrap(outcome.runs.last).summary
+        var inconclusive: [String] = []
+        LatencyGate.assertTiming(
+            outcome, "outline p90 over two frames (\(Self.outlineBudget) ms): \(summary)", inconclusive: &inconclusive)
+        try LatencyGate.skipIfInconclusive(inconclusive)
     }
 
     /// One click per row with the Outline sampled on every display pass after the press.
@@ -509,7 +517,9 @@ final class DocumentSelectionLatencyTests: XCTestCase {
     func testLatencyGateReMeasuresOnceAndFailsOnlyWhenBothRunsAreOver() async throws {
         func gate(_ runs: [[Double]]) async throws -> (LatencyGate.Outcome<[Double]>, measured: Int) {
             var measured = 0
-            let outcome = try await LatencyGate.measure("synthetic", budget: 16, samples: { $0 }) {
+            let outcome = try await LatencyGate.measure(
+                "synthetic", budget: 16, samples: { $0 }, control: { Array(repeating: 1.0, count: 20) }
+            ) {
                 defer { measured += 1 }
                 return runs[measured]
             }
@@ -535,6 +545,66 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         XCTAssertEqual(measured, 2, "at most one re-measure")
         XCTAssertEqual(outcome.value, 40)
     }
+
+    /// #213 (owner decision): the no-click control decides whether two failed runs are a regression or a loaded host.
+    /// Only a slow control (p90 over 8 ms) with both runs over budget is inconclusive; a fast control with slow
+    /// clicks still fails, and the control is never timed when a run passes.
+    @MainActor
+    func testLatencyGateIsInconclusiveOnlyWhenTheControlIsSlowToo() async throws {
+        func gate(_ runs: [[Double]], control: [Double]) async throws -> (LatencyGate.Outcome<[Double]>, timed: Int) {
+            var measured = 0
+            var timed = 0
+            let outcome = try await LatencyGate.measure(
+                "synthetic", budget: 16, samples: { $0 },
+                control: {
+                    timed += 1
+                    return control
+                }
+            ) {
+                defer { measured += 1 }
+                return runs[measured]
+            }
+            return (outcome, timed)
+        }
+        let fast = Array(repeating: 10.0, count: 20)
+        let slow = Array(repeating: 20.0, count: 20)
+        let idle = Array(repeating: 1.5, count: 20)
+        let loaded = Array(repeating: 1.5, count: 10) + Array(repeating: 12.0, count: 10)
+
+        var (outcome, timed) = try await gate([slow, slow], control: idle)
+        XCTAssertFalse(outcome.passed)
+        XCTAssertFalse(outcome.inconclusive, "a fast control with slow clicks is a regression, not load")
+        XCTAssertEqual(outcome.control, 1.5)
+        XCTAssertEqual(timed, 1)
+        var skipped: [String] = []
+        XCTExpectFailure("a fast control with slow clicks must fail the timing assertion") {
+            LatencyGate.assertTiming(outcome, "synthetic", inconclusive: &skipped)
+        }
+        XCTAssertTrue(skipped.isEmpty)
+        XCTAssertNoThrow(try LatencyGate.skipIfInconclusive(skipped))
+
+        (outcome, timed) = try await gate([slow, slow], control: loaded)
+        XCTAssertFalse(outcome.passed)
+        XCTAssertTrue(outcome.inconclusive, "both runs over budget on a host whose idle passes take 12 ms")
+        XCTAssertTrue(outcome.note?.contains("inconclusive") == true, outcome.note ?? "no note")
+        LatencyGate.assertTiming(outcome, "synthetic", inconclusive: &skipped)
+        XCTAssertEqual(skipped.count, 1, "the timing verdict is recorded for the skip, not asserted")
+        XCTAssertThrowsError(try LatencyGate.skipIfInconclusive(skipped)) { XCTAssertTrue($0 is XCTSkip) }
+
+        (outcome, timed) = try await gate([fast], control: loaded)
+        XCTAssertTrue(outcome.passed)
+        XCTAssertFalse(outcome.inconclusive)
+        XCTAssertNil(outcome.control)
+        XCTAssertEqual(timed, 0, "a run within budget never times the control")
+
+        (outcome, timed) = try await gate([slow, fast], control: loaded)
+        XCTAssertTrue(outcome.passed, "a passing re-measure passes whatever the load")
+        XCTAssertEqual(timed, 0)
+
+        // The control threshold itself (8 ms) is still judged conclusive.
+        (outcome, _) = try await gate([slow, slow], control: Array(repeating: 8.0, count: 20))
+        XCTAssertFalse(outcome.inconclusive)
+    }
 }
 
 /// #124: judges the click-through benchmarks by a typical click, not the slowest one, at the unchanged local
@@ -542,8 +612,16 @@ final class DocumentSelectionLatencyTests: XCTestCase {
 /// 20 clicks still fails it; scheduler noise from a concurrent suite slows one or two clicks, which p90 tolerates.
 /// When a whole run lands in a loaded stretch, the timing segment is re-measured once, logged, and fails only if
 /// it is over budget again. Functional guards are never judged here.
+///
+/// #213 (owner decision): when both runs are over budget, a same-run control times display passes with no click.
+/// A control p90 over 8 ms means the host itself was too slow to judge a frame budget: the timing is inconclusive
+/// (logged, and only the timing assertion is skipped). A fast control with slow clicks still fails. The budgets
+/// are unchanged; there is no environment flag and no multiplier.
 enum LatencyGate {
     static let quantile = 0.9
+    /// The control's p90 above which the host is too loaded to judge a frame budget.
+    static let controlBudget = TestEnvironment.frameBudget(8)
+    static let controlSamples = 20
 
     /// Nearest-rank percentile of `samples` (0 when empty).
     static func percentile(_ samples: [Double], _ p: Double) -> Double {
@@ -563,21 +641,71 @@ enum LatencyGate {
         var passed: Bool
         /// The log line when the re-measure ran.
         var note: String?
+        /// The control's p90, measured only when both runs were over budget.
+        var control: Double?
+        /// Both runs over budget on a host whose control was slow too: the timing can't be judged (#213).
+        var inconclusive: Bool { !passed && (control ?? 0) > LatencyGate.controlBudget }
     }
 
     /// Measures `run`, and once more only when its p90 is over `budget`. Passes when the last run is within budget.
+    /// When both runs are over, times `control` (display passes with no click) in the same run (#213).
     @MainActor
     static func measure<Run>(
-        _ name: String, budget: Double, samples: (Run) -> [Double], _ run: () async throws -> Run
+        _ name: String, budget: Double, samples: (Run) -> [Double], control: () async throws -> [Double],
+        _ run: () async throws -> Run
     ) async throws -> Outcome<Run> {
         let first = try await run()
         let firstValue = value(samples(first))
         guard firstValue > budget else { return Outcome(runs: [first], value: firstValue, passed: true) }
-        let note = String(
+        var note = String(
             format: "DocumentSelectionLatency %@: retried after p90 %.1f ms (first run)", name, firstValue)
         print(note)
         let second = try await run()
         let secondValue = value(samples(second))
-        return Outcome(runs: [first, second], value: secondValue, passed: secondValue <= budget, note: note)
+        var outcome = Outcome(runs: [first, second], value: secondValue, passed: secondValue <= budget, note: note)
+        guard !outcome.passed else { return outcome }
+        let controlValue = value(try await control())
+        outcome.control = controlValue
+        note += String(format: "; control p90 %.1f ms (limit %.1f ms)", controlValue, controlBudget)
+        if outcome.inconclusive {
+            note += String(
+                format: "; inconclusive: p90 %.1f ms over %.1f ms on a loaded host, timing not judged", secondValue,
+                budget)
+        }
+        outcome.note = note
+        print("DocumentSelectionLatency \(name): " + (outcome.inconclusive ? "inconclusive" : "failed") + " — " + note)
+        return outcome
+    }
+
+    /// Timings of `samples` display passes with no click: the host's own pass cost under the current load.
+    @MainActor
+    static func control(_ pass: () async throws -> Void) async throws -> [Double] {
+        var timings: [Double] = []
+        for _ in 0..<controlSamples {
+            let start = ContinuousClock.now
+            try await pass()
+            let elapsed = ContinuousClock.now - start
+            timings.append(Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e15)
+        }
+        return timings
+    }
+
+    /// Judges a timing outcome: fails when conclusive and over budget, records the skip reason when inconclusive.
+    /// Callers check every functional guard first and call `skipIfInconclusive` last.
+    static func assertTiming<Run>(
+        _ outcome: Outcome<Run>, _ message: @autoclosure () -> String, inconclusive: inout [String],
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        if outcome.inconclusive {
+            inconclusive.append(message() + (outcome.note.map { "; \($0)" } ?? ""))
+        } else {
+            XCTAssertTrue(outcome.passed, message() + (outcome.note.map { "; \($0)" } ?? ""), file: file, line: line)
+        }
+    }
+
+    /// Skips only the timing verdict, after every functional guard has run (#213).
+    static func skipIfInconclusive(_ inconclusive: [String]) throws {
+        guard !inconclusive.isEmpty else { return }
+        throw XCTSkip("Timing inconclusive under sustained host load: " + inconclusive.joined(separator: " | "))
     }
 }

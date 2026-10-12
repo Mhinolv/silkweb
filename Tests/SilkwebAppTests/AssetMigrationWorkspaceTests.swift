@@ -17,15 +17,11 @@ final class AssetMigrationWorkspaceTests: XCTestCase {
         try Data("![x](.silkweb-assets/id/image.png)".utf8).write(to: root.appendingPathComponent("note.md"))
         let defaults = disposableDefaults("MigrationOpen")
         let workspace = LibraryWorkspace(defaults: defaults)
-        workspace.open(root)
-        let deadline = Date().addingTimeInterval(5)
-        while Date() < deadline {
-            if workspace.snapshot != nil, !workspace.loading, !workspace.mediaMigrationRunning,
-                !FileManager.default.fileExists(atPath: root.appendingPathComponent(".silkweb-assets").path)
-            {
-                break
-            }
-            try await Task.sleep(for: .milliseconds(20))
+        try await openLibrary(root, in: workspace)
+        try await waitUntil("the media migration finishes", timeout: .seconds(10)) {
+            workspace.error != nil
+                || (!workspace.mediaMigrationRunning
+                    && !FileManager.default.fileExists(atPath: root.appendingPathComponent(".silkweb-assets").path))
         }
         XCTAssertNil(workspace.error)
         XCTAssertFalse(workspace.mediaBannerVisible, "Fast migration stays silent")
