@@ -451,6 +451,49 @@ final class PlainMarkdownTextView: NSTextView {
             writingModes.keyboardDidMove()
         }
     }
+
+    // MARK: Line-start clicks (#243)
+
+    /// The snap zone reaches at least this far into a line whose first glyph is narrower.
+    static let lineStartTolerance: CGFloat = 4
+
+    /// AppKit rounds a click to the nearest glyph edge, so a click on the right half of a line's
+    /// one-character marker (`#`, `-`, `>`) landed after it. A plain click in the left margin or on
+    /// the first glyph of any visual line goes to that line's start; a drag from there anchors there.
+    override func mouseDown(with event: NSEvent) {
+        guard event.clickCount == 1, event.modifierFlags.isDisjoint(with: [.shift, .command, .option, .control]),
+            let zone = lineStartZone(at: convert(event.locationInWindow, from: nil))
+        else { return super.mouseDown(with: event) }
+        // Press on the first glyph's leading edge so AppKit's tracking loop anchors there.
+        let edge = convert(NSPoint(x: zone.edge, y: convert(event.locationInWindow, from: nil).y), to: nil)
+        super.mouseDown(
+            with: NSEvent.mouseEvent(
+                with: event.type, location: edge, modifierFlags: event.modifierFlags, timestamp: event.timestamp,
+                windowNumber: event.windowNumber, context: nil, eventNumber: event.eventNumber,
+                clickCount: event.clickCount, pressure: event.pressure) ?? event)
+        // The loop ends on the mouse-up. Released in the same zone (a click, or a jitter over the
+        // marker), it is a caret at the line start, drawn on the clicked line.
+        guard let up = NSApp.currentEvent, up.type == .leftMouseUp, up.windowNumber == event.windowNumber,
+            lineStartZone(at: convert(up.locationInWindow, from: nil))?.start == zone.start
+        else { return }
+        setSelectedRange(NSRange(location: zone.start, length: 0), affinity: .downstream, stillSelecting: false)
+    }
+
+    /// The visual line under `point` when it is in that line's snap zone: the left margin up to the
+    /// trailing edge of its first glyph (at least `lineStartTolerance`), across the fragment's band.
+    func lineStartZone(at point: NSPoint) -> (start: Int, edge: CGFloat)? {
+        guard let layout = layoutManager, let container = textContainer, layout.numberOfGlyphs > 0 else { return nil }
+        let origin = textContainerOrigin
+        let local = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        var glyphs = NSRange()
+        let line = layout.lineFragmentRect(
+            forGlyphAt: layout.glyphIndex(for: local, in: container), effectiveRange: &glyphs)
+        guard local.y >= line.minY, local.y < line.maxY else { return nil }
+        let first = layout.boundingRect(forGlyphRange: NSRange(location: glyphs.location, length: 1), in: container)
+        guard local.x < max(first.maxX, first.minX + Self.lineStartTolerance) else { return nil }
+        return (layout.characterIndexForGlyph(at: glyphs.location), origin.x + first.minX)
+    }
+
     #if DEBUG
         private(set) var fullDrawCount = 0
     #endif
