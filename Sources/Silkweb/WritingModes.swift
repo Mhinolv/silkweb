@@ -29,6 +29,8 @@ import SwiftUI
     private var progress: CGFloat = 1
     private var timer: Timer?
     private var updateScheduled = false
+    /// When the last queued unit update ran.
+    private var lastUpdate: CFTimeInterval = 0
     private var anchorScheduled = false
     var isFading: Bool { fadeFrom != nil }
 
@@ -64,7 +66,11 @@ import SwiftUI
 
     // MARK: Focus
 
-    func selectionDidChange() { if focus { scheduleUpdate() } }
+    /// A selection drag (#244) moves the bright unit at most once per frame; the release settles it.
+    func selectionDidChange(stillSelecting: Bool = false) {
+        guard focus else { return }
+        scheduleUpdate(after: stillSelecting ? max(0, lastUpdate + 1.0 / 60 - CACurrentMediaTime()) : 0)
+    }
 
     func textDidChange() {
         if focus { scheduleUpdate() }
@@ -108,14 +114,20 @@ import SwiftUI
     }
 
     /// Once per run loop turn, after the styler has refreshed its fence checkpoints.
-    private func scheduleUpdate() {
+    private func scheduleUpdate(after delay: TimeInterval = 0) {
         guard !updateScheduled else { return }
         updateScheduled = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.updateScheduled = false
-            self.updateActiveRange()
+        if delay > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.runScheduledUpdate() }
+        } else {
+            DispatchQueue.main.async { [weak self] in self?.runScheduledUpdate() }
         }
+    }
+
+    private func runScheduledUpdate() {
+        updateScheduled = false
+        lastUpdate = CACurrentMediaTime()
+        updateActiveRange()
     }
 
     func updateActiveRange() {
@@ -375,7 +387,7 @@ import SwiftUI
         return (max(0, (Self.anchor * height - half).rounded()), max(0, ((1 - Self.anchor) * height - half).rounded()))
     }
 
-    private func lineHeight(_ editor: PlainMarkdownTextView) -> CGFloat {
+    func lineHeight(_ editor: PlainMarkdownTextView) -> CGFloat {
         let font = editor.style.bodyFont
         return (editor.layoutManager?.defaultLineHeight(for: font) ?? font.ascender - font.descender)
             * editor.style.lineHeight
