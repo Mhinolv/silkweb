@@ -80,7 +80,8 @@ final class AgentHelperProcessTests: XCTestCase {
     }
 
     /// The test key is honored by the test host only: the shipped helper's sources, the shared entry and the bundling
-    /// script never mention it, and the installed `build/helper/silkweb` is copied from `SilkwebHelper`.
+    /// and release scripts never mention it, and the installed `build/helper/silkweb` is copied from `SilkwebHelper`
+    /// of the bundled configuration (debug or release, #249).
     func testShippedHelperHasNoTestKeyHook() throws {
         let sources = Self.repository.appendingPathComponent("Sources")
         for folder in ["SilkwebHelper", "SilkwebCore", "Silkweb"] {
@@ -98,7 +99,14 @@ final class AgentHelperProcessTests: XCTestCase {
         XCTAssertTrue(main.contains("verifier: AgentGrantKeychain()"), main)
         let bundle = try String(
             contentsOf: Self.repository.appendingPathComponent("scripts/bundle_app.sh"), encoding: .utf8)
-        XCTAssertTrue(bundle.contains("cp .build/debug/SilkwebHelper \"$HELPER\""), bundle)
-        XCTAssertFalse(bundle.contains(BuiltHelper.productName), bundle)
+        XCTAssertTrue(bundle.contains("HELPER=\"build/helper/silkweb\""), bundle)
+        XCTAssertTrue(bundle.contains("cp \".build/$CONFIG/SilkwebHelper\" \"$HELPER\""), bundle)
+        for script in ["bundle_app.sh", "release.sh", "make_dmg.sh"] {
+            let text = try String(
+                contentsOf: Self.repository.appendingPathComponent("scripts").appendingPathComponent(script),
+                encoding: .utf8)
+            XCTAssertFalse(text.contains(BuiltHelper.keyVariable), script)
+            XCTAssertFalse(text.contains(BuiltHelper.productName), script)
+        }
     }
 }
