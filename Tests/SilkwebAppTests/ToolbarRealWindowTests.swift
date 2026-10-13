@@ -10,8 +10,6 @@ import XCTest
 /// The owner's GUI check of 5916514 found items over the traffic lights and the bar collapsing into » after a
 /// document opened; the collapse reproduces whenever the Outline inspector is shown.
 final class ToolbarRealWindowTests: XCTestCase {
-    static let repository = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     static let deep =
         "Travel/North American Road Trips/Pennsylvania and the Great Lakes/Lake Erie Shoreline Campgrounds/Presque Isle"
     static let document = deep + "/Settling In at Presque Isle State Park After a Long Week on the Road.md"
@@ -78,14 +76,14 @@ final class ToolbarRealWindowTests: XCTestCase {
         }
     }
 
-    /// A temp copy of `Test_Library` plus a deep folder holding a document with a long title.
+    /// A temp copy of the sample Library plus a deep folder holding a document with a long title.
     @MainActor private func makeHarness(width: CGFloat, outline: Bool) async throws -> Harness {
         _ = NSApplication.shared
         let container = FileManager.default.temporaryDirectory.appendingPathComponent(
             "SilkwebRealWindow-" + UUID().uuidString)
         let root = container.appendingPathComponent("Field Notes")
         try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: Self.repository.appendingPathComponent("Test_Library"), to: root)
+        try FileManager.default.copyItem(at: SnapshotHarness.sampleLibrary, to: root)
         try? FileManager.default.removeItem(at: root.appendingPathComponent(".silkweb"))
         try FileManager.default.createDirectory(
             at: root.appendingPathComponent(Self.deep), withIntermediateDirectories: true)
