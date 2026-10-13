@@ -133,7 +133,8 @@ Rules:
   checks on `main`), and (bugs) the regression test proven to fail on the pre-fix code. The Orchestrator closes issues
   explicitly (`merge_pr.sh`), so `Refs #n` items stay open for the owner check.
 - CI (`.github/workflows/ci.yml`) has three fixed checks: `CI / classify` lists the PR's changed files (and fails
-  if any added or changed path is under `Test_Library/` or repo-root `.silkweb/`, #247), `CI /
+  if any added or changed path is under `Test_Library/` or repo-root `.silkweb/`, or if the head commit still
+  tracks either folder at all, #247), `CI /
   build-format` runs the pinned toolchain check, format lint and build on macOS (no tests), and `CI / ci-gate` is the
   merge evidence. `./scripts/build.sh test` is still mandatory locally (Engineer, QA, Orchestrator post-merge).
 - CI runs on every PR into `main` when it is opened, reopened, marked ready, or pushed to (`synchronize`).

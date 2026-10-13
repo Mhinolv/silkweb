@@ -37,6 +37,20 @@ jobs:
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
           echo "PR head SHA: $HEAD_SHA"
           short=${HEAD_SHA:0:7}
+          # #247: the owner's Library must stay untracked, so the head commit's root tree must not
+          # contain Test_Library/ or .silkweb/ at all (catches entries left in the index, not just PR changes).
+          root=$(gh api "repos/$GITHUB_REPOSITORY/git/trees/$HEAD_SHA" --jq '.tree[].path') || {
+            echo "::error::GitHub API request for the head tree failed"
+            echo "Could not list the head tree — failing so the gate cannot pass silently." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+          tracked=$(printf '%s\n' "$root" | grep -Ex 'Test_Library|\.silkweb' || true)
+          if [ -n "$tracked" ]; then
+            line="classify: FAIL — owner Library tracked at $short: $(printf '%s' "$tracked" | tr '\n' ' ')(run git rm -r --cached --sparse <path>)"
+            echo "::error::$line"
+            echo "$line" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           if [ "$EVENT" != pull_request ]; then
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
             echo "draft=false" >> "$GITHUB_OUTPUT"
