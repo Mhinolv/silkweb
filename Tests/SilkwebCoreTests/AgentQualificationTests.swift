@@ -259,18 +259,13 @@ final class AgentQualificationTests: XCTestCase {
     /// Six helper processes create at once, each also retrying one shared key, while the app keeps adding
     /// Tags. Every Document appears exactly once, every Tag and identity survives, and the receipts match.
     func testParallelHelperProcessesKeepDocumentsTagsAndReceipts() async throws {
-        let products = Bundle(for: Self.self).bundleURL.deletingLastPathComponent()
-        let binary = products.appendingPathComponent("SilkwebHelper")
-        guard FileManager.default.isExecutableFile(atPath: binary.path) else {
-            throw XCTSkip("SilkwebHelper isn't built next to the test bundle")
-        }
+        let helper = try BuiltHelper(nextTo: Self.self)
         let grants = root.appendingPathComponent("agent-grants.json")
-        try Data(
+        try helper.writeSignedGrants(
             """
             {"version":1,"grants":[{"project":"Silkweb","library":{"path":"\(library.path)"},"access":"read-create",
             "limits":{"requests_per_minute":1000}}]}
-            """.utf8
-        ).write(to: grants)
+            """, to: grants)
         let body = root.appendingPathComponent("body.md")
         try Data("Checkpoint from a parallel session.".utf8).write(to: body)
         let owner = UUID()
@@ -290,13 +285,11 @@ final class AgentQualificationTests: XCTestCase {
         let library = library!
         let project = project
         @Sendable func run(_ key: String, title: String, lane: Int) {
-            let process = Process()
-            process.executableURL = binary
-            process.arguments = [
+            let process = helper.process([
                 "memory", "create", "--grants", grants.path, "--folder", "memories", "--title", title,
                 "--idempotency-key", key, "--agent", "qualification", "--session", "parallel",
                 "--client", "lane-\(key == "shared" ? 0 : lane)", "--body-file", body.path,
-            ]
+            ])
             let stdout = Pipe()
             process.standardOutput = stdout
             process.standardError = Pipe()

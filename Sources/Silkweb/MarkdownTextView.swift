@@ -451,6 +451,112 @@ final class PlainMarkdownTextView: NSTextView {
             writingModes.keyboardDidMove()
         }
     }
+
+    // MARK: Line-start clicks (#243)
+
+    /// The snap zone reaches at least this far into a line whose first glyph is narrower.
+    static let lineStartTolerance: CGFloat = 4
+
+    /// AppKit rounds a click to the nearest glyph edge, so a click on the right half of a line's
+    /// one-character marker (`#`, `-`, `>`) landed after it. A plain click in the left margin or on
+    /// the first glyph of any visual line goes to that line's start; a drag from there anchors there.
+    override func mouseDown(with event: NSEvent) {
+        // AppKit's tracking loop runs inside super; its auto-scroll ticks use the drag pacing below (#244).
+        selectionDrag = (nil, enclosingScrollView?.contentView.bounds.minY ?? 0)
+        defer { selectionDrag = nil }
+        guard event.clickCount == 1, event.modifierFlags.isDisjoint(with: [.shift, .command, .option, .control]),
+            let zone = lineStartZone(at: convert(event.locationInWindow, from: nil))
+        else { return super.mouseDown(with: event) }
+        // Press on the first glyph's leading edge so AppKit's tracking loop anchors there.
+        let edge = convert(NSPoint(x: zone.edge, y: convert(event.locationInWindow, from: nil).y), to: nil)
+        super.mouseDown(
+            with: NSEvent.mouseEvent(
+                with: event.type, location: edge, modifierFlags: event.modifierFlags, timestamp: event.timestamp,
+                windowNumber: event.windowNumber, context: nil, eventNumber: event.eventNumber,
+                clickCount: event.clickCount, pressure: event.pressure) ?? event)
+        // The loop ends on the mouse-up. Released in the same zone (a click, or a jitter over the
+        // marker), it is a caret at the line start, drawn on the clicked line.
+        guard let up = NSApp.currentEvent, up.type == .leftMouseUp, up.windowNumber == event.windowNumber,
+            lineStartZone(at: convert(up.locationInWindow, from: nil))?.start == zone.start
+        else { return }
+        setSelectedRange(NSRange(location: zone.start, length: 0), affinity: .downstream, stillSelecting: false)
+    }
+
+    /// The visual line under `point` when it is in that line's snap zone: the left margin up to the
+    /// trailing edge of its first glyph (at least `lineStartTolerance`), across the fragment's band.
+    func lineStartZone(at point: NSPoint) -> (start: Int, edge: CGFloat)? {
+        guard let layout = layoutManager, let container = textContainer, layout.numberOfGlyphs > 0 else { return nil }
+        let origin = textContainerOrigin
+        let local = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        var glyphs = NSRange()
+        let line = layout.lineFragmentRect(
+            forGlyphAt: layout.glyphIndex(for: local, in: container), effectiveRange: &glyphs)
+        guard local.y >= line.minY, local.y < line.maxY else { return nil }
+        let first = layout.boundingRect(forGlyphRange: NSRange(location: glyphs.location, length: 1), in: container)
+        guard local.x < max(first.maxX, first.minX + Self.lineStartTolerance) else { return nil }
+        return (layout.characterIndexForGlyph(at: glyphs.location), origin.x + first.minX)
+    }
+
+    // MARK: Drag auto-scroll (#244)
+
+    /// Scrolling starts this far inside the pane's top or bottom edge.
+    static let autoscrollMargin: CGFloat = 4
+    /// Lines per second by distance past the pane edge, interpolated between these points and capped at the last.
+    static let autoscrollSpeeds: [(distance: CGFloat, lines: CGFloat)] = [(0, 2), (24, 5), (72, 14), (144, 30)]
+
+    /// While a selection drag tracks: the last auto-scroll tick and the unrounded scroll position it reached.
+    private var selectionDrag: (time: TimeInterval?, y: CGFloat)?
+
+    /// AppKit's clip view scrolled by the pointer's whole distance outside the visible rect on every
+    /// periodic tick, and counted Typewriter's content insets (1.27) as outside: a drag a line from the
+    /// anchor jumped hundreds of points. A selection drag scrolls only past the full pane's top or bottom
+    /// edge, at a time-based speed, and stops on release or when the pointer comes back inside.
+    override func autoscroll(with event: NSEvent) -> Bool {
+        guard let drag = selectionDrag, let scroll = enclosingScrollView else { return super.autoscroll(with: event) }
+        let clip = scroll.contentView
+        let point = clip.convert(event.locationInWindow, from: nil)
+        let visible = clip.bounds
+        let past: CGFloat, direction: CGFloat
+        if point.y < visible.minY + Self.autoscrollMargin {
+            (past, direction) = (visible.minY - point.y, -1)
+        } else if point.y > visible.maxY - Self.autoscrollMargin {
+            (past, direction) = (point.y - visible.maxY, 1)
+        } else {
+            selectionDrag = (nil, visible.minY)
+            return false
+        }
+        // The first tick past the edge counts as one frame; a stalled tick never jumps.
+        let elapsed = drag.time.map { min(max(0, event.timestamp - $0), 0.1) } ?? 1.0 / 60
+        // Keep sub-point progress the clip view rounds away, unless something else scrolled meanwhile.
+        let start = abs(drag.y.rounded() - visible.minY) < 1 ? drag.y : visible.minY
+        let target = start + direction * Self.autoscrollSpeed(past: past) * writingModes.lineHeight(self) * elapsed
+        let insets = scroll.contentInsets
+        let y = min(max(target, -insets.top), max(-insets.top, frame.height + insets.bottom - visible.height))
+        selectionDrag = (event.timestamp, y)
+        guard abs(y.rounded() - visible.minY) >= 0.5 else { return false }
+        clip.scroll(to: NSPoint(x: visible.minX, y: y.rounded()))
+        scroll.reflectScrolledClipView(clip)
+        return true
+    }
+
+    /// AppKit's tracking loop calls `autoscroll(with:)` only while the pointer is outside this rect; during
+    /// a selection drag it stops `autoscrollMargin` short of the top and bottom so a pane at the screen's
+    /// edge still scrolls.
+    override var visibleRect: NSRect {
+        let rect = super.visibleRect
+        guard selectionDrag != nil, rect.height > 2 * Self.autoscrollMargin else { return rect }
+        return rect.insetBy(dx: 0, dy: Self.autoscrollMargin)
+    }
+
+    /// Lines per second `past` points beyond the pane edge (negative inside the margin).
+    static func autoscrollSpeed(past: CGFloat) -> CGFloat {
+        let distance = max(0, past)
+        for (low, high) in zip(autoscrollSpeeds, autoscrollSpeeds.dropFirst()) where distance < high.distance {
+            return low.lines + (high.lines - low.lines) * (distance - low.distance) / (high.distance - low.distance)
+        }
+        return autoscrollSpeeds.last!.lines
+    }
+
     #if DEBUG
         private(set) var fullDrawCount = 0
     #endif
@@ -564,7 +670,7 @@ final class PlainMarkdownTextView: NSTextView {
     override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
         let old = highlightsCurrentLine ? currentLineBand() : nil
         super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
-        writingModes.selectionDidChange()
+        writingModes.selectionDidChange(stillSelecting: stillSelecting)
         guard highlightsCurrentLine else { return }
         if let old { setNeedsDisplay(old) }
         if let band = currentLineBand() { setNeedsDisplay(band) }

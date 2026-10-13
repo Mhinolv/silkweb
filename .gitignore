@@ -2,3 +2,6 @@
 build/
 .swiftpm/
 .DS_Store
+# #247: the owner's manual-test Library is local only. Tests use Tests/Fixtures/SampleLibrary/.
+Test_Library/
+/.silkweb/

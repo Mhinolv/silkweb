@@ -1,14 +1,18 @@
 # Personal Library and Test_Library
 
-How to keep your own writing and the repo's `Test_Library` open side by side in one Silkweb window.
-Menu names and shortcuts follow `docs/design-system.md` §6.
+How to keep your own writing and `Test_Library/` (local only, gitignored) open side by side in one Silkweb
+window. Menu names and shortcuts follow `docs/design-system.md` §6.
 
 ## Why two Libraries
 
-Your writing lives in a folder of your own (for example `~/Documents/Writing`). The repo's
-`Test_Library/` is the sample blog used for manual testing during development. Keep them apart, so
-testing never touches your notes, and open both at once: each open Library is a **section** in the
-sidebar of the same window.
+Your writing lives in a folder of your own (for example `~/Documents/Writing`). `Test_Library/` at the
+repo root is an optional, local-only Library for manual testing. It's gitignored, so nothing in it is
+ever committed. Automated tests use the sample Library in `Tests/Fixtures/SampleLibrary/` instead. Keep
+them apart, so testing never touches your notes, and open both at once: each open Library is a
+**section** in the sidebar of the same window.
+
+Never add notes for tests under `Test_Library/`. Change `Tests/Fixtures/SampleLibrary/` and update the
+document-count assertions.
 
 ## Create or open a Library
 
@@ -19,8 +23,10 @@ sidebar of the same window.
 
 ## Add Test_Library as a second section
 
+0. If the repo has no `Test_Library/` folder yet, copy the sample Library to start one:
+   `cp -R Tests/Fixtures/SampleLibrary Test_Library`.
 1. With your personal Library open, choose **File › Open Folder in Place…** (⌘O) again.
-2. Pick the repo's `Test_Library` folder. It's added below your Library as a second section and becomes
+2. Pick the `Test_Library` folder at the repo root. It's added below your Library as a second section and becomes
    the current Library.
 
 Opening a folder that's already open doesn't add it twice; Silkweb selects its section instead.
