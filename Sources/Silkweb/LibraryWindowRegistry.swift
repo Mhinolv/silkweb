@@ -30,6 +30,8 @@ import SilkwebCore
     /// Launch is restoring the sections, or Quit / Close Window has snapshotted them: nothing is saved meanwhile.
     @ObservationIgnored private var sessionSuspended = false
     @ObservationIgnored private var sessionRestore: Task<Void, Never>?
+    /// #238: the window has one toolbar, so one gap sized for it, whichever Library is current.
+    @ObservationIgnored let toolbarMetrics = ToolbarMetrics()
     /// Presents an alert and returns true for its first button. Tests replace it.
     @ObservationIgnored var presentAlert: @MainActor (NSAlert, NSWindow?) async -> Bool =
         LibraryWorkspace.presentAlert(_:window:)
@@ -51,6 +53,7 @@ import SilkwebCore
     /// A workspace in this window: its Search Library and Quick Open can reach the other sections (#197).
     private func adopt(_ workspace: LibraryWorkspace) {
         workspace.shell = self
+        workspace.toolbarMetrics = toolbarMetrics
         workspace.search.otherLibraries = { [weak self, weak workspace] in
             guard let self, let workspace else { return [] }
             return self.sections.compactMap { other in

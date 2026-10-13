@@ -59,6 +59,9 @@ struct SnapshotScenario {
     var typewriterMode = false
     /// #89: clicks this Outline heading after the writing modes are on; the caret is drawn at the jump.
     var outlineJump: String? = nil
+    /// #246: typed at the caret one character every 40 ms (inside the outline's debounce) after the writing modes
+    /// are on, then left to settle: the capsule stays on the caret's section.
+    var typeAtCaret: String? = nil
     /// Selects this source text (all text when empty) so the status bar shows “N of M” counts (1.25).
     var selectText: String? = nil
     /// Widens the sidebar and list to their limits so the detail column (and its status bar) is narrow.
@@ -80,7 +83,7 @@ struct SnapshotScenario {
     var caretAfterJump: String? = nil
     /// #150: opens this note first and lets its page land, then selects `document` in the list as a click does.
     var switchFrom: String? = nil
-    /// #153: opens an empty library folder (no Test_Library copy) so the list shows its first-run empty state.
+    /// #153: opens an empty library folder (no sample Library copy) so the list shows its first-run empty state.
     var emptyLibrary = false
     /// #153: the list column's width (240 pt minimum … 480 pt maximum) instead of the standard 300 pt.
     var listWidth: CGFloat? = nil
@@ -107,6 +110,10 @@ struct SnapshotScenario {
     var secondLibraryTab: String? = nil
     /// #197: Search Library's All Libraries segment, or Quick Open's All Libraries toggle, is on.
     var allLibraries = false
+    /// #238: the second Library is current first, then this Library becomes current from it: "tab" clicks this
+    /// Library's tab in the strip; "loading" opens `pourOver` in this Library while it is still loading (the click
+    /// waits in the #209 queue).
+    var crossLibraryOpen: String? = nil
     /// #222: Search Library is scoped to the selected folder, as a search typed there starts.
     var searchFolderScope = false
     /// #195: the welcome screen (no Library open) with three Recent Libraries, one of them missing.
@@ -395,6 +402,13 @@ struct SnapshotScenario {
         .init(
             name: "focus-typewriter-outline-jump", document: writingModes, outline: true,
             visibleCaret: "Second paragraph", focusMode: true, typewriterMode: true, outlineJump: "Middle"),
+        // #246: typing at the end of the section right above “Middle”; the capsule stays on “Writing Modes”.
+        .init(
+            name: "outline-typing-focus-typewriter", document: writingModes, outline: true,
+            visibleCaret:
+                "Paragraph 11 of the draft talks about the road, the coffee and the weather, long enough to wrap in the column.",
+            focusMode: true, typewriterMode: true,
+            typeAtCaret: " And one more sentence"),
         // silkweb-1.25: selection counts leading, Focus chip + “Saved” trailing; narrow detail drops the characters segment.
         .init(
             name: "status-bar-counts", document: writingModes, visibleCaret: "The caret rests", focusMode: true,
@@ -437,6 +451,16 @@ struct SnapshotScenario {
             searchQuery: "coffee", listWidth: 480, secondLibrary: true, searchFolderScope: true),
         // #197: Quick Open with All Libraries on.
         .init(name: "quick-open-multi-library", quickQuery: "brew", secondLibrary: true, allLibraries: true),
+        // #238: Writing was current; this Library's tab in the strip makes it current again. The bar matches
+        // `tabs-two-libraries` (every control placed, the view group at the trailing edge).
+        .init(
+            name: "cross-library-tab-active", folder: "Coffee/Brewing Guides", document: pourOver,
+            tabs: [pourOver, "Travel/Japan/Ten Days in Kyoto.md"], secondLibrary: true,
+            secondLibraryTab: "Drafts/Untitled Idea.md", crossLibraryOpen: "tab"),
+        // #238: a document opened from Writing while this Library still loads: Loading library… in the editor column.
+        .init(
+            name: "cross-library-target-loading", folder: "Coffee/Brewing Guides", secondLibrary: true,
+            crossLibraryOpen: "loading"),
         .init(name: "welcome-recents", welcomeRecents: true),
         // #196: relaunch restores both sections (Writing collapsed) and the current Library's tabs.
         .init(name: "restore-two-sections", restore: "two-sections"),
@@ -479,6 +503,8 @@ private final class SnapshotResult<Value> {
 final class SnapshotHarness {
     nonisolated static let repository = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    /// #247: the tracked sample Library every app test and snapshot copies. `Test_Library/` is owner-local and gitignored.
+    nonisolated static let sampleLibrary = repository.appendingPathComponent("Tests/Fixtures/SampleLibrary")
     let size: NSSize
     let timeout: TimeInterval
     private let environment: [String: String]
@@ -502,7 +528,7 @@ final class SnapshotHarness {
     init(
         size: NSSize = NSSize(width: 1400, height: 900), timeout: TimeInterval = 12,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        library: URL = SnapshotHarness.repository.appendingPathComponent("Test_Library")
+        library: URL = SnapshotHarness.sampleLibrary
     ) {
         self.size = size
         self.timeout = timeout
@@ -512,9 +538,11 @@ final class SnapshotHarness {
 
     func run(output: URL, names: [String] = []) async throws -> SnapshotManifest {
         let output = output.standardizedFileURL.resolvingSymlinksInPath()
-        let ownerLibrary = Self.repository.appendingPathComponent("Test_Library").resolvingSymlinksInPath().path
-        guard output.path != ownerLibrary, !output.path.hasPrefix(ownerLibrary + "/") else {
-            throw SnapshotFailure.error("Snapshot output must be outside Test_Library")
+        for forbidden in ["Test_Library", "Tests/Fixtures"] {
+            let root = Self.repository.appendingPathComponent(forbidden).resolvingSymlinksInPath().path
+            guard output.path != root, !output.path.hasPrefix(root + "/") else {
+                throw SnapshotFailure.error("Snapshot output must be outside Test_Library and Tests/Fixtures")
+            }
         }
         guard size.width >= 900, size.height >= 560, size.width <= 4096, size.height <= 2160 else {
             throw SnapshotFailure.error("Snapshot size must be between 900×560 and 4096×2160 points")
@@ -1602,9 +1630,13 @@ final class SnapshotHarness {
                         try await bounded("second library search index") { await second.search.waitForIndex() }
                     }
                     second.sectionCollapsed = scenario.sectionCollapsed
-                    shell.focus(workspace)
+                    shell.focus(scenario.crossLibraryOpen == nil ? workspace : second)
                 }
-                content = AnyView(LibraryWorkspaceView(workspace: workspace, registry: shell))
+                // #238: the window follows the current Library, as `LibraryWindow` does.
+                content =
+                    scenario.crossLibraryOpen == nil
+                    ? AnyView(LibraryWorkspaceView(workspace: workspace, registry: shell))
+                    : AnyView(CurrentLibraryContent(registry: shell))
             }
             let themed = content.environment(\.colorScheme, dark ? .dark : .light)
             let controller = NSHostingController(
@@ -1672,6 +1704,30 @@ final class SnapshotHarness {
                         return toggle.toolTip == title && toggle.accessibilityLabel() == title
                     }
                 }
+            }
+            if let open = scenario.crossLibraryOpen, let registry {
+                if open == "tab" {
+                    guard
+                        let entry = registry.stripTabs.first(where: {
+                            $0.workspace === workspace && $0.tab.id == workspace.activeTabID
+                        })
+                    else { throw SnapshotFailure.error("This Library has no tab in the strip") }
+                    registry.activate(entry)
+                } else {
+                    workspace.loading = true
+                    registry.focus(workspace)
+                    workspace.selectDocuments([SnapshotScenario.pourOver])
+                    guard workspace.pendingSelection != nil else {
+                        throw SnapshotFailure.error("The open was not queued while the Library loads")
+                    }
+                }
+                try await wait("this Library is current") {
+                    controller.view.layoutSubtreeIfNeeded()
+                    return registry.current === workspace
+                }
+                // The editor column's delayed progress (300 ms) shows, and the bar settles.
+                try await Task.sleep(for: .milliseconds(450))
+                controller.view.layoutSubtreeIfNeeded()
             }
             if let restore = scenario.restore {
                 guard
@@ -1895,6 +1951,15 @@ final class SnapshotHarness {
                 controller.view.layoutSubtreeIfNeeded()
                 editor.writingModes.anchorCaret()
             }
+            if let typed = scenario.typeAtCaret, let editor = workspace.preview.editor {
+                for character in typed {
+                    editor.insertText(String(character), replacementRange: editor.selectedRange())
+                    controller.view.layoutSubtreeIfNeeded()
+                    try await Task.sleep(for: .milliseconds(40))
+                }
+                // The outline republishes after its 250 ms debounce; the fade settles.
+                try await Task.sleep(for: .milliseconds(600))
+            }
             if let text = scenario.selectText, let editor = workspace.preview.editor {
                 // An empty marker selects the whole document (the longest “N of M” copy).
                 let found =
@@ -2101,7 +2166,7 @@ final class SnapshotHarness {
                 if let marker = scenario.visibleCaret, scenario.selectText == nil, let editor = workspace.preview.editor
                 {
                     var location = editor.selectedRange().location
-                    if scenario.outlineJump == nil {
+                    if scenario.outlineJump == nil, scenario.typeAtCaret == nil {
                         let found = (editor.string as NSString).range(of: marker)
                         guard found.location != NSNotFound else { throw SnapshotFailure.error("Missing caret text") }
                         location = NSMaxRange(found)
@@ -2289,4 +2354,10 @@ extension SnapshotScenario {
         default: return []
         }
     }
+}
+
+/// #238: the library window's content follows the current Library, as `LibraryWindow` does, without its app setup.
+private struct CurrentLibraryContent: View {
+    let registry: LibraryWindowRegistry
+    var body: some View { LibraryWorkspaceView(workspace: registry.current, registry: registry) }
 }

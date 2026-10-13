@@ -1551,6 +1551,12 @@ sandboxed. The helper is a separate executable kept **outside the app bundle**, 
   the app that launched the helper (Terminal, iTerm, or the agent’s app), not to Silkweb.** Approve
   it once for that app in System Settings ▸ Privacy & Security ▸ Files and Folders. A Library
   elsewhere in your home folder, such as `~/Writing`, doesn’t prompt.
+- **Bundle ID change (#249):** the app is `io.github.mhinolv.silkweb` and the helper
+  `io.github.mhinolv.silkweb.helper` (before: `com.silkweb.app`, `com.silkweb.helper`). On first launch the
+  app copies the old preferences domain into the new one once and leaves the old one unchanged. The keychain
+  item keeps its name, so nothing moves there, but macOS asks once to let the renamed app use “Silkweb Agent
+  Grants”. Only reading the private key asks, so the prompt appears when the app first signs grants, never at
+  launch.
 
 ### Spike: app-closed access in Terminal (macOS 15+)
 
@@ -1681,7 +1687,7 @@ Local builds are signed ad hoc and never quarantined, so Gatekeeper doesn’t ch
 build is signed with the owner’s Developer ID and notarized:
 
 ```sh
-codesign --force --options runtime --timestamp -i com.silkweb.helper \
+codesign --force --options runtime --timestamp -i io.github.mhinolv.silkweb.helper \
   -s "Developer ID Application: <Name> (<TEAMID>)" build/helper/silkweb
 ditto -c -k build/helper/silkweb silkweb-helper.zip
 xcrun notarytool submit silkweb-helper.zip --keychain-profile <profile> --wait

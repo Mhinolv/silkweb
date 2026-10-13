@@ -15,11 +15,7 @@ final class IdleStabilityTests: XCTestCase {
         try "coffee coffee".write(to: root.appendingPathComponent("Coffee.md"), atomically: true, encoding: .utf8)
         let defaults = disposableDefaults("Idle")
         let workspace = LibraryWorkspace(defaults: defaults)
-        workspace.open(root)
-        for _ in 0..<200 {
-            if workspace.snapshot != nil && !workspace.loading { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await openLibrary(root, in: workspace)
         XCTAssertNil(workspace.error)
         _ = try XCTUnwrap(workspace.snapshot)
         await workspace.search.waitForIndex()

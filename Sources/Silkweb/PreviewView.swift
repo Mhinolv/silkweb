@@ -13,6 +13,7 @@ struct PreviewView: NSViewRepresentable {
         web.linkAction = { [weak coordinator = context.coordinator] in coordinator?.action(for: $0) ?? .blocked }
         context.coordinator.web = web
         workspace.preview.webView = web
+        workspace.preview.webViewReplaced()
         web.configuration.userContentController.add(context.coordinator, contentWorld: .defaultClient, name: "position")
         // Trusted app code runs in an isolated world; document JavaScript remains disabled.
         let script = """

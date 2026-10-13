@@ -27,7 +27,7 @@ final class PreferencesLeakTests: XCTestCase {
     @MainActor
     func testLibraryColumnsBuiltByTestsLeaveNoFilesOrRunnerKeys() async throws {
         _ = NSApplication.shared
-        XCTAssertNotEqual(Bundle.main.bundleIdentifier, "com.silkweb.app")
+        XCTAssertFalse([BundleIdentity.app, BundleIdentity.legacyApp].contains(Bundle.main.bundleIdentifier ?? ""))
         // The production name is shared by every runner, so an odd random height no other test uses marks
         // this test's own frames.
         let height = Int.random(in: 950...1049) * 2 + 1

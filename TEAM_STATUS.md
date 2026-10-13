@@ -3,7 +3,8 @@
 **Start here after a context reset: read the newest Silkweb handoff, not this file.** Silkweb is the primary
 source of truth for project memory (owner decision 2026-10-09):
 `silkweb memory search --type handoff --limit 5` → `silkweb memory read --id <id>`, then `silkweb memory activity`.
-Documents live in `Test_Library/Memory/Projects/Silkweb/{Handoffs,Progress,Memories}/`. GitHub
+Documents live in `Test_Library/Memory/Projects/Silkweb/{Handoffs,Progress,Memories}/` on the owner's Mac
+(local only, gitignored; never on GitHub). GitHub
 (**https://github.com/Mhinolv/silkweb**, milestone `v2`) is authoritative for issues and PRs. This file is only a
 short secondary snapshot.
 

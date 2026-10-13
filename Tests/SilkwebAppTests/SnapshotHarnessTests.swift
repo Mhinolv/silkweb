@@ -109,7 +109,7 @@ final class SnapshotHarnessTests: XCTestCase {
         }
     }
 
-    /// #49: the tracked Test_Library has no `Vanlife/`, so a clean checkout (lanes, CI) must still render the list scenario.
+    /// #49: the sample Library has no `Vanlife/`, so a clean checkout (lanes, CI) must still render the list scenario.
     @MainActor
     func testListScenarioRendersFromCleanCheckout() async throws {
         let output = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -132,14 +132,13 @@ final class SnapshotHarnessTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: temporary) }
         let owner = temporary.appendingPathComponent("Owner")
         try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
-        try FileManager.default.copyItem(
-            at: SnapshotHarness.repository.appendingPathComponent("Test_Library"), to: owner)
+        try FileManager.default.copyItem(at: SnapshotHarness.sampleLibrary, to: owner)
         try FileManager.default.createDirectory(
             at: owner.appendingPathComponent("Vanlife/Photos"), withIntermediateDirectories: true)
         try Data("# Settling In\n\nOwner text.".utf8).write(to: owner.appendingPathComponent("Vanlife/Settling In.md"))
         try Data("# Private\n".utf8).write(to: owner.appendingPathComponent("Vanlife/Owner Note.md"))
         for (name, library) in [
-            ("clean", SnapshotHarness.repository.appendingPathComponent("Test_Library")), ("owner", owner),
+            ("clean", SnapshotHarness.sampleLibrary), ("owner", owner),
         ] {
             let root = temporary.appendingPathComponent("Fixture from " + name)
             try SnapshotHarness(library: library).makeFixture(at: root)
@@ -191,11 +190,15 @@ final class SnapshotHarnessTests: XCTestCase {
                 XCTFail("Invalid size accepted")
             } catch { /* Input limits rejected before allocating a window. */  }
         }
-        let forbidden = SnapshotHarness.repository.appendingPathComponent("Test_Library/Snapshot-" + UUID().uuidString)
-        do {
-            _ = try await SnapshotHarness().run(output: forbidden)
-            XCTFail("Owner library accepted as output")
-        } catch {}
-        XCTAssertFalse(FileManager.default.fileExists(atPath: forbidden.path))
+        for root in ["Test_Library", "Tests/Fixtures"] {
+            let forbidden = SnapshotHarness.repository.appendingPathComponent(root + "/Snapshot-" + UUID().uuidString)
+            do {
+                _ = try await SnapshotHarness().run(output: forbidden)
+                XCTFail("\(root) accepted as output")
+            } catch {
+                XCTAssertTrue("\(error)".contains("Snapshot output must be outside Test_Library and Tests/Fixtures"))
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: forbidden.path))
+        }
     }
 }

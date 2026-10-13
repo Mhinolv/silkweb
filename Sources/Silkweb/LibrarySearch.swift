@@ -340,6 +340,13 @@ extension LibraryWorkspace {
             search.dismissQuickOpen(restoreFocus: false)
             search.text = ""
             shell.focus(other)
+            if other.loading || other.mutating {
+                // #238: the other Library is still loading (often its first use); it opens there once it's idle.
+                if let document = other.snapshot?.documents.first(where: { $0.id == foreign.result.id }) {
+                    other.queueOpen(document, pinned: pinned)
+                }
+                return
+            }
             await other.openSearchResult(foreign.result, findText: findText, pinned: pinned)
             return
         }

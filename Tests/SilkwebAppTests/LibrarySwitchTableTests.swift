@@ -64,9 +64,9 @@ final class LibrarySwitchTableTests: XCTestCase {
             // A previous launch persists A's location, as the folder panel does.
             let first = LibraryWorkspace(defaults: defaults)
             first.recoveryDirectory = container.appendingPathComponent("Recovery")
-            first.open(libraryA)
+            try await openLibrary(libraryA, in: first)
             try await waitUntil("A's location persists", timeout: .seconds(10)) {
-                first.snapshot != nil && !first.loading && defaults.data(forKey: "libraryLocation") != nil
+                defaults.data(forKey: "libraryLocation") != nil
             }
         }
         let workspace = LibraryWorkspace(defaults: defaults, columnAutosaveName: disposableAutosaveName("SwitchTable"))
@@ -86,9 +86,7 @@ final class LibrarySwitchTableTests: XCTestCase {
         }
         let harness = Harness(window: window, workspace: workspace, defaults: defaults, container: container)
         if restoring { workspace.restore() } else { workspace.open(libraryA) }
-        try await waitUntil("library A opens", timeout: .seconds(10)) {
-            workspace.snapshot != nil && !workspace.loading
-        }
+        try await waitForLibrary(libraryA, in: workspace)
         try await waitUntil("the list realizes A's rows", timeout: .seconds(10)) {
             harness.layout()
             return harness.table.map {

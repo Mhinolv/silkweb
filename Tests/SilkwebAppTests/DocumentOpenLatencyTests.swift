@@ -7,10 +7,8 @@ import XCTest
 
 /// #150: opening a note from the list shows its content within the ~150 ms budget in every mode, as one swap from
 /// the previous note: no blank preview, no placeholder, and inline images arrive with the text. The real library
-/// window (never ordered on screen) on a copy of `Test_Library` plus image-bearing notes, the owner's library size.
+/// window (never ordered on screen) on a copy of the sample Library plus image-bearing notes, the owner's library size.
 final class DocumentOpenLatencyTests: XCTestCase {
-    static let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent()
     /// From the selection to the pass that shows the note's content. Before #150 the preview waited for the
     /// 250 ms typing debounce on every switch (about 300 ms), and inline images for a 150 ms one.
     static let openBudget = TestEnvironment.frameBudget(150)
@@ -39,7 +37,7 @@ final class DocumentOpenLatencyTests: XCTestCase {
             "SilkwebOpen-" + UUID().uuidString)
         let root = container.appendingPathComponent("Library")
         try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: Self.repository.appendingPathComponent("Test_Library"), to: root)
+        try FileManager.default.copyItem(at: SnapshotHarness.sampleLibrary, to: root)
         try? FileManager.default.removeItem(at: root.appendingPathComponent(".silkweb"))
         // The owner's copy adds photos under `media/`.
         let media = root.appendingPathComponent("media")
@@ -67,10 +65,7 @@ final class DocumentOpenLatencyTests: XCTestCase {
         controller.sizingOptions = []
         window.contentViewController = controller
         window.setFrame(NSRect(x: 0, y: 0, width: 1400, height: 900), display: false)
-        workspace.open(root)
-        try await waitUntil("the library opens", timeout: .seconds(10)) {
-            workspace.snapshot != nil && !workspace.loading
-        }
+        try await openLibrary(root, in: workspace)
         workspace.selectFolder(nil)
         try await withDeadline("navigation") { await workspace.waitForNavigation() }
         let harness = Harness(window: window, workspace: workspace, root: try XCTUnwrap(workspace.snapshot?.rootURL)) {
@@ -79,7 +74,7 @@ final class DocumentOpenLatencyTests: XCTestCase {
             NSApp.appearance = oldAppearance
             try? FileManager.default.removeItem(at: container)
         }
-        XCTAssertEqual(harness.paths.count, 10, "Test_Library's eight notes plus the two photo notes")
+        XCTAssertEqual(harness.paths.count, 10, "The sample Library's eight notes plus the two photo notes")
         return harness
     }
 
@@ -185,7 +180,8 @@ final class DocumentOpenLatencyTests: XCTestCase {
             XCTAssertTrue(shows(h, path, text: text, mode: mode), "warm-up \(path)")
         }
         let outcome = try await LatencyGate.measure(
-            "open \(mode.rawValue)", budget: Self.openBudget, samples: \.latencies
+            "open \(mode.rawValue)", budget: Self.openBudget, samples: \.latencies,
+            control: { try await LatencyGate.control(h.pump) }
         ) {
             let run = try await switchThrough(h, mode: mode)
             print("DocumentOpenLatency " + run.summary(mode))
@@ -196,9 +192,12 @@ final class DocumentOpenLatencyTests: XCTestCase {
                 run.blank.count, 0, "\(mode): a note switch must be one swap, never blank: \(run.summary(mode))")
             XCTAssertEqual(run.spinners, 0, "\(mode): small warm notes never show the spinner: \(run.summary(mode))")
         }
-        let summary = try XCTUnwrap(outcome.runs.last).summary(mode) + (outcome.note.map { "; \($0)" } ?? "")
-        XCTAssertTrue(outcome.passed, "\(mode): open p90 over \(Self.openBudget) ms: \(summary)")
+        let summary = try XCTUnwrap(outcome.runs.last).summary(mode)
+        var inconclusive: [String] = []
+        LatencyGate.assertTiming(
+            outcome, "\(mode): open p90 over \(Self.openBudget) ms: \(summary)", inconclusive: &inconclusive)
         await h.workspace.didCloseWindow()
+        try LatencyGate.skipIfInconclusive(inconclusive)
     }
 
     @MainActor func testEditorShowsEachNoteAndItsImagesWithinBudget() async throws {

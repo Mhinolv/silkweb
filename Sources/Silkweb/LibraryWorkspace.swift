@@ -20,10 +20,17 @@ final class LibraryWorkspace {
     @ObservationIgnored var recoveryDirectory: URL?
     let search = LibrarySearch()
     @ObservationIgnored let knowledge = LibraryKnowledge()
-    let toolbarMetrics = ToolbarMetrics()
+    /// The window's compact-bar gap. #238: every section in the library window shares the registry's, so the bar
+    /// keeps its measured layout when another Library becomes current.
+    @ObservationIgnored var toolbarMetrics = ToolbarMetrics()
     let preview: PreviewCoordinator
     let columnAutosaveName: String?
     @ObservationIgnored private let defaults: UserDefaults
+    #if DEBUG
+        /// #246: body evaluations per view, and each Outline row the capsule showed, for tests that type.
+        @ObservationIgnored var bodyCounts: [String: Int] = [:]
+        @ObservationIgnored var outlineCurrentLog: [Int?] = []
+    #endif
 
     init(defaults: UserDefaults = AppDefaults.store, columnAutosaveName: String? = AppDefaults.columnAutosaveName) {
         self.defaults = defaults
@@ -234,8 +241,12 @@ final class LibraryWorkspace {
         var scope: Scope?
         var ids: [UUID] = []
         var pinned = false
+        /// #238: Quick Open or Search Library: the document opens in its own folder, wherever the list is.
+        var reveals = false
     }
     private(set) var pendingSelection: PendingSelection?
+    /// #238: a navigation is loading a document that has no tab yet; the empty editor column shows it's on its way.
+    private(set) var openingDocument = false
     var mediaProgress: (name: String, done: Int, total: Int)?
     var mediaFailures: [AssetFailure] = []
     var mediaDirectoryName = "media"
@@ -924,6 +935,12 @@ final class LibraryWorkspace {
         pendingSelection = PendingSelection(root: root, scope: scope)
     }
 
+    /// #238: Quick Open or Search Library (from another Library too) while this Library is still loading or busy:
+    /// the open waits in the #209 slot instead of being dropped.
+    func queueOpen(_ document: LibraryDocument, pinned: Bool) {
+        pendingSelection = PendingSelection(root: root, ids: [document.id], pinned: pinned, reveals: true)
+    }
+
     /// The queued click follows renames and moves by ID; a target trashed or out of the list's scope is dropped.
     private func openPendingSelection() {
         guard !loading, !mutating, let pending = pendingSelection else { return }
@@ -940,6 +957,13 @@ final class LibraryWorkspace {
         case .agents: return selectAgentActivity()
         case .proposals: return selectProposals()
         case nil: break
+        }
+        if pending.reveals {
+            guard let path = pending.ids.first.flatMap({ itemPathsByID[$0] }),
+                let document = snapshot.documents.first(where: { $0.relativePath == path })
+            else { return }
+            let folder = snapshot.folders.first { $0.id == document.folderID }?.relativePath
+            return navigate(folder: folder, documents: [path], pinned: pending.pinned)
         }
         let listed = Set(documents.map(\.relativePath))
         let paths = Set(pending.ids.compactMap { itemPathsByID[$0] }).intersection(listed)
@@ -994,9 +1018,17 @@ final class LibraryWorkspace {
         }
         navigationGeneration += 1
         let generation = navigationGeneration
+        let opening =
+            documents.count == 1
+            && documents.first.flatMap { snapshot?.metadata.IDsByPath[$0] }.map { id in
+                !tabs.contains { $0.id == id }
+            } == true
+        if openingDocument != opening { openingDocument = opening }
         let previous = navigationTask
         navigationTask = Task {
             await previous?.value
+            // A newer navigation owns the flag; this one clears it however it ends.
+            defer { if generation == navigationGeneration, openingDocument { openingDocument = false } }
             // Rapid clicks coalesce: a navigation already replaced by a newer one opens nothing.
             guard generation == navigationGeneration else { return }
             let document =
@@ -1299,19 +1331,25 @@ extension View {
 
 struct DelayedLibraryProgress: View {
     let count: Int?
+    var body: some View {
+        DelayedProgress(
+            label: count.map { "Loading library… \(CountPresentation.label($0, unit: .document))" }
+                ?? "Loading library…")
+    }
+}
+
+/// The pane background at once and a small spinner only after `delay`, so fast loads never flash it.
+struct DelayedProgress: View {
+    let label: String
+    var delay: Duration = .milliseconds(300)
     @State private var visible = false
     var body: some View {
         ColumnEmptyState {
-            if visible {
-                ProgressView(
-                    count.map { "Loading library… \(CountPresentation.label($0, unit: .document))" }
-                        ?? "Loading library…"
-                ).controlSize(.small)
-            }
+            if visible { ProgressView(label).controlSize(.small) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
-            try? await Task.sleep(for: .milliseconds(300)); if !Task.isCancelled { visible = true }
+            try? await Task.sleep(for: delay); if !Task.isCancelled { visible = true }
         }
     }
 }

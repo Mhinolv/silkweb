@@ -11,6 +11,8 @@ let package = Package(
         .executableTarget(name: "Silkweb", dependencies: ["SilkwebCore"], resources: [.process("Resources")]),
         // Headless `silkweb` agent-memory helper; bundled to build/helper/silkweb, outside the app.
         .executableTarget(name: "SilkwebHelper", dependencies: ["SilkwebCore"]),
+        // The helper with a test verify key instead of the keychain, for tests that launch it (#248). Never bundled.
+        .executableTarget(name: "SilkwebHelperTestHost", dependencies: ["SilkwebCore"]),
         .testTarget(name: "SilkwebCoreTests", dependencies: ["SilkwebCore"]),
         .testTarget(name: "SilkwebAppTests", dependencies: ["Silkweb"]),
     ],

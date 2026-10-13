@@ -8,6 +8,8 @@ struct SilkwebApp: App {
     private let registry = LibraryWindowRegistry.shared
 
     init() {
+        // #249: first, so window frames and settings read the preferences carried over from the old bundle ID.
+        _ = AppDefaults.store
         // #205: grants are verified with this Mac's keychain key; the Agent Access window signs owner saves with it.
         AgentGrantKeys.verifier = AgentGrantKeychain()
         AgentAccessModel.shared.keys = AgentGrantKeychain()

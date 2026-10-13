@@ -1,10 +1,11 @@
 import Foundation
+import SilkwebCore
 import XCTest
 
 /// A disposable preferences suite for one test (#67). The suite is a plist path in its own temporary directory:
 /// cfprefsd rewrites an emptied `~/Library/Preferences/<suite>.plist` after it is deleted, but never touches a
 /// removed directory. `remove()` also drops NSSplitView frames AppKit autosaved under `name` in XCTest's own domain.
-/// It never touches the app's real domain (`com.silkweb.app`).
+/// It never touches the app's real domain (`io.github.mhinolv.silkweb`, or `com.silkweb.app` before #249).
 final class TestPreferences: @unchecked Sendable {
     /// Every helper suite starts with this, so a leftover file is recognisable as test residue.
     static let prefix = "Silkweb.Tests."
@@ -44,7 +45,9 @@ final class TestPreferences: @unchecked Sendable {
 
     /// Removes `NSSplitView …` keys containing `name` from the runner's domain only.
     static func removeSplitAutosave(containing name: String) {
-        precondition(Bundle.main.bundleIdentifier != "com.silkweb.app", "Tests must never edit the app's preferences")
+        precondition(
+            ![BundleIdentity.app, BundleIdentity.legacyApp].contains(Bundle.main.bundleIdentifier ?? ""),
+            "Tests must never edit the app's preferences")
         let standard = UserDefaults.standard
         standard.synchronize()
         for key in standard.dictionaryRepresentation().keys where key.hasPrefix("NSSplitView") && key.contains(name) {
