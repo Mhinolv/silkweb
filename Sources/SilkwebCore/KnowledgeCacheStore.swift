@@ -16,7 +16,7 @@ import os
 /// Folders are 0700 and files 0600.
 public struct KnowledgeCacheStore: Sendable {
     public static let version = 1
-    static let log = Logger(subsystem: "com.silkweb.app", category: "knowledge")
+    static let log = Logger(subsystem: BundleIdentity.app, category: "knowledge")
 
     public enum Discard: String, Sendable, Equatable {
         case missing, corrupt, unsupportedVersion = "unsupported-version", otherLibrary = "other-library"
