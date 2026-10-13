@@ -104,10 +104,7 @@ final class AgentUpdateWorkspaceTests: XCTestCase {
             }
         }
 
-        workspace.open(root)
-        try await waitUntil("the library opens", timeout: .seconds(10)) {
-            workspace.snapshot != nil && !workspace.loading
-        }
+        try await openLibrary(root, in: workspace)
         workspace.navigate(folder: Self.handoffs, documents: [path])
         await workspace.waitForNavigation()
         try await waitUntil("the editor shows the agent Document", timeout: .seconds(10)) {

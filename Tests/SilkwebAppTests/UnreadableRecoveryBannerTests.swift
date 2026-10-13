@@ -24,11 +24,7 @@ final class UnreadableRecoveryBannerTests: XCTestCase {
             let defaults = disposableDefaults("Unreadable")
             let workspace = LibraryWorkspace(defaults: defaults)
             workspace.recoveryDirectory = recovery
-            workspace.open(root)
-            for _ in 0..<500 {
-                if workspace.error != nil || (!workspace.loading && workspace.snapshot != nil) { break }
-                try await Task.sleep(for: .milliseconds(10))
-            }
+            try await openLibrary(root, in: workspace)
             XCTAssertNotNil(workspace.snapshot)
             return workspace
         }
