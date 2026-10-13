@@ -6,7 +6,11 @@ import SwiftUI
 /// to the process, so tests start from defaults and never read or write the runner's real domain (silkweb-1.81).
 enum AppDefaults {
     static let store: UserDefaults = {
-        guard NSClassFromString("XCTestCase") != nil else { return .standard }
+        guard NSClassFromString("XCTestCase") != nil else {
+            // #249: preferences saved under the old bundle identifier carry over once.
+            PreferencesMigration.runForApp()
+            return .standard
+        }
         try? FileManager.default.createDirectory(at: testDirectory, withIntermediateDirectories: true)
         let suite = UserDefaults(suiteName: testSuiteName) ?? .standard
         suite.removePersistentDomain(forName: testSuiteName)

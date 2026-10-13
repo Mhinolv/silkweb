@@ -1,0 +1,29 @@
+name: Release
+# #249: every v* tag push builds the unsigned Release DMG and publishes it on the GitHub Release for that tag
+# (scripts/release.sh --publish). Re-running the job, or pushing the same tag again, updates the Release in place.
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    # Pinned toolchain (.toolchain-versions), the same as CI.
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and publish
+        run: sh ./scripts/release.sh --publish "$GITHUB_REF_NAME"
+      - name: Summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          echo "release: $STATUS — $GITHUB_REF_NAME. Re-run: gh run rerun ${{ github.run_id }} --failed" >> "$GITHUB_STEP_SUMMARY"

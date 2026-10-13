@@ -26,6 +26,9 @@ Do **not** open or read the product owner's personal MWeb library/notes content 
 ## Build & Test
 - Build (also bundles `build/Silkweb.app`): `./scripts/build.sh`
 - Unit tests: `./scripts/build.sh test`
+- Unsigned release DMG (#249): `sh scripts/release.sh` builds the Release configuration into
+  `build/release/Silkweb-<version>.dmg`; `--publish` also creates or updates the GitHub Release for tag `v<version>`.
+  Pushing a `v*` tag runs the same script in `.github/workflows/release.yml`. The version comes from `scripts/Info.plist`.
 - Toolchain: pinned in `.toolchain-versions` (Xcode 26.2 / 17C52, Swift 6.2.3, swift-format 6.2.3); `./scripts/check_toolchain.sh`
   verifies it (`build.sh` runs it first for both build and test and stops on a mismatch) and CI selects the same Xcode via `DEVELOPER_DIR`. Bump all versions together in one PR, then re-run the formatter.
 - Format: `./scripts/format.sh` (formats `Sources/` and `Tests/` in place with the root `.swift-format`) and

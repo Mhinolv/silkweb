@@ -4,7 +4,7 @@
 <dict>
     <key>CFBundleName</key><string>Silkweb</string>
     <key>CFBundleDisplayName</key><string>Silkweb</string>
-    <key>CFBundleIdentifier</key><string>com.silkweb.app</string>
+    <key>CFBundleIdentifier</key><string>io.github.mhinolv.silkweb</string>
     <key>CFBundleExecutable</key><string>Silkweb</string>
     <key>CFBundleIconFile</key><string>Silkweb.icns</string>
     <key>CFBundlePackageType</key><string>APPL</string>

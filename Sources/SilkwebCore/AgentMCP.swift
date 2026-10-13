@@ -47,7 +47,7 @@ public final class AgentMCPServer: @unchecked Sendable {
     /// Tool calls accepted but not answered, and the ones among them the client cancelled.
     private var pending: Set<String> = []
     private var cancelled: Set<String> = []
-    let queue = DispatchQueue(label: "com.silkweb.helper.mcp-tools")
+    let queue = DispatchQueue(label: "io.github.mhinolv.silkweb.helper.mcp-tools")
     /// Test seam: runs on the tool queue as a call starts, with its request ID.
     var willRun: (@Sendable (String) -> Void)?
 

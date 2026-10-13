@@ -1,21 +1,26 @@
 #!/bin/sh
-# Wrap the SwiftPM debug binary into build/Silkweb.app so it launches like a normal Mac app.
+# Wrap the SwiftPM binary into build/Silkweb.app so it launches like a normal Mac app.
+# Usage: scripts/bundle_app.sh [debug|release]   (default debug; release is what scripts/release.sh ships)
 set -e
-BIN=".build/debug/Silkweb"
+CONFIG="${1:-debug}"
+BIN=".build/$CONFIG/Silkweb"
 APP="build/Silkweb.app"
+# Bundle identifiers (#249); SilkwebCore's BundleIdentity and scripts/Info.plist say the same.
+APP_ID="io.github.mhinolv.silkweb"
+HELPER_ID="io.github.mhinolv.silkweb.helper"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Silkweb"
-cp -R .build/debug/Silkweb_Silkweb.bundle "$APP/Contents/Resources/"
+cp -R ".build/$CONFIG/Silkweb_Silkweb.bundle" "$APP/Contents/Resources/"
 cp scripts/Info.plist "$APP/Contents/Info.plist"
 cp scripts/Silkweb.icns "$APP/Contents/Resources/Silkweb.icns"
-codesign --force -s - -i com.silkweb.app "$APP"
-echo "bundled $APP"
+codesign --force -s - -i "$APP_ID" "$APP"
+echo "bundled $APP ($CONFIG)"
 # The agent-memory helper lives outside the app bundle so app updates can't break agent configs.
 # Ad-hoc signed here; releases sign with Developer ID and notarize (docs/agent-memory.md).
 HELPER="build/helper/silkweb"
 rm -rf build/helper
 mkdir -p build/helper
-cp .build/debug/SilkwebHelper "$HELPER"
-codesign --force -s - -i com.silkweb.helper "$HELPER"
+cp ".build/$CONFIG/SilkwebHelper" "$HELPER"
+codesign --force -s - -i "$HELPER_ID" "$HELPER"
 echo "bundled $HELPER"
