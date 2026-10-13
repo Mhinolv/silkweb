@@ -1,5 +1,6 @@
 import AppKit
 import SilkwebCore
+import SwiftUI
 import XCTest
 
 @testable import Silkweb
@@ -186,12 +187,131 @@ final class LineStartClickTests: XCTestCase {
             dragTo: NSPoint(x: dash.minX + dash.width * 0.9, y: listLine.midY + 1))
         XCTAssertEqual(editor.selectedRange(), NSRange(location: list, length: 0), "jittered click")
     }
+
+    /// The app's hierarchy: the tab stack hosted in SwiftUI, in a window wide enough that the text
+    /// column is centred in a wide gutter. Clicks go through the window's own hit testing, which the
+    /// tests above bypass; the text view leaves its container inset to the clip view, so gutter
+    /// clicks reached nothing with Typewriter Mode off.
+    @MainActor
+    func testGutterClicksThroughWindowHitTesting() async throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for name in ["A", "B", "C"] {
+            try Data(Self.document.utf8).write(to: root.appendingPathComponent(name + ".md"))
+        }
+        let workspace = LibraryWorkspace(defaults: disposableDefaults("LineStart243"))
+        workspace.root = root
+        workspace.recoveryDirectory = root.appendingPathComponent(".recovery")
+        workspace.install(try await LibraryScanner.scan(root: root))
+        // The list pane sits left of the editor, so the pane's edge is not the window's resize border.
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 1800, height: 900))
+        let sidebar = FocusableView(frame: NSRect(x: 0, y: 0, width: 200, height: 900))
+        let host = NSHostingView(rootView: TabEditorContent(workspace: workspace))
+        host.sizingOptions = []
+        host.frame = NSRect(x: 200, y: 0, width: 1600, height: 900)
+        content.addSubview(sidebar)
+        content.addSubview(host)
+        let window = ClickTestWindow(
+            contentRect: content.frame, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = content
+        window.makeKey() // Never ordered on screen.
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        func settle() async throws {
+            for _ in 0..<5 {
+                host.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(20))
+            }
+        }
+
+        var failures: [String] = []
+        for tabs in [["A"], ["B", "C"]] {
+            for name in tabs {
+                workspace.navigate(folder: "", documents: [name + ".md"], pinned: true)
+                await workspace.waitForNavigation()
+            }
+            try await settle()
+            let editor = try XCTUnwrap(workspace.tabs.first { $0.id == workspace.activeTabID }?.textView)
+            let text = editor.string as NSString
+            for typewriter in [false, true] {
+                workspace.setWritingModes(typewriter: typewriter)
+                try await settle()
+                let mode = "\(workspace.tabs.count) tab(s), Typewriter \(typewriter ? "on" : "off")"
+                let origin = editor.textContainerOrigin
+                XCTAssertGreaterThan(origin.x, 300, "\(mode): the column is centred in a wide gutter")
+                let layout = editor.layoutManager!
+                var firstLine = NSRange()
+                let paragraphStart = text.range(of: "Wrapping").location
+                _ = layout.lineFragmentRect(
+                    forGlyphAt: layout.glyphIndexForCharacter(at: paragraphStart), effectiveRange: &firstLine)
+                let lines: [(String, Int)] = [
+                    ("heading #", 0), ("list -", text.range(of: "- list").location),
+                    ("wrapped continuation", layout.characterIndexForGlyph(at: NSMaxRange(firstLine))),
+                ]
+                for (line, start) in lines {
+                    // The first glyph is a control: the text view's own frame got it before the fix.
+                    for (label, x) in [
+                        ("pane edge", CGFloat(2)), ("mid gutter", origin.x / 2), ("next to the text", origin.x - 2),
+                        ("first glyph", geometry(editor, at: start).glyph.midX),
+                    ] {
+                        editor.setSelectedRange(NSRange(location: text.length, length: 0))
+                        window.makeFirstResponder(sidebar)
+                        try await settle()
+                        let point = NSPoint(x: x, y: geometry(editor, at: start).line.midY)
+                        let place = "\(mode), \(line), \(label)"
+                        guard editor.visibleRect.contains(point) else {
+                            failures.append("\(place): line not visible")
+                            continue
+                        }
+                        try windowClick(window, at: editor.convert(point, to: nil))
+                        if window.firstResponder !== editor { failures.append("\(place): not focused") }
+                        let selection = editor.selectedRange()
+                        if selection != NSRange(location: start, length: 0) {
+                            failures.append("\(place): caret at \(selection.location), expected \(start)")
+                        }
+                    }
+                }
+            }
+            workspace.setWritingModes(typewriter: false)
+        }
+        XCTAssertEqual(failures, [], "gutter clicks through window hit testing")
+    }
+
+    /// A press and release through `NSWindow.sendEvent`. An unordered window in a sandboxed host may
+    /// drop it; then the press goes where NSWindow sends it: the view its frame view hit-tests at
+    /// `location`, focused first when it accepts focus. Never straight to the text view.
+    @MainActor
+    private func windowClick(_ window: NSWindow, at location: NSPoint) throws {
+        let time = ProcessInfo.processInfo.systemUptime
+        func event(_ type: NSEvent.EventType, _ offset: TimeInterval, _ number: Int) throws -> NSEvent {
+            try XCTUnwrap(
+                NSEvent.mouseEvent(
+                    with: type, location: location, modifierFlags: [], timestamp: time + offset,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: number, clickCount: 1,
+                    pressure: type == .leftMouseUp ? 0 : 1))
+        }
+        let down = try event(.leftMouseDown, 0, 1)
+        NSApp.postEvent(try event(.leftMouseUp, 0.1, 2), atStart: true)
+        window.sendEvent(down)
+        if NSApp.nextEvent(matching: .leftMouseUp, until: Date(), inMode: .default, dequeue: false) != nil {
+            let frame = try XCTUnwrap(window.contentView?.superview)
+            if let hit = frame.hitTest(location) {
+                if hit.acceptsFirstResponder { window.makeFirstResponder(hit) }
+                hit.mouseDown(with: down)
+            }
+        }
+        while NSApp.nextEvent(matching: .leftMouseUp, until: Date(), inMode: .default, dequeue: true) != nil {}
+    }
 }
 
 private final class ClickTestWindow: NSWindow {
     override var canBecomeKey: Bool { true }
 }
-
 private final class FocusableView: NSView {
     override var acceptsFirstResponder: Bool { true }
 }
