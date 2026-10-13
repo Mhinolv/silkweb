@@ -377,7 +377,8 @@ struct GrantDetail: View {
                 "Access",
                 selection: Binding(get: { model.draft?.access ?? .read }, set: { model.draft?.access = $0 })
             ) {
-                ForEach([AgentGrant.Access.read, .readCreate, .readCreateUpdate], id: \.self) { level in
+                ForEach([AgentGrant.Access.read, .readCreate, .readCreatePropose, .readCreateUpdate], id: \.self) {
+                    level in
                     VStack(alignment: .leading, spacing: 1) {
                         Text(level.displayName)
                         Text(Self.description(level)).font(.caption).foregroundStyle(.secondary)
@@ -395,6 +396,8 @@ struct GrantDetail: View {
         switch access {
         case .read: return "Agents search and read."
         case .readCreate: return "Agents can also add documents. They never edit or delete."
+        case .readCreatePropose:
+            return "Agents can also propose edits, moves and merges. Only you apply them, in Proposals."
         case .readCreateUpdate:
             return "Agents can also update documents an agent created. They never change yours or delete anything."
         }
@@ -565,7 +568,7 @@ struct NewGrantSheet: View {
                 }
                 TextField("Label", text: $form.label, prompt: Text("Optional"))
                 Picker("Access", selection: $form.access) {
-                    ForEach([AgentGrant.Access.read, .readCreate, .readCreateUpdate], id: \.self) {
+                    ForEach([AgentGrant.Access.read, .readCreate, .readCreatePropose, .readCreateUpdate], id: \.self) {
                         Text($0.displayName).tag($0)
                     }
                 }

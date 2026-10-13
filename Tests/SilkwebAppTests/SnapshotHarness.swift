@@ -88,6 +88,10 @@ struct SnapshotScenario {
     /// selected), "filtered-empty", "info" (an edited agent Document in Info), "claimed-only" and "arrives".
     /// #139 "dirty-open": the owner's unsaved Document in Progress stays open while an agent row arrives there.
     var agentActivity: String? = nil
+    /// #140 Proposals on the #137 agent Documents, with the Proposals row selected: "list" (a rename selected),
+    /// "edit", "move", "merge", "out-of-date" (the edit's base changed), "dirty" (the edit's Document has unsaved
+    /// changes) and "empty" (the only Proposal was rejected, Pending filter).
+    var proposals: String? = nil
     /// #195: a second Library (“Writing”, its own fixture copy) as the sidebar's second section; this one stays the
     /// current Library.
     var secondLibrary = false
@@ -311,6 +315,14 @@ struct SnapshotScenario {
         .init(name: "agent-provenance-proposals-only", agentActivity: "proposals-only"),
         .init(name: "agent-activity-updated-row", agentActivity: "updated-row"),
         .init(name: "agent-update-open-clean", agentActivity: "update-open"),
+        // #140: the Proposals list and review pane in each state.
+        .init(name: "proposal-list-pending", proposals: "list"),
+        .init(name: "proposal-edit-diff", proposals: "edit"),
+        .init(name: "proposal-move-links", proposals: "move"),
+        .init(name: "proposal-merge", proposals: "merge"),
+        .init(name: "proposal-out-of-date", proposals: "out-of-date"),
+        .init(name: "proposal-dirty-blocked", proposals: "dirty"),
+        .init(name: "proposals-empty", proposals: "empty"),
         // #203: Agent Activity with requests only (sidebar hand.raised, strip button, empty list).
         .init(name: "agent-activity-requests-only", accessRequests: "requests-only"),
         // #229: the Agent Access window (grants for two Libraries, one paused; an edited grant; the paused grant;
@@ -1041,6 +1053,27 @@ final class SnapshotHarness {
                 workspace.preview.showsOutline = true
             }
         }
+        if let state = scenario.proposals {
+            await workspace.reloadProposals()
+            guard workspace.hasProposals else { throw SnapshotFailure.error("Proposals did not load") }
+            if state == "dirty", let next = agentPaths["Next session"] {
+                // The edit's Document is open first, so its buffer can have unsaved changes behind the review pane.
+                workspace.navigate(folder: nil, documents: [next], pinned: true, changesScope: true)
+                await workspace.waitForNavigation()
+            }
+            let kinds: [String: AgentProposal.Kind] = [
+                "list": .rename, "move": .move, "merge": .merge, "edit": .edit, "out-of-date": .edit, "dirty": .edit,
+            ]
+            workspace.selectProposals()
+            await workspace.waitForNavigation()
+            guard workspace.proposalScope else { throw SnapshotFailure.error("Proposals did not open") }
+            if let kind = kinds[state] {
+                guard let proposal = workspace.proposals.first(where: { $0.kind == kind }) else {
+                    throw SnapshotFailure.error("Missing \(kind) proposal")
+                }
+                workspace.selectedProposalID = proposal.id
+            }
+        }
         if let state = scenario.outsideChanges {
             // The harness installs its snapshot directly; give it the ledger `open` would load. "mixed" keeps the
             // envelope-only claim, so only the changed receipt Document stays flagged.
@@ -1110,6 +1143,76 @@ final class SnapshotHarness {
                 [.modificationDate: Date(timeIntervalSince1970: 1_791_387_000)], ofItemAtPath: url.path)
         default:
             break
+        }
+    }
+
+    /// #140 fixtures through `AgentProposeService` (Oct 7 10:00–10:45 UTC): an edit of “Next session”, a rename of
+    /// “Use flock for the gate”, a move of “Helper spike” (linked from the decision) and a merge of both into
+    /// “Session summary”. "out-of-date" changes “Next session” afterwards; "empty" keeps one rejected rename.
+    func makeProposalFixture(_ state: String, at root: URL) throws {
+        let library = root.resolvingSymlinksInPath()
+        guard let next = agentPaths["Next session"], let spike = agentPaths["Helper spike"],
+            let decision = agentPaths["Use flock for the gate"]
+        else { throw SnapshotFailure.error("Missing agent fixtures") }
+        let decisionURL = library.appendingPathComponent(decision)
+        let spikeFolder = (spike as NSString).deletingLastPathComponent
+        let link = "../" + (spikeFolder as NSString).lastPathComponent + "/Helper%20spike.md"
+        try Data((try String(contentsOf: decisionURL, encoding: .utf8) + "\nSee [Helper spike](\(link)).\n").utf8)
+            .write(to: decisionURL)
+        let scope = try AgentScope(
+            grant: AgentGrant(
+                project: "Silkweb", library: LibraryLocation(path: library.path), access: .readCreatePropose))
+        var service = AgentProposeService(
+            library: library, grantId: "Silkweb", scope: scope, maxBytes: AgentGrantLimits.defaultMaxCreateBytes,
+            maxReadBytes: AgentGrantLimits.defaultMaxReadBytes)
+        func propose(_ kind: AgentProposal.Kind, at minute: Int, _ fill: (inout AgentProposeRequest) -> Void) throws
+            -> AgentProposal
+        {
+            let date = Date(timeIntervalSince1970: 1_791_367_200 + TimeInterval(minute * 60))
+            service.now = { date }
+            var request = AgentProposeRequest(
+                kind: kind, idempotencyKey: "\(kind.rawValue)-\(minute)", reason: "", agent: "claude-code",
+                session: "7f3a2c19", client: "Claude Code")
+            fill(&request)
+            return try service.propose(request).proposal
+        }
+        let renamed = try propose(.rename, at: 0) {
+            $0.path = decision
+            $0.title = "Gate locking"
+            $0.reason = "The title should name the topic, not the tool, so it's easy to find next to other decisions."
+        }
+        if state == "empty" {
+            try AgentProposalStore.update(renamed.proposalId, root: library) {
+                $0.status = .rejected
+                $0.decidedAt = "2026-10-07T11:00:00Z"
+            }
+            return
+        }
+        let nextURL = library.appendingPathComponent(next)
+        let current = try String(contentsOf: nextURL, encoding: .utf8)
+        guard case .envelope(_, let range) = MemoryEnvelope.parse(current) else {
+            throw SnapshotFailure.error("Next session has no envelope")
+        }
+        _ = try propose(.move, at: 15) {
+            $0.path = spike
+            $0.destination = (next as NSString).deletingLastPathComponent
+            $0.reason = "The spike is finished; it belongs with the handoffs that followed it."
+        }
+        _ = try propose(.merge, at: 30) {
+            $0.sources = [spike, next]
+            $0.destination = (next as NSString).deletingLastPathComponent
+            $0.title = "Session summary"
+            $0.body = "# Session summary\n\nThe helper spike worked.\n\nNext action: ship agent updates.\n"
+            $0.reason = "Both notes describe the same session; one summary is easier to resume from."
+        }
+        _ = try propose(.edit, at: 45) {
+            $0.path = next
+            $0.expectedRevision = AgentCreateService.digest(Data(current.utf8))
+            $0.body = String(current[range.lowerBound...]) + "\nObjective: ship #140 proposals.\n"
+            $0.reason = "Add the objective so the next session starts from the right issue."
+        }
+        if state == "out-of-date" {
+            try Data((current + "\nOwner: checked by hand.\n").utf8).write(to: nextURL)
         }
     }
 
@@ -1313,6 +1416,10 @@ final class SnapshotHarness {
                 if let state = scenario.agentActivity {
                     try makeAgentFixture(at: root)
                     try makeAgentUpdateFixture(state, at: root)
+                }
+                if let state = scenario.proposals {
+                    try makeAgentFixture(at: root)
+                    try makeProposalFixture(state, at: root)
                 }
                 // #229: receipts for the Silkweb grant's last activity.
                 if let state = scenario.agentAccess, !["empty", "widen-refused"].contains(state) {
@@ -1639,6 +1746,31 @@ final class SnapshotHarness {
                     workspace.editor.text.hasSuffix("Next action: ship agent updates.\n"),
                     workspace.editor.state == .clean, workspace.agentEntries.first?.isUpdate == true
                 else { throw SnapshotFailure.error("The update didn't reload in place, or moved selection or focus") }
+            }
+            if let state = scenario.proposals {
+                if state == "dirty" { workspace.editor.state = .dirty }
+                if let id = workspace.selectedProposalID {
+                    // The review (revisions, diff, links to update) loads off the main thread.
+                    try await wait("the proposal review loads") {
+                        controller.view.layoutSubtreeIfNeeded()
+                        return workspace.proposalReview?.id == id
+                            && (state != "move" || workspace.proposalReview?.links != nil)
+                    }
+                    let expected: [String: String] = [
+                        "out-of-date": "changed after this proposal was made.",
+                        "dirty": "has unsaved changes. Save or discard them before applying.",
+                    ]
+                    if let sentence = expected[state], let proposal = workspace.selectedProposal {
+                        let message = workspace.proposalBlock(proposal, review: workspace.proposalReview)?.message
+                        guard message?.hasSuffix(sentence) == true else {
+                            throw SnapshotFailure.error("Expected the “\(sentence)” banner, found \(message ?? "none")")
+                        }
+                    }
+                } else if state == "empty", workspace.pendingProposalCount != 0 {
+                    throw SnapshotFailure.error("Expected no pending proposals")
+                }
+                try await Task.sleep(for: .milliseconds(200))
+                controller.view.layoutSubtreeIfNeeded()
             }
             if ["info", "claimed-only", "updated", "proposals-only"].contains(scenario.agentActivity)
                 || scenario.outsideChanges == "info"

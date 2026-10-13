@@ -45,6 +45,18 @@ public enum AgentHelper {
           update <PATH> | --id ID       Replace the body of a document an agent created
               --expected-revision R --body-file <FILE|-> --agent A --session S
               [--idempotency-key K]
+          propose-change <PATH> | --id ID
+                                        Propose a new body for any readable document;
+                                        the owner reviews it in Silkweb
+              --expected-revision R --body-file <FILE|-> --reason TEXT --agent A
+              --session S [--idempotency-key K]
+          propose-organization --kind move|rename|merge
+                                        Propose a move, rename or merge for the owner
+              move:   <PATH> | --id ID --destination FOLDER
+              rename: <PATH> | --id ID --title T
+              merge:  --source PATH... --title T --destination FOLDER --body-file <FILE|->
+              --reason TEXT --agent A --session S [--expected-revision R]
+              [--idempotency-key K]
           activity [--limit N] [--since D]
                                         This grant’s receipts, newest first
           list                          Document paths, sizes and dates, no text
@@ -96,6 +108,16 @@ public enum AgentHelper {
         "update": Command(
             arguments: 0...1, options: ["id", "expected-revision", "body-file", "idempotency-key"],
             required: ["expected-revision", "body-file", "agent", "session"]),
+        "propose-change": Command(
+            arguments: 0...1, options: ["id", "expected-revision", "body-file", "idempotency-key", "reason"],
+            required: ["expected-revision", "body-file", "reason", "agent", "session"]),
+        "propose-organization": Command(
+            arguments: 0...1,
+            options: [
+                "kind", "id", "expected-revision", "destination", "title", "source", "body-file", "idempotency-key",
+                "reason",
+            ],
+            repeatable: ["source"], required: ["kind", "reason", "agent", "session"]),
         "activity": Command(options: ["limit", "since"]),
     ]
 
@@ -165,7 +187,8 @@ public enum AgentHelper {
             "idempotency_conflict", "not_found", "revision_changed", "request_not_found", "request_decided",
             "invalid_agent_folder", "invalid_create_folder":
             return 65
-        case "library_busy", "stale_snapshot", "rate_limited", "document_has_unsaved_changes", "too_many_requests":
+        case "library_busy", "stale_snapshot", "rate_limited", "document_has_unsaved_changes", "too_many_requests",
+            "too_many_proposals":
             return 69
         case "library_not_found", "library_unreadable", "unreadable", "write_failed", "disk_full", "permission_denied",
             "grants_signing_failed":
@@ -173,6 +196,7 @@ public enum AgentHelper {
         case "grant_required", "grant_not_found", "grant_revoked", "no_grant", "no_grants_file",
             "invalid_grants_file", "unsupported_grants_version", "invalid_grant", "out_of_scope",
             "create_not_allowed", "invalid_path", "excluded_name", "update_not_allowed", "update_requires_proposal",
+            "propose_not_allowed",
             "invalid_requests_file", "unsupported_requests_version", "approve_would_widen", "invalid_grants_signature",
             "grants_key_missing", "grants_key_unreadable", "grants_signing_required", "needs_authentication":
             return 77
@@ -233,7 +257,9 @@ public enum AgentHelper {
         guard words.first == "memory" else {
             throw usage(words.isEmpty ? "Choose a command." : "That isn’t a silkweb command.")
         }
-        let names = "capabilities, search, read, create, create-folder, update, activity or list"
+        let names =
+            "capabilities, search, read, create, create-folder, update, propose-change, propose-organization, "
+            + "activity or list"
         guard words.count >= 2 else { throw usage("Choose a memory command: \(names).") }
         guard let command = commands[words[1]] else { throw usage("That isn’t a memory command. Use \(names).") }
         let name = words[1]
@@ -257,8 +283,32 @@ public enum AgentHelper {
         if invocation.flags.contains("ranked"), name != "search" {
             throw usage("The option “--ranked” isn’t valid for “memory \(name)”.")
         }
-        if name == "read" || name == "update", arguments.isEmpty == (invocation.value("id") == nil) {
+        if name == "read" || name == "update" || name == "propose-change",
+            arguments.isEmpty == (invocation.value("id") == nil)
+        {
             throw usage("“memory \(name)” needs a path or --id, not both.")
+        }
+        if name == "propose-organization" {
+            guard let kind = invocation.value("kind").flatMap(AgentProposal.Kind.init(rawValue:)), kind != .edit else {
+                throw usage("The option “--kind” must be move, rename or merge.")
+            }
+            let named = !arguments.isEmpty || invocation.value("id") != nil
+            switch kind {
+            case .merge:
+                guard !named else { throw usage("A merge names its documents with --source, not a path or --id.") }
+                for option in ["title", "destination", "body-file"] where invocation.value(option) == nil {
+                    throw usage("A merge needs --\(option).")
+                }
+            default:
+                guard arguments.isEmpty != (invocation.value("id") == nil) else {
+                    throw usage("“memory \(name)” needs a path or --id, not both.")
+                }
+                guard invocation.options["source"] == nil, invocation.value("body-file") == nil else {
+                    throw usage("Only a merge takes --source and --body-file.")
+                }
+                let needed = kind == .move ? "destination" : "title"
+                guard invocation.value(needed) != nil else { throw usage("A \(kind.rawValue) needs --\(needed).") }
+            }
         }
         return (name, arguments)
     }
@@ -318,6 +368,22 @@ public enum AgentHelper {
                 invocation, limit: context.grant.limits.maxCreateBytes, tooLarge: AgentAccessError.updateTooLarge,
                 standardInput: standardInput)
             return (try update(context, invocation: invocation, path: path, body: body, keyPrefix: "cli-").json, nil)
+        case "propose-change", "propose-organization":
+            let path = arguments.first.map(nfc)
+            let context = try session.authorize(.propose, path: path)
+            let kind =
+                name == "propose-change"
+                ? AgentProposal.Kind.edit : AgentProposal.Kind(rawValue: invocation.value("kind") ?? "") ?? .move
+            let body =
+                invocation.value("body-file") == nil
+                ? nil
+                : try self.body(
+                    invocation, limit: context.grant.limits.maxCreateBytes, tooLarge: AgentProposeService.tooLarge,
+                    standardInput: standardInput)
+            return (
+                try propose(context, kind: kind, invocation: invocation, path: path, body: body, keyPrefix: "cli-")
+                    .json, nil
+            )
         case "create-folder":
             let authorization = try session.authorize(.createFolder, path: nfc(arguments[0]))
             let folder = try AgentCreateService(authorization: authorization).createFolder(authorization.path ?? "")
@@ -357,7 +423,10 @@ public enum AgentHelper {
             "profile": context.grant.access.displayName,
             "operations": ["capabilities", "list", "search", "read", "activity"]
                 + (context.scope.createRoots.isEmpty ? [] : ["create", "create-folder"])
-                + (context.scope.createRoots.isEmpty || !context.grant.access.allowsUpdate ? [] : ["update"]),
+                + (context.scope.createRoots.isEmpty || !context.grant.access.allowsUpdate ? [] : ["update"])
+                // #140: proposals are saved under `.silkweb/`, so they need a qualified disk, not a create folder.
+                + (context.filesystem == .qualified && context.grant.access.allowsPropose
+                    ? ["propose-change", "propose-organization"] : []),
             "read_roots": context.scope.readRoots,
             "retrieval_contract_version": AgentMemoryContract.retrievalVersion,
             "retrieval_modes": AgentMemorySearchRequest.Mode.allCases.map(\.rawValue),
@@ -425,6 +494,27 @@ public enum AgentHelper {
             "revision": result.revision ?? NSNull(), "receipt": receipt,
         ]
         return (AgentJSON(sortingKeysOf: fields), result)
+    }
+
+    /// One Proposal (#140), shared with `memory_propose_change` and `memory_propose_organization`. A replay of the
+    /// same key and payload succeeds with `"replayed": true`.
+    static func propose(
+        _ context: AgentAuthorization, kind: AgentProposal.Kind, invocation: Invocation, path: String?, body: String?,
+        keyPrefix: String
+    ) throws -> AgentProposeResult {
+        let value = invocation.value
+        let id = try value("id").map { text -> UUID in
+            guard let id = UUID(uuidString: text) else { throw AgentAccessError.invalidArgument("id") }
+            return id
+        }
+        let request = AgentProposeRequest(
+            // Without a key a retry can't be recognized, so each run saves another proposal.
+            kind: kind, idempotencyKey: value("idempotency-key") ?? keyPrefix + UUID().uuidString,
+            path: context.path ?? path, documentID: id, sources: invocation.options["source"] ?? [],
+            expectedRevision: value("expected-revision"), body: body, destination: value("destination"),
+            title: value("title"), reason: value("reason") ?? "", agent: value("agent") ?? "",
+            session: value("session") ?? "", client: value("client") ?? "cli")
+        return try AgentProposeService(authorization: context).propose(request)
     }
 
     /// The envelope type and the Library-relative Folder (`nil` for the type's entry folder) from

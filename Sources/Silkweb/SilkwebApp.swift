@@ -214,6 +214,8 @@ struct WorkspaceCommands: Commands {
             Divider()
             // #137: no shortcut; selects the sidebar row as a click does, and is disabled while it's hidden.
             Button("Agent Activity") { workspace.selectAgentActivity() }.disabled(!state.hasAgentActivity)
+            // #140: no shortcut; disabled while its sidebar row is hidden.
+            Button("Proposals") { workspace.selectProposals() }.disabled(!state.hasProposals)
             // #229 (was #203's Access Requests…): no shortcut; always enabled, grants aren't tied to the open Library.
             Button("Agent Access…") { showAgentAccess() }
         }

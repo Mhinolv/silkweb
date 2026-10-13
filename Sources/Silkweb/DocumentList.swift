@@ -11,6 +11,7 @@ struct DocumentList: View {
             PinnedColumn {
                 TagFilterBar(workspace: workspace)
                 if workspace.agentScope { AgentActivityStrip(workspace: workspace) }
+                if workspace.proposalScope { ProposalStrip(workspace: workspace) }
                 if workspace.includesSubfolders {
                     HStack {
                         Text(
@@ -26,9 +27,12 @@ struct DocumentList: View {
                     .accessibilityElement(children: .contain).accessibilityLabel("Including subfolders")
                 }
             } content: {
-                if workspace.snapshot?.folders.first(where: { $0.relativePath == workspace.session.selectedFolder })?
-                    .isUnreadable == true
-                {
+                if workspace.proposalScope {
+                    ProposalList(workspace: workspace)
+                } else if workspace.snapshot?.folders.first(where: {
+                    $0.relativePath == workspace.session.selectedFolder
+                })?
+                .isUnreadable == true {
                     ColumnEmptyState {
                         ContentUnavailableView(
                             "Folder Unavailable", systemImage: "lock",
@@ -274,9 +278,14 @@ struct DocumentDetail: View {
                 .font(.callout).frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
                 .padding(.horizontal, 12).paneStrip(hairline: .bottom)
             }
-            EditorBanner(session: workspace.editor, workspace: workspace)
-            AssetErrorBanner(session: workspace.editor)
-            if workspace.editor.url != nil {
+            if !workspace.proposalScope {
+                EditorBanner(session: workspace.editor, workspace: workspace)
+                AssetErrorBanner(session: workspace.editor)
+            }
+            if workspace.proposalScope {
+                // #140: the review pane replaces the editor while Proposals is selected.
+                ProposalReviewPane(workspace: workspace)
+            } else if workspace.editor.url != nil {
                 DocumentPanes(workspace: workspace)
                 if let progress = workspace.editor.assetProgress {
                     HStack {

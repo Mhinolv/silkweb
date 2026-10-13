@@ -68,7 +68,8 @@ Rules for every operation:
   agent still creates a new document that references the old one.
 - No generic `write_file`, no shell tool, and no automatic deletion or expiry.
 - No HTTP or other network transport, and no accounts.
-- No `Proposals` Folder. Reviewed edits and organization proposals come after the MVP.
+- No `Proposals` Folder. Reviewed edits and organization proposals (#140) are saved under
+  `.silkweb/proposals/`, never as Documents; see [Proposals](#proposals-140).
 - No Settings UI in this ticket. Since #229 the owner manages grants in the app's
   [Agent Access window](#agent-access-window-229) (Settings ▸ Library ▸ Agent access ▸ **Manage…**), or runs
   [`silkweb grant init`](#setting-up-a-grant-186).
@@ -86,7 +87,7 @@ Folders are created in title case, exactly as shown:
 │           ├── Memories/           create folder: memory documents
 │           ├── Progress/           create folder: progress documents
 │           └── Handoffs/           create folder: handoff documents
-│           (Proposals/ is reserved and is not created in MVP)
+│           (Proposals/ is reserved and never created; #140 uses .silkweb/proposals/)
 └── .silkweb/                       app metadata; never readable or creatable by agents
 ```
 
@@ -1094,6 +1095,48 @@ temporary files without an intent are removed.
 selection are clamped to the new length, scroll, focus and tab stay put, and no undo entry is added.
 There are no banners, sounds or announcements (see [In the app](#in-the-app-137)).
 
+## Proposals (#140)
+
+An agent with **Read, Create and Propose** (or Read, Create and Update) on a qualified disk may
+**propose** a change to any Document in its read folders. Nothing in the Library changes: the helper
+saves one versioned JSON file, `.silkweb/proposals/<proposalId>.json`, holding the Library gate. Only the
+owner applies or rejects it, in Silkweb. Proposals never appear as Documents, in search or in the tree.
+
+| Kind | Command / MCP tool | Payload |
+|---|---|---|
+| `edit` | `propose-change` / `memory_propose_change` | The new body. `--expected-revision` is required; the current envelope is kept byte for byte, and a body bringing its own envelope is refused. |
+| `move` | `propose-organization --kind move` / `memory_propose_organization` | `--destination`: an existing Folder in the read folders. |
+| `rename` | `propose-organization --kind rename` | `--title`: the new filename without its extension. |
+| `merge` | `propose-organization --kind merge` | 2 to 10 `--source` Documents, `--title`, `--destination` and the new Document’s body. |
+
+- Every proposal carries `--reason`: one paragraph of plain text (line breaks become spaces), 1 to
+  1,000 characters. Each target records its path, its `documentId` and its revision (`baseRevision`).
+- **Idempotency.** `proposalId` is `prop_` + 32 hex characters derived from the grant and the key. The
+  same key and payload return the original with `"replayed": true`; a different payload is
+  `idempotency_conflict`.
+- **Limits.** At most 100 pending proposals per Library (`too_many_proposals`, exit 69); an edit’s
+  finished text and a merge’s body count against `max_create_bytes` (`too_large`).
+- **Output.** `{"createdAt", "kind", "proposalId", "replayed", "status"}`. Never document text.
+- **File format** (`version: 1`, every key written, decoded tolerantly): `proposalId`, `kind`, `status`
+  (`pending`, `applied`, `rejected`; an unknown status reads as rejected), `createdAt`, `decidedAt`,
+  `agent`, `session`, `client`, `grantId`, `idempotencyKey`, `requestDigest`, `reason`, `targets`,
+  `body`, `destination`, `title`, `appliedPath`. A file with an unknown `kind` is skipped.
+
+**In the app.** A **Proposals (n)** sidebar row under Agent Activity (and **Go ▸ Proposals**, no
+shortcut) lists them newest first, filtered by Pending ▾ (Pending, Applied, Rejected, All). Selecting
+one opens the review pane: edits show Current Version / Proposed Version with −/+ markers and red/green
+line bands; moves and renames show From / To and the Documents whose links Move To… will rewrite; merges
+preview the new Document, with “Move the sources to Trash after merging” off by default. Apply is
+blocked by a banner when a target is **Out of Date** (its bytes aren’t the base revision), is gone, or
+has unsaved changes; there is no rebase. Neither Reject nor Apply is the default button. Each Apply or
+Reject is one Library Undo entry (“Undo Apply Proposal” / “Undo Reject Proposal”) that restores the
+files and sets the proposal back to Pending. Document Info shows “1 pending proposal · Review…”.
+
+| Code | Title | Message |
+|---|---|---|
+| `propose_not_allowed` | No Agent Access | This grant can’t propose changes. Ask the owner to switch it to Read, Create and Propose. |
+| `too_many_proposals` | Too Many Proposals | There are already 100 proposals waiting in this Library. Ask the owner to review them. |
+
 ## Command line (#135)
 
 `silkweb memory …` is the shell-facing face of the same services the MCP server uses (#136): the same
@@ -1117,6 +1160,13 @@ silkweb memory create  --folder memories|progress|handoffs|agent-memories|<PATH>
 silkweb memory create-folder <PATH>
 silkweb memory update  <PATH> | --id DOCUMENT_ID  --expected-revision R --body-file <FILE|->
                        --agent A --session S [--idempotency-key K]
+silkweb memory propose-change <PATH> | --id DOCUMENT_ID  --expected-revision R --body-file <FILE|->
+                       --reason TEXT --agent A --session S [--idempotency-key K]
+silkweb memory propose-organization --kind move|rename|merge --reason TEXT --agent A --session S
+                       move:   <PATH> | --id DOCUMENT_ID --destination FOLDER
+                       rename: <PATH> | --id DOCUMENT_ID --title T
+                       merge:  --source PATH… --title T --destination FOLDER --body-file <FILE|->
+                       [--expected-revision R] [--idempotency-key K]
 silkweb memory activity [--limit N] [--since D]
 silkweb memory list
 silkweb --version | --help
@@ -1130,6 +1180,8 @@ silkweb --version | --help
 | `create` | `{"outcome", "path", "receipt", "replayed"}` ([Create and receipts](#create-and-receipts-133)). `--folder memories`, `progress` or `handoffs` (any case) picks the entry folder and the default type (`memory`, `progress`, `handoff`); `--type decision` with `memories` makes a decision. A Library-relative `--folder` needs `--type`. Without `--idempotency-key`, the helper uses a fresh `cli-<UUID>` key, so a retry creates another document. A replay exits 0. |
 | `create-folder` | `{"created", "path"}`. Idempotent. |
 | `update` | `{"outcome", "path", "receipt", "replayed", "revision"}` ([Update](#update-204)). A path or `--id`, not both. Without `--idempotency-key`, the helper uses a fresh `cli-<UUID>` key; the revision check still stops a second write. |
+| `propose-change` | `{"createdAt", "kind", "proposalId", "replayed", "status"}` ([Proposals](#proposals-140)). A path or `--id`, not both. Without `--idempotency-key`, each run saves another proposal. |
+| `propose-organization` | The same result. `--kind move` needs `--destination`, `rename` needs `--title`, `merge` needs `--source` (2–10), `--title`, `--destination` and `--body-file`, and takes no path or `--id`. |
 | `activity` | `{"receipts": […], "total": N}`: this grant’s [receipts](#create-and-receipts-133) (sorted keys, never body text), newest first. Receipts whose destination is outside the read folders are dropped before counting. `--limit` defaults to 20 and is capped by the grant’s `max_results`; `--since` is a date or ISO 8601 timestamp. Reads `.silkweb/agent-events/` only and never takes the gate. |
 | `list` | `{"documents": [{"modified", "path", "size"}], "project"}` (#129). |
 
@@ -1176,10 +1228,10 @@ and `--supersedes` (create).
 | 0 | Success, including a replayed create | — |
 | 64 | Usage or bad argument | `invalid_argument` |
 | 65 | Bad input data | `envelope_malformed`, `envelope_schema_newer`, `envelope_invalid_field`, `too_large`, `idempotency_conflict`, `not_found`, `revision_changed`, `request_not_found`, `request_decided`, `invalid_agent_folder`, `invalid_create_folder` |
-| 69 | Busy; try again | `library_busy`, `stale_snapshot`, `rate_limited`, `document_has_unsaved_changes`, `too_many_requests` |
+| 69 | Busy; try again | `library_busy`, `stale_snapshot`, `rate_limited`, `document_has_unsaved_changes`, `too_many_requests`, `too_many_proposals` |
 | 70 | Unexpected helper failure | `internal_error` |
 | 74 | Library I/O | `library_not_found`, `library_unreadable`, `unreadable`, `write_failed`, `disk_full`, `permission_denied`, `grants_signing_failed` |
-| 77 | Access | `grant_required`, `grant_not_found`, `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `invalid_grants_signature`, `grants_key_missing`, `grants_key_unreadable`, `grants_signing_required`, `needs_authentication`, `no_grant`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `invalid_path`, `excluded_name`, `update_not_allowed`, `update_requires_proposal`, `invalid_requests_file`, `unsupported_requests_version`, `approve_would_widen` |
+| 77 | Access | `grant_required`, `grant_not_found`, `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `invalid_grants_signature`, `grants_key_missing`, `grants_key_unreadable`, `grants_signing_required`, `needs_authentication`, `no_grant`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `invalid_path`, `excluded_name`, `update_not_allowed`, `update_requires_proposal`, `propose_not_allowed`, `invalid_requests_file`, `unsupported_requests_version`, `approve_would_widen` |
 
 - **One bad-input code.** `invalid_argument` covers usage mistakes (unknown command or option, a
   repeated or missing option, `--body` text), bad values (`--limit`, `--type`, dates, `--id`, `--cursor`)

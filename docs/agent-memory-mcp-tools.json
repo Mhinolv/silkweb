@@ -17,6 +17,7 @@
             "enum" : [
               "read",
               "read-create",
+              "read-create-propose",
               "read-create-update"
             ]
           },
@@ -826,6 +827,242 @@
         "title" : "Silkweb: Update Document",
         "readOnlyHint" : false,
         "destructiveHint" : true,
+        "idempotentHint" : true,
+        "openWorldHint" : false
+      }
+    },
+    {
+      "name" : "memory_propose_change",
+      "title" : "Silkweb: Propose an Edit",
+      "description" : "Proposes a new body (the text after the front matter) for a document in this grant’s read folders, including the owner’s, for the owner to review in Silkweb. Nothing in the Library changes: only the owner applies or rejects it. Needs expectedRevision from memory_read and a short reason. Use it when memory_update answers update_requires_proposal. Retrying with the same idempotencyKey returns the original result.",
+      "inputSchema" : {
+        "type" : "object",
+        "properties" : {
+          "path" : {
+            "type" : "string",
+            "description" : "Library-relative path of a document in a read folder, such as Memory/Projects/Silkweb/Memories/Use flock.md. Or documentId."
+          },
+          "documentId" : {
+            "type" : "string",
+            "description" : "The documentId from a search or read result, instead of path."
+          },
+          "expectedRevision" : {
+            "type" : "string",
+            "description" : "The revision from memory_read. If the document changed since, nothing is saved."
+          },
+          "body" : {
+            "type" : "string",
+            "description" : "The proposed Markdown text after the front matter, replacing all of it. The front matter stays as it is."
+          },
+          "reason" : {
+            "type" : "string",
+            "description" : "Why, in one short paragraph of plain text for the owner.",
+            "minLength" : 1,
+            "maxLength" : 1000
+          },
+          "idempotencyKey" : {
+            "type" : "string",
+            "description" : "Request key, 1 to 200 characters. Reuse it when retrying.",
+            "minLength" : 1,
+            "maxLength" : 200
+          },
+          "session" : {
+            "type" : "string",
+            "description" : "Session recorded with the proposal. Defaults to this server’s session."
+          }
+        },
+        "required" : [
+          "expectedRevision",
+          "body",
+          "reason"
+        ],
+        "additionalProperties" : false
+      },
+      "outputSchema" : {
+        "type" : "object",
+        "properties" : {
+          "createdAt" : {
+            "type" : "string"
+          },
+          "kind" : {
+            "type" : "string",
+            "enum" : [
+              "edit",
+              "move",
+              "rename",
+              "merge"
+            ]
+          },
+          "proposalId" : {
+            "type" : "string"
+          },
+          "replayed" : {
+            "type" : "boolean"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [
+              "pending",
+              "applied",
+              "rejected"
+            ]
+          },
+          "error" : {
+            "type" : "object",
+            "properties" : {
+              "code" : {
+                "type" : "string"
+              },
+              "message" : {
+                "type" : "string"
+              },
+              "retryAfter" : {
+                "type" : "integer"
+              },
+              "currentRevision" : {
+                "type" : "string"
+              },
+              "title" : {
+                "type" : "string"
+              }
+            }
+          }
+        }
+      },
+      "annotations" : {
+        "title" : "Silkweb: Propose an Edit",
+        "readOnlyHint" : false,
+        "destructiveHint" : false,
+        "idempotentHint" : true,
+        "openWorldHint" : false
+      }
+    },
+    {
+      "name" : "memory_propose_organization",
+      "title" : "Silkweb: Propose a Move, Rename or Merge",
+      "description" : "Proposes moving a document into another folder, renaming it, or merging 2 to 10 documents into a new one, for the owner to review in Silkweb. Nothing in the Library changes until the owner applies it; moves and renames keep the document’s identity and update links, and a merge never deletes its sources by itself. Needs a short reason. Retrying with the same idempotencyKey returns the original result.",
+      "inputSchema" : {
+        "type" : "object",
+        "properties" : {
+          "kind" : {
+            "type" : "string",
+            "description" : "What to propose.",
+            "enum" : [
+              "move",
+              "rename",
+              "merge"
+            ]
+          },
+          "path" : {
+            "type" : "string",
+            "description" : "Move or rename: the document’s Library-relative path in a read folder. Or documentId."
+          },
+          "documentId" : {
+            "type" : "string",
+            "description" : "Move or rename: the documentId from a search or read result."
+          },
+          "expectedRevision" : {
+            "type" : "string",
+            "description" : "Move or rename: the revision from memory_read. If given and the document changed, nothing is saved."
+          },
+          "destination" : {
+            "type" : "string",
+            "description" : "Move and merge: a Library-relative folder in a read folder, such as Memory/Projects/Silkweb/Archive."
+          },
+          "title" : {
+            "type" : "string",
+            "description" : "Rename: the new title. Merge: the new document’s title. Without “:” or “/”."
+          },
+          "sources" : {
+            "type" : "array",
+            "description" : "Merge: the 2 to 10 documents to merge, in order. They stay unless the owner trashes them.",
+            "items" : {
+              "type" : "string",
+              "description" : "A Library-relative path in a read folder."
+            }
+          },
+          "body" : {
+            "type" : "string",
+            "description" : "Merge: the new document’s Markdown text."
+          },
+          "reason" : {
+            "type" : "string",
+            "description" : "Why, in one short paragraph of plain text for the owner.",
+            "minLength" : 1,
+            "maxLength" : 1000
+          },
+          "idempotencyKey" : {
+            "type" : "string",
+            "description" : "Request key, 1 to 200 characters. Reuse it when retrying.",
+            "minLength" : 1,
+            "maxLength" : 200
+          },
+          "session" : {
+            "type" : "string",
+            "description" : "Session recorded with the proposal. Defaults to this server’s session."
+          }
+        },
+        "required" : [
+          "kind",
+          "reason"
+        ],
+        "additionalProperties" : false
+      },
+      "outputSchema" : {
+        "type" : "object",
+        "properties" : {
+          "createdAt" : {
+            "type" : "string"
+          },
+          "kind" : {
+            "type" : "string",
+            "enum" : [
+              "edit",
+              "move",
+              "rename",
+              "merge"
+            ]
+          },
+          "proposalId" : {
+            "type" : "string"
+          },
+          "replayed" : {
+            "type" : "boolean"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [
+              "pending",
+              "applied",
+              "rejected"
+            ]
+          },
+          "error" : {
+            "type" : "object",
+            "properties" : {
+              "code" : {
+                "type" : "string"
+              },
+              "message" : {
+                "type" : "string"
+              },
+              "retryAfter" : {
+                "type" : "integer"
+              },
+              "currentRevision" : {
+                "type" : "string"
+              },
+              "title" : {
+                "type" : "string"
+              }
+            }
+          }
+        }
+      },
+      "annotations" : {
+        "title" : "Silkweb: Propose a Move, Rename or Merge",
+        "readOnlyHint" : false,
+        "destructiveHint" : false,
         "idempotentHint" : true,
         "openWorldHint" : false
       }

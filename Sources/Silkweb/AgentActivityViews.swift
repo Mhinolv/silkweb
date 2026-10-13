@@ -142,6 +142,8 @@ struct AgentProvenanceSection: View {
     let modified: Date?
     /// The Library, for revealing the newest earlier version in Finder.
     var root: URL? = nil
+    /// #140: the Document's pending Proposals, which replace “Not reviewed”.
+    var review: ProposalReviewRow? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -192,8 +194,11 @@ struct AgentProvenanceSection: View {
                 }
                 .accessibilityElement(children: .contain)
             }
-            // Display only; the review workflow and its controls come with #140.
-            pair("Review", "Not reviewed")
+            if let review, !review.proposals.isEmpty {
+                review
+            } else {
+                pair("Review", "Not reviewed")
+            }
             Text("Agent and session are reported by the agent, not verified.")
                 .font(.caption).foregroundStyle(.tertiary)
         }
@@ -213,6 +218,36 @@ struct AgentProvenanceSection: View {
             Text(value).font(.caption).textSelection(.enabled)
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// #140: Document Info's Review row, “1 pending proposal · Review…”; the link selects the newest one.
+struct ProposalReviewRow: View {
+    let proposals: [AgentProposal]
+    let workspace: LibraryWorkspace
+
+    /// The row for a Document with pending Proposals, else `nil`.
+    @MainActor static func make(_ document: LibraryDocument, workspace: LibraryWorkspace) -> ProposalReviewRow? {
+        let pending = workspace.pendingProposals(for: document)
+        return pending.isEmpty ? nil : ProposalReviewRow(proposals: pending, workspace: workspace)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Review").font(.headline)
+            HStack(spacing: 0) {
+                Text(
+                    proposals.count == 1 ? "1 pending proposal · " : "\(proposals.count) pending proposals · "
+                )
+                .font(.caption)
+                Button("Review…") {
+                    if let first = proposals.first { workspace.reviewProposal(first.id) }
+                }
+                .buttonStyle(.link).font(.caption)
+                .accessibilityLabel("Review proposal")
+            }
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 

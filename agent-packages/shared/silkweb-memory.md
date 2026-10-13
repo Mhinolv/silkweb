@@ -1,9 +1,9 @@
 # Silkweb memory
 
 Silkweb keeps this project's memory as plain Markdown documents in the owner's Silkweb Library. You reach
-it through the `silkweb` MCP server and its eight tools: `memory_capabilities`, `memory_search`,
-`memory_read`, `memory_create`, `memory_create_folder`, `memory_update`, `memory_activity` and
-`grant_request`. You can read and create documents only in the Folders the owner's grant allows. With a Read, Create and Update
+it through the `silkweb` MCP server and its ten tools: `memory_capabilities`, `memory_search`,
+`memory_read`, `memory_create`, `memory_create_folder`, `memory_update`, `memory_propose_change`,
+`memory_propose_organization`, `memory_activity` and `grant_request`. You can read and create documents only in the Folders the owner's grant allows. With a Read, Create and Update
 grant you can also update a document an agent created, if nobody edited it since. Documents the owner
 wrote or edited are never changed, nothing is ever deleted, and you can't ask for that.
 
@@ -96,7 +96,12 @@ personal data the user didn't ask you to keep, or long pasted output.
   body (everything after the front matter, as `memory_read` returned it). The result's `revision` is
   the one to pass next time. Use an `idempotencyKey` as for creates.
 - If `memory_update` says `update_requires_proposal`, the owner wrote or edited that document: don't
-  retry, and create a new document that `supersedes` it instead.
+  retry. When `operations` includes `propose-change`, call `memory_propose_change` with the `revision`
+  you read, the whole new body and a one-paragraph `reason`; the owner reviews and applies it in Silkweb.
+  Otherwise create a new document that `supersedes` it.
+- Moves, renames and merges are never yours to do. When `operations` includes `propose-organization`,
+  suggest one with `memory_propose_organization` (`kind` `move`, `rename` or `merge`) and a `reason`.
+  A proposal changes nothing until the owner applies it; don't propose the same change twice.
 - Pick one session ID when you start, for example the date plus a letter (`2026-10-07-a`), and pass it
   as `session` on every `memory_create` and `memory_update`.
 - Always pass an `idempotencyKey`: `<session>-<n>`, where `n` counts your creates and updates in this
@@ -122,7 +127,7 @@ Replace `<code>` with the `error.code` from the result, for example `create_not_
 - **Access refusals** (exit status `77` from the command line): `grant_required`, `grant_not_found`,
   `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `no_grant`,
   `invalid_grants_signature`, `grants_key_missing`, `grants_key_unreadable`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `update_not_allowed`,
-  `update_requires_proposal`, `invalid_path` and `excluded_name`. Don't retry them. Pass the message on;
+  `update_requires_proposal`, `propose_not_allowed`, `invalid_path` and `excluded_name`. Don't retry them. Pass the message on;
   it already says what the owner can do.
 - **No access yet** (`grant_not_found`, `no_grants_file`), or the grant is too narrow for the task: ask
   once with `grant_request` (or `silkweb grant request` from the command line). Give the Library folder,
