@@ -925,17 +925,13 @@ final class AgentMCPTests: XCTestCase {
         XCTAssertTrue(stderr.contains("Until then, only grant_request works.\n"), stderr)
     }
 
-    /// The built `silkweb` binary as an agent launches it: every stdout line is an MCP frame.
+    /// The built `silkweb` binary as an agent launches it, with protected grants (#248): every stdout line is an MCP
+    /// frame.
     func testBuiltHelperBinaryKeepsStdoutForMCPFramesOnly() throws {
-        let products = Bundle(for: Self.self).bundleURL.deletingLastPathComponent()
-        let binary = products.appendingPathComponent("SilkwebHelper")
-        guard FileManager.default.isExecutableFile(atPath: binary.path) else {
-            throw XCTSkip("SilkwebHelper isn't built next to the test bundle")
-        }
+        let helper = try BuiltHelper(nextTo: Self.self)
+        try helper.writeSignedGrants(AgentGrantFile(grants: [grant()]), to: grantsURL)
         func launch(_ input: [String]) throws -> (status: Int32, stdout: String, stderr: String) {
-            let process = Process()
-            process.executableURL = binary
-            process.arguments = ["mcp", "--grants", grantsURL.path, "--agent", "codex"]
+            let process = helper.process(["mcp", "--grants", grantsURL.path, "--agent", "codex"])
             let stdin = Pipe()
             let stdout = Pipe()
             let stderr = Pipe()
@@ -985,7 +981,8 @@ final class AgentMCPTests: XCTestCase {
             "silkweb: memory_read: That location is outside this grant’s read folders (Memory › Projects › Silkweb).\n")
         XCTAssertFalse(session.stdout.contains("private words"))
 
-        try writeGrants([grant(), grant("Notes", label: "Notes", access: .read)])
+        try helper.writeSignedGrants(
+            AgentGrantFile(grants: [grant(), grant("Notes", label: "Notes", access: .read)]), to: grantsURL)
         let ambiguous = try launch([#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#])
         XCTAssertEqual(ambiguous.status, 77)
         XCTAssertEqual(ambiguous.stdout, "")
