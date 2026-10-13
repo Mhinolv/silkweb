@@ -48,7 +48,7 @@ Do **not** open or read the product owner's personal MWeb library/notes content 
   noted in the manifest; outside it, the harness requires `.prohibited`.
   To add a scenario, append a `SnapshotScenario` configuration in
   `Tests/SilkwebAppTests/SnapshotHarness.swift`; extend its state driver for new interactions.
-  The harness copies `Test_Library` into disposable temporary directories and generates local
+  The harness copies `Tests/Fixtures/SampleLibrary` into disposable temporary directories and generates local
   and remote image references, an empty document, and a read-only encoding fixture there.
 - Build and unit tests work inside the agents' sandbox (caches are kept under `.build/`). Always use these scripts,
   never bare `swift build`.
@@ -61,7 +61,8 @@ Do **not** open or read the product owner's personal MWeb library/notes content 
 | App (SwiftUI scenes, views, AppKit bridges, menus/commands) | `Sources/Silkweb/` |
 | Unit tests for core | `Tests/SilkwebCoreTests/` |
 | Build / bundling scripts, Info.plist | `scripts/` |
-| Owner's manual-test library (sample blog). **Agents: do not modify**; unit tests use their own temp fixtures. Using it beside a personal Library: `docs/personal-library.md` | `Test_Library/` |
+| Sample Library for tests and snapshots (tracked; the harness copies it into temp folders) | `Tests/Fixtures/SampleLibrary/` |
+| Owner's manual-test Library: local only, gitignored. **Agents: do not read, modify or commit.** Using it beside a personal Library: `docs/personal-library.md` | `Test_Library/` |
 | Design system: naming, look, **keyboard shortcut map** (source of truth — check before adding any shortcut) | `docs/design-system.md` |
 | Agent memory contract (grants, layout, guarantees) and the headless `silkweb` helper (`build/helper/silkweb`) | `docs/agent-memory.md`, `Sources/SilkwebHelper/` |
 | Agent memory skills and install docs for Claude Code, Codex, Gemini CLI. Edit only `shared/silkweb-memory.md`, then run `scripts/agent_packages.sh` | `agent-packages/` |
@@ -128,7 +129,8 @@ Rules:
 - Merge requires: `qa-pass`, a passing `CI / ci-gate`, a passing `PR template / check` (these two are the required
   checks on `main`), and (bugs) the regression test proven to fail on the pre-fix code. The Orchestrator closes issues
   explicitly (`merge_pr.sh`), so `Refs #n` items stay open for the owner check.
-- CI (`.github/workflows/ci.yml`) has three fixed checks: `CI / classify` lists the PR's changed files, `CI /
+- CI (`.github/workflows/ci.yml`) has three fixed checks: `CI / classify` lists the PR's changed files (and fails
+  if any added or changed path is under `Test_Library/` or repo-root `.silkweb/`, #247), `CI /
   build-format` runs the pinned toolchain check, format lint and build on macOS (no tests), and `CI / ci-gate` is the
   merge evidence. `./scripts/build.sh test` is still mandatory locally (Engineer, QA, Orchestrator post-merge).
 - CI runs on every PR into `main` when it is opened, reopened, marked ready, or pushed to (`synchronize`).

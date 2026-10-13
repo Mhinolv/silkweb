@@ -49,17 +49,28 @@ jobs:
             echo "Could not list changed files — failing so the gate cannot pass silently." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           }
-          # One line per file: new path, tab, old path (renames only). The REST API stops at 3000
-          # files, so a count below the PR's changed_files means the list is incomplete.
+          # One line per file: status, tab, new path, tab, old path (renames only). The REST API stops
+          # at 3000 files, so a count below the PR's changed_files means the list is incomplete.
           gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files?per_page=100" \
-            --jq '.[] | [.filename, (.previous_filename // "")] | @tsv' > files.tsv \
+            --jq '.[] | [.status, .filename, (.previous_filename // "")] | @tsv' > files.tsv \
             || fail "GitHub API request for the changed files failed"
           count=$(wc -l < files.tsv | tr -d ' ')
           [ "$count" -eq "$EXPECTED" ] || fail "Got $count of $EXPECTED changed files"
+          # #247: the owner's Library (Test_Library/) and a repo-root .silkweb/ are local only. Any
+          # added or changed path there fails; removing one from the index is allowed.
+          owner=$(awk -F'\t' '$1 != "removed" && $2 ~ /^(Test_Library|\.silkweb)(\/|$)/ { print $2 }' files.tsv)
+          if [ -n "$owner" ]; then
+            more=$(($(printf '%s\n' "$owner" | wc -l) - 1))
+            line="classify: FAIL — owner Library paths in PR: $(printf '%s\n' "$owner" | head -n 1)"
+            [ "$more" -eq 0 ] || line="$line (+$more more)"
+            echo "::error::$line"
+            echo "$line" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           # Docs-only allowlist: every path (old and new, for renames) must match. Anything else,
           # including unknown paths, is meaningful and needs the macOS build.
           first=""
-          while IFS=$'\t' read -r path old; do
+          while IFS=$'\t' read -r _status path old; do
             for p in "$path" "$old"; do
               [ -n "$p" ] || continue
               case "$p" in
