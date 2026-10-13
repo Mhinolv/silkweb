@@ -31,11 +31,7 @@ final class RecoveryDraftTests: XCTestCase {
     }
 
     private func open(_ workspace: LibraryWorkspace) async throws {
-        workspace.open(root)
-        for _ in 0..<500 {
-            if workspace.error != nil || (!workspace.loading && workspace.snapshot != nil) { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await openLibrary(root, in: workspace)
         XCTAssertNil(workspace.error)
         XCTAssertNotNil(workspace.snapshot)
     }

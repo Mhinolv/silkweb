@@ -387,17 +387,11 @@ final class AgentMemoryTests: XCTestCase {
             "only --type, --status and --supersedes may repeat")
     }
 
-    /// The real signed helper binary, launched as its own process like an agent would.
+    /// The built helper, launched as its own process like an agent would, with protected grants (#248).
     func testBuiltHelperBinaryRunsHeadless() throws {
-        let products = Bundle(for: Self.self).bundleURL.deletingLastPathComponent()
-        let binary = products.appendingPathComponent("SilkwebHelper")
-        guard FileManager.default.isExecutableFile(atPath: binary.path) else {
-            throw XCTSkip("SilkwebHelper isn't built next to the test bundle")
-        }
-        try writeGrants(grantJSON())
-        let process = Process()
-        process.executableURL = binary
-        process.arguments = ["memory", "list", "--grants", grantsURL.path]
+        let helper = try BuiltHelper(nextTo: Self.self)
+        try helper.writeSignedGrants(grantJSON(), to: grantsURL)
+        let process = helper.process(["memory", "list", "--grants", grantsURL.path])
         let stdout = Pipe()
         process.standardOutput = stdout
         process.standardError = Pipe()

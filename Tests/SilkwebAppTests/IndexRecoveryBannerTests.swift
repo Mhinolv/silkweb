@@ -30,12 +30,7 @@ final class IndexRecoveryBannerTests: XCTestCase {
         workspace.canSaveWindowSession = false
         workspace.recoveryDirectory = root.deletingLastPathComponent().appendingPathComponent(
             "SilkwebIndexRecoveryDrafts-" + UUID().uuidString)
-        workspace.open(root)
-        for _ in 0..<500 {
-            if workspace.error != nil || (!workspace.loading && workspace.snapshot != nil) { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        return workspace
+        return try await openLibrary(root, in: workspace)
     }
 
     /// Hosts the real detail column (empty “No Document Selected” state) and returns its accessibility strings.

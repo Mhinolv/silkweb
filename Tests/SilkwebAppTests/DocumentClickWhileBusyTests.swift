@@ -108,10 +108,7 @@ final class DocumentClickWhileBusyTests: XCTestCase {
             }
             try? FileManager.default.removeItem(at: container)
         }
-        workspace.open(root)
-        try await waitUntil("the library opens", timeout: .seconds(10)) {
-            workspace.snapshot != nil && !workspace.loading
-        }
+        try await openLibrary(root, in: workspace)
         workspace.selectFolder(Self.folder)
         try await withDeadline("navigation") { await workspace.waitForNavigation() }
         try await waitUntil("the list realizes its rows", timeout: .seconds(10)) {

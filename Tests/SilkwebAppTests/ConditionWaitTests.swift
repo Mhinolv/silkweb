@@ -1,4 +1,7 @@
+import AppKit
 import XCTest
+
+@testable import Silkweb
 
 /// #56: the shared condition wait returns as soon as the condition holds and names the condition on timeout.
 @MainActor
@@ -24,5 +27,38 @@ final class ConditionWaitTests: XCTestCase {
         XCTExpectFailure("The wait must fail and name the condition", options: options)
         let met = try await waitUntil("never true", timeout: .milliseconds(50)) { false }
         XCTAssertFalse(met)
+    }
+
+    /// #213: reusing a loaded workspace for another library must not count as open until the requested library is
+    /// showing. `open(_:)` keeps the previous snapshot with `loading == false` until its task runs, which the old
+    /// "any snapshot, not loading" predicate took as ready, so IndexRecoveryWorkspaceTests asserted on the previous
+    /// library.
+    func testSwitchIsOpenOnlyOnceTheRequestedLibraryShows() async throws {
+        _ = NSApplication.shared
+        let container = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SilkwebConditionWait-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: container) }
+        var roots: [URL] = []
+        for name in ["First", "Second"] {
+            let root = container.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try Data("# \(name)\n".utf8).write(to: root.appendingPathComponent("\(name).md"))
+            roots.append(root)
+        }
+        let workspace = LibraryWorkspace(defaults: disposableDefaults("ConditionWait"))
+        workspace.canSaveWindowSession = false
+        workspace.recoveryDirectory = container.appendingPathComponent("Recovery")
+        try await openLibrary(roots[0], in: workspace)
+        XCTAssertTrue(libraryIsOpen(workspace, at: roots[0]))
+        XCTAssertFalse(libraryIsOpen(workspace, at: roots[1]), "another library is not open")
+
+        workspace.open(roots[1])
+        XCTAssertEqual(workspace.snapshot?.rootURL.lastPathComponent, "First", "the switch has not run yet")
+        XCTAssertFalse(libraryIsOpen(workspace, at: roots[1]), "the previous library still showing is not the switch")
+        try await waitForLibrary(roots[1], in: workspace)
+        XCTAssertEqual(workspace.snapshot?.rootURL.lastPathComponent, "Second")
+        XCTAssertEqual(workspace.snapshot?.documents.map(\.relativePath), ["Second.md"])
+        XCTAssertNil(workspace.error)
+        await workspace.didCloseWindow()
     }
 }
