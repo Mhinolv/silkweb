@@ -80,7 +80,7 @@ struct SnapshotScenario {
     var caretAfterJump: String? = nil
     /// #150: opens this note first and lets its page land, then selects `document` in the list as a click does.
     var switchFrom: String? = nil
-    /// #153: opens an empty library folder (no Test_Library copy) so the list shows its first-run empty state.
+    /// #153: opens an empty library folder (no sample Library copy) so the list shows its first-run empty state.
     var emptyLibrary = false
     /// #153: the list column's width (240 pt minimum … 480 pt maximum) instead of the standard 300 pt.
     var listWidth: CGFloat? = nil
@@ -481,6 +481,8 @@ private final class SnapshotResult<Value> {
 final class SnapshotHarness {
     nonisolated static let repository = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    /// #247: the tracked sample Library every app test and snapshot copies. `Test_Library/` is owner-local and gitignored.
+    nonisolated static let sampleLibrary = repository.appendingPathComponent("Tests/Fixtures/SampleLibrary")
     let size: NSSize
     let timeout: TimeInterval
     private let environment: [String: String]
@@ -504,7 +506,7 @@ final class SnapshotHarness {
     init(
         size: NSSize = NSSize(width: 1400, height: 900), timeout: TimeInterval = 12,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        library: URL = SnapshotHarness.repository.appendingPathComponent("Test_Library")
+        library: URL = SnapshotHarness.sampleLibrary
     ) {
         self.size = size
         self.timeout = timeout
@@ -514,9 +516,11 @@ final class SnapshotHarness {
 
     func run(output: URL, names: [String] = []) async throws -> SnapshotManifest {
         let output = output.standardizedFileURL.resolvingSymlinksInPath()
-        let ownerLibrary = Self.repository.appendingPathComponent("Test_Library").resolvingSymlinksInPath().path
-        guard output.path != ownerLibrary, !output.path.hasPrefix(ownerLibrary + "/") else {
-            throw SnapshotFailure.error("Snapshot output must be outside Test_Library")
+        for forbidden in ["Test_Library", "Tests/Fixtures"] {
+            let root = Self.repository.appendingPathComponent(forbidden).resolvingSymlinksInPath().path
+            guard output.path != root, !output.path.hasPrefix(root + "/") else {
+                throw SnapshotFailure.error("Snapshot output must be outside Test_Library and Tests/Fixtures")
+            }
         }
         guard size.width >= 900, size.height >= 560, size.width <= 4096, size.height <= 2160 else {
             throw SnapshotFailure.error("Snapshot size must be between 900×560 and 4096×2160 points")
