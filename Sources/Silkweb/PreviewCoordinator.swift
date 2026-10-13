@@ -53,7 +53,9 @@ final class PreviewCoordinator {
     @ObservationIgnored private var loadingDocument: URL?
     @ObservationIgnored private var finishedDocument: URL?
     @ObservationIgnored private var input: RenderInput?
-    @ObservationIgnored private var outlineText: String?
+    /// The text `headings` and `outlineItems` were parsed from. Observed, so the Outline re-checks the caret's
+    /// section when a publish catches up with typing even if the headings came back equal (#246).
+    private(set) var outlineText: String?
     /// The note a list click asked the Outline to show; editor renders of other notes leave the Outline alone.
     @ObservationIgnored private var outlineTarget: URL?
     @ObservationIgnored private var outlineTask: Task<Void, Never>?
@@ -335,6 +337,15 @@ final class PreviewCoordinator {
             return image.id
         }
         return currentHeading(caret: caret)
+    }
+
+    /// The Outline's caret-following row for the editor buffer `text` (#246), or `.none` while `text` is ahead of
+    /// the published outline: typing moves the caret past heading offsets that only refresh after the debounce,
+    /// so the row it last showed holds until the outline catches up. The inner value is `currentItem(caret:)`.
+    /// Headings set without a parse (`outlineText` nil) have no text to be behind.
+    func caretItem(caret: Int, text: String) -> String?? {
+        guard mode == .preview || outlineText == nil || outlineText == text else { return .none }
+        return .some(currentItem(caret: caret))
     }
 
     /// An Outline click focuses the editor at the jumped-to line ("jump and write", #89); Return

@@ -59,6 +59,9 @@ struct SnapshotScenario {
     var typewriterMode = false
     /// #89: clicks this Outline heading after the writing modes are on; the caret is drawn at the jump.
     var outlineJump: String? = nil
+    /// #246: typed at the caret one character every 40 ms (inside the outline's debounce) after the writing modes
+    /// are on, then left to settle: the capsule stays on the caret's section.
+    var typeAtCaret: String? = nil
     /// Selects this source text (all text when empty) so the status bar shows “N of M” counts (1.25).
     var selectText: String? = nil
     /// Widens the sidebar and list to their limits so the detail column (and its status bar) is narrow.
@@ -387,6 +390,13 @@ struct SnapshotScenario {
         .init(
             name: "focus-typewriter-outline-jump", document: writingModes, outline: true,
             visibleCaret: "Second paragraph", focusMode: true, typewriterMode: true, outlineJump: "Middle"),
+        // #246: typing at the end of the section right above “Middle”; the capsule stays on “Writing Modes”.
+        .init(
+            name: "outline-typing-focus-typewriter", document: writingModes, outline: true,
+            visibleCaret:
+                "Paragraph 11 of the draft talks about the road, the coffee and the weather, long enough to wrap in the column.",
+            focusMode: true, typewriterMode: true,
+            typeAtCaret: " And one more sentence"),
         // silkweb-1.25: selection counts leading, Focus chip + “Saved” trailing; narrow detail drops the characters segment.
         .init(
             name: "status-bar-counts", document: writingModes, visibleCaret: "The caret rests", focusMode: true,
@@ -1809,6 +1819,15 @@ final class SnapshotHarness {
                 controller.view.layoutSubtreeIfNeeded()
                 editor.writingModes.anchorCaret()
             }
+            if let typed = scenario.typeAtCaret, let editor = workspace.preview.editor {
+                for character in typed {
+                    editor.insertText(String(character), replacementRange: editor.selectedRange())
+                    controller.view.layoutSubtreeIfNeeded()
+                    try await Task.sleep(for: .milliseconds(40))
+                }
+                // The outline republishes after its 250 ms debounce; the fade settles.
+                try await Task.sleep(for: .milliseconds(600))
+            }
             if let text = scenario.selectText, let editor = workspace.preview.editor {
                 // An empty marker selects the whole document (the longest “N of M” copy).
                 let found =
@@ -2015,7 +2034,7 @@ final class SnapshotHarness {
                 if let marker = scenario.visibleCaret, scenario.selectText == nil, let editor = workspace.preview.editor
                 {
                     var location = editor.selectedRange().location
-                    if scenario.outlineJump == nil {
+                    if scenario.outlineJump == nil, scenario.typeAtCaret == nil {
                         let found = (editor.string as NSString).range(of: marker)
                         guard found.location != NSNotFound else { throw SnapshotFailure.error("Missing caret text") }
                         location = NSMaxRange(found)

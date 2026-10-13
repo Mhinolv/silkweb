@@ -26,6 +26,11 @@ final class LibraryWorkspace {
     let preview: PreviewCoordinator
     let columnAutosaveName: String?
     @ObservationIgnored private let defaults: UserDefaults
+    #if DEBUG
+        /// #246: body evaluations per view, and each Outline row the capsule showed, for tests that type.
+        @ObservationIgnored var bodyCounts: [String: Int] = [:]
+        @ObservationIgnored var outlineCurrentLog: [Int?] = []
+    #endif
 
     init(defaults: UserDefaults = AppDefaults.store, columnAutosaveName: String? = AppDefaults.columnAutosaveName) {
         self.defaults = defaults
