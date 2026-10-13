@@ -234,10 +234,7 @@ final class AccessRequestsWorkspaceTests: XCTestCase {
             return nil
         }
 
-        workspace.open(root)
-        try await waitUntil("the library opens", timeout: .seconds(10)) {
-            workspace.snapshot != nil && !workspace.loading
-        }
+        try await openLibrary(root, in: workspace)
         try await waitUntil("the Agent Activity row appears for the request", timeout: .seconds(10)) {
             content.superview?.layoutSubtreeIfNeeded()
             return agentCell() != nil

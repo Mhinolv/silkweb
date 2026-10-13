@@ -24,12 +24,8 @@ final class IndexRecoveryWorkspaceTests: XCTestCase {
         workspace.canSaveWindowSession = false
         workspace.recoveryDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "SilkwebIndexWorkspaceDrafts-" + UUID().uuidString)
-        workspace.open(root)
-        try await Task.sleep(for: .milliseconds(10))
-        for _ in 0..<500 {
-            if workspace.error != nil || (!workspace.loading && workspace.snapshot?.rootURL != nil) { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        // #213: a reused workspace still shows the previous library until the switch runs; wait for `root`.
+        try await openLibrary(root, in: workspace)
         XCTAssertNotNil(workspace.snapshot)
         return workspace
     }

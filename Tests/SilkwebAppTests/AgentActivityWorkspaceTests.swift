@@ -246,10 +246,7 @@ final class AgentActivityWorkspaceTests: XCTestCase {
             }
         }
 
-        workspace.open(root)
-        try await waitUntil("the library opens", timeout: .seconds(10)) {
-            workspace.snapshot != nil && !workspace.loading
-        }
+        try await openLibrary(root, in: workspace)
         try await waitUntil("the sidebar lists the folders", timeout: .seconds(10)) {
             content.superview?.layoutSubtreeIfNeeded()
             return (outline?.numberOfRows ?? 0) > 2

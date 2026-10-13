@@ -120,10 +120,7 @@ final class AgentQualificationWorkspaceTests: XCTestCase {
         window.setFrame(NSRect(x: 0, y: 0, width: 1400, height: 900), display: false)
         let host = Host(workspace: workspace, window: window, suite: suite)
         StatusBarCountsTests.exposeAccessibility(true)
-        workspace.open(root)
-        try await waitUntil("the library opens", timeout: .seconds(10)) {
-            workspace.snapshot != nil && !workspace.loading
-        }
+        try await openLibrary(root, in: workspace)
         if let path, workspace.editor.url == nil {
             workspace.navigate(folder: Self.progress, documents: [path])
             await workspace.waitForNavigation()

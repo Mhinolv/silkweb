@@ -4,7 +4,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension UTType {
-    static let silkwebMove = UTType(exportedAs: "com.silkweb.internal-move")
+    static let silkwebMove = UTType(exportedAs: "io.github.mhinolv.silkweb.internal-move")
 }
 
 struct MoveRequest: Identifiable {

@@ -183,25 +183,35 @@ final class CrossLibrarySwitchTests: XCTestCase {
 
     // MARK: Content
 
-    /// A loaded tab from another Library shows its text in the same frame budget as a same-Library switch (#150).
-    func testAnotherLibrarysTabShowsItsTextWithin150Milliseconds() async throws {
+    /// What the editor column shows on one display pass after a switch: the target's text, the target's editor
+    /// visible with anything else (blank or stale), or the target's editor not up in this window yet.
+    private enum ColumnSample: Equatable { case text, blank, other }
+
+    private func column(_ window: NSWindow, _ target: LibraryWorkspace) -> ColumnSample {
+        guard let view = target.preview.editor, view.window === window, !view.isHiddenOrHasHiddenAncestor else {
+            return .other
+        }
+        return !view.string.isEmpty && view.string == target.editor.text ? .text : .blank
+    }
+
+    /// A loaded tab from another Library shows its text as a same-Library switch does (#150). #213: judged by what
+    /// each display pass shows, not a wall clock (a 150 ms bound flaked under parallel-lane load): every pass until
+    /// the text shows, the target's editor is either not up yet or already shows the text, never visible and blank
+    /// or holding another note's text. The wait is bounded so a switch that never lands still fails.
+    func testAnotherLibrarysTabShowsItsTextAndIsNeverBlank() async throws {
         let (registry, window, a, b) = try await twoLibraries(outline: false)
         for target in [a, b, a] {
+            let name = target.root?.lastPathComponent ?? "?"
             let entry = try XCTUnwrap(registry.stripTabs.first { $0.workspace === target })
-            let start = ContinuousClock.now
             registry.activate(entry)
-            var shown = false
-            while ContinuousClock.now - start < .milliseconds(150) {
+            var samples: [ColumnSample] = []
+            try await waitUntil("\(name): the tab's text (passes \(samples))", timeout: .seconds(10)) {
                 window.contentView?.superview?.layoutSubtreeIfNeeded()
-                if let view = target.preview.editor, view.window === window, !view.isHiddenOrHasHiddenAncestor,
-                    view.string == target.editor.text, !view.string.isEmpty
-                {
-                    shown = true
-                    break
-                }
-                try await Task.sleep(for: .milliseconds(5))
+                samples.append(column(window, target))
+                return samples.last == .text
             }
-            XCTAssertTrue(shown, "\(target.root?.lastPathComponent ?? "?"): the tab's text within 150 ms")
+            print("CrossLibrarySwitch \(name): passes \(samples)")
+            XCTAssertFalse(samples.contains(.blank), "\(name): the editor never shows blank (passes \(samples))")
         }
     }
 

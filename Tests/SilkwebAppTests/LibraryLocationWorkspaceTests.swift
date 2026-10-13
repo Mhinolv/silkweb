@@ -5,13 +5,13 @@ import XCTest
 
 final class LibraryLocationWorkspaceTests: XCTestCase {
     @MainActor
-    private func waitForOpen(_ workspace: LibraryWorkspace, defaults: UserDefaults) async throws {
-        for _ in 0..<500 {
-            if workspace.error != nil { break }
-            if workspace.snapshot != nil, !workspace.loading, defaults.data(forKey: "libraryLocation") != nil { return }
-            try await Task.sleep(for: .milliseconds(10))
+    private func waitForOpen(_ workspace: LibraryWorkspace, _ root: URL, defaults: UserDefaults) async throws {
+        // #213: the shared bounded wait for the requested root, then for the persisted location.
+        try await waitForLibrary(root, in: workspace)
+        XCTAssertNil(workspace.error, "Library did not open")
+        try await waitUntil("the library location persists", timeout: .seconds(10)) {
+            defaults.data(forKey: "libraryLocation") != nil
         }
-        XCTFail("Library did not open: \(workspace.error ?? "timed out")")
     }
 
     @MainActor
@@ -25,7 +25,7 @@ final class LibraryLocationWorkspaceTests: XCTestCase {
         let chosen = LibraryWorkspace(defaults: defaults)
         // Same entry point used by the folder panel, without presenting a GUI.
         chosen.open(root)
-        try await waitForOpen(chosen, defaults: defaults)
+        try await waitForOpen(chosen, root, defaults: defaults)
         let saved = try JSONDecoder().decode(
             LibraryLocation.self, from: XCTUnwrap(defaults.data(forKey: "libraryLocation")))
         XCTAssertEqual(saved.version, 1)
@@ -34,7 +34,7 @@ final class LibraryLocationWorkspaceTests: XCTestCase {
         XCTAssertNil(defaults.data(forKey: "libraryBookmark"))
         let relaunched = LibraryWorkspace(defaults: defaults)
         relaunched.restore()
-        try await waitForOpen(relaunched, defaults: defaults)
+        try await waitForOpen(relaunched, root, defaults: defaults)
         XCTAssertEqual(relaunched.root?.path, expectedPath)
         XCTAssertEqual(relaunched.snapshot?.documents.count, 1)
         defaults.removeObject(forKey: "libraryLocation")
@@ -42,7 +42,7 @@ final class LibraryLocationWorkspaceTests: XCTestCase {
         defaults.set(saved.bookmark, forKey: "libraryBookmark")
         let migrated = LibraryWorkspace(defaults: defaults)
         migrated.restore()
-        try await waitForOpen(migrated, defaults: defaults)
+        try await waitForOpen(migrated, root, defaults: defaults)
         XCTAssertEqual(migrated.root?.path, expectedPath)
         XCTAssertNil(defaults.data(forKey: "libraryBookmark"))
     }
