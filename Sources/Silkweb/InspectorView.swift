@@ -5,6 +5,8 @@ import SwiftUI
 struct InspectorView: View {
     let workspace: LibraryWorkspace
     @State private var selectedHeading: String?
+    /// The caret's row, set by `OutlineCaretTracker` only when it changes (#246).
+    @State private var caretRow: OutlineCaretRow?
     @State private var outlineHovered = false
     @State private var manualScrollUntil = Date.distantPast
     @FocusState private var outlineFocused: Bool
@@ -16,6 +18,9 @@ struct InspectorView: View {
         let resume: Date
     }
     var body: some View {
+        #if DEBUG
+            let _ = { workspace.bodyCounts["InspectorView", default: 0] += 1 }()
+        #endif
         VStack(spacing: 0) {
             Picker(
                 "Inspector", selection: Binding(get: { workspace.inspectorInfo }, set: { workspace.inspectorInfo = $0 })
@@ -36,11 +41,17 @@ struct InspectorView: View {
     private var outline: some View {
         // Until the editor catches up with a list click (#87), the caret belongs to another note.
         let followsEditor = preview.outlineURL == workspace.editor.url && !preview.outlinePending
-        let current = followsEditor ? preview.currentItem(caret: workspace.editor.caretLocation) : nil
-        // #90: one capsule, on the keyboard selection while the Outline is focused, else on the caret's section.
-        let highlight = outlineFocused ? selectedHeading ?? current : current
         let items =
             preview.outlineItems.isEmpty ? OutlineItem.parse("", headings: preview.headings) : preview.outlineItems
+        let current = currentRow(followsEditor: followsEditor, items: items)
+        #if DEBUG
+            let _ = {
+                workspace.bodyCounts["Outline", default: 0] += 1
+                workspace.outlineCurrentLog.append(items.firstIndex { $0.id == current })
+            }()
+        #endif
+        // #90: one capsule, on the keyboard selection while the Outline is focused, else on the caret's section.
+        let highlight = outlineFocused ? selectedHeading ?? current : current
         let imageCount = items.count - preview.headings.count
         let summary = [(preview.headings.count, CountPresentation.Unit.heading), (imageCount, .image)]
             .filter { $0.0 > 0 }.map { CountPresentation.label($0.0, unit: $0.1) }.joined(separator: " · ")
@@ -152,6 +163,20 @@ struct InspectorView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(OutlineCaretTracker(workspace: workspace, followsEditor: followsEditor, row: $caretRow))
+    }
+
+    /// The tracker's row while it still names a row of this note. A publish that renamed or removed it (typing on
+    /// a heading line), or a new note, resolves here in the same update, from the caret's untracked selection, so
+    /// the capsule never blinks off for a frame and typing still never re-evaluates the rows.
+    private func currentRow(followsEditor: Bool, items: [OutlineItem]) -> String? {
+        guard followsEditor else { return nil }
+        if let caretRow, caretRow.document == preview.outlineURL,
+            caretRow.id.map({ id in items.contains { $0.id == id } }) ?? true
+        {
+            return caretRow.id
+        }
+        return preview.currentItem(caret: workspace.editor.selection.location)
     }
 
     private func row(_ heading: MarkdownHeading, depth: Int, current: Bool, highlighted: Bool) -> some View {
@@ -167,6 +192,37 @@ struct InspectorView: View {
             .accessibilityLabel("Heading level \(heading.level), \(heading.text)")
             .accessibilityValue(current ? "current" : "")
     }
+}
+
+/// #246: the only Outline view that reads the caret and the buffer, so a keystroke re-evaluates this empty view
+/// instead of every row. The capsule moves when the caret's section changes, never while typing runs ahead of the
+/// debounced outline (`PreviewCoordinator.caretItem`).
+private struct OutlineCaretTracker: View {
+    let workspace: LibraryWorkspace
+    let followsEditor: Bool
+    @Binding var row: OutlineCaretRow?
+
+    var body: some View {
+        let editor = workspace.editor
+        let preview = workspace.preview
+        // Until the editor catches up with a list click (#87), no row is current. `nil` holds the last row.
+        let resolved =
+            followsEditor
+            ? preview.caretItem(caret: editor.caretLocation, text: editor.text).map {
+                OutlineCaretRow(id: $0, document: preview.outlineURL)
+            } : OutlineCaretRow(id: nil, document: nil)
+        Color.clear
+            .accessibilityHidden(true)
+            .onChange(of: resolved, initial: true) { _, resolved in
+                if let resolved, resolved != row { row = resolved }
+            }
+    }
+}
+
+/// The caret's Outline row and the note it was resolved in (#246).
+struct OutlineCaretRow: Equatable {
+    let id: String?
+    let document: URL?
 }
 
 /// #72 thread tree: a fixed-height row hanging from the sidebar's 1.5 pt `SilkwebThread` guides, with the

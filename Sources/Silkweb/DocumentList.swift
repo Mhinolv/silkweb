@@ -7,6 +7,9 @@ struct DocumentList: View {
     var makeDragProvider: (([String]) -> NSItemProvider)? = nil
     @State private var dateReference = Date()
     var body: some View {
+        #if DEBUG
+            let _ = { workspace.bodyCounts["DocumentList", default: 0] += 1 }()
+        #endif
         SearchView(workspace: workspace, search: workspace.search) {
             PinnedColumn {
                 TagFilterBar(workspace: workspace)
@@ -171,6 +174,9 @@ struct DocumentRow: View {
     private var isEmpty: Bool { summary.map { $0.excerpt == "No additional text" } ?? false }
 
     var body: some View {
+        #if DEBUG
+            let _ = { workspace.bodyCounts["DocumentRow", default: 0] += 1 }()
+        #endif
         VStack(alignment: .leading, spacing: 3) {
             if let item = workspace.rename, item.path == document.relativePath, !item.isFolder {
                 // The 24 pt field overhangs the 17 pt title line so the other lines stay put.
@@ -258,6 +264,9 @@ struct DocumentDetail: View {
     var registry: LibraryWindowRegistry? = nil
     @State private var isNarrow = true
     var body: some View {
+        #if DEBUG
+            let _ = { workspace.bodyCounts["DocumentDetail", default: 0] += 1 }()
+        #endif
         VStack(spacing: 0) {
             // The strip can show while this Library has no tab of its own (#197).
             if !(registry?.stripTabs.isEmpty ?? workspace.tabs.isEmpty) {
@@ -315,7 +324,7 @@ struct DocumentDetail: View {
         ) {
             InspectorView(workspace: workspace).inspectorColumnWidth(min: 200, ideal: 240, max: 320)
         }
-        .onChange(of: workspace.editor.text, initial: true) { render() }
+        .background(PreviewRenderTrigger(session: workspace.editor) { render() })
         .onChange(of: workspace.editor.url) { render() }
         .onGeometryChange(for: Bool.self) {
             $0.size.width < 600
@@ -333,6 +342,19 @@ struct DocumentDetail: View {
 
     private func render() {
         workspace.preview.schedule(text: workspace.editor.text, document: workspace.editor.url, root: workspace.root)
+    }
+}
+
+/// #246: the only view that reads the buffer for the preview, so a keystroke re-evaluates this empty view rather
+/// than the whole detail column (and its Inspector, status bar and hosted editor panes).
+private struct PreviewRenderTrigger: View {
+    let session: DocumentSession
+    let render: () -> Void
+
+    var body: some View {
+        Color.clear
+            .accessibilityHidden(true)
+            .onChange(of: session.text, initial: true) { render() }
     }
 }
 
@@ -363,6 +385,9 @@ struct DocumentStatusBar: View {
     var label: SaveLabel { SaveLabel(state: session.state, readOnly: readOnlyLibrary || session.readOnly) }
 
     var body: some View {
+        #if DEBUG
+            let _ = { workspace?.bodyCounts["DocumentStatusBar", default: 0] += 1 }()
+        #endif
         StatusBarLayout {
             // Only an open library document has a path; a bare session (tests, previews) shows none.
             if let workspace, workspace.editor === session, session.url != nil {
