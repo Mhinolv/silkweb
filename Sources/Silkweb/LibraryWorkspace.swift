@@ -89,6 +89,9 @@ final class LibraryWorkspace {
         itemPathsByID = Dictionary(uniqueKeysWithValues: snapshot.metadata.IDsByPath.map { ($0.value, $0.key) })
         documentCache = nil
         updateAgentEntries()
+        // #140: a target may have moved or changed; the review pane checks again.
+        if selectedProposalID != nil { scheduleProposalReview() }
+        if !proposals.isEmpty { scheduleProposalStatus() }
         presentationRevision += 1
         reportIndexRecovery(snapshot)
     }
@@ -165,6 +168,34 @@ final class LibraryWorkspace {
     @ObservationIgnored var accessRequestReloadTask: Task<Void, Never>?
     /// Expiry is computed on read; snapshots pin the time.
     @ObservationIgnored var accessRequestClock: @MainActor () -> Date = { Date() }
+    /// #140: every Proposal under `.silkweb/proposals/`, newest first. Assigned only when it changes.
+    var proposals: [AgentProposal] = [] {
+        didSet {
+            guard proposals != oldValue else { return }
+            // The row never vanishes under the pointer: once shown, it stays for the window session.
+            if !proposals.isEmpty { proposalsRowShown = true }
+            if let id = selectedProposalID, !proposals.contains(where: { $0.id == id }) { selectedProposalID = nil }
+            scheduleProposalReview()
+            scheduleProposalStatus()
+        }
+    }
+    /// Pending Proposals whose base changed or whose target is gone: the list says “Out of Date”.
+    var staleProposals: Set<String> = []
+    @ObservationIgnored var proposalStatusTask: Task<Void, Never>?
+    /// The Proposals sidebar row is shown (any Proposal file existed this window session).
+    var proposalsRowShown = false
+    /// The Proposals sidebar row is selected. Never saved; it implies no folder and no tag scope.
+    var proposalScope = false { didSet { documentCache = nil } }
+    /// The Proposal in the review pane.
+    var selectedProposalID: String? { didSet { if selectedProposalID != oldValue { scheduleProposalReview() } } }
+    /// The strip's Pending ▾ choice, for this window session only.
+    var proposalFilter = ProposalFilter.pending
+    /// What the review pane shows for `selectedProposalID`, loaded off the main thread.
+    var proposalReview: ProposalReview?
+    /// Apply or Reject is running for this Proposal.
+    var decidingProposal: String?
+    @ObservationIgnored var proposalReviewTask: Task<Void, Never>?
+    @ObservationIgnored var proposalReloadTask: Task<Void, Never>?
 
     /// `force`: only the outside changes moved, so the receipts' entries are the same but the list isn't.
     private func updateAgentEntries(force: Bool = false) {
@@ -189,9 +220,12 @@ final class LibraryWorkspace {
     @ObservationIgnored private(set) var navigationGeneration = 0
     var snapshot: LibrarySnapshot?
     var session = LibrarySession() {
-        // Any folder or tag scope, however it was set, leaves Agent Activity.
+        // Any folder or tag scope, however it was set, leaves Agent Activity and Proposals.
         didSet {
             if agentScope && (session.selectedFolder != nil || session.selectedTagID != nil) { agentScope = false }
+            if proposalScope && (session.selectedFolder != nil || session.selectedTagID != nil) {
+                proposalScope = false
+            }
         }
     }
     var loading = false {
@@ -200,8 +234,8 @@ final class LibraryWorkspace {
     /// #209: the last document or sidebar scope (#211) click while loading or mutating, by ID. It opens once the
     /// library is idle. Observed: the sidebar capsule stays on a queued scope.
     struct PendingSelection: Equatable {
-        /// A folder (nil for All Documents), a tag or Agent Activity.
-        enum Scope: Equatable { case folder(UUID?), tag(UUID), agents }
+        /// A folder (nil for All Documents), a tag, Agent Activity or Proposals (#140).
+        enum Scope: Equatable { case folder(UUID?), tag(UUID), agents, proposals }
         var root: URL?
         /// Nil for a document click, which keeps the list's scope.
         var scope: Scope?
@@ -278,6 +312,7 @@ final class LibraryWorkspace {
     /// Agent Activity keeps its own (unsaved) preference, so Sort By there never changes All Documents.
     private var preferenceID: String {
         if agentScope { return "agents" }
+        if proposalScope { return "proposals" }
         if let id = session.selectedTagID { return "tag:" + id.uuidString };
         return selectedFolder.map { "folder:" + $0.id.uuidString } ?? "all"
     }
@@ -303,6 +338,8 @@ final class LibraryWorkspace {
     var documents: [LibraryDocument] {
         guard let snapshot else { return [] }
         let preference = listPreference
+        // #140: the Proposals scope lists Proposals, not Documents, so no Document command acts on its rows.
+        if proposalScope { return [] }
         let agents: String?? = agentScope ? .some(outsideFilter ? "\u{0}outside" : agentFilter) : nil
         if let cached = documentCache, cached.folder == session.selectedFolder, cached.preference == preference,
             cached.tag == session.selectedTagID, cached.agents == agents
@@ -340,12 +377,14 @@ final class LibraryWorkspace {
     }
     var folderName: String {
         if agentScope { return "Agent Activity" }
+        if proposalScope { return "Proposals" }
         return tags.first { $0.id == session.selectedTagID }?.name ?? snapshot?.folders.first {
             $0.relativePath == session.selectedFolder
         }?.name ?? "All Documents"
     }
     var subtitle: String {
-        search.text.isEmpty
+        if proposalScope { return "\(pendingProposalCount) pending" }
+        return search.text.isEmpty
             ? CountPresentation.label(documents.count, unit: .document)
                 + (includesSubfolders ? " (with subfolders)" : "")
             : CountPresentation.label(filteredSearchResults.count, unit: .result)
@@ -464,6 +503,9 @@ final class LibraryWorkspace {
         mediaRetryTask?.cancel()
         saveTask?.cancel()
         agentReloadTask?.cancel()
+        proposalReloadTask?.cancel()
+        proposalReviewTask?.cancel()
+        proposalStatusTask?.cancel()
         await persistOutsideLedgerNow()
         resetOutsideChanges()
         watcher?.stop()
@@ -538,6 +580,13 @@ final class LibraryWorkspace {
             agentFilter = nil
             grantFilter = nil
             agentActivity = AgentActivity()
+            proposalReloadTask?.cancel()
+            proposalScope = false
+            selectedProposalID = nil
+            proposals = []
+            staleProposals = []
+            proposalsRowShown = false
+            proposalFilter = .pending
             accessRequestWatcher?.stop()
             accessRequestWatcher = nil
             accessRequestReloadTask?.cancel()
@@ -572,6 +621,7 @@ final class LibraryWorkspace {
                 { /* A rebuildable navigation session can fall back to its defaults. */  }
                 guard !Task.isCancelled else { return }
                 agentActivity = await Self.loadAgentActivity(root: url)
+                proposals = await Self.loadProposals(root: url)
                 outsideLedger = await Self.loadOutsideLedger(root: url)
                 install(scanned)
                 session = restored.pruningPreferences(
@@ -619,9 +669,11 @@ final class LibraryWorkspace {
                     await self?.reconcileFinderChanges()
                 } receiptsChanged: { [weak self] in
                     await self?.reloadAgentActivity()
+                    await self?.reloadProposals()
                 }
                 // A receipt written between the first read and the watcher's start is picked up here.
                 await reloadAgentActivity()
+                await reloadProposals()
                 // #203: requests live outside the Library; Terminal and helpers change them while the app runs.
                 accessRequestWatcher = AccessRequestWatcher(file: accessRequestStore.url) { [weak self] in
                     await self?.reloadAccessRequests()
@@ -865,10 +917,12 @@ final class LibraryWorkspace {
     }
 
     /// #211: a sidebar row, breadcrumb or menu scope while busy shares the #209 slot; the list keeps its scope.
-    private func queueScope(folder: String?, tag: UUID?, agents: Bool) {
+    private func queueScope(folder: String?, tag: UUID?, agents: Bool, proposals: Bool) {
         guard let snapshot else { return }
         let scope: PendingSelection.Scope
-        if agents {
+        if proposals {
+            scope = .proposals
+        } else if agents {
             scope = .agents
         } else if let tag {
             scope = .tag(tag)
@@ -901,6 +955,7 @@ final class LibraryWorkspace {
             if tags.contains(where: { $0.id == id }) { selectTag(id) }
             return
         case .agents: return selectAgentActivity()
+        case .proposals: return selectProposals()
         case nil: break
         }
         if pending.reveals {
@@ -925,17 +980,17 @@ final class LibraryWorkspace {
 
     func navigate(
         folder: String?, documents: Set<String>, pinned: Bool = false, tag: UUID? = nil, changesScope: Bool = false,
-        agents: Bool = false
+        agents: Bool = false, proposals: Bool = false
     ) {
         guard !loading, !mutating else {
-            if changesScope { queueScope(folder: folder, tag: tag, agents: agents) }
+            if changesScope { queueScope(folder: folder, tag: tag, agents: agents, proposals: proposals) }
             return
         }
         if pendingSelection != nil { pendingSelection = nil }
         // The list follows the click at once (#70); the editor swaps in when the buffer has loaded.
         let shown = (
             folder: session.selectedFolder, documents: session.selectedDocuments, tag: session.selectedTagID,
-            filters: tagFilters, agents: agentScope
+            filters: tagFilters, agents: agentScope, proposals: proposalScope
         )
         var next = session
         next.selectedFolder = folder
@@ -944,9 +999,12 @@ final class LibraryWorkspace {
         // Revealing a Document Agent Activity doesn't list (a link, a search result) shows All Documents.
         if changesScope {
             agentScope = agents
+            proposalScope = proposals
         } else if agentScope, !documents.allSatisfy({ agentEntriesByPath[$0] != nil || outsideByPath[$0] != nil }) {
             agentScope = false
         }
+        // #140: the Proposals list holds no Documents, so revealing one (Show Document) leaves it.
+        if !changesScope, proposalScope, !documents.isEmpty { proposalScope = false }
         session = next
         // Install the new tag scope before clearing toolbar filters: never expose the full library.
         if changesScope && tag != nil { tagFilters = [] }
@@ -986,6 +1044,7 @@ final class LibraryWorkspace {
                 session.selectedDocuments = shown.documents
                 session.selectedTagID = shown.tag
                 agentScope = shown.agents
+                proposalScope = shown.proposals
                 tagFilters = shown.filters
                 return
             }

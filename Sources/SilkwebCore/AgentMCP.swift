@@ -418,6 +418,7 @@ public final class AgentMCPServer: @unchecked Sendable {
     /// CLI option → tool argument, for `invalid_argument` messages.
     static let argumentNames = [
         "id": "documentId", "created-after": "createdAfter", "created-before": "createdBefore",
+        "expected-revision": "expectedRevision",
     ]
 
     private func refusal(_ failure: AgentAccessError, tool: AgentMCPTool) -> AgentJSON {
@@ -557,6 +558,36 @@ public final class AgentMCPServer: @unchecked Sendable {
                 updated.json
             )
 
+        case .proposeChange, .proposeOrganization:
+            for (name, key) in [
+                ("id", "documentId"), ("expected-revision", "expectedRevision"), ("idempotency-key", "idempotencyKey"),
+                ("session", "session"), ("reason", "reason"), ("destination", "destination"), ("title", "title"),
+                ("source", "sources"),
+            ] {
+                option(name, key)
+            }
+            let name = lock.withLock { clientName }
+            invocation.options["agent"] = [agent ?? name ?? "mcp"]
+            invocation.options["client"] = [client ?? name ?? "mcp"]
+            if invocation.options["session"] == nil { invocation.options["session"] = [sessionID] }
+            let path = (arguments["path"] as? String).map(AgentHelper.nfc)
+            let context = try session.authorize(.propose, path: path)
+            let kind =
+                tool == .proposeChange
+                ? AgentProposal.Kind.edit : AgentProposal.Kind(rawValue: arguments["kind"] as? String ?? "") ?? .move
+            let body = arguments["body"] as? String
+            let limit = context.grant.limits.maxCreateBytes
+            guard (body?.utf8.count ?? 0) <= limit else { throw AgentProposeService.tooLarge(limit) }
+            let result = try AgentHelper.propose(
+                context, kind: kind, invocation: invocation, path: path, body: body, keyPrefix: "mcp-")
+            let headline = result.proposal.headline()
+            return (
+                result.replayed
+                    ? "Already proposed: \(headline). This is the original result."
+                    : "Proposed: \(headline). The owner reviews it in Silkweb; nothing changes until they apply it.",
+                result.json
+            )
+
         case .createFolder:
             let authorization = try session.authorize(
                 .createFolder, path: AgentHelper.nfc(arguments["path"] as? String ?? ""))
@@ -606,7 +637,7 @@ public final class AgentMCPServer: @unchecked Sendable {
     }
 }
 
-/// The eight tools, in `tools/list` order (`docs/agent-memory.md` › MCP server).
+/// The ten tools, in `tools/list` order (`docs/agent-memory.md` › MCP server).
 public enum AgentMCPTool: String, CaseIterable, Sendable {
     case capabilities = "memory_capabilities"
     case search = "memory_search"
@@ -614,6 +645,10 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
     case create = "memory_create"
     case createFolder = "memory_create_folder"
     case update = "memory_update"
+    /// #140: a body edit for the owner to review.
+    case proposeChange = "memory_propose_change"
+    /// #140: a move, rename or merge for the owner to review.
+    case proposeOrganization = "memory_propose_organization"
     case activity = "memory_activity"
     /// #203: works without a grant; never changes one.
     case grantRequest = "grant_request"
@@ -626,12 +661,16 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
         case .create: return "Silkweb: Create Document"
         case .createFolder: return "Silkweb: Create Folder"
         case .update: return "Silkweb: Update Document"
+        case .proposeChange: return "Silkweb: Propose an Edit"
+        case .proposeOrganization: return "Silkweb: Propose a Move, Rename or Merge"
         case .activity: return "Silkweb: Recent Agent Activity"
         case .grantRequest: return "Silkweb: Request Access"
         }
     }
 
-    public var readOnly: Bool { self != .create && self != .createFolder && self != .update }
+    public var readOnly: Bool {
+        ![.create, .createFolder, .update, .proposeChange, .proposeOrganization].contains(self)
+    }
 
     public var description: String {
         switch self {
@@ -661,6 +700,18 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                 + "the owner wrote or edited are refused with update_requires_proposal, and a document with "
                 + "unsaved changes in Silkweb with document_has_unsaved_changes (try again later). The earlier "
                 + "text is kept. Retrying with the same idempotencyKey returns the original result."
+        case .proposeChange:
+            return "Proposes a new body (the text after the front matter) for a document in this grant’s read "
+                + "folders, including the owner’s, for the owner to review in Silkweb. Nothing in the Library changes: "
+                + "only the owner applies or rejects it. Needs expectedRevision from memory_read and a short reason. "
+                + "Use it when memory_update answers update_requires_proposal. Retrying with the same idempotencyKey "
+                + "returns the original result."
+        case .proposeOrganization:
+            return "Proposes moving a document into another folder, renaming it, or merging 2 to 10 documents into a "
+                + "new one, for the owner to review in Silkweb. Nothing in the Library changes until the owner applies "
+                + "it; moves and renames keep the document’s identity and update links, and a merge never deletes its "
+                + "sources by itself. Needs a short reason. Retrying with the same idempotencyKey returns the original "
+                + "result."
         case .activity:
             return "Lists this grant’s create and update receipts in its read folders, newest first. "
                 + "Returns at most the grant’s max_results and never includes document text."
@@ -816,6 +867,84 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                     ),
                     ("session", S.string("Session recorded in the receipt. Defaults to this server’s session.")),
                 ], required: ["expectedRevision", "body"])
+        case .proposeChange:
+            return S.object(
+                [
+                    (
+                        "path",
+                        S.string(
+                            "Library-relative path of a document in a read folder, such as "
+                                + "Memory/Projects/Silkweb/Memories/Use flock.md. Or documentId.")
+                    ),
+                    ("documentId", S.string("The documentId from a search or read result, instead of path.")),
+                    (
+                        "expectedRevision",
+                        S.string("The revision from memory_read. If the document changed since, nothing is saved.")
+                    ),
+                    (
+                        "body",
+                        S.string(
+                            "The proposed Markdown text after the front matter, replacing all of it. The front matter "
+                                + "stays as it is.")
+                    ),
+                    (
+                        "reason",
+                        S.string(
+                            "Why, in one short paragraph of plain text for the owner.", minLength: 1,
+                            maxLength: AgentProposeService.maxReasonLength)
+                    ),
+                    (
+                        "idempotencyKey",
+                        S.string(
+                            "Request key, 1 to 200 characters. Reuse it when retrying.", minLength: 1,
+                            maxLength: AgentCreateService.maxKeyLength)
+                    ),
+                    ("session", S.string("Session recorded with the proposal. Defaults to this server’s session.")),
+                ], required: ["expectedRevision", "body", "reason"])
+        case .proposeOrganization:
+            return S.object(
+                [
+                    ("kind", S.string("What to propose.", oneOf: ["move", "rename", "merge"])),
+                    (
+                        "path",
+                        S.string(
+                            "Move or rename: the document’s Library-relative path in a read folder. Or documentId.")
+                    ),
+                    ("documentId", S.string("Move or rename: the documentId from a search or read result.")),
+                    (
+                        "expectedRevision",
+                        S.string(
+                            "Move or rename: the revision from memory_read. If given and the document changed, "
+                                + "nothing is saved.")
+                    ),
+                    (
+                        "destination",
+                        S.string(
+                            "Move and merge: a Library-relative folder in a read folder, such as "
+                                + "Memory/Projects/Silkweb/Archive.")
+                    ),
+                    ("title", S.string("Rename: the new title. Merge: the new document’s title. Without “:” or “/”.")),
+                    (
+                        "sources",
+                        S.array(
+                            S.string("A Library-relative path in a read folder."),
+                            "Merge: the 2 to 10 documents to merge, in order. They stay unless the owner trashes them.")
+                    ),
+                    ("body", S.string("Merge: the new document’s Markdown text.")),
+                    (
+                        "reason",
+                        S.string(
+                            "Why, in one short paragraph of plain text for the owner.", minLength: 1,
+                            maxLength: AgentProposeService.maxReasonLength)
+                    ),
+                    (
+                        "idempotencyKey",
+                        S.string(
+                            "Request key, 1 to 200 characters. Reuse it when retrying.", minLength: 1,
+                            maxLength: AgentCreateService.maxKeyLength)
+                    ),
+                    ("session", S.string("Session recorded with the proposal. Defaults to this server’s session.")),
+                ], required: ["kind", "reason"])
         case .activity:
             return S.object([
                 (
@@ -869,8 +998,20 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
             return "folderPath needs type."
         case .create where values["folder"] == nil && values["type"] == nil:
             return "give folder or type."
-        case .update where (values["path"] == nil) == (values["documentId"] == nil):
+        case .update where (values["path"] == nil) == (values["documentId"] == nil),
+            .proposeChange where (values["path"] == nil) == (values["documentId"] == nil):
             return "give path or documentId, not both."
+        case .proposeOrganization where values["kind"] as? String == "merge":
+            if values["path"] != nil || values["documentId"] != nil { return "a merge names its documents in sources." }
+            for key in ["sources", "title", "destination", "body"] where values[key] == nil {
+                return "a merge needs \(key)."
+            }
+            return nil
+        case .proposeOrganization:
+            if (values["path"] == nil) == (values["documentId"] == nil) { return "give path or documentId, not both." }
+            if values["sources"] != nil || values["body"] != nil { return "only a merge takes sources and body." }
+            let needed = values["kind"] as? String == "move" ? "destination" : "title"
+            return values[needed] == nil ? "a \(values["kind"] as? String ?? "move") needs \(needed)." : nil
         default:
             return nil
         }
@@ -882,7 +1023,10 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
         switch self {
         case .capabilities:
             properties = [
-                ("access", S.plain("string", oneOf: ["read", "read-create", "read-create-update"])),
+                (
+                    "access",
+                    S.plain("string", oneOf: ["read", "read-create", "read-create-propose", "read-create-update"])
+                ),
                 ("agent_create_root", S.nullable("string")),
                 ("agent_folder", S.nullable("string")),
                 ("agent_read_root", S.nullable("string")),
@@ -961,6 +1105,14 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                 ("receipt", .object([("type", .string("object"))])),
                 ("replayed", S.plain("boolean")),
                 ("revision", S.nullable("string")),
+            ]
+        case .proposeChange, .proposeOrganization:
+            properties = [
+                ("createdAt", S.plain("string")),
+                ("kind", S.plain("string", oneOf: AgentProposal.Kind.allCases.map(\.rawValue))),
+                ("proposalId", S.plain("string")),
+                ("replayed", S.plain("boolean")),
+                ("status", S.plain("string", oneOf: ["pending", "applied", "rejected"])),
             ]
         case .activity:
             properties = [("receipts", S.list(.object([("type", .string("object"))]))), ("total", S.plain("integer"))]

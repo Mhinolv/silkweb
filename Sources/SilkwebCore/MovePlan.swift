@@ -32,6 +32,12 @@ public struct MovePlan: Sendable {
     let unreadableDocuments: [String: UnreadableMoveDocument]
     let inventory: Set<String>
 
+    /// Documents whose links this plan rewrites, by their paths before the move, in path order (#140: “Links to
+    /// update”).
+    public var rewrittenDocuments: [String] {
+        before.keys.filter { before[$0] != after[$0] }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     public var reversed: MovePlan {
         let reverse = LibraryChangeSet(
             changes: changes.changes.map {

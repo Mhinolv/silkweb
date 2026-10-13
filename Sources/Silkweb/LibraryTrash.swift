@@ -101,8 +101,12 @@ extension LibraryWorkspace {
         Task { await performTrash(plan) }
     }
 
-    /// The injected service is also used by offscreen tests of the real save gate.
-    func performTrash(_ plan: DeletionPlan, using service: TrashService? = nil) async {
+    /// The injected service is also used by offscreen tests of the real save gate. `recordsUndo` is false when the
+    /// caller folds the trashed items into its own Undo entry (#140 Apply Proposal); returns them either way.
+    @discardableResult
+    func performTrash(_ plan: DeletionPlan, using service: TrashService? = nil, recordsUndo: Bool = true) async
+        -> [TrashedItem]
+    {
         mutating = true
         let editor = editor
         editor.loading = true
@@ -111,15 +115,17 @@ extension LibraryWorkspace {
             mutationErrorTitle = "“\(editor.name)” couldn’t be saved, so nothing was moved to the Trash."
             mutationError = "Your changes are still open in Silkweb."
             mutationRevealURLs = []
-            return
+            return []
         }
         let pane = focusColumn
         let oldRows = documents.map(\.relativePath)
+        var trashed: [TrashedItem] = []
         do {
             let service = try service ?? TrashService(root: plan.root)
             let result = try await service.execute(plan)
+            trashed = result.items
             // Retain recovery information before refreshing any rebuildable state.
-            if !result.items.isEmpty { libraryUndo.append(.trash(result.items)) }
+            if recordsUndo, !result.items.isEmpty { libraryUndo.append(.trash(result.items)) }
             let removed = Set(result.items.map(\.originalPath))
             func gone(_ path: String) -> Bool { removed.contains { path == $0 || path.hasPrefix($0 + "/") } }
             let closing = tabs.filter {
@@ -175,6 +181,7 @@ extension LibraryWorkspace {
             reportTrashFailures(
                 result.failures, reveal: result.failures.map { plan.root.appendingPathComponent($0.path) })
         } catch { mutationFailure(error, title: "The items couldn’t be moved to the Trash.") }
+        return trashed
     }
 
     func reportTrashFailures(_ failures: [TrashFailure], reveal: [URL], restoring: Bool = false) {

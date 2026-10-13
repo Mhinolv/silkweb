@@ -21,6 +21,8 @@ enum LibraryUndo {
     case rename(LibraryRename, String, MovePlan)
     case move(MovePlan)
     case trash([TrashedItem])
+    /// #140: one Apply or Reject of a Proposal.
+    case proposal(ProposalUndo)
     var title: String {
         switch self {
         case .tags(_, let title): return title;
@@ -28,6 +30,7 @@ enum LibraryUndo {
         case .rename: return "Undo Rename";
         case .move: return "Undo Move";
         case .trash: return "Undo Move to Trash"
+        case .proposal(let undo): return undo.title
         }
     }
 }
@@ -261,7 +264,7 @@ extension LibraryWorkspace {
     var canUndoLibrary: Bool {
         guard canMutate, let snapshot, let last = libraryUndo.last else { return false }
         switch last {
-        case .move, .trash, .tags: return true
+        case .move, .trash, .tags, .proposal: return true
         case .newFolder(let path):
             return snapshot.folders.contains { $0.relativePath == path }
                 && !snapshot.folders.contains { $0.relativePath.hasPrefix(path + "/") }
@@ -279,6 +282,14 @@ extension LibraryWorkspace {
         mutating = true
         Task {
             await waitForNavigation()
+            if case .proposal(let undo) = last {
+                // #140: an undone edit reloads the open buffer, so the editor isn't locked here. All or nothing,
+                // like Undo Move: a failure drops the entry and says nothing changed.
+                defer { mutating = false }
+                libraryUndo.removeLast()
+                await undoProposal(undo, root: root)
+                return
+            }
             let editor = editor
             editor.loading = true
             defer { editor.loading = false; mutating = false }
@@ -337,6 +348,9 @@ extension LibraryWorkspace {
                         let changes = try await engine.restoreName(item.path, to: name)
                         try await refresh(changes)
                     }
+                case .proposal:
+                    // Handled before the editor is locked, below.
+                    return
                 }
                 libraryUndo.removeLast()
             } catch { mutationFailure(error) }

@@ -69,6 +69,8 @@ import Foundation
         let events = metadata + "/agent-events"
         // #204: earlier versions an update saved; Info counts them.
         let history = metadata + "/agent-history"
+        // #140: Proposals agents save, and the owner's decisions on them.
+        let proposals = metadata + "/proposals"
         var library = false
         var receipts = false
         for raw in paths {
@@ -76,7 +78,7 @@ import Foundation
             if path != metadata && !path.hasPrefix(metadata + "/") {
                 library = true
             } else if path == metadata || path == events || path.hasPrefix(events + "/") || path == history
-                || path.hasPrefix(history + "/")
+                || path.hasPrefix(history + "/") || path == proposals || path.hasPrefix(proposals + "/")
             {
                 receipts = true
             }

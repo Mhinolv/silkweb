@@ -14,6 +14,8 @@ struct FolderSidebar: NSViewRepresentable {
         var isTagsGroup = false
         /// #137: the virtual Agent Activity row under All Documents.
         var isAgentActivity = false
+        /// #140: the virtual Proposals row under Agent Activity.
+        var isProposals = false
         var children: [Item] = [] { didSet { for child in children { child.parent = self } } }
         /// Thread guides walk up through parents (silkweb-1.63).
         weak var parent: Item?
@@ -100,6 +102,8 @@ struct FolderSidebar: NSViewRepresentable {
             || coordinator.agentVisible != workspace.hasAgentActivity
             || coordinator.agentCount != workspace.agentActivityCount
             || coordinator.waitingRequests != workspace.pendingAccessRequestCount
+            || coordinator.proposalsVisible != workspace.hasProposals
+            || coordinator.proposalCount != workspace.pendingProposalCount
         {
             coordinator.revision = workspace.revision
             if coordinator.configure(snapshot) { coordinator.restore() } else { coordinator.updateVisibleCounts() }
@@ -120,6 +124,7 @@ struct FolderSidebar: NSViewRepresentable {
         // Scope changes made outside the sidebar (the toolbar breadcrumb, 1.65) move the selected row too.
         if coordinator.selectedFolder != .some(workspace.session.selectedFolder)
             || coordinator.agentScope != workspace.agentScope
+            || coordinator.proposalScope != workspace.proposalScope
             || coordinator.pendingScope != workspace.pendingSelection?.scope
         {
             coordinator.selectScope()
@@ -147,6 +152,12 @@ struct FolderSidebar: NSViewRepresentable {
         private(set) var waitingRequests = 0
         /// Whether the selected row last followed the Agent Activity scope.
         var agentScope = false
+        /// #140: the Proposals row, whether it's shown, and its pending count.
+        var proposalItem: Item?
+        private(set) var proposalsVisible = false
+        private(set) var proposalCount = 0
+        /// Whether the selected row last followed the Proposals scope.
+        var proposalScope = false
         var itemsByTag: [UUID: Item] = [:]
         var tagsExpanded = true
         var selectedTagID: UUID?
@@ -199,14 +210,17 @@ struct FolderSidebar: NSViewRepresentable {
             tagCounts = workspace.tagCounts
             agentCount = workspace.agentActivityCount
             waitingRequests = workspace.pendingAccessRequestCount
+            proposalCount = workspace.pendingProposalCount
             let agentVisible = workspace.hasAgentActivity
+            let proposalsVisible = workspace.hasProposals
             guard
                 rootURL != snapshot.rootURL || folders != snapshot.folders || tags != workspace.tags
-                    || self.agentVisible != agentVisible
+                    || self.agentVisible != agentVisible || self.proposalsVisible != proposalsVisible
             else {
                 return false
             }
             self.agentVisible = agentVisible
+            self.proposalsVisible = proposalsVisible
             tags = workspace.tags
             rootURL = snapshot.rootURL
             folders = snapshot.folders
@@ -219,6 +233,14 @@ struct FolderSidebar: NSViewRepresentable {
                 let item = Item(folder: nil, title: "Agent Activity")
                 item.isAgentActivity = true
                 agentItem = item
+                roots.append(item)
+            }
+            proposalItem = nil
+            // #140: shown once any Proposal existed this window session, so it never vanishes under the pointer.
+            if proposalsVisible {
+                let item = Item(folder: nil, title: "Proposals")
+                item.isProposals = true
+                proposalItem = item
                 roots.append(item)
             }
             var byID: [UUID: Item] = [:]
@@ -273,6 +295,14 @@ struct FolderSidebar: NSViewRepresentable {
                 cell.showsRequests(waiting != nil)
                 return
             }
+            if item.isProposals {
+                cell.countBadge.stringValue =
+                    FolderDocumentCount(direct: proposalCount, recursive: proposalCount).inlineSuffix
+                cell.setAccessibilityValue("\(proposalCount) pending" + currentSuffix(item))
+                cell.toolTip = nil
+                cell.showsRequests(false)
+                return
+            }
             cell.showsRequests(false)
             if item.isTagsGroup || item.tag != nil {
                 let count = item.tag.map { tagCounts[$0.id] ?? 0 } ?? tags.count
@@ -295,6 +325,7 @@ struct FolderSidebar: NSViewRepresentable {
         /// The list's scope: a selected tag, else the selected folder, else All Documents.
         func scopeItem() -> Item? {
             if workspace.agentScope, let agentItem { return agentItem }
+            if workspace.proposalScope, let proposalItem { return proposalItem }
             return workspace.session.selectedTagID.flatMap { itemsByTag[$0] }
                 ?? (workspace.session.selectedFolder.flatMap { itemsByPath[$0] } ?? roots.first)
         }
@@ -307,6 +338,7 @@ struct FolderSidebar: NSViewRepresentable {
                 case .folder(nil): roots.first
                 case .tag(let id): itemsByTag[id]
                 case .agents: agentItem
+                case .proposals: proposalItem
                 case nil: nil
                 }
             return pending ?? scopeItem()
@@ -360,6 +392,7 @@ struct FolderSidebar: NSViewRepresentable {
             }
             selectedFolder = .some(workspace.session.selectedFolder)
             agentScope = workspace.agentScope
+            proposalScope = workspace.proposalScope
             restoring = false
             updateCurrentScope()
             sections?.didRestore(self)
@@ -385,6 +418,7 @@ struct FolderSidebar: NSViewRepresentable {
         func selectScope() {
             selectedFolder = .some(workspace.session.selectedFolder)
             agentScope = workspace.agentScope
+            proposalScope = workspace.proposalScope
             pendingScope = workspace.pendingSelection?.scope
             guard isCurrent, let outline, let item = selectionItem(),
                 outline.item(atRow: outline.selectedRow) as? Item !== item
@@ -541,8 +575,10 @@ struct FolderSidebar: NSViewRepresentable {
             let symbol =
                 item.isAgentActivity
                 ? "clock.arrow.circlepath"
-                : item.tag != nil || item.isTagsGroup
-                    ? "tag" : item.folder.map { $0.parentID == nil ? "books.vertical" : "folder" } ?? "doc.on.doc"
+                : item.isProposals
+                    ? "text.badge.checkmark"
+                    : item.tag != nil || item.isTagsGroup
+                        ? "tag" : item.folder.map { $0.parentID == nil ? "books.vertical" : "folder" } ?? "doc.on.doc"
             cell.imageView?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
             cell.configureCluster(unreadable: item.folder?.isUnreadable == true, renaming: cell.renameField != nil)
             let label = item.folder.map { "\(item.title), \($0.parentID == nil ? "library" : "folder")" } ?? item.title
@@ -779,6 +815,8 @@ struct FolderSidebar: NSViewRepresentable {
             let generation = workspace.navigationGeneration
             if item.isAgentActivity {
                 workspace.selectAgentActivity()
+            } else if item.isProposals {
+                workspace.selectProposals()
             } else if let tag = item.tag {
                 workspace.selectTag(tag.id)
             } else {

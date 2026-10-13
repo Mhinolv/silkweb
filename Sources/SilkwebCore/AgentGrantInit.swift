@@ -44,7 +44,8 @@ public enum AgentGrantInit {
     public static let help = """
         USAGE
           silkweb grant init [--library <PATH>] [--project <KEY>]
-                             [--access read|read-create|read-create-update] [--agent-folder <KEY>]
+                             [--access read|read-create|read-create-propose|read-create-update]
+                             [--agent-folder <KEY>]
                              [--create-folder <PATH>]... [--yes] [--dry-run] [--grants <FILE>]
           silkweb grant request --library <PATH> --project <KEY> --access read|read-create
                              [--folder <PATH>]... [--create-folder <PATH>]... [--message <TEXT>]
@@ -64,7 +65,8 @@ public enum AgentGrantInit {
         OPTIONS
           --library <PATH>    The Library folder agents may use (~ is expanded)
           --project <KEY>     Project key, the Folder name under Memory/Projects
-          --access <LEVEL>    read (Read Only), read-create (Read and Create) or
+          --access <LEVEL>    read (Read Only), read-create (Read and Create),
+                              read-create-propose (Read, Create and Propose; init only) or
                               read-create-update (Read, Create and Update; init only)
           --agent-folder <KEY>
                               Agent folder under Memory/Agents, shared by grants with the same key:
@@ -219,8 +221,11 @@ public enum AgentGrantInit {
             switch text {
             case "read", "read-only": return .read
             case "read-create": return .readCreate
+            case "read-create-propose": return .readCreatePropose
             case "read-create-update": return .readCreateUpdate
-            default: throw Failure.usage("The option “--access” must be read, read-create or read-create-update.")
+            default:
+                throw Failure.usage(
+                    "The option “--access” must be read, read-create, read-create-propose or read-create-update.")
             }
         }
         let missing = ["library", "project", "access"].filter { invocation.value($0) == nil }
