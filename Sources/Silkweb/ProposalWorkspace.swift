@@ -16,6 +16,14 @@ enum ProposalFilter: String, CaseIterable {
     }
 }
 
+/// #141: what an applied merge does with its sources. Keep Sources is the default; nothing is ever deleted.
+enum AfterMerging: String, CaseIterable, Identifiable {
+    case keep = "Keep Sources"
+    case archive = "Archive Sources"
+    case trash = "Move Sources to Trash"
+    var id: String { rawValue }
+}
+
 /// One Library Undo entry for an Apply or Reject (#140). Undo restores the files and sets the Proposal back to
 /// Pending.
 struct ProposalUndo {
@@ -26,8 +34,8 @@ struct ProposalUndo {
         case edit(path: String, documentID: UUID?, previous: Data, applied: String)
         /// The exact reverse of the move or rename and its link rewrites.
         case move(MovePlan)
-        /// The new Document, and the sources moved to the Trash with it.
-        case merge(created: String, createdID: UUID?, trashed: [TrashedItem])
+        /// The new Document, and the sources moved to the Trash or archived (#141) with it.
+        case merge(created: String, createdID: UUID?, trashed: [TrashedItem], archived: MemoryStateUndo? = nil)
     }
 
     let proposalID: String
@@ -232,7 +240,7 @@ extension LibraryWorkspace {
 
     /// Applies a pending Proposal after checking its base revisions again at the moment of the click. A blocked
     /// Proposal changes nothing; its banner says why. One Library Undo entry, “Undo Apply Proposal”.
-    func applyProposal(_ id: String, trashSources: Bool = false) {
+    func applyProposal(_ id: String, afterMerging: AfterMerging = .keep) {
         guard canMutate, decidingProposal == nil, let root, let proposal = proposals.first(where: { $0.id == id }),
             proposal.isPending
         else { return }
@@ -249,7 +257,8 @@ extension LibraryWorkspace {
             guard review.block == nil, unsavedTarget(proposal) == nil else { return }
             do {
                 guard
-                    let (action, applied) = try await perform(proposal, review: review, root: root, trash: trashSources)
+                    let (action, applied) = try await perform(
+                        proposal, review: review, root: root, afterMerging: afterMerging)
                 else { return }
                 let now = MemoryEnvelope.timestamp(Date())
                 libraryUndo.append(
@@ -279,9 +288,9 @@ extension LibraryWorkspace {
     }
 
     /// The Library change itself. `nil` when the owner cancelled (links Silkweb can't rewrite).
-    private func perform(_ proposal: AgentProposal, review: ProposalReview, root: URL, trash: Bool) async throws
-        -> (ProposalUndo.Action, String?)?
-    {
+    private func perform(
+        _ proposal: AgentProposal, review: ProposalReview, root: URL, afterMerging: AfterMerging
+    ) async throws -> (ProposalUndo.Action, String?)? {
         let target = proposal.targets.first
         let path = review.paths.first ?? nil
         switch proposal.kind {
@@ -318,18 +327,37 @@ extension LibraryWorkspace {
             let folder = proposal.destination ?? ""
             let engine = try LibraryMutations(root: root)
             let name = try await engine.uniqueName(base: (proposal.title ?? "Merged") + ".md", in: folder)
-            let changes = try await engine.createDocument(named: name, in: folder, text: proposal.body ?? "")
+            let sources = review.paths.compactMap { $0 }
+            // #141: the summary lists its sources, and names their memory IDs in `consolidates` when they have any.
+            let text = MemoryConsolidation.document(
+                body: proposal.body ?? "",
+                sources: sources.map {
+                    .init(
+                        title: (($0 as NSString).lastPathComponent as NSString).deletingPathExtension, path: $0,
+                        memoryID: memoryLinks.links[$0]?.memoryID)
+                },
+                folder: folder, project: proposal.grantId, agent: proposal.agent, session: proposal.session,
+                createdAt: Date())
+            let changes = try await engine.createDocument(named: name, in: folder, text: text)
             try await refresh(changes)
             let created = changes.changes.first
             var trashed: [TrashedItem] = []
-            let sources = review.paths.compactMap { $0 }
-            if trash, !sources.isEmpty {
-                // The checkbox is the owner's confirmation; Undo Apply Proposal puts them back.
+            var archived: MemoryStateUndo?
+            switch afterMerging {
+            case .keep: break
+            case .trash where !sources.isEmpty:
+                // The pop-up is the owner's confirmation; Undo Apply Proposal puts them back.
                 let plan = try await TrashService(root: root).plan(sources)
                 trashed = await performTrash(plan, recordsUndo: false)
                 mutating = true
+            case .trash: break
+            case .archive:
+                archived = await archive(sources, root: root, title: "Undo Archive")
             }
-            return (.merge(created: created?.newPath ?? "", createdID: created?.id, trashed: trashed), created?.newPath)
+            return (
+                .merge(created: created?.newPath ?? "", createdID: created?.id, trashed: trashed, archived: archived),
+                created?.newPath
+            )
         }
     }
 
@@ -394,8 +422,9 @@ extension LibraryWorkspace {
                     // Something changed since the apply: move back and rewrite links afresh.
                     _ = try await commitMove(engine.planRestore(plan.changes), using: engine)
                 }
-            case .merge(let created, let id, let trashed):
+            case .merge(let created, let id, let trashed, let archived):
                 guard await flushEditors() else { return }
+                if let archived { try await undoMemoryState(archived, root: root) }
                 if !trashed.isEmpty {
                     let result = await (try TrashService(root: root)).restore(trashed)
                     try await refresh(LibraryChangeSet(changes: []), added: result.items.map(\.originalPath))

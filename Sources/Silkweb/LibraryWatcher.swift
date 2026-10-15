@@ -1,5 +1,6 @@
 import CoreServices
 import Foundation
+import SilkwebCore
 
 /// FSEvents watches descendants recursively, including atomic replacements. Only
 /// the coalesced callback reaches the workspace; scanning runs on a worker.
@@ -71,6 +72,8 @@ import Foundation
         let history = metadata + "/agent-history"
         // #140: Proposals agents save, and the owner's decisions on them.
         let proposals = metadata + "/proposals"
+        // #141: the owner's lifecycle decisions; another window of the same Library may change them.
+        let memoryState = metadata + "/" + MemoryStateStore.fileName
         var library = false
         var receipts = false
         for raw in paths {
@@ -79,6 +82,7 @@ import Foundation
                 library = true
             } else if path == metadata || path == events || path.hasPrefix(events + "/") || path == history
                 || path.hasPrefix(history + "/") || path == proposals || path.hasPrefix(proposals + "/")
+                || path == memoryState
             {
                 receipts = true
             }

@@ -32,7 +32,10 @@ public enum AgentHelper {
           capabilities                  This grant’s scope, limits and commands
           search [QUERY]                Search the read folders
               [--project P] [--type T]... [--status S]... [--created-after D]
-              [--created-before D] [--limit N] [--ranked]
+              [--created-before D] [--limit N] [--ranked] [--include-archived]
+              [--recent-days N]
+              Progress and handoffs older than 30 days are left out unless a
+              project has none newer; --recent-days 0 turns this off
               --ranked orders by relevance and reads "phrases", tag:, type:,
               status:, project:, after: and before: in QUERY
           read <PATH> | --id ID         Read one page of a document
@@ -88,14 +91,14 @@ public enum AgentHelper {
     }
 
     private static let globalOptions: Set<String> = ["grant", "agent", "session", "client", "grants"]
-    private static let flags: Set<String> = ["pretty", "help", "version", "ranked"]
+    private static let flags: Set<String> = ["pretty", "help", "version", "ranked", "include-archived"]
 
     private static let commands: [String: Command] = [
         "capabilities": Command(),
         "list": Command(),
         "search": Command(
             arguments: 0...Int.max,
-            options: ["project", "type", "status", "created-after", "created-before", "limit"],
+            options: ["project", "type", "status", "created-after", "created-before", "limit", "recent-days"],
             repeatable: ["type", "status"]),
         "read": Command(arguments: 0...1, options: ["id", "cursor", "expected-revision"]),
         "create": Command(
@@ -280,8 +283,8 @@ public enum AgentHelper {
         if let missing = command.required.first(where: { invocation.options[$0] == nil }) {
             throw usage("“memory \(name)” needs --\(missing).")
         }
-        if invocation.flags.contains("ranked"), name != "search" {
-            throw usage("The option “--ranked” isn’t valid for “memory \(name)”.")
+        for flag in ["ranked", "include-archived"] where invocation.flags.contains(flag) && name != "search" {
+            throw usage("The option “--\(flag)” isn’t valid for “memory \(name)”.")
         }
         if name == "read" || name == "update" || name == "propose-change",
             arguments.isEmpty == (invocation.value("id") == nil)
@@ -657,11 +660,19 @@ public enum AgentHelper {
             guard let parsed = Int(text) else { throw AgentAccessError.invalidArgument("limit") }
             limit = parsed
         }
+        var recentDays = AgentMemorySearchRequest.defaultRecentDays
+        if let text = value("recent-days") {
+            guard let parsed = Int(text), (0...AgentMemorySearchRequest.maxRecentDays).contains(parsed) else {
+                throw AgentAccessError.invalidArgument("recent-days")
+            }
+            recentDays = parsed
+        }
         return AgentMemorySearchRequest(
             query: query.joined(separator: " "), project: value("project").map(nfc), types: list("type"),
             statuses: list("status"), createdAfter: try date("created-after"),
             createdBefore: try date("created-before"), limit: limit,
-            mode: invocation.flags.contains("ranked") ? .ranked : .default)
+            mode: invocation.flags.contains("ranked") ? .ranked : .default,
+            includeArchived: invocation.flags.contains("include-archived"), recentDays: recentDays)
     }
 }
 

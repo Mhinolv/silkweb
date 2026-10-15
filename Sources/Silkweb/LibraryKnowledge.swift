@@ -14,6 +14,8 @@ final class LibraryKnowledge {
             "SilkwebTests-knowledge-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
     private(set) var index: LibraryKnowledgeIndex?
     private var task: Task<Void, Never>?
+    /// #141: the Library's memory IDs and `supersedes` claims after each finished reconcile.
+    var linksChanged: (@MainActor ([String: MemoryLink]) -> Void)?
     #if DEBUG
         /// Test seam: snapshots handed to the index.
         private(set) var reconcileCount = 0
@@ -30,9 +32,12 @@ final class LibraryKnowledge {
         #if DEBUG
             reconcileCount += 1
         #endif
-        task = Task(priority: .utility) {
+        task = Task(priority: .utility) { [weak self] in
             // Superseded or cancelled work is redone by the next snapshot; failures leave the old index.
-            try? await index.reconcile(snapshot)
+            guard (try? await index.reconcile(snapshot)) != nil else { return }
+            let links = await index.memoryLinks()
+            guard !Task.isCancelled else { return }
+            self?.linksChanged?(links)
         }
     }
 

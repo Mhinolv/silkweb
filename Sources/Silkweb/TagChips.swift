@@ -6,6 +6,8 @@ struct DocumentInfo: View {
     let workspace: LibraryWorkspace
     /// #137: the selected Document's agent provenance, loaded off the main thread.
     @State private var provenance: LoadedAgentProvenance?
+    /// #141: the selected memory Document's revision and envelope dates, loaded off the main thread.
+    @State private var memory: LoadedMemoryInfo?
     var body: some View {
         if workspace.tagDocumentIDs.isEmpty {
             ContentUnavailableView("No Document Selected", systemImage: "doc.text")
@@ -54,6 +56,7 @@ struct DocumentInfo: View {
                         }
                         // #230: a change made outside Silkweb leads the Agent block.
                         let outside = workspace.outsideChange(for: document)
+                        let link = workspace.memoryLinks.links[document.relativePath]
                         if let outside {
                             OutsideChangeSection(change: outside, workspace: workspace)
                         }
@@ -64,16 +67,25 @@ struct DocumentInfo: View {
                         {
                             AgentProvenanceSection(
                                 provenance: value, modified: document.modified, root: workspace.snapshot?.rootURL,
-                                review: ProposalReviewRow.make(document, workspace: workspace))
+                                review: ProposalReviewRow.make(document, workspace: workspace),
+                                showsReview: link == nil)
                         } else {
                             // #140: the owner's own Documents have no Agent block, but may have Proposals.
                             ProposalReviewRow.make(document, workspace: workspace)
+                        }
+                        // #141: lifecycle controls for any Document with a memory envelope.
+                        if let link {
+                            MemoryLifecycleSection(
+                                workspace: workspace, document: document, link: link, loaded: memory)
                         }
                     }
                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
                     .modifier(
                         AgentProvenanceLoader(
-                            workspace: workspace, document: workspace.selectedDocument, loaded: $provenance))
+                            workspace: workspace, document: workspace.selectedDocument, loaded: $provenance)
+                    )
+                    .modifier(
+                        MemoryInfoLoader(workspace: workspace, document: workspace.selectedDocument, loaded: $memory))
             }
         }
     }

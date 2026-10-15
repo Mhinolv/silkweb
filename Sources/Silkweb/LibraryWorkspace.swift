@@ -40,6 +40,10 @@ final class LibraryWorkspace {
         preview = PreviewCoordinator(defaults: defaults)
         search.knowledge = knowledge
         search.window = { [weak self] in self?.libraryWindow }
+        knowledge.linksChanged = { [weak self] links in
+            guard let self, self.memoryLinks.links != links else { return }
+            self.memoryLinks = MemoryLinkMap(links)
+        }
         emptyEditor.didSave = { [weak self] url, digest in self?.noteSilkwebSave(url, digest: digest) }
     }
     var tagCounts: [UUID: Int] = [:]
@@ -186,6 +190,13 @@ final class LibraryWorkspace {
     @ObservationIgnored var proposalStatusTask: Task<Void, Never>?
     /// The Proposals sidebar row is shown (any Proposal file existed this window session).
     var proposalsRowShown = false
+    /// #141: the owner's lifecycle decisions, `.silkweb/memory-state.json`. Assigned only when it changes.
+    var memoryState = MemoryStateFile()
+    /// The state file comes from a newer Silkweb: lifecycle controls are off, so it's never overwritten.
+    var memoryStateLocked = false
+    /// #141: memory IDs and `supersedes` claims from the knowledge index, for Info and the list menu.
+    var memoryLinks = MemoryLinkMap()
+    @ObservationIgnored var memoryStateReloadTask: Task<Void, Never>?
     /// The Proposals sidebar row is selected. Never saved; it implies no folder and no tag scope.
     var proposalScope = false { didSet { documentCache = nil } }
     /// The Proposal in the review pane.
@@ -508,6 +519,7 @@ final class LibraryWorkspace {
         proposalReloadTask?.cancel()
         proposalReviewTask?.cancel()
         proposalStatusTask?.cancel()
+        memoryStateReloadTask?.cancel()
         await persistOutsideLedgerNow()
         resetOutsideChanges()
         watcher?.stop()
@@ -589,6 +601,10 @@ final class LibraryWorkspace {
             staleProposals = []
             proposalsRowShown = false
             proposalFilter = .pending
+            memoryStateReloadTask?.cancel()
+            memoryState = MemoryStateFile()
+            memoryStateLocked = false
+            memoryLinks = MemoryLinkMap()
             accessRequestWatcher?.stop()
             accessRequestWatcher = nil
             accessRequestReloadTask?.cancel()
@@ -624,6 +640,7 @@ final class LibraryWorkspace {
                 guard !Task.isCancelled else { return }
                 agentActivity = await Self.loadAgentActivity(root: url)
                 proposals = await Self.loadProposals(root: url)
+                (memoryState, memoryStateLocked) = await Self.loadMemoryState(root: url)
                 outsideLedger = await Self.loadOutsideLedger(root: url)
                 install(scanned)
                 session = restored.pruningPreferences(
@@ -672,6 +689,7 @@ final class LibraryWorkspace {
                 } receiptsChanged: { [weak self] in
                     await self?.reloadAgentActivity()
                     await self?.reloadProposals()
+                    await self?.reloadMemoryState()
                 }
                 // A receipt written between the first read and the watcher's start is picked up here.
                 await reloadAgentActivity()

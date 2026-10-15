@@ -30,10 +30,21 @@ public struct AgentMemorySearchRequest: Equatable, Sendable {
     public var createdBefore: Date?
     /// 1…50, and never more than the grant's `max_results`.
     public var limit: Int
+    /// #141: archived Documents (archive state, or inside `Memory/Projects/<Project>/Archive`) drop out unless set.
+    public var includeArchived: Bool
+    /// #141 owner decision: `progress` and `handoff` Documents older than this many days drop out, unless a project
+    /// has none in the window. `0` turns the window off, and so does `createdAfter` or `createdBefore`.
+    public var recentDays: Int
+
+    public static let defaultRecentDays = 30
+    public static let maxRecentDays = 3_650
+    /// A project with no `progress` or `handoff` match in the window keeps this many of its best older ones.
+    public static let olderLogMatches = 10
 
     public init(
         query: String = "", project: String? = nil, types: [String] = [], statuses: [String] = [],
-        createdAfter: Date? = nil, createdBefore: Date? = nil, limit: Int = defaultLimit, mode: Mode = .default
+        createdAfter: Date? = nil, createdBefore: Date? = nil, limit: Int = defaultLimit, mode: Mode = .default,
+        includeArchived: Bool = false, recentDays: Int = defaultRecentDays
     ) {
         self.query = query
         self.mode = mode
@@ -43,6 +54,14 @@ public struct AgentMemorySearchRequest: Equatable, Sendable {
         self.createdAfter = createdAfter
         self.createdBefore = createdBefore
         self.limit = limit
+        self.includeArchived = includeArchived
+        self.recentDays = recentDays
+    }
+
+    /// The window's start, or `nil` when the caller turned it off or gave dates of its own.
+    func recentCutoff(now: Date) -> Date? {
+        guard recentDays > 0, createdAfter == nil, createdBefore == nil else { return nil }
+        return now.addingTimeInterval(-Double(recentDays) * 86_400)
     }
 
     /// `2026-10-07` (midnight UTC) or a full ISO 8601 timestamp, with or without fractional seconds.
@@ -66,15 +85,30 @@ public enum AgentMemoryReview: String, Sendable {
     case reviewedEarlierRevision = "reviewed-earlier-revision"
 }
 
-/// What app metadata knows about one document. Review and pin controls arrive with #137/#140.
+/// What app metadata knows about one document: its `.silkweb/memory-state.json` entry (#141).
 public struct AgentMemoryReviewHint: Equatable, Sendable {
-    /// `sha256:…` of the revision the owner reviewed, if any.
-    public var reviewedRevision: String?
-    public var pinned: Bool
+    public var entry: MemoryLifecycleEntry
+
+    public init(entry: MemoryLifecycleEntry) { self.entry = entry }
 
     public init(reviewedRevision: String? = nil, pinned: Bool = false) {
-        self.reviewedRevision = reviewedRevision
-        self.pinned = pinned
+        entry = MemoryLifecycleEntry(
+            reviewed: reviewedRevision.map { .init(revision: $0, at: .distantPast) }, pinned: pinned)
+    }
+
+    /// `sha256:…` of the revision the owner reviewed, if any.
+    public var reviewedRevision: String? { entry.reviewed?.revision }
+    public var pinned: Bool { entry.pinned }
+}
+
+/// One `supersedes` claim against a document, as the owner decided it (#141). Only `accepted` sinks the document.
+public struct AgentMemorySupersession: Equatable, Sendable {
+    public let memoryID: String
+    public let state: MemoryLifecycleEntry.ClaimState
+
+    public init(memoryID: String, state: MemoryLifecycleEntry.ClaimState) {
+        self.memoryID = memoryID
+        self.state = state
     }
 }
 
@@ -101,8 +135,13 @@ public struct AgentMemoryDocumentInfo: Equatable, Sendable {
     public let modified: Date
     public let review: AgentMemoryReview
     public let pinned: Bool
-    /// `memory_id`s of in-scope documents whose `supersedes` names this one, sorted.
-    public let supersededBy: [String]
+    /// #141: the review date in force (the owner's, else the envelope's `review_after`).
+    public var reviewAfter: Date? = nil
+    /// The review date passed and the owner hasn't reviewed since. Ranking only; text never changes.
+    public var reviewDue = false
+    public var archived = false
+    /// In-scope documents whose `supersedes` names this one, sorted by `memory_id`, with the owner's decision.
+    public let supersededBy: [AgentMemorySupersession]
 }
 
 public struct AgentMemorySearchResult: Equatable, Sendable {
@@ -165,6 +204,8 @@ public struct AgentMemorySearchResponse: Equatable, Sendable {
     public let message: String?
     /// The request's mode. A ranked response echoes it with `ranking_version` and `retrieval_contract_version`.
     public var mode: AgentMemorySearchRequest.Mode = .default
+    /// #141: duplicate memory IDs, supersession cycles and conflicting successors among in-scope documents.
+    public var diagnostics: [AgentMemoryDiagnostic] = []
 }
 
 public struct AgentMemoryReadRequest: Equatable, Sendable {
@@ -224,10 +265,15 @@ public struct AgentMemoryIndexOptions: Sendable {
     public var timeBudget: Duration
     /// Most document reads per refresh (a test seam).
     public var readLimit: Int
+    /// The time review dates and the recent window compare with (a test seam).
+    public var now: @Sendable () -> Date
 
-    public init(timeBudget: Duration = .seconds(2), readLimit: Int = .max) {
+    public init(
+        timeBudget: Duration = .seconds(2), readLimit: Int = .max, now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.timeBudget = timeBudget
         self.readLimit = readLimit
+        self.now = now
     }
 }
 
@@ -243,14 +289,15 @@ public final class AgentMemoryService: @unchecked Sendable {
     public let session: AgentSession
     public let cacheDirectory: URL
     private let options: AgentMemoryIndexOptions
-    private let reviews: AgentMemoryReviewLookup
+    /// `nil`: the Library's own `.silkweb/memory-state.json` (#141), read again only when it changes.
+    private let reviews: AgentMemoryReviewLookup?
     private let lock = NSLock()
     private var index: AgentMemoryIndex?
     private var knowledge: (graph: KnowledgeGraph, store: KnowledgeCacheStore, published: Int)?
 
     public init(
         session: AgentSession, cacheDirectory: URL, options: AgentMemoryIndexOptions = AgentMemoryIndexOptions(),
-        reviews: @escaping AgentMemoryReviewLookup = { _, _ in nil }
+        reviews: AgentMemoryReviewLookup? = nil
     ) {
         self.session = session
         self.cacheDirectory = cacheDirectory
@@ -358,15 +405,18 @@ public final class AgentMemoryService: @unchecked Sendable {
         let index = loadedIndex(for: context)
         let freshness = index.refresh(context, options: options)
         index.save()
+        let reviews = reviews ?? index.lifecycleLookup(context.library)
         guard request.mode == .ranked else {
-            return try index.search(request, context: context, freshness: freshness, reviews: reviews)
+            return try index.search(
+                request, context: context, freshness: freshness, reviews: reviews, now: options.now())
         }
         // Ranked (#179): BM25 statistics from the permitted graph, so hidden Documents never change a score.
         let parsed = ParsedSearchQuery(request.query)
         let statistics = PermittedKnowledgeGraph(graph: knowledge(index, context: context), scope: context.scope)
             .termStatistics(for: parsed.rankingTerms)
         return try index.search(
-            request, context: context, freshness: freshness, reviews: reviews, ranking: (parsed, statistics))
+            request, context: context, freshness: freshness, reviews: reviews, now: options.now(),
+            ranking: (parsed, statistics))
     }
 
     public func read(_ request: AgentMemoryReadRequest) throws -> AgentMemoryReadResponse {
@@ -374,7 +424,10 @@ public final class AgentMemoryService: @unchecked Sendable {
         defer { lock.unlock() }
         guard let documentID = request.documentID else {
             let context = try authorize(.read, path: request.path)
-            return try loadedIndex(for: context).read(request, context: context, reviews: reviews)
+            let index = loadedIndex(for: context)
+            return try index.read(
+                request, context: context, reviews: reviews ?? index.lifecycleLookup(context.library),
+                now: options.now())
         }
         // An ID the index doesn't know and one outside the read folders look the same, so an ID
         // never reveals whether a document exists elsewhere in the Library.
@@ -385,7 +438,8 @@ public final class AgentMemoryService: @unchecked Sendable {
         else { throw AgentAccessError.notFound }
         var resolved = request
         resolved.path = normalized
-        return try index.read(resolved, context: context, reviews: reviews)
+        return try index.read(
+            resolved, context: context, reviews: reviews ?? index.lifecycleLookup(context.library), now: options.now())
     }
 
     /// Call right after this session publishes a document (#133) with that create's authorization, so
@@ -424,7 +478,8 @@ public final class AgentMemoryService: @unchecked Sendable {
 /// The helper's per-grant index: records keyed by Library-relative path, refreshed by `stat` and
 /// re-read only when a file's size, date or identity changes.
 final class AgentMemoryIndex {
-    static let version = 1
+    /// 2 (#141): records keep the envelope's `review_after`. An older cache is rebuilt.
+    static let version = 2
 
     struct Envelope: Codable, Equatable {
         var memoryID: String?
@@ -435,6 +490,7 @@ final class AgentMemoryIndex {
         var createdAt: String?
         var status: String?
         var supersedes: [String] = []
+        var reviewAfter: String?
 
         init(_ envelope: MemoryEnvelope) {
             memoryID = envelope.memoryID
@@ -445,10 +501,12 @@ final class AgentMemoryIndex {
             createdAt = envelope.string("created_at")
             status = envelope.string("status")
             if case .list(let items) = envelope["supersedes"] { supersedes = items }
+            reviewAfter = envelope.string("review_after")
         }
 
         private enum CodingKeys: String, CodingKey {
             case memoryID = "memory_id", type, project, agent, session, createdAt = "created_at", status, supersedes
+            case reviewAfter = "review_after"
         }
 
         init(from decoder: Decoder) throws {
@@ -461,6 +519,7 @@ final class AgentMemoryIndex {
             createdAt = try values.decodeIfPresent(String.self, forKey: .createdAt)
             status = try values.decodeIfPresent(String.self, forKey: .status)
             supersedes = try values.decodeIfPresent([String].self, forKey: .supersedes) ?? []
+            reviewAfter = try values.decodeIfPresent(String.self, forKey: .reviewAfter)
         }
     }
 
@@ -555,6 +614,9 @@ final class AgentMemoryIndex {
     private var building: AgentMemoryFreshness.Reason?
     private var dirty = false
     private var metadata: (stamp: [Int], ids: [String: UUID], value: LibraryMetadata?)?
+    /// #141: the Library's lifecycle state, decoded again only when the file's stamp changes. A change to it reaches
+    /// the next search and read without any document edit.
+    private var lifecycle: (stamp: [Int], value: MemoryStateFile)?
 
     init(url: URL, library: String, project: String) {
         self.url = url
@@ -576,6 +638,11 @@ final class AgentMemoryIndex {
         }
         guard cache.version <= Self.version else {
             discard(.unsupportedVersion)
+            return
+        }
+        // An older cache lacks fields this build ranks by; it's rebuilt like a first run.
+        guard cache.version == Self.version else {
+            discard(.firstRun)
             return
         }
         // A cache for another Library (the grant was repointed) is a fresh start, not corruption.
@@ -727,7 +794,7 @@ final class AgentMemoryIndex {
     /// `ranking` is set for ranked mode (#179): the parsed query and BM25 inputs from the permitted graph.
     func search(
         _ request: AgentMemorySearchRequest, context: AgentAuthorization, freshness: AgentMemoryFreshness,
-        reviews: AgentMemoryReviewLookup,
+        reviews: @escaping AgentMemoryReviewLookup, now: Date = Date(),
         ranking: (query: ParsedSearchQuery, statistics: KnowledgeTermStatistics)? = nil
     ) throws -> AgentMemorySearchResponse {
         let scope = context.scope
@@ -749,20 +816,9 @@ final class AgentMemoryIndex {
         let candidates = scope.readable(records.values.filter { !$0.skipped }, path: \.path)
         let ids = documentIDs(context.library)
         let projectRoot = AgentMemoryContract.projectRoot(scope.project)
-        var supersededBy: [String: Set<String>] = [:]
-        for record in candidates {
-            guard let memoryID = record.envelope?.memoryID else { continue }
-            for target in record.envelope?.supersedes ?? [] { supersededBy[target, default: []].insert(memoryID) }
-        }
-        var reviewByMemoryID: [String: AgentMemoryReview] = [:]
-        func review(_ record: Record) -> (AgentMemoryReview, Bool) {
-            let hint = reviews(ids[record.path], record.path)
-            guard let reviewed = hint?.reviewedRevision else { return (.unreviewed, hint?.pinned ?? false) }
-            return (reviewed == record.revision ? .reviewed : .reviewedEarlierRevision, hint?.pinned ?? false)
-        }
-        for record in candidates {
-            if let memoryID = record.envelope?.memoryID { reviewByMemoryID[memoryID] = review(record).0 }
-        }
+        let lifecycle = Lifecycle(
+            records: candidates, ids: ids, reviews: reviews, now: now, caseSensitive: scope.caseSensitive)
+        let cutoff = request.recentCutoff(now: now)
 
         let text = searchFold(request.query).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
         let terms = text.split(separator: " ").map(String.init)
@@ -775,34 +831,34 @@ final class AgentMemoryIndex {
             let agentLevel: Bool
             let date: Date
             let documentID: UUID?
-            let review: AgentMemoryReview
-            let pinned: Bool
+            let status: Lifecycle.Status
             var score = 0.0
             var title = false
+            /// Pinned entries never sink for a passed review date.
+            var due: Bool { status.reviewDue && !status.pinned }
+            /// `progress` or `handoff`: the recent window applies.
+            var isLog: Bool { ["progress", "handoff"].contains(record.envelope?.type ?? "") }
         }
         func hit(_ record: Record, tier: Int, date: Date) -> Hit {
-            let (state, pinned) = review(record)
+            let status = lifecycle.status(record)
             let agentLevel = scope.isAgentLevel(record.path)
-            let sinks =
-                (record.envelope?.memoryID).flatMap { supersededBy[$0] }?.contains {
-                    reviewByMemoryID[$0] == .reviewed
-                } ?? false
             let category: Int
             switch record.envelope?.type {
-            case _ where pinned: category = 0
+            case _ where status.pinned: category = 0
             case "handoff": category = 3
             case "progress": category = 4
-            default: category = state == .reviewed ? 1 : 2
+            default: category = status.review == .reviewed ? 1 : 2
             }
             return Hit(
-                record: record, tier: tier, sinks: sinks, category: category, agentLevel: agentLevel, date: date,
-                documentID: ids[record.path], review: state, pinned: pinned)
+                record: record, tier: tier, sinks: status.sinks, category: category, agentLevel: agentLevel,
+                date: date, documentID: ids[record.path], status: status)
         }
         let tags = ranking?.query.tags.isEmpty == false ? documentTags(context.library) : [:]
         var filtered: [(record: Record, title: String, body: [UInt8], date: Date)] = []
         var hits: [Hit] = []
         for record in candidates {
             let envelope = record.envelope
+            if !request.includeArchived, lifecycle.isArchived(record) { continue }
             if !types.isEmpty, !types.contains(envelope?.type ?? "") { continue }
             if !statuses.isEmpty, !statuses.contains(envelope?.status?.lowercased() ?? "\u{0}") { continue }
             if request.project != nil {
@@ -864,10 +920,11 @@ final class AgentMemoryIndex {
                 ranked.title = query.matchesTitle(entry.title)
                 hits.append(ranked)
             }
-            // An exact title first, then score, project before agent folder (#206), newest first, then document
-            // ID and path.
+            // An exact title first, an accepted supersession last (#141), then score, project before agent folder
+            // (#206), newest first, then document ID and path.
             hits.sort { a, b in
                 if a.tier != b.tier { return a.tier < b.tier }
+                if a.sinks != b.sinks { return !a.sinks }
                 if a.score != b.score { return a.score > b.score }
                 if a.agentLevel != b.agentLevel { return !a.agentLevel }
                 if a.date != b.date { return a.date > b.date }
@@ -876,12 +933,13 @@ final class AgentMemoryIndex {
                 return a.record.path < b.record.path
             }
         } else {
-            // Deterministic: tier, superseded last, kind, project before agent folder (#206), newest first, then
-            // document ID and path.
+            // Deterministic: tier, superseded last, kind, review date passed last within a kind (#141), project
+            // before agent folder (#206), newest first, then document ID and path.
             hits.sort { a, b in
                 if a.tier != b.tier { return a.tier < b.tier }
                 if a.sinks != b.sinks { return !a.sinks }
                 if a.category != b.category { return a.category < b.category }
+                if a.due != b.due { return !a.due }
                 if a.agentLevel != b.agentLevel { return !a.agentLevel }
                 if a.date != b.date { return a.date > b.date }
                 let left = a.documentID?.uuidString ?? "~", right = b.documentID?.uuidString ?? "~"
@@ -889,13 +947,28 @@ final class AgentMemoryIndex {
                 return a.record.path < b.record.path
             }
         }
+        if let cutoff {
+            // #141 owner decision: older progress and handoffs drop out, unless a project has none in the window;
+            // then its best older ones stay, in the usual order.
+            func key(_ hit: Hit) -> String {
+                if let project = hit.record.envelope?.project { return project }
+                if scope.isAgentLevel(hit.record.path) { return "agent:" + (scope.agentFolder ?? "") }
+                return MemoryArchive.project(of: hit.record.path) ?? ""
+            }
+            let recent = Set(hits.filter { $0.isLog && $0.date >= cutoff }.map(key))
+            var older: [String: Int] = [:]
+            hits = hits.filter { hit in
+                guard hit.isLog, hit.date < cutoff else { return true }
+                let project = key(hit)
+                guard !recent.contains(project) else { return false }
+                older[project, default: 0] += 1
+                return older[project]! <= AgentMemorySearchRequest.olderLogMatches
+            }
+        }
         let query = ranking?.query
         let results = hits.prefix(limit).map { hit in
             AgentMemorySearchResult(
-                document: info(
-                    hit.record, documentID: hit.documentID, review: hit.review, pinned: hit.pinned,
-                    supersededBy: (hit.record.envelope?.memoryID).flatMap { supersededBy[$0] }.map { $0.sorted() }
-                        ?? []),
+                document: info(hit.record, documentID: hit.documentID, status: hit.status),
                 // Ranked: a heading counts as body.
                 matchKind: query.map { $0.hasText && !hit.title ? .body : .title } ?? (hit.tier == 4 ? .body : .title),
                 excerpt: searchSnippet(hit.record.body, terms: query?.highlightTerms ?? terms).0,
@@ -910,7 +983,7 @@ final class AgentMemoryIndex {
         }
         return AgentMemorySearchResponse(
             results: results, total: hits.count, index: freshness, message: message,
-            mode: ranking == nil ? .default : .ranked)
+            mode: ranking == nil ? .default : .ranked, diagnostics: lifecycle.diagnostics())
     }
 
     /// Ranked mode: words anywhere in the folded title or body bytes; a phrase's words adjacent.
@@ -938,16 +1011,107 @@ final class AgentMemoryIndex {
         }
     }
 
-    private func info(
-        _ record: Record, documentID: UUID?, review: AgentMemoryReview, pinned: Bool, supersededBy: [String]
-    ) -> AgentMemoryDocumentInfo {
+    private func info(_ record: Record, documentID: UUID?, status: Lifecycle.Status) -> AgentMemoryDocumentInfo {
         let envelope = record.envelope
         return AgentMemoryDocumentInfo(
             title: record.title, path: record.path, documentID: documentID, memoryID: envelope?.memoryID,
             revision: record.revision, type: envelope?.type, project: envelope?.project, status: envelope?.status,
             agent: envelope?.agent, session: envelope?.session, createdAt: envelope?.createdAt,
-            modified: Date(timeIntervalSince1970: record.modified), review: review, pinned: pinned,
-            supersededBy: supersededBy)
+            modified: Date(timeIntervalSince1970: record.modified), review: status.review, pinned: status.pinned,
+            reviewAfter: status.reviewAfter, reviewDue: status.reviewDue, archived: status.archived,
+            supersededBy: status.supersededBy)
+    }
+
+    /// #141: the owner's lifecycle decisions applied to in-scope records. Supersession is revision-bound: a decision
+    /// counts only while both documents keep the revisions it was made for, and only `accepted` sinks a document.
+    struct Lifecycle {
+        struct Status {
+            var review: AgentMemoryReview
+            var pinned: Bool
+            var reviewAfter: Date?
+            var reviewDue: Bool
+            var archived: Bool
+            var supersededBy: [AgentMemorySupersession]
+            var sinks: Bool { supersededBy.contains { $0.state == .accepted } }
+        }
+
+        let ids: [String: UUID]
+        let reviews: AgentMemoryReviewLookup
+        let now: Date
+        let caseSensitive: Bool
+        /// In-scope documents with a `memory_id`, by path order.
+        let identified: [Record]
+        /// Target `memory_id` → the records that claim to supersede it.
+        let claimants: [String: [Record]]
+
+        init(
+            records: [Record], ids: [String: UUID], reviews: @escaping AgentMemoryReviewLookup, now: Date,
+            caseSensitive: Bool
+        ) {
+            self.ids = ids
+            self.reviews = reviews
+            self.now = now
+            self.caseSensitive = caseSensitive
+            identified = records.filter { $0.envelope?.memoryID != nil }.sorted { $0.path < $1.path }
+            var claimants: [String: [Record]] = [:]
+            for record in identified {
+                for target in Set(record.envelope?.supersedes ?? []) { claimants[target, default: []].append(record) }
+            }
+            self.claimants = claimants
+        }
+
+        func entry(_ record: Record) -> MemoryLifecycleEntry {
+            reviews(ids[record.path], record.path)?.entry ?? MemoryLifecycleEntry()
+        }
+
+        func isArchived(_ record: Record) -> Bool {
+            entry(record).archived != nil || MemoryArchive.contains(record.path, caseSensitive: caseSensitive)
+        }
+
+        func status(_ record: Record) -> Status {
+            let entry = entry(record)
+            let review: AgentMemoryReview =
+                entry.reviewed.map {
+                    $0.revision == record.revision ? AgentMemoryReview.reviewed : .reviewedEarlierRevision
+                }
+                ?? .unreviewed
+            let suggested = record.envelope?.reviewAfter.flatMap(AgentMemorySearchRequest.date)
+            var supersededBy: [AgentMemorySupersession] = []
+            if let memoryID = record.envelope?.memoryID {
+                var seen = Set<String>()
+                for successor in claimants[memoryID] ?? [] {
+                    guard let id = successor.envelope?.memoryID, id != memoryID, seen.insert(id).inserted else {
+                        continue
+                    }
+                    supersededBy.append(
+                        AgentMemorySupersession(
+                            memoryID: id,
+                            state: entry.claimState(
+                                by: id, revision: record.revision, successorRevision: successor.revision)))
+                }
+                supersededBy.sort { $0.memoryID < $1.memoryID }
+            }
+            return Status(
+                review: review, pinned: entry.pinned, reviewAfter: entry.reviewDate(suggested: suggested),
+                reviewDue: entry.reviewDue(suggested: suggested, now: now),
+                archived: entry.archived != nil || MemoryArchive.contains(record.path, caseSensitive: caseSensitive),
+                supersededBy: supersededBy)
+        }
+
+        func diagnostics() -> [AgentMemoryDiagnostic] {
+            let byID = Dictionary(grouping: identified) { $0.envelope?.memoryID ?? "" }
+            return AgentMemoryDiagnostic.find(
+                identified.map { ($0.envelope?.memoryID ?? "", $0.envelope?.supersedes ?? [], $0.path) }
+            ) { target, successor in
+                (byID[target] ?? []).contains { record in
+                    (byID[successor] ?? []).contains {
+                        entry(record).claimState(
+                            by: successor, revision: record.revision, successorRevision: $0.revision)
+                            == .declined
+                    }
+                }
+            }
+        }
     }
 
     /// Native IDs from the app's `.silkweb/index.json`, decoded again only when that file changes.
@@ -965,6 +1129,33 @@ final class AgentMemoryIndex {
         let value = loaded.flatMap { $0.wasReset ? nil : $0.metadata }
         metadata = (stamp, value?.IDsByPath ?? [:], value)
         return value?.IDsByPath ?? [:]
+    }
+
+    /// #141: lifecycle hints from the Library's `.silkweb/memory-state.json`, keyed by native document ID. Read only;
+    /// a missing, unreadable or newer file reads as no decisions.
+    func lifecycleLookup(_ library: URL) -> AgentMemoryReviewLookup {
+        let state = lifecycleState(library)
+        return { id, _ in
+            guard let id, let entry = state.documents[id.uuidString] else { return nil }
+            return AgentMemoryReviewHint(entry: entry)
+        }
+    }
+
+    func lifecycleState(_ library: URL) -> MemoryStateFile {
+        guard let file = try? MemoryStateStore.url(root: library) else { return MemoryStateFile() }
+        var info = stat()
+        guard lstat(file.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else {
+            lifecycle = nil
+            return MemoryStateFile()
+        }
+        let stamp = [
+            Int(info.st_dev), Int(info.st_ino), Int(info.st_size), info.st_mtimespec.tv_sec,
+            info.st_mtimespec.tv_nsec,
+        ]
+        if let lifecycle, lifecycle.stamp == stamp { return lifecycle.value }
+        let value = (try? Data(contentsOf: file)).flatMap { try? MemoryStateStore.decode($0) } ?? MemoryStateFile()
+        lifecycle = (stamp, value)
+        return value
     }
 
     /// Tag names by path from the same file, for ranked `tag:` (#179).
@@ -989,7 +1180,8 @@ final class AgentMemoryIndex {
     }
 
     func read(
-        _ request: AgentMemoryReadRequest, context: AgentAuthorization, reviews: AgentMemoryReviewLookup
+        _ request: AgentMemoryReadRequest, context: AgentAuthorization, reviews: @escaping AgentMemoryReviewLookup,
+        now: Date = Date()
     ) throws -> AgentMemoryReadResponse {
         let path = context.path ?? request.path
         guard (path as NSString).pathExtension.lowercased() == "md" else { throw AgentAccessError.notFound }
@@ -1018,23 +1210,15 @@ final class AgentMemoryIndex {
         let end = Self.pageEnd(bytes, from: offset, size: AgentMemoryReadResponse.pageBytes)
         let modified = (try? modificationDate(context.library, path)) ?? Date(timeIntervalSince1970: 0)
         let ids = documentIDs(context.library)
-        let hint = reviews(ids[path], path)
-        let review: AgentMemoryReview =
-            hint?.reviewedRevision.map { $0 == revision ? .reviewed : .reviewedEarlierRevision } ?? .unreviewed
         let envelope = parsed.map(Envelope.init)
-        var superseders: [String] = []
-        if let memoryID = envelope?.memoryID {
-            superseders = context.scope.readable(records.values, path: \.path).compactMap { record in
-                record.envelope?.supersedes.contains(memoryID) == true ? record.envelope?.memoryID : nil
-            }.sorted()
-        }
         let record = Record(
             AgentSecureFiles.Document(path: path, size: data.count, modified: modified), revision: revision,
             body: body, envelope: envelope)
+        let lifecycle = Lifecycle(
+            records: context.scope.readable(records.values.filter { !$0.skipped && $0.path != path }, path: \.path)
+                + [record], ids: ids, reviews: reviews, now: now, caseSensitive: context.scope.caseSensitive)
         return AgentMemoryReadResponse(
-            document: info(
-                record, documentID: ids[path], review: review, pinned: hint?.pinned ?? false,
-                supersededBy: superseders),
+            document: info(record, documentID: ids[path], status: lifecycle.status(record)),
             envelope: parsed?.fields,
             revisionChanged: request.cursor == nil && request.expectedRevision.map { $0 != revision } == true,
             offset: offset, page: String(decoding: bytes[offset..<end], as: UTF8.self),
