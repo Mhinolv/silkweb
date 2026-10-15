@@ -62,6 +62,9 @@ struct SnapshotScenario {
     /// #246: typed at the caret one character every 40 ms (inside the outline's debounce) after the writing modes
     /// are on, then left to settle: the capsule stays on the caret's section.
     var typeAtCaret: String? = nil
+    /// #262: appended to the open document, which is then saved as autosave does; its row moves to the top of the
+    /// Date Modified list in place, keeping its excerpt and selection.
+    var autosaveAppend: String? = nil
     /// Selects this source text (all text when empty) so the status bar shows “N of M” counts (1.25).
     var selectText: String? = nil
     /// Widens the sidebar and list to their limits so the detail column (and its status bar) is narrow.
@@ -409,6 +412,11 @@ struct SnapshotScenario {
                 "Paragraph 11 of the draft talks about the road, the coffee and the weather, long enough to wrap in the column.",
             focusMode: true, typewriterMode: true,
             typeAtCaret: " And one more sentence"),
+        // #262: after a save the note leads the Date Modified list, still selected, excerpt intact, no scroll.
+        .init(
+            name: "list-after-autosave", folder: "Snapshot Fixtures",
+            document: "Snapshot Fixtures/Editor Typography.md",
+            autosaveAppend: "\nOne more paragraph, saved.\n"),
         // silkweb-1.25: selection counts leading, Focus chip + “Saved” trailing; narrow detail drops the characters segment.
         .init(
             name: "status-bar-counts", document: writingModes, visibleCaret: "The caret rests", focusMode: true,
@@ -1959,6 +1967,27 @@ final class SnapshotHarness {
                 }
                 // The outline republishes after its 250 ms debounce; the fade settles.
                 try await Task.sleep(for: .milliseconds(600))
+            }
+            if let appended = scenario.autosaveAppend {
+                // The list starts at its top with the saved row in view; the save then moves it to row 0.
+                if let table = Self.descendants(controller.view).lazy.compactMap({ $0 as? DocumentTableView }).first {
+                    table.scroll(.zero)
+                    guard table.visibleRect.intersects(table.rect(ofRow: table.selectedRow)) else {
+                        throw SnapshotFailure.error("Saved row not in view")
+                    }
+                }
+                workspace.editor.edit(workspace.editor.text + appended)
+                guard await workspace.editor.save() else { throw SnapshotFailure.error("Autosave failed") }
+                // What the window runs when the editor turns clean.
+                await workspace.refreshSavedDocumentDates()
+                try await wait("saved row first") {
+                    workspace.documents.first.map { workspace.session.selectedDocuments.contains($0.relativePath) }
+                        == true
+                }
+                // The row move animation (when motion is allowed) and the excerpt reload settle.
+                for _ in 0..<5 {
+                    controller.view.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(100))
+                }
             }
             if let text = scenario.selectText, let editor = workspace.preview.editor {
                 // An empty marker selects the whole document (the longest “N of M” copy).
