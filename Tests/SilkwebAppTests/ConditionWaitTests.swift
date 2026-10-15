@@ -29,6 +29,48 @@ final class ConditionWaitTests: XCTestCase {
         XCTAssertFalse(met)
     }
 
+    /// #272: the settle wait outlasts busy samples and changes, then returns once the value holds for the quiet period.
+    func testSettledWaitsForBusyAndChangingSamplesThenAQuietPeriod() async throws {
+        final class Counter { var samples = 0 }
+        let counter = Counter()
+        let start = ContinuousClock.now
+        // Busy (nil) for the first samples, then a value that changes twice before it holds.
+        let settled = try await waitUntilSettled("the value", quiet: .milliseconds(60)) { () -> Int? in
+            counter.samples += 1
+            switch counter.samples {
+            case ..<4: return nil
+            case 4..<8: return counter.samples / 2
+            default: return 7
+            }
+        }
+        XCTAssertTrue(settled)
+        let elapsed = ContinuousClock.now - start
+        XCTAssertGreaterThanOrEqual(counter.samples, 9, "eight unsettled samples, then at least one quiet one")
+        XCTAssertGreaterThanOrEqual(elapsed, .milliseconds(60 + 70), "the quiet period starts at the last change")
+        XCTAssertLessThan(elapsed, .seconds(4))
+        // Already at rest: one quiet period.
+        let quick = ContinuousClock.now
+        try await waitUntilSettled("a constant", quiet: .milliseconds(30)) { 1 }
+        XCTAssertGreaterThanOrEqual(ContinuousClock.now - quick, .milliseconds(30))
+    }
+
+    func testSettledTimeoutFailsWhenTheValueNeverHolds() async throws {
+        let options = XCTExpectedFailure.Options()
+        options.issueMatcher = {
+            $0.compactDescription.contains("Timed out after") && $0.compactDescription.contains("a clock to settle")
+        }
+        XCTExpectFailure("The wait must fail and name what never settled", options: options)
+        var busy = 0
+        let changing = try await waitUntilSettled("a clock", timeout: .milliseconds(80)) { () -> Int? in
+            busy += 1
+            return busy
+        }
+        XCTAssertFalse(changing)
+        XCTExpectFailure("A sample that stays busy also times out", options: options)
+        let alwaysBusy = try await waitUntilSettled("a clock", timeout: .milliseconds(50)) { () -> Int? in nil }
+        XCTAssertFalse(alwaysBusy)
+    }
+
     /// #213: reusing a loaded workspace for another library must not count as open until the requested library is
     /// showing. `open(_:)` keeps the previous snapshot with `loading == false` until its task runs, which the old
     /// "any snapshot, not loading" predicate took as ready, so IndexRecoveryWorkspaceTests asserted on the previous

@@ -11,7 +11,8 @@ import XCTest
 final class DocumentOpenLatencyTests: XCTestCase {
     /// From the selection to the pass that shows the note's content. Before #150 the preview waited for the
     /// 250 ms typing debounce on every switch (about 300 ms), and inline images for a 150 ms one.
-    static let openBudget = TestEnvironment.frameBudget(150)
+    /// No #272 load scale: twice the budget would let that 300 ms regression pass on a busy Mac.
+    static let openBudget = TestEnvironment.frameBudget(150, loadPerCore: 0)
     static let passes = 2
 
     @MainActor private final class Harness {
