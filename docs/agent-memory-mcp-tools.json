@@ -3,7 +3,7 @@
     {
       "name" : "memory_capabilities",
       "title" : "Silkweb: What This Grant Allows",
-      "description" : "Shows what this grant allows: its project, read and create folders, profile and limits. Never lists or counts documents.",
+      "description" : "Shows what this grant allows: its project, read and create folders, profile and limits. project_documents lists the documents directly in the project folder. Read each one, all pages, before other work.",
       "inputSchema" : {
         "type" : "object",
         "properties" : {},

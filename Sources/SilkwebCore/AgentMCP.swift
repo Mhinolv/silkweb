@@ -452,7 +452,18 @@ public final class AgentMCPServer: @unchecked Sendable {
         case .capabilities:
             let context = try session.authorize(.capabilities)
             let scope = context.scope.readRoots.map(AgentMemoryContract.displayPath).joined(separator: ", ")
-            return ("\(context.grant.access.displayName) access to \(scope).", AgentHelper.capabilities(context))
+            var summary = "\(context.grant.access.displayName) access to \(scope)."
+            // #263: the text names the project documents, so an agent that reads only the text still sees them.
+            let documents = AgentHelper.projectDocuments(context)
+            let titles = documents.compactMap { $0["title"] as? String }
+            if !titles.isEmpty {
+                let names = titles.map { "“\($0)”" }.joined(separator: ", ")
+                summary +=
+                    titles.count == 1
+                    ? " Read this project document first: \(names)."
+                    : " Read these \(titles.count) project documents first: \(names)."
+            }
+            return (summary, AgentHelper.capabilities(context, projectDocuments: documents))
 
         case .search:
             for (name, key) in [
@@ -676,7 +687,8 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
         switch self {
         case .capabilities:
             return "Shows what this grant allows: its project, read and create folders, profile and limits. "
-                + "Never lists or counts documents."
+                + "project_documents lists the documents directly in the project folder. Read each one, all pages, "
+                + "before other work."
         case .search:
             return "Searches documents in this grant’s read folders by text, type, status and creation date. "
                 + "Returns at most 50 results (fewer if the grant’s max_results is lower) and an index status "
