@@ -1,9 +1,10 @@
 name: Release
-# #249: every v* tag push builds the unsigned Release DMG and publishes it on the GitHub Release for that tag
-# (scripts/release.sh --publish). Re-running the job, or pushing the same tag again, updates the Release in place.
+# #249, #271: scripts/release.sh --publish builds the Developer ID signed, notarized DMG and publishes it on the
+# GitHub Release for a tag. The owner publishes from their Mac (docs/release.md) because no signing secret is in
+# CI yet. A tag push doesn't start this job. A manual run on a tag stops at the credential check, so CI never
+# publishes an unsigned DMG. Signing in CI needs GitHub secrets for the certificate and the notary key first.
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
 permissions:
   contents: write
 concurrency:
