@@ -356,7 +356,9 @@ the helper, MCP and the app refuse every grant when the file was changed outside
 
 ### Setting up a grant (#186)
 
-With several Libraries open, each needs its own grant: see [Personal Library › Agent memory](personal-library.md#agent-memory).
+With several Libraries open, each needs its own grant: a grant points at one Library path, and `silkweb grant init`
+refuses to repoint an existing grant to another Library. Use a new project key (`--project`) for the other Library,
+or create one in Silkweb's **Go ▸ Agent Access…** window.
 
 The owner adds a grant with `silkweb grant init`, run in Terminal, instead of editing JSON:
 
@@ -875,7 +877,7 @@ then `envelope` (the envelope’s keys and values in written order, or `null`), 
   checkpoint, renames it into place, then replaces the manifest, so a crash leaves the previous
   generation. A missing, corrupt, newer or foreign cache is rebuilt silently (logged only); nothing is
   written into the Library.
-- Performance (AGENTS.md): with 10,000 documents in 1,000 Folders inside one grant, a search from a
+- Performance: with 10,000 documents in 1,000 Folders inside one grant, a search from a
   cached index answers in well under a second; a first build is bounded by the 2-second budget per search.
 
 Errors for search and read, in addition to the [refusals](#refusals):

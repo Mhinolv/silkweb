@@ -154,6 +154,8 @@ struct DocumentRow: View {
     var outsideChange: OutsideChange? = nil
     @Environment(\.locale) private var locale
     @State private var summary: DocumentSummary?
+    /// The document `summary` belongs to.
+    @State private var summaryPath: String?
     private var title: String { URL(fileURLWithPath: document.name).deletingPathExtension().lastPathComponent }
     private var sortsByCreated: Bool {
         agentEntry == nil && outsideChange == nil && workspace.listPreference.key == .created
@@ -229,8 +231,18 @@ struct DocumentRow: View {
             }
         }
         .task(id: DocumentSummaryIdentity(path: document.relativePath, modified: document.modified)) {
-            summary = nil
-            summary = await DocumentSummary.load(document: document, root: root)
+            // #262: a save only changes the date, so the old excerpt stays until the new one has loaded; a reused
+            // cell showing another document clears it at once.
+            if summaryPath != document.relativePath {
+                #if DEBUG
+                    if summary != nil { workspace.listEventCounts["summaryCleared", default: 0] += 1 }
+                #endif
+                summary = nil
+            }
+            let loaded = await DocumentSummary.load(document: document, root: root)
+            guard !Task.isCancelled else { return }
+            summary = loaded
+            summaryPath = document.relativePath
         }
     }
 
