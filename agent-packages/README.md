@@ -83,6 +83,10 @@ When it's done, it prints the `claude mcp add`, `codex mcp add` and Gemini CLI c
 [Install](#install) with your helper path and project key filled in, then the rules from
 [Keep agents on the helper](#keep-agents-on-the-helper) with your Library's path.
 
+If an agent works in a repository whose folder name isn't the grant's project, the skill keeps its
+checkpoints in the chat and gives you the `grant init` line for that project. The printed user-scope
+`mcp add` commands then connect every repository to the new grant, not only that one.
+
 #### Editing the file by hand
 
 Once your grants are protected (#205: Protect Grants… in Silkweb's Agent Access window, or yes to “Protect
