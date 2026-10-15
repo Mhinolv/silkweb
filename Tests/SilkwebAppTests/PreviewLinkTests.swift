@@ -73,12 +73,13 @@ import XCTest
         XCTAssertEqual(menu(URL(string: "https://example.com")!), webKit, "other links keep WebKit's menu")
         XCTAssertEqual(menu(nil), webKit)
 
-        // Copy Path copies the Markdown destination as written, like the image chip.
-        let saved = NSPasteboard.general.string(forType: .string)
-        defer {
-            NSPasteboard.general.clearContents()
-            if let saved { NSPasteboard.general.setString(saved, forType: .string) }
-        }
+        // Copy Path copies the Markdown destination as written, like the image chip. #276: to a private pasteboard,
+        // so a suite in another process can't change it between the copy and the check.
+        XCTAssertEqual(web.pathPasteboard, NSPasteboard.general, "the app copies to the general pasteboard")
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        web.pathPasteboard = board
+        let general = NSPasteboard.general.changeCount
         web.contextLink = .init(url: pdf, destination: "media/Report%202026.pdf")
         let items = NSMenu()
         let link = NSMenuItem(title: "Copy Link", action: nil, keyEquivalent: "")
@@ -88,7 +89,8 @@ import XCTest
         let copy = try XCTUnwrap(items.items.last)
         XCTAssertEqual(copy.title, "Copy Path")
         XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(copy.action), to: copy.target, from: copy))
-        XCTAssertEqual(NSPasteboard.general.string(forType: .string), "media/Report%202026.pdf")
+        XCTAssertEqual(board.string(forType: .string), "media/Report%202026.pdf")
+        XCTAssertEqual(NSPasteboard.general.changeCount, general, "a test never writes the general pasteboard")
         XCTAssertFalse(window.isVisible)
     }
 

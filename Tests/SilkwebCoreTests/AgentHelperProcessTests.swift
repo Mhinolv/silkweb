@@ -99,7 +99,9 @@ final class AgentHelperProcessTests: XCTestCase {
         XCTAssertTrue(main.contains("verifier: AgentGrantKeychain()"), main)
         let bundle = try String(
             contentsOf: Self.repository.appendingPathComponent("scripts/bundle_app.sh"), encoding: .utf8)
-        XCTAssertTrue(bundle.contains("HELPER=\"build/helper/silkweb\""), bundle)
+        // #276: build/ is the default; only tests pass a private folder.
+        XCTAssertTrue(bundle.contains("OUT=\"${2:-build}\""), bundle)
+        XCTAssertTrue(bundle.contains("HELPER=\"$OUT/helper/silkweb\""), bundle)
         XCTAssertTrue(bundle.contains("cp \".build/$CONFIG/SilkwebHelper\" \"$HELPER\""), bundle)
         for script in ["bundle_app.sh", "release.sh", "make_dmg.sh"] {
             let text = try String(
