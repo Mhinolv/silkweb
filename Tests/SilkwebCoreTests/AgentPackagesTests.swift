@@ -59,9 +59,9 @@ final class AgentPackagesTests: XCTestCase {
         XCTAssertEqual(
             headings,
             [
-                "## Recall first", "## Trust and authority", "## When to checkpoint", "## Writing a checkpoint",
-                "## What changed", "## Evidence", "## Still uncertain", "## Next step", "## Creating safely",
-                "## When something fails", "## What not to do",
+                "## Recall first", "## Working in another project", "## Trust and authority", "## When to checkpoint",
+                "## Writing a checkpoint", "## What changed", "## Evidence", "## Still uncertain", "## Next step",
+                "## Creating safely", "## When something fails", "## What not to do",
             ])
 
         XCTAssertTrue(shared.contains("\n" + Self.trustSentence + "\n"), "trust sentence must be verbatim")
@@ -79,6 +79,46 @@ final class AgentPackagesTests: XCTestCase {
         ] {
             XCTAssertTrue(flat.contains(required), "shared workflow lost “\(required)”")
         }
+    }
+
+    /// #192: when the grant's project isn't the workspace's, the skill gives the owner the exact
+    /// `grant init` line, keeps checkpoints in chat and still never runs `grant init` itself.
+    func testWorkingInAnotherProjectGivesTheOwnerTheGrantInitCommand() throws {
+        let shared = try text("shared/silkweb-memory.md")
+        let flat = shared.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        let section = try XCTUnwrap(
+            flat.components(separatedBy: "## Working in another project ").dropFirst().first?
+                .components(separatedBy: " ## ").first)
+        for required in [
+            "Then check the project (see Working in another project).",
+            "the git repository root, or the working directory if there's no repository", "in NFC form",
+            "Ignore case: `silkweb` and `Silkweb` match",
+            "don't create progress, handoffs, memories or decisions under the connected project",
+            "Tell the owner once per session,** in exactly this shape",
+            "run this in Terminal (only you can):",
+            "silkweb grant init --library '/Users/me/My Library' --project JevLab --access read-create",
+            "`--library` is `library` from `memory_capabilities`", "Otherwise write `silkweb`",
+            "don't build a command. Ask the owner which project key to use",
+            "`Checkpoint not saved (grant_not_found). Keeping the handoff here instead:` followed by the full checkpoint",
+            "Don't call `memory_create` just to get an error", "Send it only if the owner says yes",
+        ] {
+            XCTAssertTrue(
+                (required.hasPrefix("Then check") ? flat : section).contains(required),
+                "Working in another project lost “\(required)”")
+        }
+        XCTAssertTrue(section.contains("`agent-memories`"), "cross-project memories stay allowed")
+
+        // The quoting rule in the skill is the helper's own (`AgentGrantInit.shellQuoted`).
+        XCTAssertTrue(section.contains("other than letters, digits or `_@%+=:,./-`"))
+        XCTAssertEqual(AgentGrantInit.shellQuoted("/Users/me/My Library"), "'/Users/me/My Library'")
+        XCTAssertEqual(AgentGrantInit.shellQuoted("JevLab"), "JevLab")
+        XCTAssertTrue(section.contains("--library \(AgentGrantInit.shellQuoted("/Users/me/My Library")) "))
+
+        // The owner-only ban stays word for word; suggesting the command is the only addition.
+        XCTAssertTrue(
+            flat.contains(
+                "Never run `silkweb grant init`, `grant approve` or `grant deny`, and never edit `agent-grants.json`; only the owner grants access. Asking with `grant_request` is the only access step you take; suggesting the command to the owner is fine."
+            ))
     }
 
     func testSkillsAndReadmeNameEveryMCPToolFromTheGoldenList() throws {
