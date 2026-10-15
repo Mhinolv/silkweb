@@ -492,9 +492,17 @@ final class PlainMarkdownTextView: NSTextView {
         let line = layout.lineFragmentRect(
             forGlyphAt: layout.glyphIndex(for: local, in: container), effectiveRange: &glyphs)
         guard local.y >= line.minY, local.y < line.maxY else { return nil }
+        // An empty line has no first glyph to snap to, only its wide newline: AppKit's tracking loop
+        // selected that newline up to the release point, a flash of the selection color (#250).
+        let start = layout.characterIndexForGlyph(at: glyphs.location)
+        if let text = textStorage?.mutableString, start < text.length,
+            let scalar = UnicodeScalar(text.character(at: start)), CharacterSet.newlines.contains(scalar)
+        {
+            return nil
+        }
         let first = layout.boundingRect(forGlyphRange: NSRange(location: glyphs.location, length: 1), in: container)
         guard local.x < max(first.maxX, first.minX + Self.lineStartTolerance) else { return nil }
-        return (layout.characterIndexForGlyph(at: glyphs.location), origin.x + first.minX)
+        return (start, origin.x + first.minX)
     }
 
     // MARK: Drag auto-scroll (#244)
