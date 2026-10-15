@@ -617,13 +617,17 @@ public enum AgentHelper {
     }
 
     /// Paths, sizes and dates only — no document bodies. Hidden items, links and special files are
-    /// skipped, and a read folder reached through a link is skipped entirely.
+    /// skipped, and a read folder reached through a link is skipped entirely. Read folders can overlap (#228), so
+    /// each path is listed once (#264).
     static func list(_ context: AgentAuthorization) throws -> AgentJSON {
         let dates = ISO8601DateFormatter()
         var documents: [AgentSecureFiles.Document] = []
+        var seen: Set<String> = []
         for root in context.scope.readRoots {
             do {
-                documents += try AgentSecureFiles.documents(library: context.library, under: root)
+                documents += try AgentSecureFiles.documents(library: context.library, under: root).filter {
+                    seen.insert(nfc($0.path)).inserted
+                }
             } catch let error as AgentAccessError where error == .invalidPath {
                 continue
             }
