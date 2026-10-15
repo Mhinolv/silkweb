@@ -136,10 +136,18 @@ final class InlineImagePositionTests: XCTestCase {
 
         window.contentViewController = controller
         func display() { controller.view.layoutSubtreeIfNeeded(); window.displayIfNeeded() }
+        /// #272: displays until the editor is at rest (no sizing pass, restyle or image decode due, and the same
+        /// frames for the quiet period), instead of a fixed 700 ms. The debounced re-decode still lands and is sampled.
         func settle() async throws {
-            display()
-            try await Task.sleep(for: .milliseconds(700))
-            display()
+            try await waitUntilSettled("the editor and its images") { () -> String? in
+                display()
+                guard let editor = workspace.preview.editor else { return "no editor" }
+                if editor.isContentSizingPending { return nil }
+                return "\(editor.frame) \(editor.visibleRect)"
+                    + editor.inlineImages.imageViews.map {
+                        "|\($0.frame) \($0.isHidden) \($0.content.bitmap.map { "\($0.width)" } ?? "none")"
+                    }.joined()
+            }
         }
         func panes() -> DocumentPanesController? {
             func find(_ controller: NSViewController) -> DocumentPanesController? {

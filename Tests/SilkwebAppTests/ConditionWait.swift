@@ -23,6 +23,31 @@ func waitUntil(
     return true
 }
 
+/// #272: waits until the UI is at rest instead of a fixed settle sleep. Every 10 ms it calls `sample`, which lays
+/// out and returns what the next assertions read, or nil while work is still due (a debounce, a decode, a fade).
+/// It returns once the same non-nil value holds for `quiet`; the quiet period covers the async hops between steps.
+@MainActor @discardableResult
+func waitUntilSettled<Value: Equatable>(
+    _ description: @autoclosure () -> String, quiet: Duration = .milliseconds(100), timeout: Duration = .seconds(10),
+    file: StaticString = #filePath, line: UInt = #line,
+    _ sample: () throws -> Value?
+) async throws -> Bool {
+    let deadline = ContinuousClock.now + timeout
+    var last = try sample()
+    var since = ContinuousClock.now
+    while last == nil || ContinuousClock.now - since < quiet {
+        guard ContinuousClock.now < deadline else {
+            XCTFail("Timed out after \(timeout) waiting for \(description()) to settle", file: file, line: line)
+            return false
+        }
+        try await Task.sleep(for: .milliseconds(10))
+        let next = try sample()
+        if next == nil || next != last { since = ContinuousClock.now }
+        last = next
+    }
+    return true
+}
+
 /// #213: the library `workspace` is showing once it is done opening `root`. `open(_:)` keeps the previous snapshot
 /// and `loading == false` until its task runs, so "any snapshot, not loading" is true at once when an already
 /// loaded workspace switches libraries. Only the requested root counts; an error also ends the wait.

@@ -852,11 +852,13 @@ final class AgentMemorySearchTests: XCTestCase {
         var totals: [TimeInterval] = []
         var defaults: [TimeInterval] = []
         for query in ["flock gate", "cache type:decision", "\"text about sidebar\"", "export", "theme index"] {
-            for _ in 0..<4 {
+            for run in 0..<4 {
                 var clock = Date()
                 let response = try session.search(AgentMemorySearchRequest(query: query, limit: 50, mode: .ranked))
                 totals.append(Date().timeIntervalSince(clock))
                 XCTAssertFalse(response.results.isEmpty, query)
+                // #272: the default mode and the view below are printed only, so one sample per query is enough.
+                guard run == 0 else { continue }
                 clock = Date()
                 _ = try session.search(AgentMemorySearchRequest(query: query, limit: 50))
                 defaults.append(Date().timeIntervalSince(clock))
@@ -864,7 +866,7 @@ final class AgentMemorySearchTests: XCTestCase {
         }
         // The refresh walk plus the per-request graph sync and permitted view (#177/#178), without ranking.
         var views: [TimeInterval] = []
-        for _ in 0..<10 {
+        for _ in 0..<3 {
             let clock = Date()
             _ = try session.permittedGraph()
             views.append(Date().timeIntervalSince(clock))

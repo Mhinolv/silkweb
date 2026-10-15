@@ -72,11 +72,33 @@ final class WritingModesTests: XCTestCase {
             window.contentViewController = controller
             window.setContentSize(NSSize(width: 1400, height: 900))
         }
-        func settle(_ milliseconds: Int = 400) async throws {
+        /// A fixed `milliseconds` wait observes a moment on purpose (mid-debounce, typing pace). Without it (#272),
+        /// waits until the editor is at rest: no sizing pass, restyle, image decode or Focus fade due, and the same
+        /// geometry for the quiet period. That replaces a fixed 400 ms.
+        func settle(_ milliseconds: Int? = nil) async throws {
+            guard let milliseconds else {
+                try await waitUntilSettled("the editor") { () -> String? in
+                    controller.view.layoutSubtreeIfNeeded()
+                    window.displayIfNeeded()
+                    return state()
+                }
+                return
+            }
             controller.view.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(milliseconds))
             controller.view.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
+        }
+        /// What the assertions read once the editor is at rest; nil while work is due.
+        private func state() -> String? {
+            guard let editor = workspace.preview.editor else { return "no editor \(workspace.preview.mode)" }
+            if editor.isContentSizingPending || editor.writingModes.isFading { return nil }
+            let scroll = editor.enclosingScrollView
+            return "\(workspace.preview.mode) \(editor.frame) \(editor.visibleRect) \(editor.selectedRange())"
+                + " \(scroll?.contentInsets.top ?? 0) \(scroll?.contentInsets.bottom ?? 0)"
+                + " \(editor.writingModes.activeRange.map { "\($0)" } ?? "none")"
+                + editor.subviews.map { "|\($0.frame) \($0.isHidden) \($0.alphaValue)" }.joined()
+                + editor.inlineImages.imageViews.map { "|\($0.content.bitmap != nil)" }.joined()
         }
         func close() {
             window.contentViewController = nil
