@@ -33,6 +33,8 @@ struct MenuCommandValues: Equatable {
     var hasSelectedFolder: Bool
     /// Go ▸ Agent Activity is enabled while its sidebar row is shown (#137).
     var hasAgentActivity: Bool
+    /// Go ▸ Proposals, likewise (#140).
+    var hasProposals: Bool
 
     @MainActor init(workspace: LibraryWorkspace) {
         canMutate = workspace.canMutate
@@ -66,6 +68,7 @@ struct MenuCommandValues: Equatable {
         includesSubfolders = workspace.includesSubfolders
         hasSelectedFolder = workspace.session.selectedFolder != nil
         hasAgentActivity = hasLibrary && workspace.hasAgentActivity
+        hasProposals = hasLibrary && workspace.hasProposals
     }
 }
 

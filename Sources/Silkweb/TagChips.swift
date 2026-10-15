@@ -63,7 +63,11 @@ struct DocumentInfo: View {
                             let value = provenance.provenance, outside == nil || value.hasReceipt
                         {
                             AgentProvenanceSection(
-                                provenance: value, modified: document.modified, root: workspace.snapshot?.rootURL)
+                                provenance: value, modified: document.modified, root: workspace.snapshot?.rootURL,
+                                review: ProposalReviewRow.make(document, workspace: workspace))
+                        } else {
+                            // #140: the owner's own Documents have no Agent block, but may have Proposals.
+                            ProposalReviewRow.make(document, workspace: workspace)
                         }
                     }
                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
