@@ -5,3 +5,10 @@ build/
 # #247: the owner's manual-test Library is local only. Tests use Tests/Fixtures/SampleLibrary/.
 Test_Library/
 /.silkweb/
+# #260: team and process files stay local. GitHub holds only the app and what builds, tests and releases it.
+/AGENTS.md
+/TEAM_STATUS.md
+/research.md
+/docs/personal-library.md
+/.team/
+/.claude/
