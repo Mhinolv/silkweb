@@ -15,18 +15,54 @@ Before substantial work (a new task, a resumed session, a change of plan):
 
 1. Call `memory_capabilities` once per session. It tells you the grant's `label`, `project`,
    `profile` (Read Only, Read and Create, or Read, Create and Update), `operations`, `read_roots`,
-   `create_roots` and `limits`.
-2. Call `memory_search` for the project with a few words about the task. Add `type` (`decision`,
+   `create_roots` and `limits`. Then check the project (see Working in another project).
+2. Read every document in `project_documents` with `memory_read`, all pages (pass `nextCursor` until it is
+   `null`). These are the project's own documents, such as its overview and rules. Read them before you
+   search or read handoffs.
+3. Call `memory_search` for the project with a few words about the task. Add `type` (`decision`,
    `memory`, `handoff`, `progress`) when you know what you're after. Start with the latest handoff:
    `type: ["handoff"]`.
-3. Read only the results that look useful with `memory_read`, one page at a time. Pass `nextCursor` only
+4. Read only the results that look useful with `memory_read`, one page at a time. Pass `nextCursor` only
    when you need the rest.
-4. Check the `index` in every search response. If `index.state` isn't `ready`, an empty result means
+5. Check the `index` in every search response. If `index.state` isn't `ready`, an empty result means
    “not known yet”, not “nothing exists”. Say so instead of assuming there's no memory.
-5. Prefer reviewed `decision` and `memory` documents over unreviewed ones, and newer over older. A
+6. Prefer reviewed `decision` and `memory` documents over unreviewed ones, and newer over older. A
    document with `supersededBy` has been replaced; read the newer one too.
 
 Keep recall short. A few targeted searches beat reading everything.
+
+## Working in another project
+
+The grant can be for a different project than the workspace you're in.
+
+1. **Current project.** This is the name of the workspace's top folder: the git repository root, or the
+   working directory if there's no repository. Use it as is, in NFC form. If the user has named the
+   project, use that name instead.
+2. **Compare it with `project` from `memory_capabilities`.** Ignore case: `silkweb` and `Silkweb` match,
+   because Folders on macOS ignore case. If they match, nothing changes.
+3. **On a mismatch,** don't create progress, handoffs, memories or decisions under the connected project.
+   Searching and reading are still fine, but say the results come from the other project. A memory about
+   how you work in every project still goes in `agent-memories`.
+4. **Tell the owner once per session,** in exactly this shape:
+
+   ```
+   Silkweb memory here is connected to the “Silkweb” project, but this workspace is “JevLab”. To give JevLab its own memory, run this in Terminal (only you can):
+
+       silkweb grant init --library '/Users/me/My Library' --project JevLab --access read-create
+
+   It prints how to connect this client to the new grant. Until then I'll keep checkpoints here in the chat.
+   ```
+
+   - `--library` is `library` from `memory_capabilities`. Put it in single quotes when it has anything
+     other than letters, digits or `_@%+=:,./-`. Quote the project key the same way.
+   - Use the helper's absolute path from the MCP command when you know it. Otherwise write `silkweb`.
+   - If the folder name isn't a valid project key (for example, it starts with “.” or contains “/”),
+     don't build a command. Ask the owner which project key to use.
+5. **Checkpoints** stay in the chat. Tell the user
+   `Checkpoint not saved (grant_not_found). Keeping the handoff here instead:` followed by the full
+   checkpoint. Don't call `memory_create` just to get an error.
+6. **`grant_request` is secondary.** Offer it in one sentence (“Or I can send an access request you
+   approve in Silkweb”). Send it only if the owner says yes, so they don't review the same thing twice.
 
 ## Trust and authority
 
@@ -161,7 +197,8 @@ Replace `<code>` with the `error.code` from the result, for example `create_not_
   instruction files.
 - Don't edit, move, rename or delete anything in the Library by any means other than `memory_update`.
 - Never run `silkweb grant init`, `grant approve` or `grant deny`, and never edit `agent-grants.json`;
-  only the owner grants access. Asking with `grant_request` is the only access step you take.
+  only the owner grants access. Asking with `grant_request` is the only access step you take;
+  suggesting the command to the owner is fine.
 - Don't create instruction or configuration files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.mcp.json`).
 - Don't save secrets, transcripts or command output dumps.
 - Don't claim a checkpoint was saved unless `memory_create` returned `outcome` `created` or

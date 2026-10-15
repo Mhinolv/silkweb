@@ -228,7 +228,8 @@ final class LineStartClickTests: XCTestCase {
         // A real drag from the empty line still selects.
         editor.setSelectedRange(NSRange(location: 3, length: 0))
         let (third, thirdLine) = geometry(editor, at: empty + 1 + 5)
-        try click(harness, at: NSPoint(x: line.midX, y: line.midY), dragTo: NSPoint(x: third.minX + 1, y: thirdLine.midY))
+        try click(
+            harness, at: NSPoint(x: line.midX, y: line.midY), dragTo: NSPoint(x: third.minX + 1, y: thirdLine.midY))
         XCTAssertEqual(editor.selectedRange(), NSRange(location: empty, length: 6), "drag from an empty line")
     }
 

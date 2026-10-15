@@ -1176,7 +1176,13 @@ silkweb --version | --help
 
 | Command | Result (`result` in the envelope) |
 |---|---|
-| `capabilities` | `access`, `profile` (Read Only / Read and Create), `label`, `project`, `library`, `filesystem`, `read_roots`, `create_roots`, `agent_folder`, `agent_read_root`, `agent_create_root` (#206; `null` without an agent folder, or when it isn't readable or creatable), `project_folder_exists`, `limits`, `operations`, `schema` (`silkweb-memory/v1`), `contract_version`, `helper_version`. Never document counts. |
+| `capabilities` | `access`, `profile` (Read Only / Read and Create), `label`, `project`, `library`, `filesystem`, `read_roots`, `create_roots`, `agent_folder`, `agent_read_root`, `agent_create_root` (#206; `null` without an agent folder, or when it isn't readable or creatable), `project_folder_exists`, `project_documents` (#263, see below), `limits`, `operations`, `schema` (`silkweb-memory/v1`), `contract_version`, `helper_version`. |
+
+`project_documents` (#263) lists every readable `.md` file directly in `Memory/Projects/<project>/`, not in its
+subfolders, sorted by path. Each row has `path`, `title`, `revision` and `modified`. The title is the file name
+without `.md`, also when the front matter is bad or missing. `revision` is `null` when the document is larger than
+`max_read_bytes`. The array is empty, never `null`. Agents read each of these documents, all pages, before other work.
+The `memory_capabilities` text line names them: `Read these 2 project documents first: “A”, “B”.`
 | `search` | The [search response](#search-response), fields in the documented order. The query is the command’s remaining words joined by spaces; put `--` before a query that starts with “-”. `--type` and `--status` repeat or take comma-separated lists. `--project` is the search filter, not grant selection. |
 | `read` | The [read response](#read). `--id` takes the app index’s `documentId`; an ID the index doesn’t know and one outside the read folders are both `not_found`. |
 | `create` | `{"outcome", "path", "receipt", "replayed"}` ([Create and receipts](#create-and-receipts-133)). `--folder memories`, `progress` or `handoffs` (any case) picks the entry folder and the default type (`memory`, `progress`, `handoff`); `--type decision` with `memories` makes a decision. A Library-relative `--folder` needs `--type`. Without `--idempotency-key`, the helper uses a fresh `cli-<UUID>` key, so a retry creates another document. A replay exits 0. |
@@ -1633,6 +1639,14 @@ Run these once from the repository root. Each step shows its expected output.
        ],
        "profile" : "Read and Create",
        "project" : "Silkweb",
+       "project_documents" : [
+         {
+           "modified" : "2026-10-15T09:00:00Z",
+           "path" : "Memory/Projects/Silkweb/Silkweb Overview.md",
+           "revision" : "sha256:…",
+           "title" : "Silkweb Overview"
+         }
+       ],
        "project_folder_exists" : true,
        "read_roots" : [
          "Memory/Projects/Silkweb"

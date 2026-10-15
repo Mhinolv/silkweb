@@ -261,7 +261,46 @@ final class AgentMemoryTests: XCTestCase {
         XCTAssertEqual(readOnly["operations"] as? [String], ["capabilities", "list", "search", "read", "activity"])
         XCTAssertEqual(readOnly["profile"] as? String, "Read Only")
         XCTAssertEqual(readOnly["project_folder_exists"] as? Bool, false)
+        XCTAssertEqual((readOnly["project_documents"] as? [Any])?.count, 0, "empty, never null")
         XCTAssertFalse(FileManager.default.fileExists(atPath: library.appendingPathComponent("Memory").path))
+    }
+
+    /// #263: every top-level `.md` in the project folder, sorted by path. Subfolders, hidden files, links and other
+    /// types are left out. A bad or missing envelope still lists, with the file name as its title.
+    func testCapabilitiesListsTopLevelProjectDocuments() throws {
+        try writeGrants(grantJSON())
+        XCTAssertEqual(
+            try XCTUnwrap(
+                try object(run(["memory", "capabilities", "--grant", "Silkweb"]))["project_documents"]
+                    as? [Any]
+            ).count, 0, "empty, never null")
+
+        let project = library.appendingPathComponent("Memory/Projects/Silkweb")
+        let rules = "---\nschema: silkweb-memory/v1\nmemory_id: [unclosed\n---\n\n# Rules\n"
+        let files = [
+            "Silkweb Project Rules.md": rules, "Silkweb Overview.md": "# Overview\n", "Image.png": "png",
+            ".Hidden.md": "hidden",
+        ]
+        for (name, text) in files {
+            try Data(text.utf8).write(to: project.appendingPathComponent(name))
+        }
+        try FileManager.default.createSymbolicLink(
+            at: project.appendingPathComponent("Linked Diary.md"),
+            withDestinationURL: library.appendingPathComponent("Notes/Private/Diary.md"))
+        let before = try snapshot()
+        let json = try object(run(["memory", "capabilities", "--grant", "Silkweb"]))
+        let documents = try XCTUnwrap(json["project_documents"] as? [[String: Any]])
+        XCTAssertEqual(
+            documents.compactMap { $0["path"] as? String },
+            ["Memory/Projects/Silkweb/Silkweb Overview.md", "Memory/Projects/Silkweb/Silkweb Project Rules.md"])
+        XCTAssertEqual(documents.compactMap { $0["title"] as? String }, ["Silkweb Overview", "Silkweb Project Rules"])
+        XCTAssertEqual(
+            documents.compactMap { $0["revision"] as? String },
+            ["# Overview\n", rules].map { AgentMemoryIndex.revision(Data($0.utf8)) })
+        XCTAssertEqual(
+            documents.map { Set($0.keys) }, Array(repeating: ["path", "title", "revision", "modified"], count: 2))
+        XCTAssertNotNil(ISO8601DateFormatter().date(from: documents[0]["modified"] as? String ?? ""))
+        XCTAssertEqual(try snapshot(), before, "read-only: no files or sidecars are written")
     }
 
     func testListReturnsGrantedMarkdownPathsOnly() throws {

@@ -308,6 +308,38 @@ final class AgentCreateFoldersTests: XCTestCase {
             try String(contentsOf: library.appendingPathComponent(path), encoding: .utf8).hasSuffix("\nRevised.\n"))
     }
 
+    /// #264: overlapping read folders (the project and `Memory/Projects`) list, find and report each item once.
+    func testOverlappingReadFoldersReturnEachDocumentOnce() throws {
+        try writeGrants([grant(createFolders: ["Memory/Projects"])])
+        try write("# Plan\n\nThe quartz plan for Other.\n", "Memory/Projects/Other/Plan.md")
+        XCTAssertEqual(
+            try result(run(["memory", "capabilities"]))["read_roots"] as? [String], [project, "Memory/Projects"],
+            "capabilities still shows both read folders")
+        let created = try XCTUnwrap(try result(create("Quartz fact", folder: project))["path"] as? String)
+        XCTAssertEqual(create("Other fact", folder: "Memory/Projects/Other").status, 0)
+
+        let listed = try XCTUnwrap(try result(run(["memory", "list"]))["documents"] as? [[String: Any]])
+        let paths = listed.compactMap { $0["path"] as? String }
+        XCTAssertEqual(paths, Array(Set(paths)).sorted(), "each path once, in path order")
+        XCTAssertEqual(paths.count, 4, "\(paths)")
+        XCTAssertTrue(
+            Set(paths).isSuperset(of: ["\(project)/Overview.md", created, "Memory/Projects/Other/Plan.md"]), "\(paths)")
+
+        let search = try result(run(["memory", "search", "quartz"]))
+        let hits = try XCTUnwrap(search["results"] as? [[String: Any]]).compactMap { $0["path"] as? String }
+        XCTAssertEqual(hits.count, Set(hits).count, "one hit per path: \(hits)")
+        XCTAssertTrue(hits.contains("\(project)/Overview.md"), "\(hits)")
+        XCTAssertEqual(search["total"] as? Int, hits.count)
+
+        let activity = try result(run(["memory", "activity"]))
+        let operations = try XCTUnwrap(activity["receipts"] as? [[String: Any]]).compactMap {
+            $0["operationId"] as? String
+        }
+        XCTAssertEqual(operations.count, 2)
+        XCTAssertEqual(Set(operations).count, 2, "each receipt once: \(operations)")
+        XCTAssertEqual(activity["total"] as? Int, 2)
+    }
+
     // MARK: Invalid entries
 
     func testInvalidCreateFoldersFailThatGrantClosed() throws {
