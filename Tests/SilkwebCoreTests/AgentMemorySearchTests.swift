@@ -300,7 +300,7 @@ final class AgentMemorySearchTests: XCTestCase {
         try write(
             "\(folder)/Alpha changed.md",
             memory("m_chg", type: "decision", created: "2026-01-03T00:00:00Z", body: "alpha"))
-        // Superseded by a reviewed document: sinks to the bottom of its tier but is still returned.
+        // #141: superseded with the owner's accepted decision: sinks to the bottom of its tier but is still returned.
         try write(
             "\(folder)/Alpha stale.md",
             memory("m_stale", type: "decision", created: "2026-06-01T00:00:00Z", body: "alpha"))
@@ -333,6 +333,12 @@ final class AgentMemorySearchTests: XCTestCase {
                 return AgentMemoryReviewHint(reviewedRevision: revisions[path])
             case "Alpha changed.md":
                 return AgentMemoryReviewHint(reviewedRevision: "sha256:" + String(repeating: "0", count: 64))
+            case "Alpha stale.md", "Alpha new.md":
+                var entry = MemoryLifecycleEntry()
+                entry.decide(
+                    .accepted, by: "m_repl", revision: revisions[path]!,
+                    successorRevision: revisions["\(folder)/Alpha replacement.md"]!, at: Date())
+                return AgentMemoryReviewHint(entry: entry)
             default: return nil
             }
         }
@@ -344,14 +350,16 @@ final class AgentMemorySearchTests: XCTestCase {
                 "Alpha replacement.md", "Alpha reviewed.md", // reviewed decisions and memories, newest first
                 "Alpha old.md", "Alpha changed.md", // unreviewed (an earlier revision counts as unreviewed)
                 "Alpha handoff.md", "Alpha progress.md",
-                "Alpha stale.md", "Alpha new.md", // superseded by a reviewed document
+                "Alpha stale.md", "Alpha new.md", // the owner accepted that m_repl replaces them
                 "Pinned body.md",
             ])
         let byName = Dictionary(
             uniqueKeysWithValues: response.results.map { (($0.document.path as NSString).lastPathComponent, $0) })
         XCTAssertEqual(byName["Alpha changed.md"]?.document.review, .reviewedEarlierRevision)
         XCTAssertEqual(byName["Alpha reviewed.md"]?.document.review, .reviewed)
-        XCTAssertEqual(byName["Alpha stale.md"]?.document.supersededBy, ["m_repl"])
+        XCTAssertEqual(
+            byName["Alpha stale.md"]?.document.supersededBy,
+            [AgentMemorySupersession(memoryID: "m_repl", state: .accepted)])
         XCTAssertEqual(byName["Alpha pinned.md"]?.document.pinned, true)
         XCTAssertEqual(byName["Pinned body.md"]?.matchKind, .body)
 
@@ -448,12 +456,12 @@ final class AgentMemorySearchTests: XCTestCase {
         XCTAssertEqual(try permissions(cache), 0o600, "the cache is private to the owner")
         XCTAssertEqual(try permissions(cacheDirectory), 0o700)
         let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: cache)) as? [String: Any])
-        XCTAssertEqual(saved["version"] as? Int, 1)
+        XCTAssertEqual(saved["version"] as? Int, 2, "#141: version 2 keeps review_after")
         XCTAssertFalse(String(data: try Data(contentsOf: cache), encoding: .utf8)!.contains("secret"))
 
         for (contents, reason) in [
             ("{ not json", AgentMemoryFreshness.Reason.corrupt),
-            (#"{"version":2,"records":"future"}"#, .unsupportedVersion),
+            (#"{"version":3,"records":"future"}"#, .unsupportedVersion),
         ] {
             try Data(contents.utf8).write(to: cache)
             let rebuilding = try service(options: AgentMemoryIndexOptions(readLimit: 1)).search(

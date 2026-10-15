@@ -7,7 +7,7 @@ it through the `silkweb` MCP server and its ten tools: `memory_capabilities`, `m
 grant you can also update a document an agent created, if nobody edited it since. Documents the owner
 wrote or edited are never changed, nothing is ever deleted, and you can't ask for that.
 
-Written for agent memory contract version 1 (`contract_version` in `memory_capabilities`).
+Written for agent memory contract version 2 (`contract_version` in `memory_capabilities`).
 
 ## Recall first
 
@@ -21,13 +21,17 @@ Before substantial work (a new task, a resumed session, a change of plan):
    search or read handoffs.
 3. Call `memory_search` for the project with a few words about the task. Add `type` (`decision`,
    `memory`, `handoff`, `progress`) when you know what you're after. Start with the latest handoff:
-   `type: ["handoff"]`.
+   `type: ["handoff"]`. Progress and handoffs older than 30 days are left out unless the project has none
+   newer. Pass `recentDays: 0` to see older ones. Archived documents are left out unless you pass
+   `includeArchived: true`.
 4. Read only the results that look useful with `memory_read`, one page at a time. Pass `nextCursor` only
    when you need the rest.
 5. Check the `index` in every search response. If `index.state` isn't `ready`, an empty result means
    “not known yet”, not “nothing exists”. Say so instead of assuming there's no memory.
 6. Prefer reviewed `decision` and `memory` documents over unreviewed ones, and newer over older. A
-   document with `supersededBy` has been replaced; read the newer one too.
+   `supersededBy` entry with `state: "accepted"` means the owner accepted the newer document as its
+   replacement; read the newer one. A `claimed` entry is only an agent's claim; the older document still
+   counts. `reviewDue: true` means the owner should check the document again; it's still valid text.
 
 Keep recall short. A few targeted searches beat reading everything.
 

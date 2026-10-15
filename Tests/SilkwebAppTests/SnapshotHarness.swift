@@ -100,6 +100,10 @@ struct SnapshotScenario {
     /// "edit", "move", "merge", "out-of-date" (the edit's base changed), "dirty" (the edit's Document has unsaved
     /// changes) and "empty" (the only Proposal was rejected, Pending filter).
     var proposals: String? = nil
+    /// #141 lifecycle rows in Document Info, on the #137 agent Documents: "reviewed-pinned" (“Use flock for the gate”
+    /// reviewed, pinned, an owner review date), "supersession-claim" (a newer decision claims to replace it) and
+    /// "archived" (“Prefer local disks” in the project's Archive Folder).
+    var memoryLifecycle: String? = nil
     /// #195: a second Library (“Writing”, its own fixture copy) as the sidebar's second section; this one stays the
     /// current Library.
     var secondLibrary = false
@@ -335,6 +339,11 @@ struct SnapshotScenario {
         .init(name: "proposal-out-of-date", proposals: "out-of-date"),
         .init(name: "proposal-dirty-blocked", proposals: "dirty"),
         .init(name: "proposals-empty", proposals: "empty"),
+        // #141: the lifecycle rows in Info, and the merge's After merging pop-up (Keep Sources by default).
+        .init(name: "memory-info-reviewed-pinned", memoryLifecycle: "reviewed-pinned"),
+        .init(name: "memory-info-supersession-claim", memoryLifecycle: "supersession-claim"),
+        .init(name: "memory-archived-info", memoryLifecycle: "archived"),
+        .init(name: "proposal-merge-after-merging", proposals: "merge"),
         // #203: Agent Activity with requests only (sidebar hand.raised, strip button, empty list).
         .init(name: "agent-activity-requests-only", accessRequests: "requests-only"),
         // #229: the Agent Access window (grants for two Libraries, one paused; an edited grant; the paused grant;
@@ -1117,6 +1126,26 @@ final class SnapshotHarness {
                 workspace.selectedProposalID = proposal.id
             }
         }
+        if scenario.memoryLifecycle != nil {
+            await workspace.reloadAgentActivity()
+            await workspace.reloadMemoryState()
+            guard let path = memoryLifecyclePath else { throw SnapshotFailure.error("Missing lifecycle fixture") }
+            // The knowledge index reads the envelopes off the main thread after the snapshot is installed.
+            let deadline = ContinuousClock.now.advanced(by: .seconds(20))
+            while workspace.memoryLinks.links[path] == nil || workspace.memoryLinks.links.count < 4 {
+                guard ContinuousClock.now < deadline else { throw SnapshotFailure.error("Memory links did not load") }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            guard !workspace.memoryState.documents.isEmpty else {
+                throw SnapshotFailure.error("Memory state did not load")
+            }
+            workspace.navigate(
+                folder: (path as NSString).deletingLastPathComponent, documents: [path], pinned: true,
+                changesScope: true)
+            await workspace.waitForNavigation()
+            workspace.inspectorInfo = true
+            workspace.preview.showsOutline = true
+        }
         if let state = scenario.outsideChanges {
             // The harness installs its snapshot directly; give it the ledger `open` would load. "mixed" keeps the
             // envelope-only claim, so only the changed receipt Document stays flagged.
@@ -1261,6 +1290,65 @@ final class SnapshotHarness {
 
     /// #137 fixture paths by title, from the real create pipeline.
     private var agentPaths: [String: String] = [:]
+    /// #141: the Document whose Info the lifecycle scenario shows.
+    private var memoryLifecyclePath: String?
+
+    /// #141: `.silkweb/memory-state.json` for the agent fixture, keyed by the IDs the fixture's index assigns.
+    func makeMemoryLifecycleFixture(_ state: String, at root: URL) async throws {
+        let library = root.resolvingSymlinksInPath()
+        guard let decision = agentPaths["Use flock for the gate"] else {
+            throw SnapshotFailure.error("Missing agent fixture")
+        }
+        let decisionURL = library.appendingPathComponent(decision)
+        var target = decision
+        if state == "archived" {
+            let archive = "Memory/Projects/Silkweb/Archive"
+            try FileManager.default.createDirectory(
+                at: library.appendingPathComponent(archive), withIntermediateDirectories: true)
+            target = archive + "/Prefer local disks.md"
+            try FileManager.default.moveItem(
+                at: library.appendingPathComponent(SnapshotScenario.agentClaimed),
+                to: library.appendingPathComponent(target))
+        }
+        if state == "supersession-claim" {
+            guard
+                case .envelope(let envelope, _) = MemoryEnvelope.parse(
+                    try String(contentsOf: decisionURL, encoding: .utf8)),
+                let id = envelope.memoryID
+            else { throw SnapshotFailure.error("The decision has no memory ID") }
+            let successor = library.appendingPathComponent(
+                "Memory/Projects/Silkweb/Memories/Use flock with a timeout.md")
+            try Data(
+                ("---\nschema: \"silkweb-memory/v1\"\nmemory_id: \"mem_01JA2B3C4D5E6F7G8H9J0K1L3P\"\ntype: \"decision\"\n"
+                    + "project: \"Silkweb\"\nagent: \"claude-code\"\nsession: \"2026-10-07-a\"\n"
+                    + "created_at: \"2026-10-07T10:00:00Z\"\nsupersedes: [\"\(id)\"]\n---\n\n# Use flock with a timeout\n\n"
+                    + "The gate gives up after 30 seconds.\n").utf8
+            ).write(to: successor)
+            let date = Date(timeIntervalSince1970: 1_791_367_200)
+            try FileManager.default.setAttributes(
+                [.creationDate: date, .modificationDate: date], ofItemAtPath: successor.path)
+        }
+        // A scan assigns the native IDs the state file is keyed by.
+        let snapshot = try await LibraryScanner.scan(root: library)
+        guard let id = snapshot.metadata.IDsByPath[target] else { throw SnapshotFailure.error("No ID for \(target)") }
+        let revision = MemoryStateStore.revision(try Data(contentsOf: library.appendingPathComponent(target)))
+        let reviewedAt = Date(timeIntervalSince1970: 1_791_302_400) // Oct 6
+        var file = MemoryStateFile()
+        switch state {
+        case "reviewed-pinned":
+            file[id] = MemoryLifecycleEntry(
+                reviewed: .init(revision: revision, at: reviewedAt), pinned: true,
+                reviewAfter: AgentMemorySearchRequest.date("2030-01-06T12:00:00Z"))
+        case "supersession-claim":
+            file[id] = MemoryLifecycleEntry(reviewed: .init(revision: revision, at: reviewedAt))
+        default:
+            file[id] = MemoryLifecycleEntry(
+                archived: .init(
+                    at: Date(timeIntervalSince1970: 1_791_475_200), fromPath: "Memory/Projects/Silkweb/Memories"))
+        }
+        try MemoryStateStore.save(file, root: library)
+        memoryLifecyclePath = target
+    }
 
     /// Publishes one agent Document through `AgentCreateService` at a fixed UTC time and pins its file dates.
     @discardableResult
@@ -1467,6 +1555,10 @@ final class SnapshotHarness {
                 if let state = scenario.proposals {
                     try makeAgentFixture(at: root)
                     try makeProposalFixture(state, at: root)
+                }
+                if let state = scenario.memoryLifecycle {
+                    try makeAgentFixture(at: root)
+                    try await makeMemoryLifecycleFixture(state, at: root)
                 }
                 // #229: receipts for the Silkweb grant's last activity.
                 if let state = scenario.agentAccess, !["empty", "widen-refused"].contains(state) {
@@ -2083,6 +2175,22 @@ final class SnapshotHarness {
                 editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))
                 editor.scrollToEndOfDocument(nil)
                 editor.scrollRangeToVisible(editor.selectedRange())
+            }
+            if scenario.memoryLifecycle != nil {
+                // #141: the lifecycle rows close the Info column; wait for their revisions, then show the end.
+                try await Task.sleep(for: .milliseconds(500))
+                controller.view.layoutSubtreeIfNeeded()
+                func scrolls(_ view: NSView) -> [NSScrollView] {
+                    (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap(scrolls)
+                }
+                let info = scrolls(controller.view).filter { $0.window != nil }
+                    .max { $0.convert($0.bounds, to: nil).maxX < $1.convert($1.bounds, to: nil).maxX }
+                if let info, let document = info.documentView {
+                    let bottom = document.isFlipped ? max(0, document.frame.height - info.contentSize.height) : 0
+                    info.contentView.scroll(to: NSPoint(x: 0, y: bottom))
+                    info.reflectScrolledClipView(info.contentView)
+                    controller.view.layoutSubtreeIfNeeded()
+                }
             }
             if scenario.mode != .editor {
                 if webKitUnavailable {

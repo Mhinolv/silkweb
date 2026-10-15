@@ -93,17 +93,37 @@ public indirect enum AgentJSON: Sendable {
 
 extension AgentMemoryDocumentInfo {
     /// The documented field order: title, path, documentId, memoryId, revision, type, project, status,
-    /// agent, session, createdAt, modified, review, pinned, supersededBy.
+    /// agent, session, createdAt, modified, review, pinned, reviewAfter, reviewDue, archived, supersededBy (#141:
+    /// `{memoryId, state}` objects).
     var jsonFields: [(String, AgentJSON)] {
-        [
+        let dates = ISO8601DateFormatter()
+        return [
             ("title", .string(title)), ("path", .string(path)), ("documentId", .optional(documentID?.uuidString)),
             ("memoryId", .optional(memoryID)), ("revision", .string(revision)), ("type", .optional(type)),
             ("project", .optional(project)), ("status", .optional(status)), ("agent", .optional(agent)),
             ("session", .optional(session)), ("createdAt", .optional(createdAt)),
-            ("modified", .string(ISO8601DateFormatter().string(from: modified))),
+            ("modified", .string(dates.string(from: modified))),
             ("review", .string(review.rawValue)), ("pinned", .bool(pinned)),
-            ("supersededBy", .array(supersededBy.map(AgentJSON.string))),
+            ("reviewAfter", .optional(reviewAfter.map(dates.string(from:)))), ("reviewDue", .bool(reviewDue)),
+            ("archived", .bool(archived)),
+            (
+                "supersededBy",
+                .array(
+                    supersededBy.map {
+                        .object([("memoryId", .string($0.memoryID)), ("state", .string($0.state.rawValue))])
+                    })
+            ),
         ]
+    }
+}
+
+extension AgentMemoryDiagnostic {
+    /// `code`, `memoryIds`, `related` (paths for a duplicate, successors for a conflict), `message`.
+    var json: AgentJSON {
+        .object([
+            ("code", .string(code.rawValue)), ("memoryIds", .array(memoryIDs.map(AgentJSON.string))),
+            ("related", .array(related.map(AgentJSON.string))), ("message", .string(message)),
+        ])
     }
 }
 
@@ -130,6 +150,7 @@ extension AgentMemorySearchResponse {
         }
         var fields: [(String, AgentJSON)] = [("results", .array(rows)), ("total", .int(total)), ("index", index.json)]
         if let message { fields.append(("message", .string(message))) }
+        if !diagnostics.isEmpty { fields.append(("diagnostics", .array(diagnostics.map(\.json)))) }
         if mode != .default {
             fields += [
                 ("mode", .string(mode.rawValue)), ("ranking_version", .string(KnowledgeBM25.rankingVersion)),

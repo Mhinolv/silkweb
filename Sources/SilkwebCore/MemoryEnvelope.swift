@@ -22,12 +22,13 @@ public struct MemoryEnvelope: Equatable, Sendable {
     /// v1 keys in their fixed write order. Unknown keys follow in their original order.
     public static let knownKeys = [
         "schema", "memory_id", "type", "project", "agent", "session", "created_at", "observed_at", "status",
-        "supersedes", "review_after",
+        "supersedes", "review_after", "consolidates",
     ]
     public static let requiredKeys = ["schema", "memory_id", "type", "project", "agent", "session", "created_at"]
     public static let types: Set<String> = ["memory", "decision", "progress", "handoff"]
     static let timestampKeys: Set<String> = ["created_at", "observed_at", "review_after"]
-    static let listKeys: Set<String> = ["supersedes"]
+    /// `consolidates` (#141): the source `memory_id`s of a summary the owner merged in Silkweb.
+    static let listKeys: Set<String> = ["supersedes", "consolidates"]
 
     public enum Value: Equatable, Sendable {
         case string(String)

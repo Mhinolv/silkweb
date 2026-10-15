@@ -144,6 +144,8 @@ struct AgentProvenanceSection: View {
     var root: URL? = nil
     /// #140: the Document's pending Proposals, which replace “Not reviewed”.
     var review: ProposalReviewRow? = nil
+    /// #141: off when the lifecycle rows below show the review state with Mark as Reviewed.
+    var showsReview = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -196,7 +198,7 @@ struct AgentProvenanceSection: View {
             }
             if let review, !review.proposals.isEmpty {
                 review
-            } else {
+            } else if showsReview {
                 pair("Review", "Not reviewed")
             }
             Text("Agent and session are reported by the agent, not verified.")

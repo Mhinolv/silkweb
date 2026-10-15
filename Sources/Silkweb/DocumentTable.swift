@@ -238,6 +238,17 @@ struct DocumentTable: NSViewRepresentable {
             menu.addItem(.separator())
             add("Rename…", #selector(rename(_:)), enabled: workspace.canMutate)
             add("Move To…", #selector(move(_:)), enabled: workspace.canMutate)
+            // #141: lifecycle actions for agent memory Documents (no shortcuts).
+            let memory = workspace.memoryMenuPaths(path)
+            if !memory.isEmpty {
+                let enabled = workspace.canChangeMemoryState
+                add("Mark as Reviewed", #selector(markReviewed(_:)), enabled: enabled)
+                let pinned = memory.allSatisfy { path in
+                    workspace.snapshot?.metadata.IDsByPath[path].map { workspace.memoryState[$0].pinned } == true
+                }
+                add(pinned ? "Unpin" : "Pin", #selector(togglePin(_:)), enabled: enabled)
+                add("Archive", #selector(archive(_:)), enabled: enabled && memory.contains(where: workspace.canArchive))
+            }
             add("Reveal in Finder", #selector(reveal(_:)))
             menu.addCopyPathItems(target: self, action: #selector(copyPath(_:)), object: path, offersRelative: true)
             // #230: next to Reveal for a Document changed outside Silkweb (or a selection holding some).
@@ -302,6 +313,18 @@ struct DocumentTable: NSViewRepresentable {
         @objc private func move(_ sender: NSMenuItem) {
             guard let path = sender.representedObject as? String else { return }
             workspace.requestMove(workspace.documentDragPaths(path))
+        }
+        @objc private func markReviewed(_ sender: NSMenuItem) {
+            guard let path = sender.representedObject as? String else { return }
+            workspace.markReviewed(workspace.memoryMenuPaths(path))
+        }
+        @objc private func togglePin(_ sender: NSMenuItem) {
+            guard let path = sender.representedObject as? String else { return }
+            workspace.setPinned(workspace.memoryMenuPaths(path), pinned: sender.title == "Pin")
+        }
+        @objc private func archive(_ sender: NSMenuItem) {
+            guard let path = sender.representedObject as? String else { return }
+            workspace.archiveDocuments(workspace.memoryMenuPaths(path))
         }
         @objc private func exportHTML(_ sender: NSMenuItem) {
             workspace.exportHTML(path: sender.representedObject as? String)

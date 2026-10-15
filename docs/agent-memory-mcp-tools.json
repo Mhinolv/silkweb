@@ -202,6 +202,16 @@
               "default",
               "ranked"
             ]
+          },
+          "includeArchived" : {
+            "type" : "boolean",
+            "description" : "Also return archived documents (in a project's Archive folder). Default false."
+          },
+          "recentDays" : {
+            "type" : "integer",
+            "description" : "Progress and handoffs older than this many days are left out, unless a project has none newer. Default 30. 0 turns this off, and so do createdAfter and createdBefore.",
+            "minimum" : 0,
+            "maximum" : 3650
           }
         },
         "additionalProperties" : false
@@ -285,10 +295,35 @@
                 "pinned" : {
                   "type" : "boolean"
                 },
+                "reviewAfter" : {
+                  "type" : [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reviewDue" : {
+                  "type" : "boolean"
+                },
+                "archived" : {
+                  "type" : "boolean"
+                },
                 "supersededBy" : {
                   "type" : "array",
                   "items" : {
-                    "type" : "string"
+                    "type" : "object",
+                    "properties" : {
+                      "memoryId" : {
+                        "type" : "string"
+                      },
+                      "state" : {
+                        "type" : "string",
+                        "enum" : [
+                          "claimed",
+                          "accepted",
+                          "declined"
+                        ]
+                      }
+                    }
                   }
                 },
                 "matchKind" : {
@@ -358,6 +393,37 @@
           },
           "retrieval_contract_version" : {
             "type" : "integer"
+          },
+          "diagnostics" : {
+            "type" : "array",
+            "items" : {
+              "type" : "object",
+              "properties" : {
+                "code" : {
+                  "type" : "string",
+                  "enum" : [
+                    "duplicate_memory_id",
+                    "supersession_cycle",
+                    "conflicting_successors"
+                  ]
+                },
+                "memoryIds" : {
+                  "type" : "array",
+                  "items" : {
+                    "type" : "string"
+                  }
+                },
+                "related" : {
+                  "type" : "array",
+                  "items" : {
+                    "type" : "string"
+                  }
+                },
+                "message" : {
+                  "type" : "string"
+                }
+              }
+            }
           },
           "error" : {
             "type" : "object",
@@ -489,10 +555,35 @@
           "pinned" : {
             "type" : "boolean"
           },
+          "reviewAfter" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "reviewDue" : {
+            "type" : "boolean"
+          },
+          "archived" : {
+            "type" : "boolean"
+          },
           "supersededBy" : {
             "type" : "array",
             "items" : {
-              "type" : "string"
+              "type" : "object",
+              "properties" : {
+                "memoryId" : {
+                  "type" : "string"
+                },
+                "state" : {
+                  "type" : "string",
+                  "enum" : [
+                    "claimed",
+                    "accepted",
+                    "declined"
+                  ]
+                }
+              }
             }
           },
           "envelope" : {

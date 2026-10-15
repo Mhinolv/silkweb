@@ -122,8 +122,8 @@ extension LibraryWorkspace {
 /// The review pane (#140): replaces the editor while the Proposals scope is selected.
 struct ProposalReviewPane: View {
     @Bindable var workspace: LibraryWorkspace
-    /// Merge: “Move the n sources to Trash after merging”, off by default, per Proposal.
-    @State private var trashSources = false
+    /// Merge (#141): the After merging pop-up, Keep Sources by default, per Proposal.
+    @State private var afterMerging = AfterMerging.keep
 
     var body: some View {
         if let proposal = workspace.selectedProposal {
@@ -166,7 +166,7 @@ struct ProposalReviewPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onExitCommand { workspace.focus(1) }
-        .onChange(of: proposal.id) { trashSources = false }
+        .onChange(of: proposal.id) { afterMerging = .keep }
     }
 
     private func banner(_ block: (message: String, showsDocument: Bool), proposal: AgentProposal) -> some View {
@@ -307,7 +307,11 @@ struct ProposalReviewPane: View {
                     .font(.callout).textSelection(.enabled)
             }
             if proposal.isPending {
-                Toggle("Move the \(proposal.targets.count) sources to Trash after merging", isOn: $trashSources)
+                Picker("After merging:", selection: $afterMerging) {
+                    ForEach(AfterMerging.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.menu).fixedSize()
+                .help("Keep Sources leaves the \(proposal.targets.count) sources as they are.")
             }
         }
         .padding(16)
@@ -326,7 +330,7 @@ struct ProposalReviewPane: View {
             // Neither is the default button: Return does nothing here.
             Button("Reject") { workspace.rejectProposal(proposal.id) }
                 .disabled(readOnly || busy)
-            Button("Apply") { workspace.applyProposal(proposal.id, trashSources: trashSources) }
+            Button("Apply") { workspace.applyProposal(proposal.id, afterMerging: afterMerging) }
                 .disabled(readOnly || busy || block != nil || review == nil)
                 .help(applyHelp)
         }

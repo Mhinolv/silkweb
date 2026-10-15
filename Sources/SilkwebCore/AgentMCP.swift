@@ -418,7 +418,7 @@ public final class AgentMCPServer: @unchecked Sendable {
     /// CLI option → tool argument, for `invalid_argument` messages.
     static let argumentNames = [
         "id": "documentId", "created-after": "createdAfter", "created-before": "createdBefore",
-        "expected-revision": "expectedRevision",
+        "expected-revision": "expectedRevision", "recent-days": "recentDays",
     ]
 
     private func refusal(_ failure: AgentAccessError, tool: AgentMCPTool) -> AgentJSON {
@@ -468,13 +468,14 @@ public final class AgentMCPServer: @unchecked Sendable {
         case .search:
             for (name, key) in [
                 ("project", "project"), ("type", "type"), ("status", "status"), ("created-after", "createdAfter"),
-                ("created-before", "createdBefore"), ("limit", "limit"),
+                ("created-before", "createdBefore"), ("limit", "limit"), ("recent-days", "recentDays"),
             ] {
                 option(name, key)
             }
             if arguments["mode"] as? String == AgentMemorySearchRequest.Mode.ranked.rawValue {
                 invocation.flags.insert("ranked")
             }
+            if arguments["includeArchived"] as? Bool == true { invocation.flags.insert("include-archived") }
             let request = try AgentHelper.searchRequest(invocation, query: [arguments["query"] as? String ?? ""])
             let response = try service.search(request)
             let summary =
@@ -780,6 +781,17 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                         "default (all words, as above) or ranked: orders by relevance, adds score to each result, and "
                             + "reads \"phrases\", tag:, type:, status:, project:, after: and before: in query.",
                         oneOf: AgentMemorySearchRequest.Mode.allCases.map(\.rawValue))
+                ),
+                (
+                    "includeArchived",
+                    S.boolean("Also return archived documents (in a project's Archive folder). Default false.")
+                ),
+                (
+                    "recentDays",
+                    S.integer(
+                        "Progress and handoffs older than this many days are left out, unless a project has none "
+                            + "newer. Default 30. 0 turns this off, and so do createdAfter and createdBefore.",
+                        minimum: 0, maximum: AgentMemorySearchRequest.maxRecentDays)
                 ),
             ])
         case .read:
@@ -1091,6 +1103,20 @@ public enum AgentMCPTool: String, CaseIterable, Sendable {
                 ("mode", S.plain("string", oneOf: AgentMemorySearchRequest.Mode.allCases.map(\.rawValue))),
                 ("ranking_version", S.plain("string")),
                 ("retrieval_contract_version", S.plain("integer")),
+                (
+                    "diagnostics",
+                    S.list(
+                        S.record([
+                            (
+                                "code",
+                                S.plain(
+                                    "string",
+                                    oneOf: ["duplicate_memory_id", "supersession_cycle", "conflicting_successors"])
+                            ),
+                            ("memoryIds", S.list(S.plain("string"))), ("related", S.list(S.plain("string"))),
+                            ("message", S.plain("string")),
+                        ]))
+                ),
             ]
         case .read:
             properties =
@@ -1170,6 +1196,10 @@ enum AgentMCPSchema {
         return .object(fields)
     }
 
+    static func boolean(_ description: String) -> AgentJSON {
+        .object([("type", .string("boolean")), ("description", .string(description))])
+    }
+
     static func integer(_ description: String, minimum: Int? = nil, maximum: Int? = nil) -> AgentJSON {
         var fields: [(String, AgentJSON)] = [("type", .string("integer")), ("description", .string(description))]
         if let minimum { fields.append(("minimum", .int(minimum))) }
@@ -1208,7 +1238,16 @@ enum AgentMCPSchema {
         ("project", nullable("string")), ("status", nullable("string")), ("agent", nullable("string")),
         ("session", nullable("string")), ("createdAt", nullable("string")), ("modified", plain("string")),
         ("review", plain("string", oneOf: ["reviewed", "unreviewed", "reviewed-earlier-revision"])),
-        ("pinned", plain("boolean")), ("supersededBy", list(plain("string"))),
+        ("pinned", plain("boolean")), ("reviewAfter", nullable("string")), ("reviewDue", plain("boolean")),
+        ("archived", plain("boolean")),
+        (
+            "supersededBy",
+            list(
+                record([
+                    ("memoryId", plain("string")),
+                    ("state", plain("string", oneOf: ["claimed", "accepted", "declined"])),
+                ]))
+        ),
     ]
 
     /// The first problem, in words, or `nil` when `value` matches. Never echoes a value.

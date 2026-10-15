@@ -2,7 +2,7 @@
 
 ```text
 Gate: P1 slice of #126 (agent memory MVP)
-Contract: docs/agent-memory.md, contract_version 1
+Contract: docs/agent-memory.md, contract_version 2
 Last run: 2026-10-08
 ```
 

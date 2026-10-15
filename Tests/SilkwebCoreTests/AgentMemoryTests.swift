@@ -237,7 +237,7 @@ final class AgentMemoryTests: XCTestCase {
         XCTAssertEqual(output.status, 0, output.stderr)
         XCTAssertEqual(output.stderr, "")
         let json = try object(output)
-        XCTAssertEqual(json["contract_version"] as? Int, 1)
+        XCTAssertEqual(json["contract_version"] as? Int, 2)
         XCTAssertEqual(json["project"] as? String, "Silkweb")
         XCTAssertEqual(json["library"] as? String, library.standardizedFileURL.path)
         XCTAssertEqual(json["filesystem"] as? String, "qualified")

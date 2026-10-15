@@ -43,6 +43,14 @@ final class RetrievalBaselineTests: XCTestCase {
             var canary: String?
             /// Relevant-looking text that carries instructions for agents.
             var injection: Bool?
+            /// `memory_id`s the owner accepted this Document as replacing (#141). On a `reviewed-earlier-revision`
+            /// Document the acceptance names an earlier revision, so it no longer applies.
+            var acceptedSupersedes: [String]?
+
+            private enum CodingKeys: String, CodingKey {
+                case path, text, modified, review, pinned, canary, injection
+                case acceptedSupersedes = "accepted_supersedes"
+            }
         }
         var version: Int
         var project: String
@@ -254,16 +262,38 @@ final class RetrievalBaselineTests: XCTestCase {
         return AgentSession(project: library.project, store: AgentGrantStore(url: grantsURL))
     }
 
+    /// The day after the newest fixture Document.
+    static let now = AgentMemorySearchRequest.date("2026-10-03")!
+
     private func reviews(_ library: Library) -> AgentMemoryReviewLookup {
         var hints: [String: AgentMemoryReviewHint] = [:]
+        let earlier = "sha256:" + String(repeating: "0", count: 64)
         for document in library.documents where document.review != nil || document.pinned == true {
             let revision: String? =
                 switch document.review {
                 case "reviewed": AgentMemoryIndex.revision(Data(document.text.utf8))
-                case "reviewed-earlier-revision": "sha256:" + String(repeating: "0", count: 64)
+                case "reviewed-earlier-revision": earlier
                 default: nil
                 }
             hints[document.path] = AgentMemoryReviewHint(reviewedRevision: revision, pinned: document.pinned == true)
+        }
+        // #141: accepted supersession is the owner's decision on the predecessor, bound to both revisions.
+        func memoryID(_ text: String) -> String? {
+            if case .envelope(let envelope, _) = MemoryEnvelope.parse(text) { return envelope.memoryID }
+            return nil
+        }
+        for successor in library.documents {
+            guard let accepted = successor.acceptedSupersedes, let id = memoryID(successor.text) else { continue }
+            let successorRevision =
+                successor.review == "reviewed-earlier-revision"
+                ? earlier : AgentMemoryIndex.revision(Data(successor.text.utf8))
+            for target in library.documents where accepted.contains(memoryID(target.text) ?? "") {
+                var hint = hints[target.path] ?? AgentMemoryReviewHint()
+                hint.entry.decide(
+                    .accepted, by: id, revision: AgentMemoryIndex.revision(Data(target.text.utf8)),
+                    successorRevision: successorRevision, at: Date(timeIntervalSince1970: 0))
+                hints[target.path] = hint
+            }
         }
         let lookup = hints
         return { _, path in lookup[path] }
@@ -308,8 +338,10 @@ final class RetrievalBaselineTests: XCTestCase {
         var probes: [String: (AgentSession, AgentMemoryIndex)] = [:]
         for grant in library.grants.keys.sorted() {
             let session = try session(library, grant: grant, folder: folder)
+            // A fixed clock keeps the #141 recent window (30 days for progress and handoffs) the same every run.
             let service = AgentMemoryService(
-                session: session, cacheDirectory: root.appendingPathComponent("cache-\(grant)"), reviews: lookup)
+                session: session, cacheDirectory: root.appendingPathComponent("cache-\(grant)"),
+                options: AgentMemoryIndexOptions(now: { Self.now }), reviews: lookup)
             let start = clock.now
             let first = try service.search(AgentMemorySearchRequest(limit: Self.requestLimit))
             resources["cold_build_ms.\(grant)"] = String(Self.round2(Self.milliseconds(clock.now - start)))

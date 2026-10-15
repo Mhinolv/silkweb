@@ -4,7 +4,8 @@ import Foundation
 /// qualification and read-only helper commands. Enforcement per operation lives in `AgentAccess.swift`
 /// (#130); creates and receipts in `AgentCreate.swift` (#133).
 public enum AgentMemoryContract {
-    public static let version = 1
+    /// 2 (#141): lifecycle fields in search and read, accepted-only supersession, the recent window.
+    public static let version = 2
     /// `retrieval_contract_version` in `knowledge-graph-retrieval.md`, reported by capabilities and ranked modes.
     public static let retrievalVersion = 1
     public static let projectsFolder = "Memory/Projects"

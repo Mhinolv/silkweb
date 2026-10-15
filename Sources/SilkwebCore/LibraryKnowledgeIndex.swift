@@ -118,6 +118,16 @@ public actor LibraryKnowledgeIndex {
 
     public func document(_ path: String) -> KnowledgeLookup<KnowledgeRecord> { graph.document(path) }
 
+    /// #141: every indexed Document with a `memory_id`, by path, with its `supersedes` claims.
+    public func memoryLinks() -> [String: MemoryLink] {
+        var links: [String: MemoryLink] = [:]
+        for record in graph.records.values {
+            guard let id = record.content.memoryID else { continue }
+            links[record.path] = MemoryLink(memoryID: id, supersedes: record.content.supersedes)
+        }
+        return links
+    }
+
     public func links(from path: String, kind: KnowledgeEdgeKind = .linksTo) -> KnowledgeLookup<[KnowledgeEdge]> {
         graph.links(from: path, kind: kind)
     }

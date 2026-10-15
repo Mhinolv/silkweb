@@ -1,7 +1,7 @@
 # Silkweb Agent Memory Contract
 
 ```text
-contract_version: 1
+contract_version: 2
 Last reviewed: 2026-10-08 (#139)
 ```
 
@@ -130,6 +130,7 @@ line, then the body. The body starts with `# <Title>`, matching the generated fi
 | `status` | No | Quoted string | Agent |
 | `supersedes` | No | Flow list of `memory_id` strings, `[]` or `["a", "b"]` | Agent |
 | `review_after` | No | Quoted ISO 8601 UTC timestamp | Agent |
+| `consolidates` | No | Flow list of the source `memory_id`s of a summary merged in Silkweb (#141) | App |
 
 An annotated v1 progress document, `Progress/2026-10-07 0930 — Helper spike.md`:
 
@@ -765,7 +766,8 @@ the Library gate, never write to the Library and never wait for the app. The CLI
 
 ```sh
 silkweb memory search [<text>] [--type decision --type memory] [--status <s>]… \
-  [--created-after 2026-10-01] [--created-before 2026-10-08] [--project Silkweb] [--limit 10]
+  [--created-after 2026-10-01] [--created-before 2026-10-08] [--project Silkweb] [--limit 10] \
+  [--recent-days 30] [--include-archived]
 silkweb memory read "Memory/Projects/Silkweb/Memories/Use flock.md" \
   [--cursor <nextCursor>] [--expected-revision sha256:…]
 silkweb memory read --id 5E0C…-documentId
@@ -784,6 +786,12 @@ silkweb memory read --id 5E0C…-documentId
 - `createdAfter` (inclusive) and `createdBefore` (exclusive): `2026-10-07` (midnight UTC) or an ISO 8601
   timestamp, compared with `created_at`. Documents without an envelope use their modified date.
 - `limit`: default 10, at most 50, and never more than the grant’s `max_results`.
+- `recentDays` (CLI `--recent-days`, #141 owner decision): default 30, 0 to 3,650. `progress` and `handoff`
+  documents created before the window drop out. Memories and decisions are searchable at any age. If a
+  project has no `progress` or `handoff` match in the window, its 10 best older ones stay, ranked as usual
+  and capped by `limit`. `0`, `createdAfter` or `createdBefore` turns the window off.
+- `includeArchived` (CLI `--include-archived`, #141): archived documents drop out unless this is true. A
+  document is archived when the owner archived it, or when it is in `Memory/Projects/<Project>/Archive`.
 - **Scope comes first.** Only documents inside the read folders are matched, ranked, counted or excerpted.
 - `mode`: `default` (everything above, unchanged) or `ranked` (CLI `--ranked`, #179): BM25 order, query
   syntax and a trailing `score`. See [`knowledge-graph-retrieval.md` › Ranking signals](knowledge-graph-retrieval.md#ranking-signals).
@@ -802,13 +810,21 @@ no results. Each result has these fields, in this order:
 | `revision` | `sha256:` + hex digest of the file’s bytes |
 | `type`, `project`, `status`, `agent`, `session`, `createdAt` | Envelope values as written, or `null` |
 | `modified` | ISO 8601 UTC |
-| `review` | `reviewed`, `unreviewed` or `reviewed-earlier-revision`, from app metadata (#137) |
-| `pinned` | From app metadata (#140) |
-| `supersededBy` | `memory_id`s of in-scope documents whose `supersedes` names this one |
+| `review` | `reviewed`, `unreviewed` or `reviewed-earlier-revision`, from `.silkweb/memory-state.json` (#141) |
+| `pinned` | From the same file |
+| `reviewAfter` | The review date in force: the owner's, else the envelope's `review_after`, or `null` |
+| `reviewDue` | `true` when that date passed and the owner hasn't reviewed since |
+| `archived` | See `includeArchived` |
+| `supersededBy` | `{memoryId, state}` for each in-scope document whose `supersedes` names this one, sorted. `state`: `claimed`, `accepted` or `declined` |
 | `matchKind` | `title` or `body` |
 | `excerpt` | About 120 characters of plain text around the first hit, `…` at cut ends |
 
-- Missing app metadata reads as `unreviewed` and `false`, never as an error.
+- Missing app metadata reads as `unreviewed` and `false`, never as an error. The helper reads
+  `.silkweb/memory-state.json` again whenever it changes, so a lifecycle decision reaches the next
+  search without a document edit.
+- `diagnostics` (only when there are any): `{code, memoryIds, related, message}` for
+  `duplicate_memory_id` (`related`: the paths), `supersession_cycle` and `conflicting_successors`
+  (`related`: the successors the owner didn't decline). Reported, never repaired.
 - Excerpts come from the body after the envelope, so envelope lines never appear in them. A document
   with a malformed or newer envelope still matches by title, with an empty excerpt and no envelope fields.
 - **Ranking** is deterministic. First the text-match tier, as in the app: exact title, title prefix, a
@@ -816,8 +832,10 @@ no results. Each result has these fields, in this order:
   unreviewed ones (including an earlier reviewed revision and documents without an envelope), then
   handoffs, then progress. Within a kind, project documents come before agent folder documents (#206),
   then newest `created_at` (or modified date) first, then `documentId` and `path`. Ranked mode puts project
-  documents first among equal scores the same way. A document superseded by a reviewed document sinks to the bottom of its tier but is still
-  returned, so neither side of a contradiction is hidden.
+  documents first among equal scores the same way. Within a kind, a document whose review date passed
+  ranks below the others; a pinned one never does (#141). A document sinks to the bottom of its tier, in
+  both modes, only when the owner **accepted** a supersession of it. It is still returned, so neither side
+  of a contradiction is hidden. A claim alone changes nothing.
 
 ### Freshness
 
@@ -1128,7 +1146,7 @@ owner applies or rejects it, in Silkweb. Proposals never appear as Documents, in
 shortcut) lists them newest first, filtered by Pending ▾ (Pending, Applied, Rejected, All). Selecting
 one opens the review pane: edits show Current Version / Proposed Version with −/+ markers and red/green
 line bands; moves and renames show From / To and the Documents whose links Move To… will rewrite; merges
-preview the new Document, with “Move the sources to Trash after merging” off by default. Apply is
+preview the new Document, with an **After merging** pop-up (#141), Keep Sources by default. Apply is
 blocked by a banner when a target is **Out of Date** (its bytes aren’t the base revision), is gone, or
 has unsaved changes; there is no rebase. Neither Reject nor Apply is the default button. Each Apply or
 Reject is one Library Undo entry (“Undo Apply Proposal” / “Undo Reject Proposal”) that restores the
@@ -1359,7 +1377,7 @@ ask before running it. `memory list` stays CLI-only. Arguments are camelCase ver
 
 | Tool | Arguments |
 |---|---|
-| `memory_search` | `query`, `project` (the grant's project or `agent_folder`), `type` (list of `memory`, `decision`, `progress`, `handoff`), `status` (list), `createdAfter`, `createdBefore`, `limit` (1–50) |
+| `memory_search` | `query`, `project` (the grant's project or `agent_folder`), `type` (list of `memory`, `decision`, `progress`, `handoff`), `status` (list), `createdAfter`, `createdBefore`, `limit` (1–50), `mode`, `includeArchived`, `recentDays` (0–3,650) |
 | `memory_read` | `path` or `documentId` (exactly one), `cursor`, `expectedRevision` |
 | `memory_create` | `title` and `body` (required); `folder` (`memories`, `progress`, `handoffs`) or `type`, or `folderPath` with `type`; `idempotencyKey` (1–200 characters), `session`, `status`, `observedAt`, `reviewAfter`, `supersedes` (list) |
 | `memory_create_folder` | `path` (required) |
@@ -1520,6 +1538,34 @@ there's no Silkweb receipt for it. It never says which app made it, and never �
   has an envelope. **Move to Trash…** is the existing Trash command with its confirmation rules and Undo.
   Nothing is deleted automatically.
 
+## Keeping memory tidy (#141)
+
+Hygiene is a set of owner decisions. Silkweb suggests and the owner decides. Nothing is deleted, rewritten
+or hidden without an owner action.
+
+- **State file.** `.silkweb/memory-state.json`, `version: 1`, sorted keys, keyed by native document ID.
+  Each entry may hold `reviewed {revision, at}`, `pinned`, `reviewAfter`, `reviewAfterCleared`,
+  `supersession` decisions, `archived {at, fromPath}` and `dismissed`. Missing keys read as defaults. A
+  bad entry drops only itself. The app never overwrites a newer version; its controls turn off instead.
+- **Document Info.** A Document with a `memory_id` shows Review (**Mark as Reviewed**), Review date
+  (**Change…**: a date picker with Clear and Done), **Pin**, Supersedes and Superseded by (**Accept**,
+  **Decline**), Consolidates, Archived (**Restore**) and Problems (a shared memory ID, more than one open
+  claim). The list menu adds **Mark as Reviewed**, **Pin** / **Unpin** and **Archive** after Move To….
+  Each action has one named Undo. There are no shortcuts.
+- **Review date.** It changes ranking and `reviewDue` only. It never changes or deletes text.
+- **Supersession.** Accept and Decline are revision-bound owner actions, separate from review. A
+  decision applies while both documents keep the revisions it was made for. After an edit, the claim
+  reads `claimed` again.
+- **Archive.** Moves the Document into `Memory/Projects/<Project>/Archive` (created on demand) with the
+  Move To… path, so identity and links are kept. **Restore** moves it back to `fromPath`. Never the
+  Trash.
+- **Consolidation.** An applied merge (#140) has an **After merging** pop-up: **Keep Sources**
+  (default), **Archive Sources** or **Move Sources to Trash**. The new Document ends with a “Sources”
+  list of links. When a source has a `memory_id`, the new Document gets an envelope with
+  `consolidates`.
+- **Retention.** Owner decision 2026-10-09: no archive suggestions. Search applies the 30-day window
+  for progress and handoffs instead (see `recentDays`).
+
 ## Safety exclusions
 
 - **Instruction and configuration files can never be created by an agent:** `AGENTS.md`, `AGENT.md`,
@@ -1587,7 +1633,7 @@ Run these once from the repository root. Each step shows its expected output.
    ~/.local/bin/silkweb --version
    ```
    ```json
-   {"ok":true,"result":{"contract_version":1,"helper_version":"0.1.0"},"version":1}
+   {"ok":true,"result":{"contract_version":2,"helper_version":"0.1.0"},"version":1}
    ```
 
 3. Write the grant, using the Library you want agents to use. (Since #186, `silkweb grant init` does
@@ -1612,7 +1658,7 @@ Run these once from the repository root. Each step shows its expected output.
      "ok" : true,
      "result" : {
        "access" : "read-create",
-       "contract_version" : 1,
+       "contract_version" : 2,
        "create_roots" : [
          "Memory/Projects/Silkweb/Memories",
          "Memory/Projects/Silkweb/Progress",
@@ -1772,4 +1818,11 @@ Silkweb otherwise allows no third-party dependencies.
 - **Qualified filesystem:** a local APFS or HFS+ volume outside iCloud Drive and File Provider sync
   folders. Only these carry the human-text guarantee.
 - **Cooperating writer:** the Silkweb app or `silkweb` helper following this contract.
+- **Archive:** the reserved Folder `Memory/Projects/<Project>/Archive`, and the owner action that moves a
+  Document into it (#141). Archived Documents stay readable; agent search leaves them out unless asked.
+- **Pin:** the owner's mark that keeps a Document at the top of agent results (#141).
+- **Review date:** when the owner wants to check a Document again: the owner's date, else the
+  envelope's `review_after` (#141). It never changes text.
+- **Supersession:** a newer Document's `supersedes` claim against an older one. Only the owner's
+  accepted decision demotes the older one (#141).
 - **Helper:** the `silkweb` executable at `~/.local/bin/silkweb`, kept outside the app bundle.

@@ -23,6 +23,8 @@ enum LibraryUndo {
     case trash([TrashedItem])
     /// #140: one Apply or Reject of a Proposal.
     case proposal(ProposalUndo)
+    /// #141: one lifecycle action (Mark as Reviewed, Pin, Archive…).
+    case memoryState(MemoryStateUndo)
     var title: String {
         switch self {
         case .tags(_, let title): return title;
@@ -31,6 +33,7 @@ enum LibraryUndo {
         case .move: return "Undo Move";
         case .trash: return "Undo Move to Trash"
         case .proposal(let undo): return undo.title
+        case .memoryState(let undo): return undo.title
         }
     }
 }
@@ -264,7 +267,7 @@ extension LibraryWorkspace {
     var canUndoLibrary: Bool {
         guard canMutate, let snapshot, let last = libraryUndo.last else { return false }
         switch last {
-        case .move, .trash, .tags, .proposal: return true
+        case .move, .trash, .tags, .proposal, .memoryState: return true
         case .newFolder(let path):
             return snapshot.folders.contains { $0.relativePath == path }
                 && !snapshot.folders.contains { $0.relativePath.hasPrefix(path + "/") }
@@ -351,6 +354,8 @@ extension LibraryWorkspace {
                 case .proposal:
                     // Handled before the editor is locked, below.
                     return
+                case .memoryState(let undo):
+                    try await undoMemoryState(undo, root: root)
                 }
                 libraryUndo.removeLast()
             } catch { mutationFailure(error) }
