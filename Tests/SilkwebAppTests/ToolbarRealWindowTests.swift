@@ -22,6 +22,22 @@ final class ToolbarRealWindowTests: XCTestCase {
 
     private static func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
 
+    /// #272: what the assertions read from the titlebar (every view's frame, visibility and opacity, which items
+    /// are placed, and the gap width) after a layout pass. Nil while a slide or another layer animation runs.
+    @MainActor static func titlebarState(_ window: NSWindow, gapWidth: CGFloat) -> String? {
+        guard let frameView = window.contentView?.superview else { return nil }
+        frameView.layoutSubtreeIfNeeded()
+        var state = "\(window.frame) gap \(gapWidth)"
+        for view in frameView.subviews where view !== window.contentView {
+            for view in descendants(view) {
+                if view.layer?.animationKeys()?.isEmpty == false { return nil }
+                state += "|\(view.convert(view.bounds, to: nil)) \(view.isHidden) \(view.alphaValue)"
+            }
+        }
+        for item in window.toolbar?.items ?? [] { state += "|\(item.label) \(item.view?.window != nil)" }
+        return state
+    }
+
     @MainActor private final class Harness {
         let window: NSWindow
         let workspace: LibraryWorkspace
@@ -58,10 +74,10 @@ final class ToolbarRealWindowTests: XCTestCase {
                 window.standardWindowButton($0)
             }
         }
+        /// #272: lays the window out until the titlebar is at rest, instead of six fixed 100 ms passes.
         func settle() async throws {
-            for _ in 0..<6 {
-                window.contentView?.superview?.layoutSubtreeIfNeeded()
-                try await Task.sleep(for: .milliseconds(100))
+            try await waitUntilSettled("the compact bar") {
+                ToolbarRealWindowTests.titlebarState(window, gapWidth: workspace.toolbarMetrics.gapWidth)
             }
         }
         func resize(_ width: CGFloat) async throws {
@@ -509,10 +525,10 @@ final class ToolbarRealWindowTests: XCTestCase {
         let toolbar = NSToolbar(identifier: "Silkweb.SectionlessToolbar." + UUID().uuidString)
         toolbar.delegate = delegate
         window.toolbar = toolbar
+        /// #272: lays the window out until the titlebar is at rest, instead of six fixed 100 ms passes.
         func settle() async throws {
-            for _ in 0..<6 {
-                window.contentView?.superview?.layoutSubtreeIfNeeded()
-                try await Task.sleep(for: .milliseconds(100))
+            try await waitUntilSettled("the compact bar") {
+                ToolbarRealWindowTests.titlebarState(window, gapWidth: workspace.toolbarMetrics.gapWidth)
             }
         }
         try await settle()

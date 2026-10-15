@@ -15,7 +15,7 @@ final class DocumentSelectionLatencyTests: XCTestCase {
     static let clicks = 20
     /// The list segment's budget, from the press to the end of the display pass that shows the capsule: one
     /// 60 Hz frame. Locally that pass measures about 10 ms, most of it SwiftUI re-rendering for the new selection.
-    static let listBudget = TestEnvironment.frameBudget(16)
+    static let listBudget = TestEnvironment.frameBudget(16, loadPerCore: 0)
     /// Focus Mode may cost the editor segment this much more than the plain run (dim strips are rebuilt after the swap).
     static let focusMargin = 1.5
 
@@ -244,7 +244,8 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         if inconclusive.isEmpty, let off = runs[false], let on = runs[true] {
             let base = Run.percentile(off.editor, 0.95)
             XCTAssertLessThanOrEqual(
-                Run.percentile(on.editor, 0.95), max(base * Self.focusMargin, base + TestEnvironment.frameBudget(16)),
+                Run.percentile(on.editor, 0.95),
+                max(base * Self.focusMargin, base + TestEnvironment.frameBudget(16, loadPerCore: 0)),
                 "Focus Mode must not slow the editor swap: \(on.summary("on")) vs \(off.summary("off"))")
         }
         try LatencyGate.skipIfInconclusive(inconclusive)
@@ -282,7 +283,8 @@ final class DocumentSelectionLatencyTests: XCTestCase {
         XCTAssertEqual(behind, 0, "the capsule must track every click")
         // A coalesced queue finishes the open in flight and then the latest target: two opens, not one per click.
         XCTAssertLessThanOrEqual(
-            drained, 2 * open + TestEnvironment.frameBudget(16), "the editor must coalesce to the latest click")
+            drained, 2 * open + TestEnvironment.frameBudget(16, loadPerCore: 0),
+            "the editor must coalesce to the latest click")
         XCTAssertTrue(h.shows(last))
         XCTAssertEqual(h.editorURL, h.url(last))
     }
@@ -373,7 +375,7 @@ final class DocumentSelectionLatencyTests: XCTestCase {
     /// Within this long of the press (two 60 Hz frames), the Outline shows the clicked note. Locally the shared
     /// pass that shows the capsule and the Outline measures about 18 ms; before #87 it took the editor swap plus the
     /// 250 ms typing debounce.
-    static let outlineBudget = TestEnvironment.frameBudget(33)
+    static let outlineBudget = TestEnvironment.frameBudget(33, loadPerCore: 0)
 
     private struct OutlineRun {
         var latencies: [Double] = []
@@ -616,11 +618,12 @@ final class DocumentSelectionLatencyTests: XCTestCase {
 /// #213 (owner decision): when both runs are over budget, a same-run control times display passes with no click.
 /// A control p90 over 8 ms means the host itself was too slow to judge a frame budget: the timing is inconclusive
 /// (logged, and only the timing assertion is skipped). A fast control with slow clicks still fails. The budgets
-/// are unchanged; there is no environment flag and no multiplier.
+/// are unchanged; there is no environment flag and no multiplier. So these budgets pass `loadPerCore: 0` and keep
+/// the #272 load scale of `TestEnvironment.frameBudget` out: the control alone judges a loaded host.
 enum LatencyGate {
     static let quantile = 0.9
     /// The control's p90 above which the host is too loaded to judge a frame budget.
-    static let controlBudget = TestEnvironment.frameBudget(8)
+    static let controlBudget = TestEnvironment.frameBudget(8, loadPerCore: 0)
     static let controlSamples = 20
 
     /// Nearest-rank percentile of `samples` (0 when empty).
