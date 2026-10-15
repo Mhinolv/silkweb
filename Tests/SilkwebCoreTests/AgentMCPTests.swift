@@ -273,6 +273,29 @@ final class AgentMCPTests: XCTestCase {
         XCTAssertEqual(refused["code"] as? String, "invalid_argument")
     }
 
+    /// #263: the text line names the project documents, so an agent reads them before other work.
+    func testCapabilitiesTextNamesProjectDocuments() throws {
+        let folder = library.appendingPathComponent(project)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data("# Rules\n".utf8).write(to: folder.appendingPathComponent("Silkweb Project Rules.md"))
+        _ = try initialize()
+        XCTAssertTrue(
+            try text(call(2, "memory_capabilities")).hasPrefix(
+                "Read and Create access to Memory › Projects › Silkweb. "
+                    + "Read this project document first: “Silkweb Project Rules”.\n\n{"))
+        try Data("# Overview\n".utf8).write(to: folder.appendingPathComponent("Silkweb Overview.md"))
+        let capabilities = try call(3, "memory_capabilities")
+        XCTAssertTrue(
+            try text(capabilities).hasPrefix(
+                "Read and Create access to Memory › Projects › Silkweb. "
+                    + "Read these 2 project documents first: “Silkweb Overview”, “Silkweb Project Rules”.\n\n{"))
+        XCTAssertEqual(
+            (try structured(capabilities)["project_documents"] as? [[String: Any]])?.compactMap {
+                $0["path"] as? String
+            },
+            [project + "/Silkweb Overview.md", project + "/Silkweb Project Rules.md"])
+    }
+
     func testEveryToolSucceedsWithStructuredContentAndSummary() throws {
         _ = try initialize()
 

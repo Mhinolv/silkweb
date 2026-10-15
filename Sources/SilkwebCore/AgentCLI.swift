@@ -398,8 +398,27 @@ public enum AgentHelper {
         }
     }
 
-    /// Scope, profile, limits and commands. Never document counts.
-    static func capabilities(_ context: AgentAuthorization) -> AgentJSON {
+    /// #263: the readable documents directly in the project folder, for agents to read first each session. The title
+    /// is the file name, as `memory_read` reports it, also when the envelope is bad or missing. `revision` is `null`
+    /// when the document can't be read (larger than `max_read_bytes`, or replaced by a link since the listing).
+    static func projectDocuments(_ context: AgentAuthorization) -> [[String: Any]] {
+        let root = AgentMemoryContract.projectRoot(context.scope.project)
+        let documents = (try? AgentSecureFiles.documents(library: context.library, in: root)) ?? []
+        let dates = ISO8601DateFormatter()
+        return context.scope.readable(documents, path: \.path).map { document in
+            let data = try? AgentSecureFiles.readDocument(
+                library: context.library, path: document.path, maxBytes: context.grant.limits.maxReadBytes)
+            return [
+                "path": document.path,
+                "title": ((document.path as NSString).lastPathComponent as NSString).deletingPathExtension,
+                "revision": data.map(AgentMemoryIndex.revision) ?? NSNull(),
+                "modified": dates.string(from: document.modified),
+            ]
+        }
+    }
+
+    /// Scope, profile, limits, commands and the project documents to read first.
+    static func capabilities(_ context: AgentAuthorization, projectDocuments: [[String: Any]]? = nil) -> AgentJSON {
         let root = AgentMemoryContract.projectRoot(context.scope.project)
         let descriptor = try? AgentSecureFiles.openFolder(library: context.library, path: root)
         if let descriptor { close(descriptor) }
@@ -432,6 +451,7 @@ public enum AgentHelper {
             "retrieval_modes": AgentMemorySearchRequest.Mode.allCases.map(\.rawValue),
             "create_roots": context.scope.createRoots,
             "project_folder_exists": descriptor != nil,
+            "project_documents": projectDocuments ?? Self.projectDocuments(context),
             "limits": [
                 "max_read_bytes": limits.maxReadBytes, "max_results": limits.maxResults,
                 "requests_per_minute": limits.requestsPerMinute, "max_create_bytes": limits.maxCreateBytes,
