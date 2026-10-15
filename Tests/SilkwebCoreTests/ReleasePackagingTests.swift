@@ -4,7 +4,7 @@ import XCTest
 @testable import SilkwebCore
 
 /// #249: the new bundle identifiers, the one-time preferences carry-over from `com.silkweb.app`, and the release
-/// script, notes template and workflow that publish the unsigned DMG.
+/// script, notes template and workflow that publish the DMG (#271: Developer ID signed and notarized).
 final class ReleasePackagingTests: XCTestCase {
     private static let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         .deletingLastPathComponent().deletingLastPathComponent()
@@ -128,11 +128,12 @@ final class ReleasePackagingTests: XCTestCase {
     func testReleaseNotesTemplateSectionsInOrder() throws {
         let notes = try text("scripts/release_notes.md")
         let headings = notes.split(separator: "\n").filter { $0.hasPrefix("## ") }.map(String.init)
-        XCTAssertEqual(
-            headings, ["## Install", "## This build is unsigned", "## Agent memory helper (not included)"])
+        // #271: a signed, notarized build needs no Open Anyway or quarantine steps.
+        XCTAssertEqual(headings, ["## Install", "## Agent memory helper (not included)"])
         XCTAssertTrue(notes.contains("Silkweb-{{VERSION}}.dmg"))
-        XCTAssertTrue(notes.contains("Open Anyway"))
-        XCTAssertTrue(notes.contains("xattr -dr com.apple.quarantine /Applications/Silkweb.app"))
+        XCTAssertFalse(notes.contains("Open Anyway"))
+        XCTAssertFalse(notes.contains("xattr"))
+        XCTAssertFalse(notes.contains("unsigned"))
     }
 
     func testReleaseScriptRefusesAVersionThatDoesNotMatchInfoPlist() throws {
@@ -147,9 +148,80 @@ final class ReleasePackagingTests: XCTestCase {
         XCTAssertTrue(result.error.contains("unknown option --sign"), result.error)
     }
 
-    func testReleaseWorkflowPublishesOnVersionTags() throws {
+    func testReleaseScriptRefusesUnsignedWithPublish() throws {
+        for arguments in [["--unsigned", "--publish"], ["--publish", "--no-build", "--unsigned"]] {
+            let result = try runRelease(arguments)
+            XCTAssertEqual(result.status, 64, "\(arguments)")
+            XCTAssertTrue(result.error.contains("--unsigned can't combine with --publish"), result.error)
+        }
+    }
+
+    func testReleaseScriptStopsWhenTheSigningIdentityIsMissing() throws {
+        let missing = try runRelease(
+            ["--no-build"], environment: ["SILKWEB_SIGN_IDENTITY": "Developer ID Application: Nobody (TEST000000)"])
+        XCTAssertEqual(missing.status, 1)
+        XCTAssertTrue(
+            missing.error.contains(
+                "release: no Developer ID Application identity \"Developer ID Application: Nobody (TEST000000)\" "
+                    + "in the keychain. See docs/release.md."), missing.error)
+        let wrongKind = try runRelease(
+            ["--no-build"], environment: ["SILKWEB_SIGN_IDENTITY": "Apple Development: Nobody (TEST000000)"])
+        XCTAssertEqual(wrongKind.status, 1)
+        XCTAssertTrue(wrongKind.error.contains("isn't a Developer ID Application identity"), wrongKind.error)
+    }
+
+    func testReleaseScriptChecksCredentialsBeforeTheBuild() throws {
+        let script = try text("scripts/release.sh")
+        let identityCheck = try XCTUnwrap(script.range(of: "security find-identity -v -p codesigning"))
+        let profileCheck = try XCTUnwrap(script.range(of: "xcrun notarytool history --keychain-profile \"$PROFILE\""))
+        let build = try XCTUnwrap(script.range(of: "./scripts/build.sh release"))
+        XCTAssertLessThan(identityCheck.lowerBound, build.lowerBound)
+        XCTAssertLessThan(profileCheck.lowerBound, build.lowerBound)
+        // The repo names the profile and the identity only. No secret.
+        XCTAssertTrue(script.contains("PROFILE=\"${SILKWEB_NOTARY_PROFILE:-silkweb-notary}\""))
+        XCTAssertTrue(
+            script.contains(
+                "IDENTITY=\"${SILKWEB_SIGN_IDENTITY:-Developer ID Application: Mark Hinojosa (V8X3GYRTNK)}\""))
+        XCTAssertFalse(script.contains("--password"))
+    }
+
+    func testReleaseScriptSignsNotarizesAndStaplesTheAppAndTheDMG() throws {
+        let script = try text("scripts/release.sh")
+        XCTAssertTrue(
+            script.contains("codesign --force --options runtime --timestamp -s \"$IDENTITY\" -i \"$APP_ID\" \"$APP\""))
+        XCTAssertTrue(script.contains("codesign --force --timestamp -s \"$IDENTITY\" \"$DMG\""))
+        XCTAssertTrue(script.contains("codesign --verify --strict --deep \"$APP\""))
+        XCTAssertTrue(script.contains("codesign --verify --strict \"$DMG\""))
+        XCTAssertTrue(script.contains("xcrun notarytool submit \"$1\" --keychain-profile \"$PROFILE\" --wait"))
+        XCTAssertTrue(script.contains("xcrun notarytool log \"$SUBMISSION\""))
+        XCTAssertTrue(script.contains("xcrun stapler staple -q \"$1\""))
+        XCTAssertTrue(script.contains("spctl -a -t open --context context:primary-signature \"$DMG\""))
+        for stage in ["echo \"signed $APP\"", "echo \"notarized $1", "echo \"stapled $1\"", "echo \"signed $DMG\""] {
+            XCTAssertTrue(script.contains(stage), stage)
+        }
+        // The DMG is packed from the signed, stapled app and holds only it and the Applications shortcut.
+        let stapleApp = try XCTUnwrap(script.range(of: "staple \"$APP\""))
+        let pack = try XCTUnwrap(script.range(of: "sh ./scripts/make_dmg.sh \"$APP\""))
+        let publish = try XCTUnwrap(script.range(of: "gh release create"))
+        XCTAssertLessThan(stapleApp.lowerBound, pack.lowerBound)
+        XCTAssertLessThan(pack.lowerBound, publish.lowerBound)
+        XCTAssertFalse(script.contains("build/helper"))
+        let dmg = try text("scripts/make_dmg.sh")
+        XCTAssertFalse(dmg.contains("helper"))
+        XCTAssertEqual(dmg.components(separatedBy: "\"$STAGE/").count - 1, 2)
+        // The everyday build stays ad hoc signed.
+        let bundle = try text("scripts/bundle_app.sh")
+        XCTAssertTrue(bundle.contains("codesign --force -s - -i \"$APP_ID\" \"$APP\""))
+        XCTAssertFalse(bundle.contains("Developer ID Application:"))
+    }
+
+    func testReleaseWorkflowNeverPublishesOnATagPush() throws {
         let workflow = try text(".github/workflows/release.yml")
-        XCTAssertTrue(workflow.contains("tags: ['v*']"))
+        // #271: no signing secret is in CI yet, so the owner publishes from their Mac. A manual run stops at the
+        // credential check in release.sh.
+        XCTAssertFalse(workflow.contains("tags:"))
+        XCTAssertTrue(workflow.contains("workflow_dispatch:"))
+        XCTAssertFalse(workflow.contains("--unsigned"))
         XCTAssertTrue(workflow.contains("contents: write"))
         XCTAssertTrue(workflow.contains("sh ./scripts/release.sh --publish \"$GITHUB_REF_NAME\""))
         XCTAssertTrue(workflow.contains("DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer"))
@@ -164,8 +236,19 @@ final class ReleasePackagingTests: XCTestCase {
         XCTAssertTrue(dmg.contains("ln -s /Applications \"$STAGE/Applications\""))
     }
 
-    private func runRelease(_ arguments: [String]) throws -> (status: Int32, error: String) {
+    func testReleaseDocsDescribeTheKeychainProfileSetup() throws {
+        let docs = try text("docs/release.md")
+        XCTAssertTrue(docs.contains("xcrun notarytool store-credentials silkweb-notary"))
+        XCTAssertTrue(docs.contains("SILKWEB_SIGN_IDENTITY"))
+        XCTAssertTrue(docs.contains("SILKWEB_NOTARY_PROFILE"))
+        XCTAssertTrue(docs.contains("sh scripts/release.sh --unsigned"))
+    }
+
+    private func runRelease(_ arguments: [String], environment: [String: String] = [:]) throws -> (
+        status: Int32, error: String
+    ) {
         let process = Process()
+        process.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [Self.repository.appendingPathComponent("scripts/release.sh").path] + arguments
         let errorPipe = Pipe()
