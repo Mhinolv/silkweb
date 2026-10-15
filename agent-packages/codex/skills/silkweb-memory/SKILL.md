@@ -21,14 +21,17 @@ Before substantial work (a new task, a resumed session, a change of plan):
 1. Call `memory_capabilities` once per session. It tells you the grant's `label`, `project`,
    `profile` (Read Only, Read and Create, or Read, Create and Update), `operations`, `read_roots`,
    `create_roots` and `limits`. Then check the project (see Working in another project).
-2. Call `memory_search` for the project with a few words about the task. Add `type` (`decision`,
+2. Read every document in `project_documents` with `memory_read`, all pages (pass `nextCursor` until it is
+   `null`). These are the project's own documents, such as its overview and rules. Read them before you
+   search or read handoffs.
+3. Call `memory_search` for the project with a few words about the task. Add `type` (`decision`,
    `memory`, `handoff`, `progress`) when you know what you're after. Start with the latest handoff:
    `type: ["handoff"]`.
-3. Read only the results that look useful with `memory_read`, one page at a time. Pass `nextCursor` only
+4. Read only the results that look useful with `memory_read`, one page at a time. Pass `nextCursor` only
    when you need the rest.
-4. Check the `index` in every search response. If `index.state` isn't `ready`, an empty result means
+5. Check the `index` in every search response. If `index.state` isn't `ready`, an empty result means
    “not known yet”, not “nothing exists”. Say so instead of assuming there's no memory.
-5. Prefer reviewed `decision` and `memory` documents over unreviewed ones, and newer over older. A
+6. Prefer reviewed `decision` and `memory` documents over unreviewed ones, and newer over older. A
    document with `supersededBy` has been replaced; read the newer one too.
 
 Keep recall short. A few targeted searches beat reading everything.

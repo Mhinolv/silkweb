@@ -592,9 +592,24 @@ public enum AgentSecureFiles {
         return documents.sorted { $0.path < $1.path }
     }
 
+    /// #263: Markdown documents directly in `folder`, not in its subfolders, sorted by path. A missing folder is empty.
+    public static func documents(library: URL, in folder: String) throws -> [Document] {
+        let descriptor: Int32
+        do {
+            descriptor = try openFolder(library: library, path: folder)
+        } catch let error as AgentAccessError where error == .notFound {
+            return []
+        }
+        var documents: [Document] = []
+        var unreadable = 0
+        walk(descriptor, prefix: folder, into: &documents, unreadable: &unreadable, recursive: false)
+        return documents.sorted { $0.path < $1.path }
+    }
+
     /// Takes ownership of `descriptor`.
     private static func walk(
-        _ descriptor: Int32, prefix: String, into documents: inout [Document], unreadable: inout Int
+        _ descriptor: Int32, prefix: String, into documents: inout [Document], unreadable: inout Int,
+        recursive: Bool = true
     ) {
         guard let folder = fdopendir(descriptor) else {
             close(descriptor)
@@ -611,7 +626,7 @@ public enum AgentSecureFiles {
             guard !name.hasPrefix("."), fstatat(parent, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { continue }
             let path = prefix.isEmpty ? name : prefix + "/" + name
             switch info.st_mode & S_IFMT {
-            case S_IFDIR:
+            case S_IFDIR where recursive:
                 let child = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
                 if child >= 0 {
                     walk(child, prefix: path, into: &documents, unreadable: &unreadable)
