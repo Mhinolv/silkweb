@@ -449,4 +449,75 @@ final class AgentAccessWorkspaceTests: XCTestCase {
         try await sweep()
         XCTAssertEqual(model.outside, .deleted)
     }
+
+    /// #270: the hover over a Library header keeps an unretained pointer to its row (`_outlineCellTrackingAreaItem`).
+    /// When the Library's last grant goes, the next tracking-area pass must not read the freed row. On the old List it
+    /// did: SIGSEGV in `-[NSOutlineView rowForItem:]` from `_addOutlineCellTrackingAreas`, if the cursor was there.
+    func testRemovingTheHoveredLibraryHeaderLeavesNoFreedSidebarRow() async throws {
+        let setRowSelector = NSSelectorFromString("_setOutlineCellTrackingAreaRow:")
+        let addAreasSelector = NSSelectorFromString("_addOutlineCellTrackingAreas")
+        guard let setRowMethod = class_getInstanceMethod(NSOutlineView.self, setRowSelector),
+            let trackingIvar = class_getInstanceVariable(NSOutlineView.self, "_outlineCellTrackingAreaItem"),
+            NSOutlineView.instancesRespond(to: addAreasSelector)
+        else { throw XCTSkip("AppKit no longer has the outline cell hover internals") }
+        typealias SetRow = @convention(c) (NSOutlineView, Selector, Int) -> Void
+        let setRow = unsafeBitCast(method_getImplementation(setRowMethod), to: SetRow.self)
+        func hoverItem(_ outline: NSOutlineView) -> UInt {
+            Unmanaged.passUnretained(outline).toOpaque().load(
+                fromByteOffset: ivar_getOffset(trackingIvar), as: UInt.self)
+        }
+        func rowItems(_ outline: NSOutlineView) -> [UInt] {
+            (0..<outline.numberOfRows).compactMap { row in
+                outline.item(atRow: row).map { UInt(bitPattern: Unmanaged.passUnretained($0 as AnyObject).toOpaque()) }
+            }
+        }
+
+        _ = NSApplication.shared
+        try seed([grant("Silkweb", library: silkweb), grant("Novel", library: writing)])
+        let model = makeModel()
+        await model.reload()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 780, height: 520), styleMask: [.titled, .resizable],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let host = NSHostingController(rootView: AgentAccessView(model: model))
+        host.sizingOptions = []
+        window.contentViewController = host
+        defer {
+            window.contentViewController = nil
+            window.close()
+        }
+        window.setContentSize(NSSize(width: 780, height: 520))
+        func layout() async throws {
+            try await Task.sleep(for: .milliseconds(1))
+            host.view.layoutSubtreeIfNeeded()
+        }
+        func outline() throws -> NSOutlineView {
+            try XCTUnwrap(Self.descendants(host.view).compactMap { $0 as? NSOutlineView }.first)
+        }
+        try await layout()
+        XCTAssertEqual(model.groups.map(\.name), ["Silkweb Library", "Writing"])
+
+        // The cursor rests on the “Writing” header, the last expandable row.
+        let before = try outline()
+        let header = try XCTUnwrap(
+            (0..<before.numberOfRows).last { before.isExpandable(before.item(atRow: $0)) }, "a Library header row")
+        setRow(before, setRowSelector, header)
+        XCTAssertEqual(hoverItem(before), rowItems(before)[header], "the hover holds the Writing header")
+
+        // Terminal removes the last grant of Writing, so its Section goes away.
+        try seed([grant("Silkweb", library: silkweb)])
+        await model.reload()
+        try await layout()
+        try await layout()
+        XCTAssertEqual(model.groups.map(\.name), ["Silkweb Library"])
+        let after = try outline()
+        let hovered = hoverItem(after)
+        let isLive = hovered == 0 || rowItems(after).contains(hovered)
+        XCTAssertTrue(isLive, "the sidebar still points its hover at the freed Writing header")
+        guard isLive else { return }
+        // The display cycle's next tracking-area pass, which crashed before the fix.
+        after.perform(addAreasSelector)
+        window.displayIfNeeded()
+    }
 }

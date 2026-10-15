@@ -225,6 +225,10 @@ struct AgentAccessSidebar: View {
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
+            // #270: AppKit keeps the hovered Section header unretained (`_outlineCellTrackingAreaItem`). If that
+            // Library's Section goes, its next tracking pass reads the freed row and crashes. A new List per Library
+            // set drops the old outline with its hover.
+            .id(model.groups.map(\.id))
             Divider()
             HStack(spacing: 0) {
                 Button {
