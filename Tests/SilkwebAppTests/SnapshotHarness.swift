@@ -62,6 +62,8 @@ struct SnapshotScenario {
     /// #246: typed at the caret one character every 40 ms (inside the outline's debounce) after the writing modes
     /// are on, then left to settle: the capsule stays on the caret's section.
     var typeAtCaret: String? = nil
+    /// #250: Settings ▸ Editor ▸ Highlight the current line, restored after the capture.
+    var highlightsCurrentLine = false
     /// #262: appended to the open document, which is then saved as autosave does; its row moves to the top of the
     /// Date Modified list in place, keeping its excerpt and selection.
     var autosaveAppend: String? = nil
@@ -412,6 +414,11 @@ struct SnapshotScenario {
                 "Paragraph 11 of the draft talks about the road, the coffee and the weather, long enough to wrap in the column.",
             focusMode: true, typewriterMode: true,
             typeAtCaret: " And one more sentence"),
+        // #250: caret on an empty line with the current-line band; the band and caret only, no selection fill.
+        .init(
+            name: "focus-typewriter-empty-line-caret", document: writingModes,
+            visibleCaret: "Second paragraph sits near the start of the document.\n", focusMode: true,
+            typewriterMode: true, highlightsCurrentLine: true),
         // #262: after a save the note leads the Date Modified list, still selected, excerpt intact, no scroll.
         .init(
             name: "list-after-autosave", folder: "Snapshot Fixtures",
@@ -1410,6 +1417,7 @@ final class SnapshotHarness {
             LivePreferences.shared.current.colors.dark.accent = accent
             ColorRevision.shared.bump()
         }
+        if scenario.highlightsCurrentLine { LivePreferences.shared.current.highlightsCurrentLine = true }
         // Native window chrome and production content, never entered into the window list.
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
@@ -1426,6 +1434,9 @@ final class SnapshotHarness {
             if scenario.accent != nil {
                 LivePreferences.shared.current = oldPreferences
                 ColorRevision.shared.bump()
+            }
+            if scenario.highlightsCurrentLine {
+                LivePreferences.shared.current.highlightsCurrentLine = oldPreferences.highlightsCurrentLine
             }
             preferences.remove()
             try? FileManager.default.removeItem(at: temporary)

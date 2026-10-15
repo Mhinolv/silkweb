@@ -188,6 +188,51 @@ final class LineStartClickTests: XCTestCase {
         XCTAssertEqual(editor.selectedRange(), NSRange(location: list, length: 0), "jittered click")
     }
 
+    /// #250: a plain click on an empty line showed the whole line in the selection color for a moment.
+    /// The press snapped to the newline glyph's leading edge, and AppKit's tracking loop selected the
+    /// newline up to the real release point before the caret came back. Every range is recorded.
+    @MainActor
+    func testEmptyLineClickNeverSelects() throws {
+        let harness = try makeHarness()
+        defer { harness.window.close() }
+        let editor = harness.editor
+        editor.string = "First line\n\nThird line\n"
+        editor.styler.reload()
+        let recorder = SelectionRecorder()
+        editor.delegate = recorder
+        defer { editor.delegate = nil }
+        let empty = 11
+        let (newline, line) = geometry(editor, at: empty)
+        var failures: [String] = []
+        for (label, x) in [
+            ("left margin", editor.bounds.minX + 2), ("line start", newline.minX + 1),
+            ("mid line", line.midX), ("past the newline", newline.maxX + 20),
+        ] {
+            for jitter in [false, true] {
+                let place = "\(label)\(jitter ? ", jittered" : "")"
+                // Come back from another line, as the owner did.
+                editor.setSelectedRange(NSRange(location: 3, length: 0))
+                recorder.ranges = []
+                let point = NSPoint(x: x, y: line.midY)
+                try click(harness, at: point, dragTo: jitter ? NSPoint(x: x + 1, y: line.midY + 1) : nil)
+                if let wide = recorder.ranges.first(where: { $0.length > 0 }) {
+                    failures.append("\(place): selected \(wide) during the click")
+                }
+                if editor.selectedRange() != NSRange(location: empty, length: 0) {
+                    failures.append("\(place): caret at \(editor.selectedRange()), expected \(empty)")
+                }
+            }
+        }
+        XCTAssertEqual(failures, [], "clicks on an empty line")
+
+        // A real drag from the empty line still selects.
+        editor.setSelectedRange(NSRange(location: 3, length: 0))
+        let (third, thirdLine) = geometry(editor, at: empty + 1 + 5)
+        try click(
+            harness, at: NSPoint(x: line.midX, y: line.midY), dragTo: NSPoint(x: third.minX + 1, y: thirdLine.midY))
+        XCTAssertEqual(editor.selectedRange(), NSRange(location: empty, length: 6), "drag from an empty line")
+    }
+
     /// The app's hierarchy: the tab stack hosted in SwiftUI, in a window wide enough that the text
     /// column is centred in a wide gutter. Clicks go through the window's own hit testing, which the
     /// tests above bypass; the text view leaves its container inset to the clip view, so gutter
@@ -314,4 +359,15 @@ private final class ClickTestWindow: NSWindow {
 }
 private final class FocusableView: NSView {
     override var acceptsFirstResponder: Bool { true }
+}
+/// Every selection the text view takes, including the ones its tracking loop sets while the button is down.
+private final class SelectionRecorder: NSObject, NSTextViewDelegate {
+    var ranges: [NSRange] = []
+    func textView(
+        _ textView: NSTextView, willChangeSelectionFromCharacterRanges old: [NSValue],
+        toCharacterRanges new: [NSValue]
+    ) -> [NSValue] {
+        ranges += new.map(\.rangeValue)
+        return new
+    }
 }
