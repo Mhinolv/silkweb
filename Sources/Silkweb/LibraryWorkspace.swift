@@ -30,6 +30,8 @@ final class LibraryWorkspace {
         /// #246: body evaluations per view, and each Outline row the capsule showed, for tests that type.
         @ObservationIgnored var bodyCounts: [String: Int] = [:]
         @ObservationIgnored var outlineCurrentLog: [Int?] = []
+        /// #262: document list reloads and row excerpts blanked by a reload, for tests that save.
+        @ObservationIgnored var listEventCounts: [String: Int] = [:]
     #endif
 
     init(defaults: UserDefaults = AppDefaults.store, columnAutosaveName: String? = AppDefaults.columnAutosaveName) {

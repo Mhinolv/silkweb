@@ -80,7 +80,10 @@ struct DocumentTable: NSViewRepresentable {
                 || zip(self.documents, documents).contains {
                     $0.id != $1.id || $0.relativePath != $1.relativePath
                 }
-            let reload = structureChanged || includesSubfolders != workspace.includesSubfolders
+            let scopeChanged = includesSubfolders != workspace.includesSubfolders
+            // #262: a save under Date Modified moves one row; move it in place rather than reload every cell.
+            let move = structureChanged && !scopeChanged ? Self.singleMove(from: self.documents, to: documents) : nil
+            let reload = (structureChanged && move == nil) || scopeChanged
             // A visible selection stays in view when sorting or filtering reorders the rows.
             let anchor =
                 reload
@@ -93,7 +96,21 @@ struct DocumentTable: NSViewRepresentable {
             includesSubfolders = workspace.includesSubfolders
             locationScope = Self.locationScope(workspace)
             if table.rowHeight != DocumentRow.height { table.rowHeight = DocumentRow.height }
-            if reload { table.reloadData() }
+            if reload {
+                #if DEBUG
+                    workspace.listEventCounts["reloadData", default: 0] += 1
+                #endif
+                table.reloadData()
+            } else if let move {
+                // The selection moves with the row, and nothing scrolls: the user is typing.
+                NSAnimationContext.runAnimationGroup { context in
+                    if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                        context.duration = 0
+                        context.allowsImplicitAnimation = false
+                    }
+                    table.moveRow(at: move.from, to: move.to)
+                }
+            }
             // Refresh realized cells only; summaries still load asynchronously in DocumentRow.
             let visible = table.rows(in: table.visibleRect)
             let first = min(visible.location, documents.count)
@@ -135,6 +152,26 @@ struct DocumentTable: NSViewRepresentable {
                 updating = wasUpdating
             }
             return selected
+        }
+
+        /// The one row move that turns `old` into `new`, or nil when they differ in any other way (#262).
+        static func singleMove(from old: [LibraryDocument], to new: [LibraryDocument]) -> (from: Int, to: Int)? {
+            func same(_ a: LibraryDocument, _ b: LibraryDocument) -> Bool {
+                a.id == b.id && a.relativePath == b.relativePath
+            }
+            guard old.count == new.count,
+                let first = old.indices.first(where: { !same(old[$0], new[$0]) }),
+                let last = old.indices.last(where: { !same(old[$0], new[$0]) }), first < last
+            else { return nil }
+            // Moved up: the last differing row now leads the range; the rows before it shift down by one.
+            if same(old[last], new[first]), (first..<last).allSatisfy({ same(old[$0], new[$0 + 1]) }) {
+                return (last, first)
+            }
+            // Moved down: the first differing row now ends the range; the rows after it shift up by one.
+            if same(old[first], new[last]), (first + 1...last).allSatisfy({ same(old[$0], new[$0 - 1]) }) {
+                return (first, last)
+            }
+            return nil
         }
 
         /// Nil while no library is loaded: a row can't load its excerpt without the library's root.
