@@ -198,7 +198,8 @@ final class AgentMCPTests: XCTestCase {
             tools.compactMap { $0["name"] as? String },
             [
                 "memory_capabilities", "memory_search", "memory_read", "memory_create", "memory_create_folder",
-                "memory_update", "memory_activity", "grant_request",
+                "memory_update", "memory_propose_change", "memory_propose_organization", "memory_activity",
+                "grant_request",
             ])
         let expected: [String: (title: String, readOnly: Bool)] = [
             "memory_capabilities": ("Silkweb: What This Grant Allows", true),
@@ -207,6 +208,9 @@ final class AgentMCPTests: XCTestCase {
             "memory_create": ("Silkweb: Create Document", false),
             "memory_create_folder": ("Silkweb: Create Folder", false),
             "memory_update": ("Silkweb: Update Document", false),
+            // #140: a proposal changes no Document, but it is a saved write under `.silkweb/`.
+            "memory_propose_change": ("Silkweb: Propose an Edit", false),
+            "memory_propose_organization": ("Silkweb: Propose a Move, Rename or Merge", false),
             "memory_activity": ("Silkweb: Recent Agent Activity", true),
             // #203: asking never changes a grant or the Library.
             "grant_request": ("Silkweb: Request Access", true),

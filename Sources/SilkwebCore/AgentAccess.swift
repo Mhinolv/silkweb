@@ -7,6 +7,8 @@ public enum AgentOperation: String, CaseIterable, Sendable {
     case createFolder = "create-folder"
     /// #204: only Read, Create and Update grants on a qualified filesystem.
     case update
+    /// #140: Read, Create and Propose (or Update) grants on a qualified filesystem. Writes only under `.silkweb/`.
+    case propose
 
     /// Only Read and Create (or Read, Create and Update) grants on a qualified filesystem may run these.
     public var creates: Bool { self == .create || self == .createFolder }
@@ -139,6 +141,23 @@ public struct AgentAccessError: Error, Equatable, Sendable {
             code: "revision_changed", title: "Document Changed",
             message: "The document changed since you read it. Nothing was changed. Read it again and retry "
                 + "with its new revision.", currentRevision: current)
+    }
+
+    /// #140: the grant doesn't include proposals.
+    public static let proposeNotAllowed = Self(
+        code: "propose_not_allowed", title: noAccess,
+        message: "This grant can’t propose changes. Ask the owner to switch it to Read, Create and Propose.")
+
+    /// Same code as a grant without proposals: proposing is off because the Library isn't on a qualified disk.
+    public static let proposeNotQualified = Self(
+        code: "propose_not_allowed", title: noAccess,
+        message: "This Library isn’t on a local disk, so agents can only read it.")
+
+    /// #140: the owner hasn't reviewed enough of the proposals already waiting in this Library.
+    public static func tooManyProposals(_ limit: Int) -> Self {
+        Self(
+            code: "too_many_proposals", title: "Too Many Proposals",
+            message: "There are already \(limit) proposals waiting in this Library. Ask the owner to review them.")
     }
 
     /// #204: Silkweb has unsaved changes for this document. The agent retries later.
@@ -434,6 +453,10 @@ public final class AgentSession: @unchecked Sendable {
         if operation == .update {
             guard grant.access.allowsUpdate else { throw AgentAccessError.updateNotAllowed }
             guard context.filesystem == .qualified else { throw AgentAccessError.updateNotQualified }
+        }
+        if operation == .propose {
+            guard grant.access.allowsPropose else { throw AgentAccessError.proposeNotAllowed }
+            guard context.filesystem == .qualified else { throw AgentAccessError.proposeNotQualified }
         }
         var normalized: String?
         if let path {

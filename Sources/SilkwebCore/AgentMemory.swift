@@ -44,7 +44,9 @@ public struct AgentGrant: Codable, Equatable, Sendable {
     public enum Access: String, Codable, Sendable {
         case read
         case readCreate = "read-create"
-        /// #204: also updates documents an agent created, inside the create folders.
+        /// #140: also proposes edits and organization changes for the owner to review, inside the read folders.
+        case readCreatePropose = "read-create-propose"
+        /// #204: also updates documents an agent created, inside the create folders. Proposes too (#140).
         case readCreateUpdate = "read-create-update"
 
         /// Owner-facing profile names.
@@ -52,19 +54,23 @@ public struct AgentGrant: Codable, Equatable, Sendable {
             switch self {
             case .read: return "Read Only"
             case .readCreate: return "Read and Create"
+            case .readCreatePropose: return "Read, Create and Propose"
             case .readCreateUpdate: return "Read, Create and Update"
             }
         }
 
         public var allowsCreate: Bool { self != .read }
         public var allowsUpdate: Bool { self == .readCreateUpdate }
+        /// #140: an update grant also proposes, since anything it can't update goes through a proposal.
+        public var allowsPropose: Bool { rank >= Self.readCreatePropose.rank }
 
         /// Profiles in order of how much they allow, so `grant init` can tell narrowing from widening.
         public var rank: Int {
             switch self {
             case .read: return 0
             case .readCreate: return 1
-            case .readCreateUpdate: return 2
+            case .readCreatePropose: return 2
+            case .readCreateUpdate: return 3
             }
         }
 
@@ -73,6 +79,7 @@ public struct AgentGrant: Codable, Equatable, Sendable {
             switch value {
             case "read", "read-only": self = .read
             case "read-create": self = .readCreate
+            case "read-create-propose": self = .readCreatePropose
             case "read-create-update": self = .readCreateUpdate
             default:
                 throw DecodingError.dataCorrupted(

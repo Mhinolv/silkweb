@@ -562,7 +562,10 @@ final class AgentUpdateTests: XCTestCase {
         XCTAssertEqual(capabilities["profile"] as? String, "Read, Create and Update")
         XCTAssertEqual(
             capabilities["operations"] as? [String],
-            ["capabilities", "list", "search", "read", "activity", "create", "create-folder", "update"])
+            [
+                "capabilities", "list", "search", "read", "activity", "create", "create-folder", "update",
+                "propose-change", "propose-organization",
+            ])
 
         // A stale revision: exit 65 and the current revision in the error.
         var stale = update
