@@ -5,7 +5,6 @@ import Foundation
 /// read folders; they never widen them.
 public struct AgentMemorySearchRequest: Equatable, Sendable {
     public static let defaultLimit = 10
-    public static let maxLimit = 50
 
     /// `default` is #134 exactly. `ranked` (#179, CLI `--ranked`) parses the query syntax (`ParsedSearchQuery`),
     /// ANDs its filters with these parameters and orders by BM25.
@@ -28,8 +27,10 @@ public struct AgentMemorySearchRequest: Equatable, Sendable {
     public var createdAfter: Date?
     /// Exclusive upper bound on the same date.
     public var createdBefore: Date?
-    /// 1…50, and never more than the grant's `max_results`.
+    /// 1 or more. The grant's `max_results` is the only cap (#282).
     public var limit: Int
+    /// #282: the `nextCursor` of the previous page. It belongs to the same query and filters; only `limit` may change.
+    public var cursor: String?
     /// #141: archived Documents (archive state, or inside `Memory/Projects/<Project>/Archive`) drop out unless set.
     public var includeArchived: Bool
     /// #141 owner decision: `progress` and `handoff` Documents older than this many days drop out, unless a project
@@ -44,9 +45,10 @@ public struct AgentMemorySearchRequest: Equatable, Sendable {
     public init(
         query: String = "", project: String? = nil, types: [String] = [], statuses: [String] = [],
         createdAfter: Date? = nil, createdBefore: Date? = nil, limit: Int = defaultLimit, mode: Mode = .default,
-        includeArchived: Bool = false, recentDays: Int = defaultRecentDays
+        includeArchived: Bool = false, recentDays: Int = defaultRecentDays, cursor: String? = nil
     ) {
         self.query = query
+        self.cursor = cursor
         self.mode = mode
         self.project = project
         self.types = types
@@ -62,6 +64,35 @@ public struct AgentMemorySearchRequest: Equatable, Sendable {
     func recentCutoff(now: Date) -> Date? {
         guard recentDays > 0, createdAfter == nil, createdBefore == nil else { return nil }
         return now.addingTimeInterval(-Double(recentDays) * 86_400)
+    }
+
+    /// #282: names the query and every filter, so a cursor can't continue a different search.
+    var filterKey: String {
+        let dates = ISO8601DateFormatter()
+        let parts = [
+            query, mode.rawValue, project ?? "\u{0}", types.sorted().joined(separator: ","),
+            statuses.map { $0.lowercased() }.sorted().joined(separator: ","),
+            createdAfter.map(dates.string(from:)) ?? "", createdBefore.map(dates.string(from:)) ?? "",
+            String(includeArchived), String(recentDays),
+        ]
+        return String(DocumentRevision(data: Data(parts.joined(separator: "\n").utf8)).digest.prefix(16))
+    }
+
+    /// Opaque to callers: the offset of the next page and the filters it belongs to.
+    func cursor(offset: Int) -> String { "s1." + String(offset) + "." + filterKey }
+
+    /// The offset a cursor names, or `nil` when it's malformed or belongs to other filters.
+    func offset(of cursor: String) -> Int? {
+        let parts = cursor.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[0] == "s1", let offset = Int(parts[1]), offset >= 0, parts[2] == filterKey
+        else { return nil }
+        return offset
+    }
+
+    /// #282: a one-word query, which search also compares with each `memory_id`.
+    var memoryID: String? {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty || text.contains(where: { $0.isWhitespace }) ? nil : text
     }
 
     /// `2026-10-07` (midnight UTC) or a full ISO 8601 timestamp, with or without fractional seconds.
@@ -199,6 +230,8 @@ public struct AgentMemorySearchResponse: Equatable, Sendable {
     public let results: [AgentMemorySearchResult]
     /// Matching in-scope documents before `limit`.
     public let total: Int
+    /// #282: pass as `cursor` for the next page; `nil` on the last page.
+    public var nextCursor: String? = nil
     public let index: AgentMemoryFreshness
     /// Set only when there are no results, and honest about an unfinished index.
     public let message: String?
@@ -212,12 +245,18 @@ public struct AgentMemoryReadRequest: Equatable, Sendable {
     public var path: String
     /// The app index's native UUID (#135, `--id`). When set, it names the document instead of `path`.
     public var documentID: UUID?
+    /// #282 (`--memory-id`): the envelope `memory_id`. When set, it names the document instead of `path`.
+    public var memoryID: String?
     public var cursor: String?
     public var expectedRevision: String?
 
-    public init(path: String, documentID: UUID? = nil, cursor: String? = nil, expectedRevision: String? = nil) {
+    public init(
+        path: String, documentID: UUID? = nil, memoryID: String? = nil, cursor: String? = nil,
+        expectedRevision: String? = nil
+    ) {
         self.path = path
         self.documentID = documentID
+        self.memoryID = memoryID
         self.cursor = cursor
         self.expectedRevision = expectedRevision
     }
@@ -249,6 +288,16 @@ extension AgentAccessError {
     public static func invalidArgument(_ name: String) -> Self {
         Self(code: "invalid_argument", title: "Invalid Request", message: "The option “\(name)” isn’t valid.")
     }
+
+    /// #282: a `mem_…` value in `--id` or `documentId`. Names the option that reads by memory ID.
+    public static func memoryIDGiven(_ name: String, use option: String) -> Self {
+        Self(
+            code: "invalid_argument", title: "Invalid Request",
+            message: "The option “\(name)” takes a documentId, not a memory ID. Use “\(option)” for a mem_… ID.")
+    }
+
+    /// #282: whether an `--id` or `documentId` value is a memory ID.
+    public static func isMemoryID(_ text: String) -> Bool { text.hasPrefix("mem_") }
 
     static let notText = Self(
         code: "unreadable", title: "Can’t Open Document", message: "That document isn’t UTF-8 text.")
@@ -422,6 +471,26 @@ public final class AgentMemoryService: @unchecked Sendable {
     public func read(_ request: AgentMemoryReadRequest) throws -> AgentMemoryReadResponse {
         lock.lock()
         defer { lock.unlock() }
+        if let memoryID = request.memoryID {
+            // #282: only in-scope records are matched, so an ID outside the read folders and an unknown one look the
+            // same. The refresh picks up documents this index hasn't read yet.
+            let context = try authorize(.read)
+            let index = loadedIndex(for: context)
+            _ = index.refresh(context, options: options)
+            index.save()
+            let reviews = reviews ?? index.lifecycleLookup(context.library)
+            guard let path = index.path(forMemoryID: memoryID, scope: context.scope) else {
+                throw AgentAccessError.outOfScope(context.scope.readRoots)
+            }
+            var resolved = request
+            resolved.path = path
+            let response = try index.read(resolved, context: context, reviews: reviews, now: options.now())
+            // The file changed after the refresh read it: its text no longer carries this ID.
+            guard response.document.memoryID == memoryID else {
+                throw AgentAccessError.outOfScope(context.scope.readRoots)
+            }
+            return response
+        }
         guard let documentID = request.documentID else {
             let context = try authorize(.read, path: request.path)
             let index = loadedIndex(for: context)
@@ -800,22 +869,41 @@ final class AgentMemoryIndex {
         let scope = context.scope
         let compare: String.CompareOptions = scope.caseSensitive ? [] : [.caseInsensitive]
         let same = { (a: String, b: String?) in b.map { a.compare($0, options: compare) == .orderedSame } ?? false }
-        if let project = request.project, !same(project, scope.project), !same(project, scope.agentFolder) {
-            throw AgentAccessError.outOfScope(scope.readRoots)
+        // Scope first: nothing outside the read folders is matched, ranked, counted or excerpted.
+        let candidates = scope.readable(records.values.filter { !$0.skipped }, path: \.path)
+        // `project` keeps documents whose envelope names it, and documents without an envelope in its Folders: the
+        // grant's project Folder, the agent folder (#206), or another project's Folder in the read folders (#282).
+        var projectFolders: [String] = []
+        if let project = request.project {
+            if same(project, scope.project) { projectFolders.append(AgentMemoryContract.projectRoot(scope.project)) }
+            if same(project, scope.agentFolder), let agentFolder = scope.agentFolder {
+                projectFolders.append(AgentMemoryContract.agentRoot(agentFolder))
+            }
+            let other = AgentMemoryContract.projectRoot(project)
+            if projectFolders.isEmpty, (try? LibraryMutations.validateName(project)) == project,
+                scope.readRoots.contains(where: {
+                    AgentScope.contains($0, other, caseSensitive: scope.caseSensitive)
+                        || AgentScope.contains(other, $0, caseSensitive: scope.caseSensitive)
+                })
+            {
+                projectFolders.append(other)
+            }
+            // A project that only in-scope envelopes name, such as one in an extra read folder, works too.
+            guard !projectFolders.isEmpty || candidates.contains(where: { same(project, $0.envelope?.project) })
+            else { throw AgentAccessError.outOfScope(scope.readRoots) }
         }
-        // #206: `project` may name the agent folder; each key keeps its own envelopes and its own Folder.
-        let wantsProject = request.project.map { same($0, scope.project) } ?? false
-        let wantsAgent = request.project.map { same($0, scope.agentFolder) } ?? false
         let types = Set(request.types)
         guard types.isSubset(of: MemoryEnvelope.types) else { throw AgentAccessError.invalidArgument("type") }
         guard (1...).contains(request.limit) else { throw AgentAccessError.invalidArgument("limit") }
         let statuses = Set(request.statuses.map { $0.lowercased() })
-        let limit = min(request.limit, AgentMemorySearchRequest.maxLimit, context.grant.limits.maxResults)
-
-        // Scope first: nothing outside the read folders is matched, ranked, counted or excerpted.
-        let candidates = scope.readable(records.values.filter { !$0.skipped }, path: \.path)
+        // #282: the grant's `max_results` is the only cap, the same number `capabilities` reports.
+        let limit = min(request.limit, context.grant.limits.maxResults)
+        let offset = try request.cursor.map { cursor -> Int in
+            guard let offset = request.offset(of: cursor) else { throw AgentAccessError.invalidArgument("cursor") }
+            return offset
+        }
+        let memoryID = request.memoryID
         let ids = documentIDs(context.library)
-        let projectRoot = AgentMemoryContract.projectRoot(scope.project)
         let lifecycle = Lifecycle(
             records: candidates, ids: ids, reviews: reviews, now: now, caseSensitive: scope.caseSensitive)
         let cutoff = request.recentCutoff(now: now)
@@ -861,13 +949,15 @@ final class AgentMemoryIndex {
             if !request.includeArchived, lifecycle.isArchived(record) { continue }
             if !types.isEmpty, !types.contains(envelope?.type ?? "") { continue }
             if !statuses.isEmpty, !statuses.contains(envelope?.status?.lowercased() ?? "\u{0}") { continue }
-            if request.project != nil {
+            if let project = request.project {
                 if let owner = envelope?.project {
-                    guard wantsProject && same(owner, scope.project) || wantsAgent && same(owner, scope.agentFolder)
-                    else { continue }
+                    guard same(owner, project) else { continue }
                 } else {
-                    let inProject = AgentScope.contains(projectRoot, record.path, caseSensitive: scope.caseSensitive)
-                    guard wantsProject && inProject || wantsAgent && scope.isAgentLevel(record.path) else { continue }
+                    guard
+                        projectFolders.contains(where: {
+                            AgentScope.contains($0, record.path, caseSensitive: scope.caseSensitive)
+                        })
+                    else { continue }
                 }
             }
             let fold =
@@ -892,9 +982,15 @@ final class AgentMemoryIndex {
                 filtered.append((record, fold.title, fold.body, date))
                 continue
             }
-            guard terms.allSatisfy({ fold.title.contains($0) || Self.contains(fold.body, $0) }) else { continue }
+            // #282: the document a full `memory_id` names comes first, also when its text doesn't contain the ID.
+            let named = memoryID != nil && envelope?.memoryID == memoryID
+            guard named || terms.allSatisfy({ fold.title.contains($0) || Self.contains(fold.body, $0) }) else {
+                continue
+            }
             let tier: Int
-            if text.isEmpty || fold.title == text {
+            if named {
+                tier = -1
+            } else if text.isEmpty || fold.title == text {
                 tier = 0
             } else if fold.title.hasPrefix(text) {
                 tier = 1
@@ -914,8 +1010,11 @@ final class AgentMemoryIndex {
             let scores = KnowledgeBM25.scores(
                 terms: query.rankingTerms, candidates: filtered.map(\.record.path), statistics: statistics)
             let text = query.foldedText
-            for entry in filtered where Self.matches(query, title: entry.title, body: entry.body) {
-                var ranked = hit(entry.record, tier: !query.hasText || entry.title == text ? 0 : 1, date: entry.date)
+            for entry in filtered {
+                let named = memoryID != nil && entry.record.envelope?.memoryID == memoryID
+                guard named || Self.matches(query, title: entry.title, body: entry.body) else { continue }
+                let tier = named ? -1 : !query.hasText || entry.title == text ? 0 : 1
+                var ranked = hit(entry.record, tier: tier, date: entry.date)
                 ranked.score = scores[entry.record.path] ?? 0
                 ranked.title = query.matchesTitle(entry.title)
                 hits.append(ranked)
@@ -958,7 +1057,8 @@ final class AgentMemoryIndex {
             let recent = Set(hits.filter { $0.isLog && $0.date >= cutoff }.map(key))
             var older: [String: Int] = [:]
             hits = hits.filter { hit in
-                guard hit.isLog, hit.date < cutoff else { return true }
+                // A document named by its memory ID (tier -1) always stays.
+                guard hit.isLog, hit.date < cutoff, hit.tier >= 0 else { return true }
                 let project = key(hit)
                 guard !recent.contains(project) else { return false }
                 older[project, default: 0] += 1
@@ -966,7 +1066,9 @@ final class AgentMemoryIndex {
             }
         }
         let query = ranking?.query
-        let results = hits.prefix(limit).map { hit in
+        let start = min(offset ?? 0, hits.count)
+        let end = min(start + limit, hits.count)
+        let results = hits[start..<end].map { hit in
             AgentMemorySearchResult(
                 document: info(hit.record, documentID: hit.documentID, status: hit.status),
                 // Ranked: a heading counts as body.
@@ -982,8 +1084,9 @@ final class AgentMemoryIndex {
                 : "No matches yet. The index isn’t finished, so this doesn’t mean no memory exists."
         }
         return AgentMemorySearchResponse(
-            results: results, total: hits.count, index: freshness, message: message,
-            mode: ranking == nil ? .default : .ranked, diagnostics: lifecycle.diagnostics())
+            results: results, total: hits.count, nextCursor: end < hits.count ? request.cursor(offset: end) : nil,
+            index: freshness, message: message, mode: ranking == nil ? .default : .ranked,
+            diagnostics: lifecycle.diagnostics())
     }
 
     /// Ranked mode: words anywhere in the folded title or body bytes; a phrase's words adjacent.
@@ -1177,6 +1280,12 @@ final class AgentMemoryIndex {
     /// The Library-relative path the app index records for a native document ID.
     func path(forDocumentID id: UUID, library: URL) -> String? {
         documentIDs(library).first { $0.value == id }?.key
+    }
+
+    /// #282: the in-scope document whose envelope carries `memoryID`. A duplicate ID resolves to the first path.
+    func path(forMemoryID memoryID: String, scope: AgentScope) -> String? {
+        scope.readable(records.values.filter { !$0.skipped && $0.envelope?.memoryID == memoryID }, path: \.path)
+            .map(\.path).min()
     }
 
     func read(

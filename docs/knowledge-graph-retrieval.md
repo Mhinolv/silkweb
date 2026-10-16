@@ -216,7 +216,8 @@ The default `memory_search` request, with no new parameter, keeps every #134 rul
 - Every word must appear in the title or the body after the envelope, ignoring case and diacritics.
 - Same filters, scope rule, limit, ranking tiers and tie-breaks, result fields and field order,
   `total` (matching in-scope Documents before `limit`), freshness and `message` strings.
-- The `memory_id`, envelope keys and links aren’t searchable text in this mode.
+- Envelope keys and links aren’t searchable text in this mode. #282: a one-word query that is a full
+  `memory_id` also matches that Document and puts it first (see `agent-memory.md` › Search request).
 
 `RetrievalBaselineTests` freezes this: the ranked paths and totals of all 200 golden queries are
 compared with `docs/knowledge-graph-eval/baseline-134.json`, and any change fails the suite.
@@ -331,7 +332,7 @@ Raw results: `docs/knowledge-graph-eval/baseline-134.json`.
 
 | Category | Queries | Recall@5 | Recall@10 | Recall@20 | MRR@10 | Evidence complete | No results | Injection first | p50 ms | p95 ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `exact` | 18 | 0.889 | 0.889 | 0.889 | 0.833 | 89% | 2 | 0 | 2.35 | 2.85 |
+| `exact` | 18 | 1.000 | 1.000 | 1.000 | 0.944 | 100% | 0 | 0 | 2.35 | 2.85 |
 | `paraphrase` | 21 | 0.048 | 0.048 | 0.048 | 0.048 | 5% | 20 | 0 | 2.19 | 2.27 |
 | `multi-hop` | 15 | 0.000 | 0.000 | 0.000 | 0.000 | 0% | 15 | 0 | 2.33 | 2.76 |
 | `supersession` | 15 | 0.400 | 0.400 | 0.400 | 0.433 | 33% | 7 | 2 | 2.28 | 2.78 |
@@ -339,7 +340,7 @@ Raw results: `docs/knowledge-graph-eval/baseline-134.json`.
 | `injection-neighbor` | 12 | 0.792 | 0.792 | 0.792 | 0.792 | 75% | 0 | 3 | 2.31 | 2.87 |
 | `scope-leak` | 15 | 1.000 | 1.000 | 1.000 | 1.000 | 100% | 13 | 0 | 2.24 | 2.70 |
 | `unanswerable` | 12 | — | — | — | — | — | 12 | 0 | 2.16 | 2.34 |
-| **Overall** | 120 | 0.479 | 0.479 | 0.479 | 0.474 | 46% | 70 | 5 | 2.26 | 2.68 |
+| **Overall** | 120 | 0.500 | 0.500 | 0.500 | 0.495 | 48% | 68 | 5 | 2.26 | 2.68 |
 
 Scope: 0 leaks / 15 probes (all 120 queries checked).
 
@@ -347,7 +348,7 @@ Scope: 0 leaks / 15 probes (all 120 queries checked).
 
 | Category | Queries | Recall@5 | Recall@10 | Recall@20 | MRR@10 | Evidence complete | No results | Injection first | p50 ms | p95 ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `exact` | 12 | 0.917 | 0.917 | 0.917 | 0.917 | 92% | 1 | 0 | 2.35 | 2.82 |
+| `exact` | 12 | 1.000 | 1.000 | 1.000 | 1.000 | 100% | 0 | 0 | 2.35 | 2.82 |
 | `paraphrase` | 14 | 0.000 | 0.000 | 0.000 | 0.000 | 0% | 14 | 0 | 2.27 | 2.36 |
 | `multi-hop` | 10 | 0.033 | 0.033 | 0.033 | 0.100 | 0% | 9 | 0 | 2.17 | 2.37 |
 | `supersession` | 10 | 0.000 | 0.000 | 0.000 | 0.000 | 0% | 9 | 0 | 2.24 | 2.54 |
@@ -355,7 +356,7 @@ Scope: 0 leaks / 15 probes (all 120 queries checked).
 | `injection-neighbor` | 8 | 0.500 | 0.500 | 0.500 | 0.438 | 50% | 0 | 4 | 2.31 | 2.74 |
 | `scope-leak` | 10 | 1.000 | 1.000 | 1.000 | 1.000 | 100% | 7 | 0 | 2.26 | 2.56 |
 | `unanswerable` | 8 | — | — | — | — | — | 8 | 0 | 2.33 | 2.52 |
-| **Overall** | 80 | 0.359 | 0.359 | 0.359 | 0.362 | 35% | 51 | 4 | 2.27 | 2.62 |
+| **Overall** | 80 | 0.374 | 0.374 | 0.374 | 0.377 | 37% | 50 | 4 | 2.27 | 2.62 |
 
 Scope: 0 leaks / 10 probes (all 80 queries checked).
 
@@ -365,11 +366,13 @@ Scope: 0 leaks / 10 probes (all 80 queries checked).
 **Observations**
 
 - **All-words matching.** Recall@5, @10 and @20 are equal: a query either matches a few Documents or
-  none. 121 of 200 queries return nothing, which is right for all 20 `unanswerable` queries but
+  none. 118 of 200 queries return nothing, which is right for all 20 `unanswerable` queries but
   wrong for nearly every `paraphrase` and `multi-hop` query. No single Document holds every word of
   a question whose evidence spans linked Documents.
-- **Identifiers.** `memory_id` lookups (`hb_gate`, `hb_cache_v2`, `hb_pdf_v1`) find nothing because
-  the envelope isn’t searchable text.
+- **Identifiers.** In the 2026-10-08 run, `memory_id` lookups (`hb_gate`, `hb_cache_v2`, `hb_pdf_v1`) found
+  nothing because the envelope isn’t searchable text. #282 matches a full `memory_id` query, so each one now
+  returns its Document first. #282 updated only these 3 queries and the `exact` and **Overall** rows. Latency
+  figures are still from the 2026-10-08 run.
 - **Supersession.** Natural-language lifecycle questions mostly return nothing. Where they do match,
   an unaccepted claim (“Last writer wins for conflicts”) or an injection Document can rank first.
 - **Malformed metadata.** Documents with `envelope_malformed` or `envelope_schema_newer` match by

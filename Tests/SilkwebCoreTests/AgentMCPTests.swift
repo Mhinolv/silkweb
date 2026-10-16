@@ -398,6 +398,47 @@ final class AgentMCPTests: XCTestCase {
         XCTAssertEqual(stderr, "", "nothing to report")
     }
 
+    /// #282: `memoryId` reads, a memory ID in `documentId`, the grant's `max_results` and search `cursor`.
+    func testMemoryIDReadAndSearchPagingOverMCP() throws {
+        _ = try initialize()
+        var memoryID = ""
+        for index in 0..<12 {
+            let created = try structured(
+                call(
+                    index + 2, "memory_create",
+                    ["folder": "memories", "title": "Note \(index)", "body": "Quartz note \(index).\n"]))
+            let path = try XCTUnwrap(created["path"] as? String)
+            if index == 0 {
+                memoryID = try XCTUnwrap(try structured(call(20, "memory_read", ["path": path]))["memoryId"] as? String)
+            }
+        }
+        let read = try call(21, "memory_read", ["memoryId": memoryID])
+        XCTAssertEqual(read["isError"] as? Bool, false, "\(read)")
+        XCTAssertEqual(try structured(read)["path"] as? String, project + "/Memories/Note 0.md")
+
+        let wrong = try refusal(call(22, "memory_read", ["documentId": memoryID]))
+        XCTAssertEqual(wrong["code"] as? String, "invalid_argument")
+        XCTAssertTrue((wrong["message"] as? String ?? "").contains("memoryId"), "\(wrong)")
+        let outside = try refusal(call(23, "memory_read", ["memoryId": "mem_00000000000000000000000000"]))
+        XCTAssertEqual(outside["code"] as? String, "out_of_scope")
+
+        let found = try structured(call(24, "memory_search", ["query": memoryID]))
+        XCTAssertEqual((found["results"] as? [[String: Any]])?.first?["memoryId"] as? String, memoryID)
+
+        let wide = try structured(call(25, "memory_search", ["query": "quartz", "limit": 99]))
+        XCTAssertEqual((wide["results"] as? [Any])?.count, 12, "the grant’s max_results is the only cap")
+        let first = try call(26, "memory_search", ["query": "quartz", "limit": 5])
+        let summary = try text(first)
+        XCTAssertTrue(summary.contains("nextCursor"), summary)
+        let cursor = try XCTUnwrap(try structured(first)["nextCursor"] as? String)
+        let second = try structured(call(27, "memory_search", ["query": "quartz", "limit": 10, "cursor": cursor]))
+        XCTAssertEqual((second["results"] as? [Any])?.count, 7)
+        XCTAssertTrue(second["nextCursor"] is NSNull)
+        let mismatch = try refusal(call(28, "memory_search", ["query": "note", "cursor": cursor]))
+        XCTAssertEqual(mismatch["code"] as? String, "invalid_argument")
+        XCTAssertTrue((mismatch["message"] as? String ?? "").contains("“cursor”"), "\(mismatch)")
+    }
+
     func testGoldenToolResultFrames() throws {
         try send(
             [
@@ -604,8 +645,8 @@ final class AgentMCPTests: XCTestCase {
         }
         XCTAssertEqual(try fault(1, "write_file", ["path": "x"]), "Unknown tool.")
         XCTAssertEqual(
-            try fault(2, "memory_search", ["limit": 99]),
-            "Invalid arguments for memory_search: “limit” must be at most 50.")
+            try fault(2, "memory_read", ["documentId": "a", "memoryId": "b"]),
+            "Invalid arguments for memory_read: give one of path, documentId or memoryId.")
         XCTAssertEqual(
             try fault(3, "memory_search", ["limit": 0]),
             "Invalid arguments for memory_search: “limit” must be at least 1.")
@@ -620,9 +661,10 @@ final class AgentMCPTests: XCTestCase {
             "Invalid arguments for memory_search: “type” must be a list.")
         XCTAssertEqual(
             try fault(7, "memory_read", ["path": "a.md", "documentId": "b"]),
-            "Invalid arguments for memory_read: give path or documentId, not both.")
+            "Invalid arguments for memory_read: give one of path, documentId or memoryId.")
         XCTAssertEqual(
-            try fault(8, "memory_read", [:]), "Invalid arguments for memory_read: give path or documentId, not both.")
+            try fault(8, "memory_read", [:]),
+            "Invalid arguments for memory_read: give one of path, documentId or memoryId.")
         XCTAssertEqual(
             try fault(9, "memory_create", ["title": "T", "body": "B"]),
             "Invalid arguments for memory_create: give folder or type.")

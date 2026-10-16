@@ -157,6 +157,10 @@ final class AgentMemorySearchTests: XCTestCase {
             AgentMemorySearchRequest(createdBefore: AgentMemorySearchRequest.date("2026-09-02"), limit: 50))
         XCTAssertEqual(paths(old), ["Notes.md"])
 
+        // Another project is refused with the grant's scope, never searched.
+        assertRefused(try search.search(AgentMemorySearchRequest(project: "Other")), code: "out_of_scope")
+        assertRefused(try search.search(AgentMemorySearchRequest(project: "Silkweb2")), code: "out_of_scope")
+
         // The grant's own project keeps envelope documents for it and plain documents in its Folder.
         try writeGrants(extra: ["Reference"])
         let wide = try search.search(AgentMemorySearchRequest(query: "flock", limit: 50))
@@ -164,19 +168,18 @@ final class AgentMemorySearchTests: XCTestCase {
         let scoped = try search.search(AgentMemorySearchRequest(query: "flock", project: "Silkweb", limit: 50))
         XCTAssertEqual(scoped.total, 5)
         XCTAssertFalse(paths(scoped).contains("Foreign.md"))
-
-        // Another project is refused with the grant's scope, never searched.
-        assertRefused(try search.search(AgentMemorySearchRequest(project: "Other")), code: "out_of_scope")
+        // #282: a project an in-scope envelope names works; its Folder is still outside the grant.
+        XCTAssertEqual(paths(try search.search(AgentMemorySearchRequest(project: "Other"))), ["Foreign.md"])
         assertRefused(try search.search(AgentMemorySearchRequest(project: "Silkweb2")), code: "out_of_scope")
         assertRefused(try search.search(AgentMemorySearchRequest(types: ["note"])), code: "invalid_argument")
         assertRefused(try search.search(AgentMemorySearchRequest(limit: 0)), code: "invalid_argument")
     }
 
-    func testLimitIsCappedByFiftyAndTheGrantAndTotalsCountOnlyInScopeMatches() throws {
+    func testLimitIsCappedByTheGrantAndTotalsCountOnlyInScopeMatches() throws {
         for index in 0..<60 { try write("\(projectPath)/Memories/Note \(index).md", "# Note\n\nshared word\n") }
         for index in 0..<30 { try write("Notes/Private/Secret \(index).md", "shared word") }
         let response = try service().search(AgentMemorySearchRequest(query: "shared", limit: 500))
-        XCTAssertEqual(response.results.count, 50)
+        XCTAssertEqual(response.results.count, 60, "#282: no cap of 50 below the grant's max_results")
         XCTAssertEqual(response.total, 60)
         XCTAssertEqual(try service().search(AgentMemorySearchRequest(query: "shared")).results.count, 10)
         try writeGrants(limits: AgentGrantLimits(maxResults: 7))
@@ -275,6 +278,136 @@ final class AgentMemorySearchTests: XCTestCase {
         XCTAssertEqual(run(["memory", "search", "--limit", "ten"]).status, 64)
         XCTAssertEqual(run(["memory", "search", "--path", "x"]).status, 64)
         XCTAssertEqual(run(["memory", "read"]).status, 64, "read needs a path")
+    }
+
+    // MARK: Memory IDs, limits, paging and projects (#282)
+
+    private func error(_ output: AgentHelper.Output) throws -> [String: Any] {
+        let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any])
+        return try XCTUnwrap(envelope["error"] as? [String: Any], output.stdout)
+    }
+
+    func testReadByMemoryIDInsideTheGrantOnly() throws {
+        try writeFixture()
+        let read = run(["memory", "read", "--memory-id", "mem_a"])
+        XCTAssertEqual(read.status, 0, read.stdout)
+        let json = try result(read)
+        XCTAssertEqual(json["path"] as? String, "\(projectPath)/Memories/Gate decision.md")
+        XCTAssertEqual(json["memoryId"] as? String, "mem_a")
+        XCTAssertTrue((json["body"] as? String ?? "").contains("Commits go through the flock gate."))
+
+        // A memory ID in --id names the right option and reads nothing.
+        let wrong = run(["memory", "read", "--id", "mem_a"])
+        XCTAssertEqual(wrong.status, 64)
+        XCTAssertEqual(try error(wrong)["code"] as? String, "invalid_argument")
+        XCTAssertTrue((try error(wrong)["message"] as? String ?? "").contains("--memory-id"), wrong.stdout)
+        XCTAssertFalse(wrong.stdout.contains("Commits"))
+
+        // Outside the read folders, or unknown: the usual scope error, with no title, path or text.
+        for id in ["mem_x", "mem_f", "mem_missing"] {
+            let refused = run(["memory", "read", "--memory-id", id])
+            XCTAssertEqual(refused.status, 77, id)
+            XCTAssertEqual(try error(refused)["code"] as? String, "out_of_scope", id)
+            for leak in ["secret", "Leak", "Foreign", "elsewhere"] {
+                XCTAssertFalse(refused.stdout.contains(leak) || refused.stderr.contains(leak), id)
+            }
+        }
+        try writeGrants(extra: ["Reference"])
+        XCTAssertEqual(
+            try result(run(["memory", "read", "--memory-id", "mem_f"]))["path"] as? String, "Reference/Foreign.md")
+
+        XCTAssertEqual(run(["memory", "read", "\(projectPath)/Notes.md", "--memory-id", "mem_a"]).status, 64)
+        XCTAssertEqual(run(["memory", "read", "--id", UUID().uuidString, "--memory-id", "mem_a"]).status, 64)
+        XCTAssertEqual(try error(run(["memory", "read", "--memory-id", "a b"]))["code"] as? String, "invalid_argument")
+    }
+
+    func testSearchOnAFullMemoryIDReturnsThatDocumentFirst() throws {
+        try writeFixture()
+        try write("\(projectPath)/Memories/Pointer.md", "# Pointer\n\nSee mem_c for the spike.\n")
+        for mode in ["default", "ranked"] {
+            let output = run(["memory", "search", "mem_c"] + (mode == "ranked" ? ["--ranked"] : []))
+            let results = try XCTUnwrap(try result(output)["results"] as? [[String: Any]], output.stdout)
+            XCTAssertEqual(results.first?["memoryId"] as? String, "mem_c", mode)
+            XCTAssertTrue(results.contains { $0["title"] as? String == "Pointer" }, "\(mode): text matches stay")
+        }
+        XCTAssertEqual(try result(run(["memory", "search", "mem_x"]))["total"] as? Int, 0, "out of scope")
+        let service = service()
+        XCTAssertEqual(
+            try service.search(AgentMemorySearchRequest(query: " mem_c ")).results.first?.document.title,
+            "2026-10-05 0900 — Spike")
+    }
+
+    func testSearchLimitIsTheGrantMaxResultsAndPagesWithACursor() throws {
+        for index in 0..<63 {
+            try write(
+                "\(projectPath)/Memories/Note \(index).md",
+                memory("mem_n\(index)", type: "memory", created: "2026-10-1\(index % 6)T09:00:00Z", body: "musicmap"))
+        }
+        let capabilities = try result(run(["memory", "capabilities"]))
+        let maxResults = try XCTUnwrap((capabilities["limits"] as? [String: Any])?["max_results"] as? Int)
+        XCTAssertEqual(maxResults, 200)
+        let all = try result(run(["memory", "search", "musicmap", "--limit", String(maxResults)]))
+        XCTAssertEqual((all["results"] as? [[String: Any]])?.count, 63, "--limit matches max_results, not 50")
+        XCTAssertTrue(all["nextCursor"] is NSNull)
+
+        // Pages of 25: every document once, in order, then a null cursor.
+        var seen: [String] = []
+        var cursor: String?
+        repeat {
+            let page = try result(
+                run(["memory", "search", "musicmap", "--limit", "25"] + (cursor.map { ["--cursor", $0] } ?? [])))
+            let rows = try XCTUnwrap(page["results"] as? [[String: Any]])
+            XCTAssertEqual(page["total"] as? Int, 63)
+            seen += rows.compactMap { $0["path"] as? String }
+            cursor = page["nextCursor"] as? String
+            XCTAssertTrue(cursor != nil || page["nextCursor"] is NSNull)
+        } while cursor != nil && seen.count < 200
+        XCTAssertEqual(seen, (all["results"] as? [[String: Any]])?.compactMap { $0["path"] as? String })
+
+        // A cursor belongs to its filters.
+        let first = try result(run(["memory", "search", "musicmap", "--limit", "25"]))
+        let next = try XCTUnwrap(first["nextCursor"] as? String)
+        for other in [["other"], ["musicmap", "--type", "decision"], ["musicmap", "--recent-days", "0"]] {
+            let refused = run(["memory", "search"] + other + ["--cursor", next])
+            XCTAssertEqual(try error(refused)["code"] as? String, "invalid_argument", "\(other)")
+        }
+        XCTAssertEqual(try error(run(["memory", "search", "--cursor", "junk"]))["code"] as? String, "invalid_argument")
+
+        try writeGrants(limits: AgentGrantLimits(maxResults: 7))
+        XCTAssertEqual(
+            (try result(run(["memory", "search", "musicmap", "--limit", "200"]))["results"] as? [Any])?.count, 7)
+    }
+
+    func testProjectFilterWorksForEachProjectAnUnfilteredSearchReturns() throws {
+        try writeFixture()
+        try write(
+            "Memory/Projects/MusicMap/Handoffs/Next.md",
+            memory("mem_m", type: "handoff", project: "MusicMap", body: "# Next\n\nflock the playlist\n"))
+        try write("Memory/Projects/MusicMap/Plain.md", "# Plain\n\nflock without an envelope\n")
+        try writeGrants(extra: ["Memory/Projects", "Reference"])
+
+        let all = try result(run(["memory", "search", "flock", "--limit", "200"]))
+        let rows = try XCTUnwrap(all["results"] as? [[String: Any]])
+        let projects = Set(rows.compactMap { $0["project"] as? String })
+        XCTAssertEqual(projects, ["Silkweb", "Silkweb2", "MusicMap", "Other"])
+        for project in projects {
+            let output = run(["memory", "search", "flock", "--project", project, "--limit", "200"])
+            XCTAssertEqual(output.status, 0, "\(project): \(output.stdout)")
+            let found = try XCTUnwrap(try result(output)["results"] as? [[String: Any]])
+            XCTAssertFalse(found.isEmpty, project)
+            XCTAssertTrue(
+                found.allSatisfy { ($0["project"] as? String).map { $0 == project } ?? true }, "\(project): \(found)")
+        }
+        let music = try XCTUnwrap(
+            try result(run(["memory", "search", "flock", "--project", "MusicMap"]))["results"] as? [[String: Any]])
+        XCTAssertEqual(Set(music.compactMap { $0["title"] as? String }), ["Next", "Plain"])
+
+        // A project with neither a Folder in the read folders nor a document there stays refused.
+        XCTAssertEqual(
+            try error(run(["memory", "search", "--project", "Nowhere/Else"]))["code"] as? String, "out_of_scope")
+        try writeGrants()
+        XCTAssertEqual(
+            try error(run(["memory", "search", "--project", "MusicMap"]))["code"] as? String, "out_of_scope")
     }
 
     // MARK: Ranking
