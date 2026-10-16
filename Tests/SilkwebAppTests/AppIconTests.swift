@@ -17,9 +17,15 @@ final class AppIconTests: XCTestCase {
     ]
 
     func testBundledPlistNamesCommittedIconWithAllTenRepresentations() throws {
-        // Bundle the already-built executable, so this also works after a clean test build.
-        try run("/bin/sh", arguments: ["scripts/bundle_app.sh"])
-        let contents = repository.appendingPathComponent("build/Silkweb.app/Contents")
+        // Bundle the already-built executable, so this also works after a clean test build. #276: into a private
+        // folder, so a suite or build at the same time never deletes the bundle this test reads, and vice versa.
+        let output = try privateOutput()
+        defer { try? FileManager.default.removeItem(at: output) }
+        let shared = sharedBundleStamp()
+        try run("/bin/sh", arguments: ["scripts/bundle_app.sh", "debug", output.path])
+        XCTAssertEqual(sharedBundleStamp(), shared, "bundling into a private folder must not touch build/")
+        let app = output.appendingPathComponent("Silkweb.app")
+        let contents = app.appendingPathComponent("Contents")
         let data = try Data(contentsOf: contents.appendingPathComponent("Info.plist"))
         let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
         let name = try XCTUnwrap(plist["CFBundleIconFile"] as? String)
@@ -29,7 +35,60 @@ final class AppIconTests: XCTestCase {
             try Data(contentsOf: icon), try Data(contentsOf: repository.appendingPathComponent("scripts/Silkweb.icns")))
         try assertRepresentations(icon)
         XCTAssertNotNil(NSImage(contentsOf: icon), "AppKit must load the application icon")
-        try run("/usr/bin/codesign", arguments: ["--verify", "--strict", "build/Silkweb.app"])
+        try run("/usr/bin/codesign", arguments: ["--verify", "--strict", app.path])
+        try run(
+            "/usr/bin/codesign",
+            arguments: ["--verify", "--strict", output.appendingPathComponent("helper/silkweb").path])
+    }
+
+    /// #276: two bundling runs at the same time, each into its own folder, both leave a complete, signed bundle.
+    func testConcurrentBundlingIntoPrivateFoldersKeepsBothBundles() throws {
+        let outputs = try [privateOutput(), privateOutput()]
+        defer { for output in outputs { try? FileManager.default.removeItem(at: output) } }
+        let shared = sharedBundleStamp()
+        let processes = try outputs.map { output in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["scripts/bundle_app.sh", "debug", output.path]
+            process.currentDirectoryURL = repository
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            return process
+        }
+        for process in processes { process.waitUntilExit() }
+        XCTAssertEqual(processes.map(\.terminationStatus), [0, 0])
+        XCTAssertEqual(sharedBundleStamp(), shared, "bundling into a private folder must not touch build/")
+        for output in outputs {
+            let app = output.appendingPathComponent("Silkweb.app")
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: app.appendingPathComponent("Contents/MacOS/Silkweb").path),
+                output.path)
+            try run("/usr/bin/codesign", arguments: ["--verify", "--strict", app.path])
+            try run(
+                "/usr/bin/codesign",
+                arguments: ["--verify", "--strict", output.appendingPathComponent("helper/silkweb").path])
+        }
+    }
+
+    /// A new, empty folder that only this test writes to.
+    private func privateOutput() throws -> URL {
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent("SilkwebBundle-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        return output
+    }
+
+    /// The identity of the shared `build/` bundle and helper (nil when absent), to prove that a test leaves them alone.
+    private func sharedBundleStamp() -> [String: String] {
+        var stamp: [String: String] = [:]
+        for path in ["build/Silkweb.app", "build/Silkweb.app/Contents/MacOS/Silkweb", "build/helper/silkweb"] {
+            let attributes = try? FileManager.default.attributesOfItem(
+                atPath: repository.appendingPathComponent(path).path)
+            let number = attributes?[.systemFileNumber].map { "\($0)" } ?? "none"
+            let date = (attributes?[.modificationDate] as? Date).map { "\($0.timeIntervalSince1970)" } ?? "none"
+            stamp[path] = number + "@" + date
+        }
+        return stamp
     }
 
     func testGeneratorProducesIdenticalPNGsInEverySizeAndAppearance() throws {

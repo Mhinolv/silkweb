@@ -369,6 +369,8 @@ final class PreviewWebView: WKWebView {
     /// The link under the latest right-click, reported by the preview's isolated-world script.
     var contextLink: ContextLink?
     var linkAction: (URL) -> PreviewNavigation.Action = { _ in .blocked }
+    /// #276: where Copy Path writes, as in #227; tests use a private pasteboard.
+    var pathPasteboard = NSPasteboard.general
 
     static let webKitLinkItems: Set<String> = [
         "WKMenuItemIdentifierOpenLink", "WKMenuItemIdentifierOpenLinkInNewWindow",
@@ -415,8 +417,8 @@ final class PreviewWebView: WKWebView {
     }
     @objc private func copyAttachmentPath(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(path, forType: .string)
+        pathPasteboard.clearContents()
+        pathPasteboard.setString(path, forType: .string)
     }
 }
 
