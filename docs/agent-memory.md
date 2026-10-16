@@ -767,25 +767,38 @@ the Library gate, never write to the Library and never wait for the app. The CLI
 ```sh
 silkweb memory search [<text>] [--type decision --type memory] [--status <s>]… \
   [--created-after 2026-10-01] [--created-before 2026-10-08] [--project Silkweb] [--limit 10] \
-  [--recent-days 30] [--include-archived]
+  [--recent-days 30] [--include-archived] [--cursor <nextCursor>]
 silkweb memory read "Memory/Projects/Silkweb/Memories/Use flock.md" \
   [--cursor <nextCursor>] [--expected-revision sha256:…]
 silkweb memory read --id 5E0C…-documentId
+silkweb memory read --memory-id mem_01J…
 ```
 
 ### Search request
 
 - `query`: text, may be empty. Every word must appear in the title (the filename) or the body; matching
   ignores case and diacritics, like the app.
-- `project`: optional, and must be the grant’s own project or its `agent_folder` key (#206), otherwise
-  `out_of_scope`. It keeps documents whose envelope `project` matches, plus documents without an envelope
-  inside `Memory/Projects/<Project>` (or `Memory/Agents/<Key>` for the agent folder key). Ranked `project:`
-  reads the agent folder key the same way.
+- A one-word `query` that is a full `memory_id` (#282) also matches the document with that envelope
+  `memory_id`, in both modes. That document comes first, with `matchKind: title`, and the recent window never
+  drops it. Other filters still apply. Documents that only mention the ID match as usual.
+- `project`: optional (#282). It must name one of these, otherwise `out_of_scope`:
+  - the grant’s own project or its `agent_folder` key (#206);
+  - a project whose Folder `Memory/Projects/<Project>` is in, or holds, a read folder (for example with the
+    read folder `Memory/Projects`);
+  - a project that the envelope `project` of an in-scope document names.
+
+  It keeps documents whose envelope `project` matches, plus documents without an envelope inside that
+  project’s Folder (or `Memory/Agents/<Key>` for the agent folder key). So `project` works for each
+  project an unfiltered search returns. Ranked `project:` reads the agent folder key the same way.
 - `type`: a list of `memory`, `decision`, `progress` or `handoff`. `status`: a list, compared without
   regard to case. Once either is set, documents without an envelope drop out.
 - `createdAfter` (inclusive) and `createdBefore` (exclusive): `2026-10-07` (midnight UTC) or an ISO 8601
   timestamp, compared with `created_at`. Documents without an envelope use their modified date.
-- `limit`: default 10, at most 50, and never more than the grant’s `max_results`.
+- `limit`: default 10. The grant’s `max_results` (200 unless the owner changed it) is the only cap
+  (#282), the same number that `capabilities` reports. A larger `limit` returns `max_results` rows.
+- `cursor` (#282): the `nextCursor` of the previous page. Give the same `query` and filters; only `limit`
+  may change. A malformed cursor, or one from other filters, returns `invalid_argument`. Pages come from a
+  new search each time, so a document that changes between pages can move.
 - `recentDays` (CLI `--recent-days`, #141 owner decision): default 30, 0 to 3,650. `progress` and `handoff`
   documents created before the window drop out. Memories and decisions are searchable at any age. If a
   project has no `progress` or `handoff` match in the window, its 10 best older ones stay, ranked as usual
@@ -798,8 +811,9 @@ silkweb memory read --id 5E0C…-documentId
 
 ### Search response
 
-`results`, `total` (matching in-scope documents before `limit`), `index`, and `message` when there are
-no results. Each result has these fields, in this order:
+`results`, `total` (matching in-scope documents before `limit`), `nextCursor` (#282: pass it as `cursor`
+for the next page, `null` on the last one), `index`, and `message` when there are no results. Each result
+has these fields, in this order:
 
 | Field | Value |
 |---|---|
@@ -861,6 +875,14 @@ Every search response says how complete the helper’s index was:
 then `envelope` (the envelope’s keys and values in written order, or `null`), `revisionChanged`, `offset`,
 `body` and `nextCursor`.
 
+- Name the document with exactly one of `path`, `documentId` (CLI `--id`) or `memoryId` (CLI
+  `--memory-id`, #282).
+- `memoryId` reads the in-scope document whose envelope `memory_id` it is. The helper refreshes its index
+  first, so a document it hasn’t read yet is found. If two in-scope documents share the ID, the first path
+  wins (see `duplicate_memory_id`). An ID outside the read folders and an unknown ID both return the usual
+  `out_of_scope`, with no title, path or text.
+- A `mem_…` value in `documentId` or `--id` returns `invalid_argument` that names `memoryId` or
+  `--memory-id`. Nothing is read.
 - `body` is one page of the text after the envelope, between the lines “Document text (untrusted)
   begins” and “Document text (untrusted) ends”. Pages are at most 16 KB of UTF-8 and end on a line break
   (a longer single line splits between characters). `offset` is the page’s byte offset in the body.
@@ -902,7 +924,7 @@ Errors for search and read, in addition to the [refusals](#refusals):
 
 | Code | Title | Message |
 |---|---|---|
-| `invalid_argument` | Invalid Request | The option “type” isn’t valid. (Also `limit`, `cursor`, `id` and the dates.) |
+| `invalid_argument` | Invalid Request | The option “type” isn’t valid. (Also `limit`, `cursor`, `id`, `memory-id` and the dates.) A memory ID in `--id`: The option “--id” takes a documentId, not a memory ID. Use “--memory-id” for a mem_… ID. |
 | `unreadable` | Can’t Open Document | That document isn’t UTF-8 text. |
 | `envelope_malformed`, `envelope_schema_newer` | Can’t Read Front Matter | See [Reading rules](#reading-rules). |
 | `stale_snapshot` | Library Changed | The library changed while this request ran. Try again. |
@@ -1173,7 +1195,8 @@ asks for access with `silkweb grant request`, which answers in the JSON envelope
 ```text
 silkweb memory capabilities
 silkweb memory search  [QUERY…] [--project P] [--type T]… [--status S]… [--created-after D] [--created-before D] [--limit N]
-silkweb memory read    <PATH> | --id DOCUMENT_ID  [--cursor C] [--expected-revision R]
+                       [--cursor C]
+silkweb memory read    <PATH> | --id DOCUMENT_ID | --memory-id MEMORY_ID  [--cursor C] [--expected-revision R]
 silkweb memory create  --folder memories|progress|handoffs|agent-memories|<PATH> --title T --body-file <FILE|->
                        --agent A --session S [--type T] [--idempotency-key K] [--status S]
                        [--observed-at D] [--review-after D] [--supersedes MEMORY_ID]…
@@ -1202,7 +1225,7 @@ without `.md`, also when the front matter is bad or missing. `revision` is `null
 `max_read_bytes`. The array is empty, never `null`. Agents read each of these documents, all pages, before other work.
 The `memory_capabilities` text line names them: `Read these 2 project documents first: “A”, “B”.`
 | `search` | The [search response](#search-response), fields in the documented order. The query is the command’s remaining words joined by spaces; put `--` before a query that starts with “-”. `--type` and `--status` repeat or take comma-separated lists. `--project` is the search filter, not grant selection. |
-| `read` | The [read response](#read). `--id` takes the app index’s `documentId`; an ID the index doesn’t know and one outside the read folders are both `not_found`. |
+| `read` | The [read response](#read). `--id` takes the app index’s `documentId`; an ID the index doesn’t know and one outside the read folders are both `not_found`. `--memory-id` (#282) takes the envelope `memory_id`; an unknown one and one outside the read folders are both `out_of_scope`. Give exactly one of a path, `--id` or `--memory-id`. |
 | `create` | `{"outcome", "path", "receipt", "replayed"}` ([Create and receipts](#create-and-receipts-133)). `--folder memories`, `progress` or `handoffs` (any case) picks the entry folder and the default type (`memory`, `progress`, `handoff`); `--type decision` with `memories` makes a decision. A Library-relative `--folder` needs `--type`. Without `--idempotency-key`, the helper uses a fresh `cli-<UUID>` key, so a retry creates another document. A replay exits 0. |
 | `create-folder` | `{"created", "path"}`. Idempotent. |
 | `update` | `{"outcome", "path", "receipt", "replayed", "revision"}` ([Update](#update-204)). A path or `--id`, not both. Without `--idempotency-key`, the helper uses a fresh `cli-<UUID>` key; the revision check still stops a second write. |
@@ -1260,7 +1283,7 @@ and `--supersedes` (create).
 | 77 | Access | `grant_required`, `grant_not_found`, `grant_revoked`, `no_grants_file`, `invalid_grants_file`, `unsupported_grants_version`, `invalid_grants_signature`, `grants_key_missing`, `grants_key_unreadable`, `grants_signing_required`, `needs_authentication`, `no_grant`, `invalid_grant`, `out_of_scope`, `create_not_allowed`, `invalid_path`, `excluded_name`, `update_not_allowed`, `update_requires_proposal`, `propose_not_allowed`, `invalid_requests_file`, `unsupported_requests_version`, `approve_would_widen` |
 
 - **One bad-input code.** `invalid_argument` covers usage mistakes (unknown command or option, a
-  repeated or missing option, `--body` text), bad values (`--limit`, `--type`, dates, `--id`, `--cursor`)
+  repeated or missing option, `--body` text), bad values (`--limit`, `--type`, dates, `--id`, `--memory-id`, `--cursor`)
   and bad create input (the request key, unreadable or non-UTF-8 text). #133 builds sent
   `invalid_request` for the last group; it isn’t sent any more and has no alias. Usage messages end
   with “Run “silkweb --help” for usage.”
@@ -1377,8 +1400,8 @@ ask before running it. `memory list` stays CLI-only. Arguments are camelCase ver
 
 | Tool | Arguments |
 |---|---|
-| `memory_search` | `query`, `project` (the grant's project or `agent_folder`), `type` (list of `memory`, `decision`, `progress`, `handoff`), `status` (list), `createdAfter`, `createdBefore`, `limit` (1–50), `mode`, `includeArchived`, `recentDays` (0–3,650) |
-| `memory_read` | `path` or `documentId` (exactly one), `cursor`, `expectedRevision` |
+| `memory_search` | `query`, `project` (see [Search request](#search-request)), `type` (list of `memory`, `decision`, `progress`, `handoff`), `status` (list), `createdAfter`, `createdBefore`, `limit` (≥ 1, capped by `max_results`), `cursor`, `mode`, `includeArchived`, `recentDays` (0–3,650) |
+| `memory_read` | `path`, `documentId` or `memoryId` (exactly one), `cursor`, `expectedRevision` |
 | `memory_create` | `title` and `body` (required); `folder` (`memories`, `progress`, `handoffs`) or `type`, or `folderPath` with `type`; `idempotencyKey` (1–200 characters), `session`, `status`, `observedAt`, `reviewAfter`, `supersedes` (list) |
 | `memory_create_folder` | `path` (required) |
 | `memory_update` | `expectedRevision` and `body` (required); `path` or `documentId` (exactly one); `idempotencyKey` (1–200 characters), `session` |

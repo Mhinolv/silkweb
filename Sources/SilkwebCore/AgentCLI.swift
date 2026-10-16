@@ -33,12 +33,15 @@ public enum AgentHelper {
           search [QUERY]                Search the read folders
               [--project P] [--type T]... [--status S]... [--created-after D]
               [--created-before D] [--limit N] [--ranked] [--include-archived]
-              [--recent-days N]
+              [--recent-days N] [--cursor C]
               Progress and handoffs older than 30 days are left out unless a
               project has none newer; --recent-days 0 turns this off
               --ranked orders by relevance and reads "phrases", tag:, type:,
               status:, project:, after: and before: in QUERY
-          read <PATH> | --id ID         Read one page of a document
+              --limit is at most the grant's max_results; pass nextCursor
+              as --cursor, with the same QUERY and filters, for the next page
+          read <PATH> | --id ID | --memory-id M
+                                        Read one page of a document
               [--cursor C] [--expected-revision R]
           create                        Create one document; never replaces anything
               --folder memories|progress|handoffs|agent-memories|<PATH> --title T --body-file <FILE|->
@@ -98,9 +101,11 @@ public enum AgentHelper {
         "list": Command(),
         "search": Command(
             arguments: 0...Int.max,
-            options: ["project", "type", "status", "created-after", "created-before", "limit", "recent-days"],
+            options: [
+                "project", "type", "status", "created-after", "created-before", "limit", "recent-days", "cursor",
+            ],
             repeatable: ["type", "status"]),
-        "read": Command(arguments: 0...1, options: ["id", "cursor", "expected-revision"]),
+        "read": Command(arguments: 0...1, options: ["id", "memory-id", "cursor", "expected-revision"]),
         "create": Command(
             options: [
                 "folder", "type", "title", "body-file", "idempotency-key", "status", "observed-at", "review-after",
@@ -286,9 +291,12 @@ public enum AgentHelper {
         for flag in ["ranked", "include-archived"] where invocation.flags.contains(flag) && name != "search" {
             throw usage("The option “--\(flag)” isn’t valid for “memory \(name)”.")
         }
-        if name == "read" || name == "update" || name == "propose-change",
-            arguments.isEmpty == (invocation.value("id") == nil)
-        {
+        if name == "read" {
+            let given = [!arguments.isEmpty, invocation.value("id") != nil, invocation.value("memory-id") != nil]
+            guard given.filter({ $0 }).count == 1 else {
+                throw usage("“memory read” needs one of a path, --id or --memory-id.")
+            }
+        } else if name == "update" || name == "propose-change", arguments.isEmpty == (invocation.value("id") == nil) {
             throw usage("“memory \(name)” needs a path or --id, not both.")
         }
         if name == "propose-organization" {
@@ -355,12 +363,15 @@ public enum AgentHelper {
                 return (try service.search(searchRequest(invocation, query: arguments)).json, nil)
             }
             let id = try invocation.value("id").map { text -> UUID in
+                if AgentAccessError.isMemoryID(text) {
+                    throw AgentAccessError.memoryIDGiven("--id", use: "--memory-id")
+                }
                 guard let id = UUID(uuidString: text) else { throw AgentAccessError.invalidArgument("id") }
                 return id
             }
             let request = AgentMemoryReadRequest(
-                path: nfc(arguments.first ?? ""), documentID: id, cursor: invocation.value("cursor"),
-                expectedRevision: invocation.value("expected-revision"))
+                path: nfc(arguments.first ?? ""), documentID: id, memoryID: try memoryID(invocation.value("memory-id")),
+                cursor: invocation.value("cursor"), expectedRevision: invocation.value("expected-revision"))
             return (try service.read(request).json, nil)
         case "create":
             return try create(session.authorize(.create), invocation: invocation, standardInput: standardInput)
@@ -642,6 +653,18 @@ public enum AgentHelper {
         return AgentJSON(sortingKeysOf: fields)
     }
 
+    /// #282: a `--memory-id` value, shared with `memory_read`'s `memoryId`. Any non-empty text without white space
+    /// or control characters, because `memory_id` has no fixed format.
+    static func memoryID(_ text: String?) throws -> String? {
+        guard let text else { return nil }
+        guard !text.isEmpty,
+            !text.unicodeScalars.contains(where: {
+                CharacterSet.whitespacesAndNewlines.contains($0) || CharacterSet.controlCharacters.contains($0)
+            })
+        else { throw AgentAccessError.invalidArgument("memory-id") }
+        return text
+    }
+
     /// `--type`/`--status` repeat or take comma-separated lists; dates are `2026-10-07` or ISO 8601
     /// timestamps. The query is the command's words, joined by spaces.
     static func searchRequest(_ invocation: Invocation, query: [String]) throws -> AgentMemorySearchRequest {
@@ -672,7 +695,8 @@ public enum AgentHelper {
             statuses: list("status"), createdAfter: try date("created-after"),
             createdBefore: try date("created-before"), limit: limit,
             mode: invocation.flags.contains("ranked") ? .ranked : .default,
-            includeArchived: invocation.flags.contains("include-archived"), recentDays: recentDays)
+            includeArchived: invocation.flags.contains("include-archived"), recentDays: recentDays,
+            cursor: value("cursor"))
     }
 }
 

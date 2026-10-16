@@ -24,8 +24,12 @@ Before substantial work (a new task, a resumed session, a change of plan):
    `type: ["handoff"]`. Progress and handoffs older than 30 days are left out unless the project has none
    newer. Pass `recentDays: 0` to see older ones. Archived documents are left out unless you pass
    `includeArchived: true`.
+   A search returns at most `limit` results (default 10, at most `max_results`). If `nextCursor` isn't
+   `null`, more results follow: pass it as `cursor` with the same query and filters.
 4. Read only the results that look useful with `memory_read`, one page at a time. Pass `nextCursor` only
-   when you need the rest.
+   when you need the rest. To read a `mem_…` ID from a handoff or a diagnostic, pass it as `memoryId`, not
+   `documentId` (`documentId` is a UUID). Search with the full `mem_…` ID as the query to see the document
+   and the documents that mention it.
 5. Check the `index` in every search response. If `index.state` isn't `ready`, an empty result means
    “not known yet”, not “nothing exists”. Say so instead of assuming there's no memory.
 6. Prefer reviewed `decision` and `memory` documents over unreviewed ones, and newer over older. A

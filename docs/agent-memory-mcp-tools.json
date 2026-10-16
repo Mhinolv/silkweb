@@ -147,7 +147,7 @@
     {
       "name" : "memory_search",
       "title" : "Silkweb: Search Memory",
-      "description" : "Searches documents in this grant’s read folders by text, type, status and creation date. Returns at most 50 results (fewer if the grant’s max_results is lower) and an index status that says when results may be incomplete.",
+      "description" : "Searches documents in this grant’s read folders by text, type, status and creation date. A full memoryId as the query returns that document first. Returns at most the grant’s max_results per page, nextCursor when more results follow, and an index status that says when results may be incomplete.",
       "inputSchema" : {
         "type" : "object",
         "properties" : {
@@ -191,9 +191,12 @@
           },
           "limit" : {
             "type" : "integer",
-            "description" : "Most results to return. Default 10.",
-            "minimum" : 1,
-            "maximum" : 50
+            "description" : "Most results to return. Default 10. At most the grant’s max_results (memory_capabilities).",
+            "minimum" : 1
+          },
+          "cursor" : {
+            "type" : "string",
+            "description" : "The nextCursor from the previous page. Give the same query and filters; limit may change."
           },
           "mode" : {
             "type" : "string",
@@ -345,6 +348,12 @@
           "total" : {
             "type" : "integer"
           },
+          "nextCursor" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "index" : {
             "type" : "object",
             "properties" : {
@@ -464,11 +473,15 @@
         "properties" : {
           "path" : {
             "type" : "string",
-            "description" : "Library-relative path, such as Memory/Projects/Silkweb/Memories/Use flock.md. Or documentId."
+            "description" : "Library-relative path, such as Memory/Projects/Silkweb/Memories/Use flock.md. Or documentId or memoryId."
           },
           "documentId" : {
             "type" : "string",
-            "description" : "The documentId from a search result, instead of path."
+            "description" : "The documentId (a UUID) from a search result, instead of path."
+          },
+          "memoryId" : {
+            "type" : "string",
+            "description" : "The memoryId (mem_…) from a search result or a handoff, instead of path."
           },
           "cursor" : {
             "type" : "string",

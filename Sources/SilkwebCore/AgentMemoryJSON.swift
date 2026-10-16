@@ -148,7 +148,10 @@ extension AgentMemorySearchResponse {
                     ("matchKind", .string(result.matchKind.rawValue)), ("excerpt", .string(result.excerpt)),
                 ] + (result.score.map { [("score", AgentJSON.decimal($0, places: 4))] } ?? []))
         }
-        var fields: [(String, AgentJSON)] = [("results", .array(rows)), ("total", .int(total)), ("index", index.json)]
+        var fields: [(String, AgentJSON)] = [
+            ("results", .array(rows)), ("total", .int(total)), ("nextCursor", .optional(nextCursor)),
+            ("index", index.json),
+        ]
         if let message { fields.append(("message", .string(message))) }
         if !diagnostics.isEmpty { fields.append(("diagnostics", .array(diagnostics.map(\.json)))) }
         if mode != .default {
